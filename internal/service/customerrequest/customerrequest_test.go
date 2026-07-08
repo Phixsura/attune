@@ -1,0 +1,576 @@
+// ptrext:file-allow customer request service tests use fake stores and pointer-valued fixtures.
+// SPDX-License-Identifier: Apache-2.0
+
+package customerrequest
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	"github.com/Phixsura/attune/internal/repo/idempotency"
+)
+
+func TestNormalizePromoteDedupeAndDefaults(t *testing.T) {
+	got, err := normalizePromote(PromoteInput{
+		TenantID:       "tenant-a",
+		FeedbackIDs:    []int64{42, 0, 42, 99, -7},
+		Title:          "  Request title  ",
+		Description:    "  Evidence from customers  ",
+		IdempotencyKey: "promote_123",
+	})
+	if err != nil {
+		t.Fatalf("normalizePromote() error = %v", err)
+	}
+
+	if got.Title != "Request title" {
+		t.Fatalf("Title = %q, want trimmed title", got.Title)
+	}
+	if got.Description != "Evidence from customers" {
+		t.Fatalf("Description = %q, want trimmed description", got.Description)
+	}
+	if got.Status != repo.StatusOpen {
+		t.Fatalf("Status = %q, want %q", got.Status, repo.StatusOpen)
+	}
+	if got.Priority != repo.PriorityNone {
+		t.Fatalf("Priority = %q, want %q", got.Priority, repo.PriorityNone)
+	}
+	if want := []int64{42, 99}; !reflect.DeepEqual(got.FeedbackIDs, want) {
+		t.Fatalf("FeedbackIDs = %#v, want %#v", got.FeedbackIDs, want)
+	}
+}
+
+func TestNormalizePromoteRejectsEmptyEvidence(t *testing.T) {
+	_, err := normalizePromote(PromoteInput{
+		TenantID:       "tenant-a",
+		FeedbackIDs:    []int64{0, -2},
+		Title:          "Request title",
+		IdempotencyKey: "promote_123",
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizePromote() error = %v, want ErrValidation", err)
+	}
+}
+
+func TestNormalizeIssueInputDerivesExternalKey(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	got, err := normalizeIssueInput(LinkIssueInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    " GitHub ",
+		ExternalURL: " https://github.com/Phixsura/attune/issues/212 ",
+		Title:       " Customer Request object ",
+		Status:      " open ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeIssueInput() error = %v", err)
+	}
+
+	if got.Provider != "github" {
+		t.Fatalf("Provider = %q, want github", got.Provider)
+	}
+	if got.ExternalKey != "Phixsura/attune#212" {
+		t.Fatalf("ExternalKey = %q, want derived GitHub issue key", got.ExternalKey)
+	}
+	if got.Title != "Customer Request object" {
+		t.Fatalf("Title = %q, want trimmed title", got.Title)
+	}
+	if got.Status != "open" {
+		t.Fatalf("Status = %q, want trimmed status", got.Status)
+	}
+}
+
+func TestNormalizeCustomerLinkTrimsIdentityFields(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	got, err := normalizeCustomerLink(LinkCustomerInput{
+		TenantID:       "tenant-a",
+		RequestID:      requestID,
+		SubjectKey:     " user:42 ",
+		SubjectHash:    " hash:42 ",
+		SubjectDisplay: " Ada Lovelace ",
+		AccountKey:     " account:acme ",
+		AccountDisplay: " Acme Inc ",
+		Note:           " Enterprise buyer ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeCustomerLink() error = %v", err)
+	}
+
+	if got.SubjectKey != "user:42" || got.SubjectHash != "hash:42" || got.SubjectDisplay != "Ada Lovelace" {
+		t.Fatalf("subject fields not normalized: %+v", got)
+	}
+	if got.AccountKey != "account:acme" || got.AccountDisplay != "Acme Inc" {
+		t.Fatalf("account fields not normalized: %+v", got)
+	}
+	if got.Note != "Enterprise buyer" {
+		t.Fatalf("Note = %q, want trimmed note", got.Note)
+	}
+}
+
+func TestNormalizeCustomerLinkRejectsMissingIdentity(t *testing.T) {
+	_, err := normalizeCustomerLink(LinkCustomerInput{
+		TenantID:  "tenant-a",
+		RequestID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeCustomerLink() error = %v, want ErrValidation", err)
+	}
+}
+
+func TestNormalizeVoteDefaultsAndValidatesWeight(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	got, err := normalizeVote(VoteInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		AccountKey: " account:acme ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeVote() error = %v", err)
+	}
+	if got.AccountKey != "account:acme" {
+		t.Fatalf("AccountKey = %q, want trimmed account key", got.AccountKey)
+	}
+	if got.Weight != 1 {
+		t.Fatalf("Weight = %d, want default weight 1", got.Weight)
+	}
+
+	_, err = normalizeVote(VoteInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		AccountKey: "account:acme",
+		Weight:     101,
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeVote(weight=101) error = %v, want ErrValidation", err)
+	}
+}
+
+func TestNormalizeSupporterRejectsOversizedFields(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	_, err := normalizeCustomerLink(LinkCustomerInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		SubjectKey: strings.Repeat("x", 513),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeCustomerLink(oversized subject) error = %v, want ErrValidation", err)
+	}
+}
+
+func TestNormalizeIssueInputRejectsUnsupportedProvider(t *testing.T) {
+	_, err := normalizeIssueInput(LinkIssueInput{
+		TenantID:    "tenant-a",
+		RequestID:   uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		Provider:    "not-a-tracker",
+		ExternalURL: "https://example.com/issues/1",
+	})
+	if !errors.Is(err, ErrUnsupportedProvider) {
+		t.Fatalf("normalizeIssueInput() error = %v, want ErrUnsupportedProvider", err)
+	}
+}
+
+func TestNormalizeUpdateTrimsPointerFields(t *testing.T) {
+	status := repo.StatusInProgress
+	priority := repo.PriorityHigh
+	got, err := normalizeUpdate(UpdateInput{
+		TenantID:    "tenant-a",
+		ID:          uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		Title:       ptrext.Of("  Better exports  "),
+		Description: ptrext.Of("  Batch export requests  "),
+		Status:      ptrext.Of(status),
+		Priority:    ptrext.Of(priority),
+	})
+	if err != nil {
+		t.Fatalf("normalizeUpdate() error = %v", err)
+	}
+
+	if got.Title == nil || ptrext.Indirect(got.Title) != "Better exports" {
+		t.Fatalf("Title = %#v, want trimmed pointer", got.Title)
+	}
+	if got.Description == nil || ptrext.Indirect(got.Description) != "Batch export requests" {
+		t.Fatalf("Description = %#v, want trimmed pointer", got.Description)
+	}
+}
+
+func TestNormalizeCreateDefaultsAndValidation(t *testing.T) {
+	got, err := normalizeCreate(CreateInput{
+		TenantID:       "tenant-a",
+		Title:          "  Export bundles  ",
+		Description:    "  CSV exports  ",
+		IdempotencyKey: " create_key ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeCreate() error = %v", err)
+	}
+	if got.Title != "Export bundles" || got.Description != "CSV exports" {
+		t.Fatalf("normalizeCreate() = %+v, want trimmed text", got)
+	}
+	if got.Status != repo.StatusOpen || got.Priority != repo.PriorityNone {
+		t.Fatalf("normalizeCreate() defaults = (%q, %q), want open/none", got.Status, got.Priority)
+	}
+
+	for name, in := range map[string]CreateInput{
+		"missing tenant": {Title: "title", IdempotencyKey: "valid_key"},
+		"missing title":  {TenantID: "tenant-a", IdempotencyKey: "valid_key"},
+		"long title":     {TenantID: "tenant-a", Title: strings.Repeat("x", 201), IdempotencyKey: "valid_key"},
+		"bad key":        {TenantID: "tenant-a", Title: "title", IdempotencyKey: "short"},
+		"bad status":     {TenantID: "tenant-a", Title: "title", Status: repo.Status("bad"), IdempotencyKey: "valid_key"},
+		"bad priority":   {TenantID: "tenant-a", Title: "title", Priority: repo.Priority("bad"), IdempotencyKey: "valid_key"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := normalizeCreate(in); !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizeCreate() error = %v, want ErrValidation", err)
+			}
+		})
+	}
+}
+
+func TestNormalizeLinkFeedbackDefaultsAndValidation(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	link, err := normalizeLinkFeedback(LinkFeedbackInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		FeedbackID: 42,
+		Note:       "  renewal blocker  ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeLinkFeedback() error = %v", err)
+	}
+	if link.Importance != repo.ImportanceNormal || link.Note != "renewal blocker" {
+		t.Fatalf("normalizeLinkFeedback() = %+v, want default importance and trimmed note", link)
+	}
+	if _, err := normalizeLinkFeedback(LinkFeedbackInput{TenantID: "tenant-a", RequestID: requestID, FeedbackID: 42, Importance: repo.Importance("bad")}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeLinkFeedback(bad importance) error = %v, want ErrValidation", err)
+	}
+}
+
+func TestNormalizeNoteAndListDefaults(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	note, err := normalizeNote(NoteInput{TenantID: "tenant-a", RequestID: requestID, Body: "  Coordinate rollout  "})
+	if err != nil {
+		t.Fatalf("normalizeNote() error = %v", err)
+	}
+	if note.Body != "Coordinate rollout" {
+		t.Fatalf("normalizeNote().Body = %q, want trimmed body", note.Body)
+	}
+	if _, err := normalizeNote(NoteInput{TenantID: "tenant-a", RequestID: requestID}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeNote(empty) error = %v, want ErrValidation", err)
+	}
+
+	if defaultVisibility("") != repo.VisibilityActive || defaultSort("") != repo.SortUpdatedAt || defaultDirection("") != repo.DirectionDesc {
+		t.Fatal("default list helpers did not return active/updated_at/desc")
+	}
+	if defaultVisibility(repo.VisibilityAll) != repo.VisibilityAll || defaultSort(repo.SortDecisionScore) != repo.SortDecisionScore || defaultDirection(repo.DirectionAsc) != repo.DirectionAsc {
+		t.Fatal("default list helpers did not preserve explicit values")
+	}
+	if validImportance(repo.Importance("bad")) || validIssueSyncState(repo.IssueSyncState("bad")) {
+		t.Fatal("validators accepted invalid enum values")
+	}
+}
+
+func TestNormalizeScoringSettingsPatchAndValidation(t *testing.T) {
+	current := repo.DefaultScoringSettings("tenant-a")
+	feedbackWeight := 7
+	revenueCentsPerPoint := int64(250000)
+	normalized, err := normalizeScoringSettings(ScoringSettingsInput{
+		TenantID:             " tenant-a ",
+		FeedbackWeight:       ptrext.Of(feedbackWeight),
+		RevenueCentsPerPoint: ptrext.Of(revenueCentsPerPoint),
+	}, current)
+	if err != nil {
+		t.Fatalf("normalizeScoringSettings() error = %v", err)
+	}
+	if normalized.TenantID != "tenant-a" ||
+		normalized.FeedbackWeight != feedbackWeight ||
+		normalized.PriorityUrgentWeight != current.PriorityUrgentWeight ||
+		normalized.RevenueCentsPerPoint != revenueCentsPerPoint ||
+		normalized.ActorID != "system" {
+		t.Fatalf("normalizeScoringSettings() = %+v, want patch over defaults", normalized)
+	}
+
+	negative := -1
+	if _, err := normalizeScoringSettings(ScoringSettingsInput{
+		TenantID:       "tenant-a",
+		FeedbackWeight: ptrext.Of(negative),
+	}, current); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeScoringSettings(negative) error = %v, want ErrValidation", err)
+	}
+	zeroRevenue := int64(0)
+	if _, err := normalizeScoringSettings(ScoringSettingsInput{
+		TenantID:             "tenant-a",
+		RevenueCentsPerPoint: ptrext.Of(zeroRevenue),
+	}, current); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeScoringSettings(zero revenue divisor) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeScoringSettings(ScoringSettingsInput{}, current); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeScoringSettings(empty tenant) error = %v, want ErrValidation", err)
+	}
+
+	audit := scoringSettingsAuditFields(repo.ScoringSettings{FeedbackWeight: 7, RevenueCentsPerPoint: 250000})
+	if audit["feedback_weight"] != 7 || audit["revenue_cents_per_point"] != int64(250000) {
+		t.Fatalf("scoringSettingsAuditFields() = %+v, want scoring fields", audit)
+	}
+}
+
+func TestNormalizeIssueSyncAndAccountProfiles(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	revenue := int64(12345)
+	profile, err := normalizeAccountProfile(" acme ", AccountProfileInput{
+		RevenueCents:    ptrext.Of(revenue),
+		RevenueCurrency: " usd ",
+		Tier:            " enterprise ",
+		SizeSegment:     " mid_market ",
+		LifecycleStatus: " active ",
+		CRMProvider:     " salesforce ",
+		CRMExternalID:   " 001 ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeAccountProfile() error = %v", err)
+	}
+	if profile.RevenueCurrency != "USD" || profile.Tier != "enterprise" || accountRevenueCents(profile) != revenue {
+		t.Fatalf("normalizeAccountProfile() = %+v, want normalized profile", profile)
+	}
+	if !hasAccountProfileInput(profile) {
+		t.Fatal("hasAccountProfileInput() = false, want true")
+	}
+	if _, err := normalizeAccountProfile("", AccountProfileInput{Tier: "enterprise"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeAccountProfile(no account) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeAccountProfile("acme", AccountProfileInput{RevenueCents: ptrext.Of(int64(-1))}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeAccountProfile(negative revenue) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeAccountProfile("acme", AccountProfileInput{RevenueCurrency: "US"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeAccountProfile(bad currency) error = %v, want ErrValidation", err)
+	}
+
+	got, err := normalizeIssueSync(IssueSyncInput{
+		TenantID:               "tenant-a",
+		RequestID:              requestID,
+		IssueLinkID:            linkID,
+		Status:                 " open ",
+		ExternalStatusCategory: " in_progress ",
+		ExternalAssignee:       " ops@example.com ",
+		ExternalUpdatedAt:      "2026-07-07T00:00:00Z",
+		SyncError:              " rate limited ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeIssueSync() error = %v", err)
+	}
+	if got.SyncState != repo.IssueSyncStateSynced || got.Status != "open" || got.SyncError != "rate limited" {
+		t.Fatalf("normalizeIssueSync() = %+v, want defaults and trimmed fields", got)
+	}
+	if _, err := normalizeIssueSync(IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, SyncState: repo.IssueSyncState("bad")}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeIssueSync(bad state) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeIssueSync(IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, ExternalUpdatedAt: "yesterday"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeIssueSync(bad time) error = %v, want ErrValidation", err)
+	}
+}
+
+func TestIssueKeyDerivation(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	for _, tc := range []LinkIssueInput{
+		{TenantID: "tenant-a", RequestID: requestID, Provider: "jira", ExternalURL: "https://jira.example.com/browse/ENG-123"},
+		{TenantID: "tenant-a", RequestID: requestID, Provider: "linear", ExternalURL: "https://linear.app/team/issue/ENG-456/title"},
+		{TenantID: "tenant-a", RequestID: requestID, Provider: "other", ExternalURL: "https://tracker.example.com/items/1", ExternalKey: "custom-1"},
+	} {
+		if got, err := normalizeIssueInput(tc); err != nil || got.ExternalKey == "" {
+			t.Fatalf("normalizeIssueInput(%s) = %+v, %v; want external key", tc.Provider, got, err)
+		}
+	}
+	if _, err := normalizeIssueInput(LinkIssueInput{TenantID: "tenant-a", RequestID: requestID, Provider: "github", ExternalURL: "ftp://github.com/x/y/issues/1"}); !errors.Is(err, ErrInvalidIssueURL) {
+		t.Fatalf("normalizeIssueInput(bad url) error = %v, want ErrInvalidIssueURL", err)
+	}
+}
+
+func TestAuditMetadataHelpers(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	ownerID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	linkID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	summary := repo.Summary{
+		ID:                      requestID,
+		TenantID:                "tenant-a",
+		DisplayID:               "CR-7",
+		Title:                   "Export bundles",
+		Status:                  repo.StatusOpen,
+		Priority:                repo.PriorityHigh,
+		OwnerMemberID:           ptrext.Of(ownerID),
+		SupportingFeedbackCount: 2,
+		CustomerCount:           1,
+		AccountCount:            1,
+		VoteCount:               3,
+		RevenueImpactCents:      12345,
+		DeliveryHealth:          repo.DeliveryHealthSynced,
+	}
+	if got := createAuditSummary("customer_request.create", summary); got != "Created customer request CR-7" {
+		t.Fatalf("createAuditSummary() = %q, want display id summary", got)
+	}
+	if got := createAuditSummary("customer_request.promote_feedback", repo.Summary{}); got != "Promoted feedback to customer request" {
+		t.Fatalf("createAuditSummary(promote) = %q", got)
+	}
+	if createAuditMetadata(summary, "idempotency-key")["owner_member_id"] != ownerID.String() {
+		t.Fatalf("createAuditMetadata() = %+v, want owner member id", createAuditMetadata(summary, "idempotency-key"))
+	}
+	if updateAuditBeforeAfter(summary, repo.Summary{ID: requestID, Title: "Renamed", Status: repo.StatusPlanned, Priority: repo.PriorityUrgent})["title_changed"] != true {
+		t.Fatal("updateAuditBeforeAfter() did not detect title change")
+	}
+	if issueAuditMetadata(requestID, repo.IssueLink{ID: linkID, Provider: "github", ExternalKey: "key", ExternalURL: "https://github.com/o/r/issues/1"})["url_host"] != "github.com" {
+		t.Fatal("issueAuditMetadata() did not parse host")
+	}
+	if customerAuditMetadata(requestID, repo.CustomerLink{ID: linkID, SubjectKey: "subject", AccountKey: "acme", Note: "note"})["account_key_set"] != true {
+		t.Fatal("customerAuditMetadata() did not mark account key")
+	}
+	if voteAuditMetadata(requestID, repo.Vote{ID: linkID, Weight: 3, Note: "note"})["weight"] != 3 {
+		t.Fatal("voteAuditMetadata() did not include weight")
+	}
+	if noteAuditMetadata(requestID, repo.Note{ID: linkID, Body: "body"})["body_length"] != 4 {
+		t.Fatal("noteAuditMetadata() did not include body length")
+	}
+	if uuidPtrString(ptrext.Of(ownerID)) != ownerID.String() || uuidPtrString(nil) != "" {
+		t.Fatal("uuidPtrString() returned unexpected values")
+	}
+}
+
+func TestIdempotencyPayloadAndTimeHelpers(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	ownerID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	linkID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	now := time.Date(2026, 7, 7, 0, 0, 0, 0, time.UTC)
+	if _, err := hashPayload("create", createIdempotencyPayload(CreateInput{TenantID: "tenant-a", Title: "Export", OwnerMemberID: ptrext.Of(ownerID)})); err != nil {
+		t.Fatalf("hashPayload(create) error = %v", err)
+	}
+	if _, err := hashPayload("promote", promoteIdempotencyPayload(PromoteInput{TenantID: "tenant-a", FeedbackIDs: []int64{42}, OwnerMemberID: ptrext.Of(ownerID)})); err != nil {
+		t.Fatalf("hashPayload(promote) error = %v", err)
+	}
+	if _, err := hashPayload("merge", mergeIdempotencyPayload(MergeInput{TenantID: "tenant-a", SourceID: requestID, TargetID: linkID})); err != nil {
+		t.Fatalf("hashPayload(merge) error = %v", err)
+	}
+	if parseOptionalTime(" ") != nil {
+		t.Fatal("parseOptionalTime(blank) != nil")
+	}
+	if parseOptionalTime("bad") != nil {
+		t.Fatal("parseOptionalTime(bad) != nil")
+	}
+	if parseOptionalTime(now.Format(time.RFC3339)) == nil {
+		t.Fatal("parseOptionalTime(valid) = nil")
+	}
+}
+
+func TestAcquireIdempotencyCompleted(t *testing.T) {
+	ctx := context.Background()
+	detail := ptrext.Of(Detail{Request: repo.Detail{Summary: repo.Summary{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111")}}})
+	body, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("Marshal detail: %v", err)
+	}
+
+	store := &fakeIdempotencyStore{record: &idempotency.Key{Status: idempotency.StatusCompleted, ResponseBody: body}}
+	service := New(nil, store, nil)
+	cached, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"})
+	if err != nil {
+		t.Fatalf("acquireIdempotency(completed) error = %v", err)
+	}
+	if acquired || cached == nil || cached.Request.Summary.ID != detail.Request.Summary.ID {
+		t.Fatalf("acquireIdempotency(completed) = cached:%+v acquired:%v, want cached detail", cached, acquired)
+	}
+}
+
+func TestAcquireIdempotencyStates(t *testing.T) {
+	ctx := context.Background()
+	store := &fakeIdempotencyStore{acquired: true}
+	service := New(nil, store, nil)
+	cached, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"})
+	if err != nil || cached != nil || !acquired {
+		t.Fatalf("acquireIdempotency(acquired) = cached:%+v acquired:%v err:%v", cached, acquired, err)
+	}
+
+	store = &fakeIdempotencyStore{record: &idempotency.Key{Status: idempotency.StatusPending}}
+	service = New(nil, store, nil)
+	if _, _, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); !errors.Is(err, ErrRequestInProgress) {
+		t.Fatalf("acquireIdempotency(pending) error = %v, want ErrRequestInProgress", err)
+	}
+
+	store = &fakeIdempotencyStore{acquireErr: idempotency.ErrHashMismatch}
+	service = New(nil, store, nil)
+	if _, _, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("acquireIdempotency(hash mismatch) error = %v, want ErrIdempotencyConflict", err)
+	}
+
+	store = &fakeIdempotencyStore{acquireErr: idempotency.ErrExpired, reacquire: true}
+	service = New(nil, store, nil)
+	if _, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); err != nil || !acquired || !store.deleted {
+		t.Fatalf("acquireIdempotency(expired) acquired:%v deleted:%v err:%v", acquired, store.deleted, err)
+	}
+}
+
+func TestCompleteIdempotencyBranches(t *testing.T) {
+	ctx := context.Background()
+	detail := ptrext.Of(Detail{Request: repo.Detail{Summary: repo.Summary{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111")}}})
+	store := &fakeIdempotencyStore{}
+	service := New(nil, store, nil)
+	if _, err := service.completeIdempotency(ctx, "tenant-a", "key", true, detail, nil); err != nil || !store.completed {
+		t.Fatalf("completeIdempotency(success) completed:%v err:%v", store.completed, err)
+	}
+	store = &fakeIdempotencyStore{}
+	service = New(nil, store, nil)
+	if _, err := service.completeIdempotency(ctx, "tenant-a", "key", true, detail, errors.New("operation failed")); err == nil || !store.failed {
+		t.Fatalf("completeIdempotency(error) failed:%v err:%v", store.failed, err)
+	}
+}
+
+type fakeIdempotencyStore struct {
+	record     *idempotency.Key
+	acquired   bool
+	acquireErr error
+	reacquire  bool
+	deleted    bool
+	completed  bool
+	failed     bool
+}
+
+func (f *fakeIdempotencyStore) Acquire(_ context.Context, tenantID, key string, requestHash []byte, ttl time.Duration) (*idempotency.Key, bool, error) {
+	if f.acquireErr != nil {
+		err := f.acquireErr
+		f.acquireErr = nil
+		if errors.Is(err, idempotency.ErrExpired) && f.reacquire {
+			return nil, false, err
+		}
+		return nil, false, err
+	}
+	if f.reacquire && f.deleted {
+		return &idempotency.Key{TenantID: tenantID, Key: key, RequestHash: requestHash, Status: idempotency.StatusPending}, true, nil
+	}
+	return f.record, f.acquired, nil
+}
+
+func (f *fakeIdempotencyStore) Complete(_ context.Context, _ string, _ string, _ int, _ []byte) error {
+	f.completed = true
+	return nil
+}
+
+func (f *fakeIdempotencyStore) Fail(_ context.Context, _ string, _ string) error {
+	f.failed = true
+	return nil
+}
+
+func (f *fakeIdempotencyStore) Get(_ context.Context, _ string, _ string) (*idempotency.Key, error) {
+	return nil, idempotency.ErrNotFound
+}
+
+func (f *fakeIdempotencyStore) Delete(_ context.Context, _ string, _ string) error {
+	f.deleted = true
+	return nil
+}
+
+func (f *fakeIdempotencyStore) CleanupExpired(context.Context) (int64, error) {
+	return 0, nil
+}

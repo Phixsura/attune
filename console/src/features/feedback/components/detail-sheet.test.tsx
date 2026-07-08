@@ -5,6 +5,13 @@ import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
 import type { Dimension } from '@/proto/attune/v1/common'
+import {
+  CustomerRequestDeliveryHealth,
+  CustomerRequestImportance,
+  CustomerRequestPriority,
+  CustomerRequestStatus,
+  type CustomerRequestSummary,
+} from '@/proto/attune/v1/customer_request'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
@@ -26,6 +33,8 @@ const dims: Dimension[] = [
     extractionHint: '',
   },
 ]
+
+const customerRequestsURL = '/fb/v1/console/customer-requests'
 
 describe('FeedbackDetailSheet', () => {
   beforeEach(() => {
@@ -79,6 +88,74 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getByText(/AI 中文解读/i)).toBeInTheDocument()
     expect(screen.getByText(/AI rationale/i)).toBeInTheDocument()
     expect(screen.getAllByTitle('原文语言：英文').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('renders linked customer requests and unlinks them from the feedback detail', async () => {
+    const linkedRequest = customerRequestSummary()
+    let unlinked = false
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+      http.get(customerRequestsURL, ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.get('feedback_id') === '42') {
+          return HttpResponse.json({ requests: unlinked ? [] : [linkedRequest] })
+        }
+        return HttpResponse.json({ requests: [] })
+      }),
+      http.delete(`${customerRequestsURL}/${linkedRequest.id}/feedback/42`, () => {
+        unlinked = true
+        return HttpResponse.json(customerRequestDetail(linkedRequest))
+      }),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await waitFor(() => expect(screen.getByText('关联客户需求')).toBeInTheDocument())
+    expect(await screen.findByText('CR-9')).toBeInTheDocument()
+    expect(screen.getByText('Export bundles')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '解除关联' }))
+
+    await waitFor(() => expect(unlinked).toBe(true))
+    await waitFor(() => expect(screen.getByText('这条反馈还没有关联客户需求')).toBeInTheDocument())
+  })
+
+  it('links the current feedback to a searched customer request', async () => {
+    const candidate = customerRequestSummary()
+    let payload: Record<string, unknown> | null = null
+    let linked = false
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+      http.get(customerRequestsURL, ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.get('feedback_id') === '42') {
+          return HttpResponse.json({ requests: linked ? [candidate] : [] })
+        }
+        return HttpResponse.json({ requests: [candidate] })
+      }),
+      http.post(`${customerRequestsURL}/${candidate.id}/feedback`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        linked = true
+        return HttpResponse.json(customerRequestDetail(candidate))
+      }),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await userEvent.type(await screen.findByLabelText('搜索客户需求'), 'Export')
+    await userEvent.click(await screen.findByRole('button', { name: /CR-9.*Export bundles/s }))
+    await userEvent.click(screen.getByRole('button', { name: '关联需求' }))
+
+    await waitFor(() => expect(payload).not.toBeNull())
+    expect(payload).toMatchObject({
+      id: candidate.id,
+      feedbackId: '42',
+      importance: CustomerRequestImportance.CUSTOMER_REQUEST_IMPORTANCE_NORMAL,
+    })
   })
 
   it('does not show a source-language rationale block for same-language rows', async () => {
@@ -1192,5 +1269,80 @@ function draftRow(id: string, over: Record<string, unknown> = {}) {
     enrichmentError: '',
     replyDraftEnabled: true,
     ...over,
+  }
+}
+
+function feedbackRow(id: string, over: Record<string, unknown> = {}) {
+  return {
+    id,
+    content: 'Need CSV export',
+    enrichedTitle: 'CSV export',
+    enrichedDisplayTitle: 'CSV export',
+    enrichedRationale: 'Enterprise customers need export bundles.',
+    enrichedDisplayRationale: 'Enterprise customers need export bundles.',
+    enrichedDisplayLocale: 'en',
+    enrichedAttrs: { severity: 'P1' },
+    enrichedAt: '2026-07-07T10:30:00Z',
+    language: 'en',
+    isUrgent: false,
+    source: 'web',
+    userId: 'u-42',
+    pageUrl: '',
+    createdAt: '2026-07-07T10:00:00Z',
+    sourceMeta: null,
+    attachments: [],
+    enrichmentError: '',
+    ...over,
+  }
+}
+
+function customerRequestSummary(
+  overrides: Partial<CustomerRequestSummary> = {},
+): CustomerRequestSummary {
+  return {
+    id: '11111111-1111-1111-1111-111111111111',
+    displayNumber: '9',
+    displayId: 'CR-9',
+    title: 'Export bundles',
+    status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+    priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+    createdAt: '2026-07-07T00:00:00Z',
+    updatedAt: '2026-07-07T01:00:00Z',
+    firstFeedbackAt: '2026-07-07T00:10:00Z',
+    latestFeedbackAt: '2026-07-07T00:10:00Z',
+    supportingFeedbackCount: 1,
+    customerCount: 1,
+    accountCount: 1,
+    linkedIssueCount: 0,
+    voteCount: 0,
+    duplicateRequestCount: 0,
+    hiddenFeedbackCount: 0,
+    revenueImpactCents: '0',
+    revenueCurrency: 'USD',
+    decisionScore: 67,
+    decisionScoreExplanation:
+      'priority=high feedback=1 customers=1 accounts=1 votes=0 revenue_cents=0 delivery_health=no_links',
+    deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS,
+    syncedIssueCount: 0,
+    staleIssueCount: 0,
+    failedIssueCount: 0,
+    pendingIssueCount: 0,
+    manualIssueCount: 0,
+    ...overrides,
+  }
+}
+
+function customerRequestDetail(request: CustomerRequestSummary) {
+  return {
+    request,
+    description: 'Bundle customer evidence for delivery planning.',
+    feedback: [],
+    issueLinks: [],
+    auditEntries: [],
+    customers: [],
+    votes: [],
+    notes: [],
+    duplicates: [],
+    accountProfiles: [],
   }
 }

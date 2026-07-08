@@ -1308,6 +1308,709 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests:
+        get:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_ListCustomerRequests
+            parameters:
+                - name: q
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                            - CUSTOMER_REQUEST_STATUS_OPEN
+                            - CUSTOMER_REQUEST_STATUS_PLANNED
+                            - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                            - CUSTOMER_REQUEST_STATUS_SHIPPED
+                            - CUSTOMER_REQUEST_STATUS_CANCELLED
+                        type: string
+                        format: enum
+                - name: priority
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                            - CUSTOMER_REQUEST_PRIORITY_NONE
+                            - CUSTOMER_REQUEST_PRIORITY_LOW
+                            - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                            - CUSTOMER_REQUEST_PRIORITY_HIGH
+                            - CUSTOMER_REQUEST_PRIORITY_URGENT
+                        type: string
+                        format: enum
+                - name: ownerMemberId
+                  in: query
+                  schema:
+                    type: string
+                - name: visibility
+                  in: query
+                  schema:
+                    enum:
+                        - CUSTOMER_REQUEST_VISIBILITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_VISIBILITY_ACTIVE
+                        - CUSTOMER_REQUEST_VISIBILITY_MERGED
+                        - CUSTOMER_REQUEST_VISIBILITY_ARCHIVED
+                        - CUSTOMER_REQUEST_VISIBILITY_ALL
+                    type: string
+                    format: enum
+                - name: sort
+                  in: query
+                  schema:
+                    enum:
+                        - CUSTOMER_REQUEST_SORT_UNSPECIFIED
+                        - CUSTOMER_REQUEST_SORT_UPDATED_AT
+                        - CUSTOMER_REQUEST_SORT_CUSTOMER_COUNT
+                        - CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT
+                        - CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT
+                        - CUSTOMER_REQUEST_SORT_PRIORITY
+                        - CUSTOMER_REQUEST_SORT_REVENUE_IMPACT
+                        - CUSTOMER_REQUEST_SORT_DECISION_SCORE
+                        - CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH
+                    type: string
+                    format: enum
+                - name: direction
+                  in: query
+                  schema:
+                    enum:
+                        - SORT_DIRECTION_UNSPECIFIED
+                        - SORT_DIRECTION_ASC
+                        - SORT_DIRECTION_DESC
+                    type: string
+                    format: enum
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: feedbackId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCustomerRequestsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_CreateCustomerRequest
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateCustomerRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/saved-views:
+        get:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_ListCustomerRequestSavedViews
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCustomerRequestSavedViewsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_CreateCustomerRequestSavedView
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateCustomerRequestSavedViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestSavedViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/saved-views/{id}:
+        put:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UpdateCustomerRequestSavedView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateCustomerRequestSavedViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestSavedViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_DeleteCustomerRequestSavedView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteCustomerRequestSavedViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/scoring-settings:
+        get:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_GetCustomerRequestScoringSettings
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestScoringSettings'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        put:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UpdateCustomerRequestScoringSettings
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateCustomerRequestScoringSettingsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestScoringSettings'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}:
+        get:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_GetCustomerRequest
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: evidenceLimit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        patch:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UpdateCustomerRequest
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateCustomerRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/customers:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_LinkCustomerToCustomerRequest
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LinkCustomerToCustomerRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/customers/{customerLinkId}:
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UnlinkCustomerFromCustomerRequest
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: customerLinkId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/feedback:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_LinkFeedbackToCustomerRequest
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LinkFeedbackToCustomerRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/feedback/{feedbackId}:
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UnlinkFeedbackFromCustomerRequest
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: feedbackId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/issue-links:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_LinkCustomerRequestIssue
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/LinkCustomerRequestIssueRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/issue-links/{issueLinkId}:
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_UnlinkCustomerRequestIssue
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: issueLinkId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/issue-links/{issueLinkId}:record-sync:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_RecordCustomerRequestIssueSync
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: issueLinkId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RecordCustomerRequestIssueSyncRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/notes:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_AddCustomerRequestNote
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AddCustomerRequestNoteRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/notes/{noteId}:
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_DeleteCustomerRequestNote
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: noteId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/votes:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_AddCustomerRequestVote
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AddCustomerRequestVoteRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/votes/{voteId}:
+        delete:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_RemoveCustomerRequestVote
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: voteId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{sourceId}:merge:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_MergeCustomerRequests
+            parameters:
+                - name: sourceId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/MergeCustomerRequestsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests:promote-feedback:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_PromoteFeedbackToCustomerRequest
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PromoteFeedbackToCustomerRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/digest-subscription:
         get:
             tags:
@@ -6775,6 +7478,52 @@ components:
             properties:
                 config:
                     $ref: '#/components/schemas/EnrichConfig'
+        AddCustomerRequestNoteRequest:
+            required:
+                - id
+                - body
+            type: object
+            properties:
+                id:
+                    type: string
+                body:
+                    type: string
+        AddCustomerRequestVoteRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                subjectKey:
+                    type: string
+                subjectHash:
+                    type: string
+                subjectDisplay:
+                    type: string
+                accountKey:
+                    type: string
+                accountDisplay:
+                    type: string
+                weight:
+                    type: integer
+                    format: int32
+                note:
+                    type: string
+                accountRevenueCents:
+                    type: string
+                accountRevenueCurrency:
+                    type: string
+                accountTier:
+                    type: string
+                accountSizeSegment:
+                    type: string
+                accountLifecycleStatus:
+                    type: string
+                accountCrmProvider:
+                    type: string
+                accountCrmExternalId:
+                    type: string
         AddFeedbackTagRequest:
             type: object
             properties:
@@ -7640,6 +8389,49 @@ components:
                 retryAfterSeconds:
                     type: integer
                     format: int32
+        CreateCustomerRequestRequest:
+            required:
+                - title
+                - idempotencyKey
+            type: object
+            properties:
+                title:
+                    type: string
+                description:
+                    type: string
+                status:
+                    enum:
+                        - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                        - CUSTOMER_REQUEST_STATUS_OPEN
+                        - CUSTOMER_REQUEST_STATUS_PLANNED
+                        - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                        - CUSTOMER_REQUEST_STATUS_SHIPPED
+                        - CUSTOMER_REQUEST_STATUS_CANCELLED
+                    type: string
+                    format: enum
+                priority:
+                    enum:
+                        - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_PRIORITY_NONE
+                        - CUSTOMER_REQUEST_PRIORITY_LOW
+                        - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                        - CUSTOMER_REQUEST_PRIORITY_HIGH
+                        - CUSTOMER_REQUEST_PRIORITY_URGENT
+                    type: string
+                    format: enum
+                ownerMemberId:
+                    type: string
+                idempotencyKey:
+                    type: string
+        CreateCustomerRequestSavedViewRequest:
+            required:
+                - name
+            type: object
+            properties:
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/CustomerRequestSavedViewState'
         CreateEventSubscriptionRequest:
             required:
                 - eventTypes
@@ -7996,7 +8788,481 @@ components:
                 maxUses:
                     type: integer
                     format: int32
+        CustomerRequestAccountProfile:
+            type: object
+            properties:
+                accountKey:
+                    type: string
+                accountDisplay:
+                    type: string
+                revenueCents:
+                    type: string
+                revenueCurrency:
+                    type: string
+                tier:
+                    type: string
+                sizeSegment:
+                    type: string
+                lifecycleStatus:
+                    type: string
+                crmProvider:
+                    type: string
+                crmExternalId:
+                    type: string
+                source:
+                    type: string
+                updatedAt:
+                    type: string
+        CustomerRequestAuditEntry:
+            type: object
+            properties:
+                id:
+                    type: string
+                action:
+                    type: string
+                actorType:
+                    type: string
+                actorId:
+                    type: string
+                summary:
+                    type: string
+                createdAt:
+                    type: string
+        CustomerRequestCustomerLink:
+            type: object
+            properties:
+                id:
+                    type: string
+                subjectKey:
+                    type: string
+                subjectHash:
+                    type: string
+                subjectDisplay:
+                    type: string
+                accountKey:
+                    type: string
+                accountDisplay:
+                    type: string
+                note:
+                    type: string
+                createdBy:
+                    type: string
+                createdAt:
+                    type: string
+                accountProfile:
+                    $ref: '#/components/schemas/CustomerRequestAccountProfile'
+        CustomerRequestDetail:
+            type: object
+            properties:
+                request:
+                    $ref: '#/components/schemas/CustomerRequestSummary'
+                description:
+                    type: string
+                feedback:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestFeedbackEvidence'
+                issueLinks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestIssueLink'
+                auditEntries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestAuditEntry'
+                customers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestCustomerLink'
+                votes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestVote'
+                duplicates:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestDuplicate'
+                accountProfiles:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestAccountProfile'
+                notes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestNote'
+        CustomerRequestDuplicate:
+            type: object
+            properties:
+                id:
+                    type: string
+                displayId:
+                    type: string
+                title:
+                    type: string
+                mergedAt:
+                    type: string
+        CustomerRequestFeedbackEvidence:
+            type: object
+            properties:
+                feedbackId:
+                    type: string
+                content:
+                    type: string
+                source:
+                    type: string
+                type:
+                    type: string
+                userId:
+                    type: string
+                subjectDisplay:
+                    type: string
+                enrichedTitle:
+                    type: string
+                importance:
+                    enum:
+                        - CUSTOMER_REQUEST_IMPORTANCE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_IMPORTANCE_NORMAL
+                        - CUSTOMER_REQUEST_IMPORTANCE_IMPORTANT
+                        - CUSTOMER_REQUEST_IMPORTANCE_CRITICAL
+                    type: string
+                    format: enum
+                note:
+                    type: string
+                linkedBy:
+                    type: string
+                linkedAt:
+                    type: string
+                createdAt:
+                    type: string
+        CustomerRequestIssueLink:
+            type: object
+            properties:
+                id:
+                    type: string
+                provider:
+                    type: string
+                externalKey:
+                    type: string
+                externalUrl:
+                    type: string
+                title:
+                    type: string
+                status:
+                    type: string
+                createdBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                lastSyncedAt:
+                    type: string
+                syncState:
+                    enum:
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED
+                    type: string
+                    format: enum
+                externalStatusCategory:
+                    type: string
+                externalAssignee:
+                    type: string
+                externalUpdatedAt:
+                    type: string
+                syncError:
+                    type: string
+        CustomerRequestNote:
+            type: object
+            properties:
+                id:
+                    type: string
+                body:
+                    type: string
+                createdBy:
+                    type: string
+                createdAt:
+                    type: string
+        CustomerRequestOwner:
+            type: object
+            properties:
+                id:
+                    type: string
+                memberType:
+                    type: string
+                userId:
+                    type: string
+                email:
+                    type: string
+                role:
+                    type: string
+        CustomerRequestSavedView:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/CustomerRequestSavedViewState'
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        CustomerRequestSavedViewResponse:
+            type: object
+            properties:
+                view:
+                    $ref: '#/components/schemas/CustomerRequestSavedView'
+        CustomerRequestSavedViewState:
+            type: object
+            properties:
+                q:
+                    type: string
+                status:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                            - CUSTOMER_REQUEST_STATUS_OPEN
+                            - CUSTOMER_REQUEST_STATUS_PLANNED
+                            - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                            - CUSTOMER_REQUEST_STATUS_SHIPPED
+                            - CUSTOMER_REQUEST_STATUS_CANCELLED
+                        type: string
+                        format: enum
+                priority:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                            - CUSTOMER_REQUEST_PRIORITY_NONE
+                            - CUSTOMER_REQUEST_PRIORITY_LOW
+                            - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                            - CUSTOMER_REQUEST_PRIORITY_HIGH
+                            - CUSTOMER_REQUEST_PRIORITY_URGENT
+                        type: string
+                        format: enum
+                ownerMemberId:
+                    type: string
+                visibility:
+                    enum:
+                        - CUSTOMER_REQUEST_VISIBILITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_VISIBILITY_ACTIVE
+                        - CUSTOMER_REQUEST_VISIBILITY_MERGED
+                        - CUSTOMER_REQUEST_VISIBILITY_ARCHIVED
+                        - CUSTOMER_REQUEST_VISIBILITY_ALL
+                    type: string
+                    format: enum
+                sort:
+                    enum:
+                        - CUSTOMER_REQUEST_SORT_UNSPECIFIED
+                        - CUSTOMER_REQUEST_SORT_UPDATED_AT
+                        - CUSTOMER_REQUEST_SORT_CUSTOMER_COUNT
+                        - CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT
+                        - CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT
+                        - CUSTOMER_REQUEST_SORT_PRIORITY
+                        - CUSTOMER_REQUEST_SORT_REVENUE_IMPACT
+                        - CUSTOMER_REQUEST_SORT_DECISION_SCORE
+                        - CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH
+                    type: string
+                    format: enum
+                direction:
+                    enum:
+                        - SORT_DIRECTION_UNSPECIFIED
+                        - SORT_DIRECTION_ASC
+                        - SORT_DIRECTION_DESC
+                    type: string
+                    format: enum
+                feedbackId:
+                    type: string
+        CustomerRequestScoringSettings:
+            type: object
+            properties:
+                tenantId:
+                    type: string
+                priorityNoneWeight:
+                    type: integer
+                    format: int32
+                priorityLowWeight:
+                    type: integer
+                    format: int32
+                priorityMediumWeight:
+                    type: integer
+                    format: int32
+                priorityHighWeight:
+                    type: integer
+                    format: int32
+                priorityUrgentWeight:
+                    type: integer
+                    format: int32
+                feedbackWeight:
+                    type: integer
+                    format: int32
+                feedbackCap:
+                    type: integer
+                    format: int32
+                customerWeight:
+                    type: integer
+                    format: int32
+                customerCap:
+                    type: integer
+                    format: int32
+                accountWeight:
+                    type: integer
+                    format: int32
+                accountCap:
+                    type: integer
+                    format: int32
+                voteWeight:
+                    type: integer
+                    format: int32
+                voteCap:
+                    type: integer
+                    format: int32
+                revenueCentsPerPoint:
+                    type: string
+                revenueCap:
+                    type: integer
+                    format: int32
+                updatedBy:
+                    type: string
+                updatedAt:
+                    type: string
+        CustomerRequestSummary:
+            type: object
+            properties:
+                id:
+                    type: string
+                displayId:
+                    type: string
+                displayNumber:
+                    type: string
+                title:
+                    type: string
+                status:
+                    enum:
+                        - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                        - CUSTOMER_REQUEST_STATUS_OPEN
+                        - CUSTOMER_REQUEST_STATUS_PLANNED
+                        - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                        - CUSTOMER_REQUEST_STATUS_SHIPPED
+                        - CUSTOMER_REQUEST_STATUS_CANCELLED
+                    type: string
+                    format: enum
+                priority:
+                    enum:
+                        - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_PRIORITY_NONE
+                        - CUSTOMER_REQUEST_PRIORITY_LOW
+                        - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                        - CUSTOMER_REQUEST_PRIORITY_HIGH
+                        - CUSTOMER_REQUEST_PRIORITY_URGENT
+                    type: string
+                    format: enum
+                owner:
+                    $ref: '#/components/schemas/CustomerRequestOwner'
+                supportingFeedbackCount:
+                    type: integer
+                    format: int32
+                customerCount:
+                    type: integer
+                    format: int32
+                linkedIssueCount:
+                    type: integer
+                    format: int32
+                hiddenFeedbackCount:
+                    type: integer
+                    format: int32
+                firstFeedbackAt:
+                    type: string
+                latestFeedbackAt:
+                    type: string
+                mergedIntoRequestId:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                archivedAt:
+                    type: string
+                accountCount:
+                    type: integer
+                    format: int32
+                voteCount:
+                    type: integer
+                    format: int32
+                duplicateRequestCount:
+                    type: integer
+                    format: int32
+                revenueImpactCents:
+                    type: string
+                revenueCurrency:
+                    type: string
+                decisionScore:
+                    type: integer
+                    format: int32
+                decisionScoreExplanation:
+                    type: string
+                deliveryHealth:
+                    enum:
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_UNSPECIFIED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+                    type: string
+                    format: enum
+                syncedIssueCount:
+                    type: integer
+                    format: int32
+                staleIssueCount:
+                    type: integer
+                    format: int32
+                failedIssueCount:
+                    type: integer
+                    format: int32
+                pendingIssueCount:
+                    type: integer
+                    format: int32
+                manualIssueCount:
+                    type: integer
+                    format: int32
+        CustomerRequestVote:
+            type: object
+            properties:
+                id:
+                    type: string
+                subjectKey:
+                    type: string
+                subjectHash:
+                    type: string
+                subjectDisplay:
+                    type: string
+                accountKey:
+                    type: string
+                accountDisplay:
+                    type: string
+                weight:
+                    type: integer
+                    format: int32
+                note:
+                    type: string
+                createdBy:
+                    type: string
+                createdAt:
+                    type: string
+                accountProfile:
+                    $ref: '#/components/schemas/CustomerRequestAccountProfile'
         DeleteApiKeyResponse:
+            type: object
+            properties: {}
+        DeleteCustomerRequestSavedViewResponse:
             type: object
             properties: {}
         DeleteDigestSubscriptionResponse:
@@ -9662,6 +10928,78 @@ components:
                 resolution:
                     type: string
             description: Leak detections
+        LinkCustomerRequestIssueRequest:
+            required:
+                - id
+                - provider
+                - externalUrl
+            type: object
+            properties:
+                id:
+                    type: string
+                provider:
+                    type: string
+                externalUrl:
+                    type: string
+                externalKey:
+                    type: string
+                title:
+                    type: string
+                status:
+                    type: string
+        LinkCustomerToCustomerRequestRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                subjectKey:
+                    type: string
+                subjectHash:
+                    type: string
+                subjectDisplay:
+                    type: string
+                accountKey:
+                    type: string
+                accountDisplay:
+                    type: string
+                note:
+                    type: string
+                accountRevenueCents:
+                    type: string
+                accountRevenueCurrency:
+                    type: string
+                accountTier:
+                    type: string
+                accountSizeSegment:
+                    type: string
+                accountLifecycleStatus:
+                    type: string
+                accountCrmProvider:
+                    type: string
+                accountCrmExternalId:
+                    type: string
+        LinkFeedbackToCustomerRequestRequest:
+            required:
+                - id
+                - feedbackId
+            type: object
+            properties:
+                id:
+                    type: string
+                feedbackId:
+                    type: string
+                importance:
+                    enum:
+                        - CUSTOMER_REQUEST_IMPORTANCE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_IMPORTANCE_NORMAL
+                        - CUSTOMER_REQUEST_IMPORTANCE_IMPORTANT
+                        - CUSTOMER_REQUEST_IMPORTANCE_CRITICAL
+                    type: string
+                    format: enum
+                note:
+                    type: string
         ListAIAgentConfigsResponse:
             type: object
             properties:
@@ -9722,6 +11060,22 @@ components:
                 totalCount:
                     type: integer
                     format: int32
+        ListCustomerRequestSavedViewsResponse:
+            type: object
+            properties:
+                views:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestSavedView'
+        ListCustomerRequestsResponse:
+            type: object
+            properties:
+                requests:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestSummary'
+                nextCursor:
+                    type: string
         ListDeliveriesResponse:
             type: object
             properties:
@@ -10208,6 +11562,19 @@ components:
                 acceptedAt:
                     type: string
             description: Member represents a user's membership in a tenant.
+        MergeCustomerRequestsRequest:
+            required:
+                - sourceId
+                - targetId
+                - idempotencyKey
+            type: object
+            properties:
+                sourceId:
+                    type: string
+                targetId:
+                    type: string
+                idempotencyKey:
+                    type: string
         NamedAny:
             type: object
             properties:
@@ -10420,6 +11787,45 @@ components:
                 updatedAt:
                     type: string
             description: Projects
+        PromoteFeedbackToCustomerRequestRequest:
+            required:
+                - feedbackIds
+                - title
+                - idempotencyKey
+            type: object
+            properties:
+                feedbackIds:
+                    type: array
+                    items:
+                        type: string
+                title:
+                    type: string
+                description:
+                    type: string
+                status:
+                    enum:
+                        - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                        - CUSTOMER_REQUEST_STATUS_OPEN
+                        - CUSTOMER_REQUEST_STATUS_PLANNED
+                        - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                        - CUSTOMER_REQUEST_STATUS_SHIPPED
+                        - CUSTOMER_REQUEST_STATUS_CANCELLED
+                    type: string
+                    format: enum
+                priority:
+                    enum:
+                        - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_PRIORITY_NONE
+                        - CUSTOMER_REQUEST_PRIORITY_LOW
+                        - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                        - CUSTOMER_REQUEST_PRIORITY_HIGH
+                        - CUSTOMER_REQUEST_PRIORITY_URGENT
+                    type: string
+                    format: enum
+                ownerMemberId:
+                    type: string
+                idempotencyKey:
+                    type: string
         PromoteSuggestedValueRequest:
             required:
                 - dimensionName
@@ -10477,6 +11883,36 @@ components:
                 updatedAt:
                     type: string
                 updatedBy:
+                    type: string
+        RecordCustomerRequestIssueSyncRequest:
+            required:
+                - id
+                - issueLinkId
+            type: object
+            properties:
+                id:
+                    type: string
+                issueLinkId:
+                    type: string
+                syncState:
+                    enum:
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED
+                    type: string
+                    format: enum
+                status:
+                    type: string
+                externalStatusCategory:
+                    type: string
+                externalAssignee:
+                    type: string
+                externalUpdatedAt:
+                    type: string
+                syncError:
                     type: string
         RecordSearchEventRequest:
             type: object
@@ -11729,6 +13165,98 @@ components:
             properties:
                 key:
                     $ref: '#/components/schemas/ApiKey'
+        UpdateCustomerRequestRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                description:
+                    type: string
+                status:
+                    enum:
+                        - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                        - CUSTOMER_REQUEST_STATUS_OPEN
+                        - CUSTOMER_REQUEST_STATUS_PLANNED
+                        - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                        - CUSTOMER_REQUEST_STATUS_SHIPPED
+                        - CUSTOMER_REQUEST_STATUS_CANCELLED
+                    type: string
+                    format: enum
+                priority:
+                    enum:
+                        - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_PRIORITY_NONE
+                        - CUSTOMER_REQUEST_PRIORITY_LOW
+                        - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                        - CUSTOMER_REQUEST_PRIORITY_HIGH
+                        - CUSTOMER_REQUEST_PRIORITY_URGENT
+                    type: string
+                    format: enum
+                ownerMemberId:
+                    type: string
+        UpdateCustomerRequestSavedViewRequest:
+            required:
+                - id
+                - name
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/CustomerRequestSavedViewState'
+        UpdateCustomerRequestScoringSettingsRequest:
+            type: object
+            properties:
+                priorityNoneWeight:
+                    type: integer
+                    format: int32
+                priorityLowWeight:
+                    type: integer
+                    format: int32
+                priorityMediumWeight:
+                    type: integer
+                    format: int32
+                priorityHighWeight:
+                    type: integer
+                    format: int32
+                priorityUrgentWeight:
+                    type: integer
+                    format: int32
+                feedbackWeight:
+                    type: integer
+                    format: int32
+                feedbackCap:
+                    type: integer
+                    format: int32
+                customerWeight:
+                    type: integer
+                    format: int32
+                customerCap:
+                    type: integer
+                    format: int32
+                accountWeight:
+                    type: integer
+                    format: int32
+                accountCap:
+                    type: integer
+                    format: int32
+                voteWeight:
+                    type: integer
+                    format: int32
+                voteCap:
+                    type: integer
+                    format: int32
+                revenueCentsPerPoint:
+                    type: string
+                revenueCap:
+                    type: integer
+                    format: int32
         UpdateEnrichConfigRequest:
             type: object
             properties:
@@ -12168,6 +13696,7 @@ tags:
          dashboard and its bounded sample drill-downs.
     - name: ClustersService
       description: ClustersService provides semantic cluster views for the console (#25).
+    - name: CustomerRequestService
     - name: DigestSubscriptionService
       description: |-
         DigestSubscriptionService manages a tenant's daily digest configuration (#27).

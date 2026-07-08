@@ -43,6 +43,26 @@ describe('console IA', () => {
     expect(canAccessConsoleItem('viewer', item)).toBe(true)
   })
 
+  it('exposes customer requests to every feedback viewer', () => {
+    const item = consoleNavItems.find(
+      (candidate) => candidate.path === '/feedback/customer-requests',
+    )
+
+    expect(item).toBeDefined()
+    if (!item) {
+      throw new Error('customer requests nav item missing')
+    }
+    expect(item).toMatchObject({
+      group: 'feedback',
+      labelKey: 'nav.customer_requests',
+      path: '/feedback/customer-requests',
+      permission: 'customer_request:view',
+    })
+    expect(canAccessConsoleItem('admin', item)).toBe(true)
+    expect(canAccessConsoleItem('member', item)).toBe(true)
+    expect(canAccessConsoleItem('viewer', item)).toBe(true)
+  })
+
   it('exposes the reliability summary as an admin-only administration destination', () => {
     const item = consoleNavItems.find(
       (candidate) => candidate.path === '/administration/reliability',

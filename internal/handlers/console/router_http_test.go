@@ -18,6 +18,7 @@ import (
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/clusters"
+	consolecustomerrequest "github.com/Phixsura/attune/internal/handlers/console/customerrequest"
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
@@ -72,6 +73,7 @@ func dispatchRouter() *Router {
 		feedbackBatch:      &feedback.BatchHandler{},
 		feedbackSearch:     &feedback.SearchHandler{},
 		qualityActions:     &feedback.QualityActionHandler{},
+		customerRequests:   &consolecustomerrequest.Handler{},
 		feedbackJob:        &feedbackjob.Handler{},
 		gdpr:               &consolegdpr.Handler{},
 		usage:              &usage.UsageHandler{},
@@ -148,6 +150,27 @@ func TestRouterHTTPDispatch_Session(t *testing.T) {
 		{"GET /llm-usage", http.MethodGet, "/llm-usage", ""},
 		{"GET /quality-actions", http.MethodGet, "/quality-actions", ""},
 		{"POST /quality-actions/update", http.MethodPost, "/quality-actions/update", `{}`},
+		{"GET /customer-requests/", http.MethodGet, "/customer-requests/", ""},
+		{"GET /customer-requests/11111111-1111-1111-1111-111111111111", http.MethodGet, "/customer-requests/11111111-1111-1111-1111-111111111111", ""},
+		{"GET /customer-requests/saved-views", http.MethodGet, "/customer-requests/saved-views", ""},
+		{"POST /customer-requests/saved-views", http.MethodPost, "/customer-requests/saved-views", `{"name":"Planning"}`},
+		{"PUT /customer-requests/saved-views/{view_id}", http.MethodPut, "/customer-requests/saved-views/view-1", `{"name":"Planning"}`},
+		{"DELETE /customer-requests/saved-views/{view_id}", http.MethodDelete, "/customer-requests/saved-views/view-1", ""},
+		{"POST /customer-requests/", http.MethodPost, "/customer-requests/", `{}`},
+		{"PATCH /customer-requests/11111111-1111-1111-1111-111111111111", http.MethodPatch, "/customer-requests/11111111-1111-1111-1111-111111111111", `{}`},
+		{"POST /customer-requests:promote-feedback", http.MethodPost, "/customer-requests:promote-feedback", `{}`},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/feedback", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/feedback", `{}`},
+		{"DELETE /customer-requests/11111111-1111-1111-1111-111111111111/feedback/1", http.MethodDelete, "/customer-requests/11111111-1111-1111-1111-111111111111/feedback/1", ""},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/customers", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/customers", `{}`},
+		{"DELETE /customer-requests/11111111-1111-1111-1111-111111111111/customers/22222222-2222-2222-2222-222222222222", http.MethodDelete, "/customer-requests/11111111-1111-1111-1111-111111111111/customers/22222222-2222-2222-2222-222222222222", ""},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/votes", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/votes", `{}`},
+		{"DELETE /customer-requests/11111111-1111-1111-1111-111111111111/votes/22222222-2222-2222-2222-222222222222", http.MethodDelete, "/customer-requests/11111111-1111-1111-1111-111111111111/votes/22222222-2222-2222-2222-222222222222", ""},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/notes", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/notes", `{}`},
+		{"DELETE /customer-requests/11111111-1111-1111-1111-111111111111/notes/22222222-2222-2222-2222-222222222222", http.MethodDelete, "/customer-requests/11111111-1111-1111-1111-111111111111/notes/22222222-2222-2222-2222-222222222222", ""},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111:merge", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111:merge", `{}`},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/issue-links", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/issue-links", `{}`},
+		{"DELETE /customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222", http.MethodDelete, "/customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222", ""},
+		{"POST /customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222:record-sync", http.MethodPost, "/customer-requests/11111111-1111-1111-1111-111111111111/issue-links/22222222-2222-2222-2222-222222222222:record-sync", `{}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -79,6 +79,7 @@ export function getActionCategory(action: string): ActionCategory {
     [
       'update',
       'update_role',
+      'update_scoring_settings',
       'activate_version',
       'rotate_secret',
       'pause',
@@ -174,5 +175,6 @@ export const auditActionOptions = [
   'audit_evidence.create',
   'audit_evidence.download',
   'audit_evidence.expire',
+  'customer_request.update_scoring_settings',
   'workflow_transition.replace',
 ] as const
