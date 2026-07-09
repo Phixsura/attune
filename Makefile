@@ -199,10 +199,6 @@ ci-check: ## Run all CI checks locally before push.
 	@npx -y jscpd . --silent
 	@echo "✓ jscpd"
 	@echo
-	@echo "▸ console: pnpm tsc"
-	@cd console && $(PNPM) --ignore-workspace tsc -b --noEmit
-	@echo "✓ console tsc"
-	@echo
 	@echo "▸ console: biome check"
 	@cd console && $(PNPM) --ignore-workspace biome check
 	@echo "✓ console biome"
@@ -210,6 +206,10 @@ ci-check: ## Run all CI checks locally before push.
 	@echo "▸ console: vite build"
 	@cd console && $(PNPM) --ignore-workspace exec vite build
 	@echo "✓ console vite build"
+	@echo
+	@echo "▸ console: pnpm tsc"
+	@cd console && $(PNPM) --ignore-workspace tsc -b --noEmit
+	@echo "✓ console tsc"
 	@echo
 	@echo "▸ console: vitest"
 	@cd console && $(PNPM) --ignore-workspace vitest run

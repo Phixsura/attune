@@ -39,6 +39,7 @@ import (
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
 	embeddingrepo "github.com/Phixsura/attune/internal/repo/embedding"
 	enrichruntime "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	feedbackjobrepo "github.com/Phixsura/attune/internal/repo/feedbackjob"
@@ -70,6 +71,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	evalsvc "github.com/Phixsura/attune/internal/service/eval"
+	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
@@ -301,7 +303,7 @@ func buildConsoleRouter(
 		workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
 	router.SetCustomerRequestHandler(customerRequestHandler)
-	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo), nil
+	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets), nil
 }
 
 type consoleAuditTarget func(*auditlogsvc.Service)
@@ -341,9 +343,10 @@ func configureConsoleRouter(
 	tenantRepo *tenant.TenantRepo,
 	adminRepo *admin.Repo,
 	feedbackRepo *feedback.FeedbackRepo,
+	secrets *secretstore.TinkStore,
 ) chi.Router {
 	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
-	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo)
+	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets)
 	return router.Mount()
 }
 
@@ -363,14 +366,24 @@ func buildSearchHandler(
 	return searchHandler
 }
 
-func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo) {
+func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo, secrets *secretstore.TinkStore) {
 	attachOutboxHandler(router, pool, auditLogSvc)
+	attachExternalSyncHandler(router, pool, auditLogSvc, secrets)
 	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
 	attachRecoveryHandler(router, pool)
 	attachReleaseInfoHandler(router, cfg)
 	attachSSOCutoverHandler(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo)
+}
+
+func attachExternalSyncHandler(router *console.Router, pool *pgxpool.Pool, audit *auditlogsvc.Service, secrets *secretstore.TinkStore) {
+	if secrets == nil {
+		return
+	}
+	svc := externalsyncsvc.New(externalsyncrepo.New(pool), secrets)
+	svc.SetAuditLogger(audit)
+	router.SetExternalSyncHandler(console.NewExternalSyncHandler(svc))
 }
 
 // attachOutboxHandler wires the notify dead-queue console handler (#33). Kept

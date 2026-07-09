@@ -1,6 +1,19 @@
 import type { Page, Route } from '@playwright/test'
 import type { ServiceAccount } from '../../src/proto/attune/v1/api_key'
 import type { AuditLogViewState, SavedAuditLogView } from '../../src/proto/attune/v1/audit'
+import {
+  type ExternalConnection,
+  type ExternalObjectMapping,
+  type ExternalObjectSchema,
+  ExternalSyncDirection,
+  type ExternalSyncEvent,
+  ExternalSyncEventSignatureStatus,
+  ExternalSyncEventStatus,
+  type ExternalSyncHealthResponse,
+  type ExternalSyncRun,
+  ExternalSyncRunStatus,
+  ExternalSyncRunTrigger,
+} from '../../src/proto/attune/v1/external_sync'
 import type {
   FeedbackDetail,
   ReplyDraftWorkflow,
@@ -102,6 +115,7 @@ export async function installConsoleApiMocks(
     replyDraftWorkflow: clone(consoleA11yReplyDraftWorkflow),
     replySendHook: clone(consoleA11yReplySendHook),
     replySendHookDeliveries: clone(consoleA11yReplySendHookDeliveries),
+    externalSync: createExternalSyncState(),
     serviceAccounts: clone(consoleA11yServiceAccountsList.items),
     tags: clone(consoleA11yTagsResponse.tags),
   }
@@ -594,6 +608,45 @@ async function handleRoute(
     return true
   }
 
+  if (method === 'GET' && path === '/external-sync/health') {
+    await fulfillJson(route, clone(state.externalSync.health))
+    return true
+  }
+  if (method === 'GET' && path === '/external-sync/connections') {
+    await fulfillJson(route, { connections: clone(state.externalSync.connections) })
+    return true
+  }
+  if (method === 'GET' && path.match(/^\/external-sync\/connections\/[^/]+\/schema$/)) {
+    const connectionID = path.split('/')[3]
+    const schemas = state.externalSync.schemasByConnection[connectionID] ?? []
+    await fulfillJson(route, { schemas: clone(schemas) })
+    return true
+  }
+  if (method === 'GET' && path === '/external-sync/mappings') {
+    const connectionID = url.searchParams.get('connection_id')
+    const mappings = connectionID
+      ? state.externalSync.mappings.filter((mapping) => mapping.connectionId === connectionID)
+      : state.externalSync.mappings
+    await fulfillJson(route, { mappings: clone(mappings) })
+    return true
+  }
+  if (method === 'GET' && path === '/external-sync/runs') {
+    const connectionID = url.searchParams.get('connection_id')
+    const runs = connectionID
+      ? state.externalSync.runs.filter((run) => run.connectionId === connectionID)
+      : state.externalSync.runs
+    await fulfillJson(route, { runs: clone(runs), nextBeforeId: '' })
+    return true
+  }
+  if (method === 'GET' && path === '/external-sync/events') {
+    const connectionID = url.searchParams.get('connection_id')
+    const events = connectionID
+      ? state.externalSync.events.filter((event) => event.connectionId === connectionID)
+      : state.externalSync.events
+    await fulfillJson(route, { events: clone(events), nextBeforeId: '' })
+    return true
+  }
+
   if (method === 'GET' && path === '/outbox/deliveries') {
     await fulfillJson(route, consoleA11yOutboxDeliveries)
     return true
@@ -616,8 +669,18 @@ type ApiMockState = {
   replyDraftWorkflow: ReplyDraftWorkflow
   replySendHook: ReplySendHook
   replySendHookDeliveries: ReplySendHookDelivery[]
+  externalSync: ExternalSyncMockState
   serviceAccounts: ServiceAccount[]
   tags: Tag[]
+}
+
+type ExternalSyncMockState = {
+  connections: ExternalConnection[]
+  events: ExternalSyncEvent[]
+  health: ExternalSyncHealthResponse
+  mappings: ExternalObjectMapping[]
+  runs: ExternalSyncRun[]
+  schemasByConnection: Record<string, ExternalObjectSchema[]>
 }
 
 function feedbackDetailWithReplyDraft(
@@ -811,6 +874,154 @@ function replySendHookHealth(deliveries: ReplySendHookDelivery[]): ReplySendHook
     pending: String(deliveries.filter((delivery) => delivery.status === 'pending').length),
     retryable: String(deliveries.filter((delivery) => delivery.retryable).length),
     total: String(deliveries.length),
+  }
+}
+
+function createExternalSyncState(): ExternalSyncMockState {
+  const activeConnection: ExternalConnection = {
+    id: 'external-sync-conn-a11y-active',
+    tenantId: 'tenant-a11y',
+    provider: 'github',
+    name: 'GitHub Issues A11y',
+    enabled: true,
+    status: 'active',
+    authType: 'token',
+    baseUrl: '',
+    providerConfigJson: '{"owner":"acme","repo":"console"}',
+    scopes: ['issues'],
+    lastTestedAt: '2026-07-08T02:00:00Z',
+    lastTestStatus: 'ok',
+    lastError: '',
+    createdBy: 'user-a11y',
+    updatedBy: 'user-a11y',
+    createdAt: '2026-07-08T01:00:00Z',
+    updatedAt: '2026-07-08T02:00:00Z',
+    webhookSecretConfigured: true,
+  }
+  const quarantinedConnection: ExternalConnection = {
+    id: 'external-sync-conn-a11y-quarantined',
+    tenantId: 'tenant-a11y',
+    provider: 'github',
+    name: 'GitHub Issues Quarantined',
+    enabled: false,
+    status: 'quarantined',
+    authType: 'token',
+    baseUrl: '',
+    providerConfigJson: '{"owner":"acme","repo":"legacy"}',
+    scopes: ['issues'],
+    lastTestedAt: '2026-07-08T03:00:00Z',
+    lastTestStatus: 'failed',
+    lastError: 'provider throttled after repeated 429 responses',
+    createdBy: 'user-a11y',
+    updatedBy: 'user-a11y',
+    createdAt: '2026-07-08T01:30:00Z',
+    updatedAt: '2026-07-08T03:00:00Z',
+    webhookSecretConfigured: false,
+  }
+  const mapping: ExternalObjectMapping = {
+    id: 'external-sync-mapping-a11y',
+    tenantId: 'tenant-a11y',
+    connectionId: activeConnection.id,
+    localObjectType: 'customer_request',
+    externalObjectType: 'issue',
+    direction: ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL,
+    fieldMappingJson: '{"title":"title","status":"state","tags":"labels"}',
+    statusMappingJson: '{"open":"open","done":"closed"}',
+    conflictPolicy: 'manual',
+    tombstonePolicy: 'mark_stale',
+    enabled: true,
+    mappingVersion: 3,
+    createdAt: '2026-07-08T01:05:00Z',
+    updatedAt: '2026-07-08T02:05:00Z',
+  }
+  const run: ExternalSyncRun = {
+    id: 'external-sync-run-a11y-failed',
+    tenantId: 'tenant-a11y',
+    connectionId: activeConnection.id,
+    mappingId: mapping.id,
+    direction: ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_PULL,
+    trigger: ExternalSyncRunTrigger.EXTERNAL_SYNC_RUN_TRIGGER_MANUAL,
+    status: ExternalSyncRunStatus.EXTERNAL_SYNC_RUN_STATUS_FAILED,
+    attempts: 3,
+    nextRetryAt: '2026-07-08T03:10:00Z',
+    startedAt: '2026-07-08T03:00:00Z',
+    finishedAt: '2026-07-08T03:01:00Z',
+    cursorBeforeJson: '{"since":"2026-07-08T02:00:00Z"}',
+    cursorAfterJson: '{}',
+    recordsSeen: 12,
+    recordsChanged: 4,
+    recordsFailed: 1,
+    conflictsCreated: 1,
+    errorKind: 'provider_throttled',
+    errorMessage: 'GitHub returned Retry-After for issue sync',
+    actorId: 'user-a11y',
+    createdAt: '2026-07-08T03:00:00Z',
+    updatedAt: '2026-07-08T03:01:00Z',
+    inFlight: false,
+  }
+  const event: ExternalSyncEvent = {
+    id: 'external-sync-event-a11y-failed',
+    tenantId: 'tenant-a11y',
+    connectionId: activeConnection.id,
+    mappingId: mapping.id,
+    provider: 'github',
+    eventType: 'issues.edited',
+    externalEventId: 'evt-a11y-214',
+    dedupeKey: 'github:evt-a11y-214',
+    signatureStatus: ExternalSyncEventSignatureStatus.EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_VERIFIED,
+    status: ExternalSyncEventStatus.EXTERNAL_SYNC_EVENT_STATUS_FAILED,
+    payloadDigest: 'sha256:a11yeventdigest000000000000000000000000000000000000000000',
+    normalizedPayloadJson: '{"action":"edited","issue":{"number":214}}',
+    receivedAt: '2026-07-08T03:02:00Z',
+    replayedAt: '',
+    replayedBy: '',
+    runId: '',
+    failureReason: 'mapping was disabled when the webhook arrived',
+    createdAt: '2026-07-08T03:02:00Z',
+    updatedAt: '2026-07-08T03:02:00Z',
+  }
+
+  return {
+    connections: [activeConnection, quarantinedConnection],
+    events: [event],
+    health: {
+      activeRuns: 0,
+      deadRuns: 1,
+      degradedConnections: 1,
+      delayedRetryRuns: 1,
+      disabledConnections: 1,
+      enabledConnections: 1,
+      failingConnections: 1,
+      newestRetryAfter: '2026-07-08T03:10:00Z',
+      newestSuccessfulRunAt: '2026-07-08T02:45:00Z',
+      openConflicts: 1,
+      providerUnavailableRuns: 0,
+      quarantinedConnections: 1,
+      retryableRuns: 1,
+      staleConnections: 0,
+      throttledRuns: 1,
+      unauthorizedRuns: 0,
+    },
+    mappings: [mapping],
+    runs: [run],
+    schemasByConnection: {
+      [activeConnection.id]: [
+        {
+          type: 'issue',
+          fields: ['number', 'title', 'state', 'labels', 'updated_at'],
+          requiredFields: ['title'],
+          writableFields: ['title', 'state', 'labels'],
+        },
+      ],
+      [quarantinedConnection.id]: [
+        {
+          type: 'issue',
+          fields: ['number', 'title', 'state', 'labels', 'updated_at'],
+          requiredFields: ['title'],
+          writableFields: ['title', 'state', 'labels'],
+        },
+      ],
+    },
   }
 }
 

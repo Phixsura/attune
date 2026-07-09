@@ -95,7 +95,33 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 104, count, "should match current migration count")
+	require.Equal(t, 105, count, "should match current migration count")
+}
+
+func TestExternalSyncMigrationAllowsAllExternalSyncAuditActions(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/105_external_sync_framework.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, action := range []string{
+		"external_connection.create",
+		"external_connection.update",
+		"external_connection.delete",
+		"external_connection.qualify",
+		"external_connection.resume",
+		"external_connection.test",
+		"external_sync_mapping.update",
+		"external_sync_cursor.reset",
+		"external_sync_run.request",
+		"external_sync_run.backfill",
+		"external_sync_run.retry",
+		"external_sync_failure.retry",
+		"external_sync_conflict.resolve",
+		"external_sync_event.replay",
+	} {
+		require.Contains(t, sql, "'"+action+"'", "audit action must be accepted by chk_audit_action_value")
+	}
 }
 
 func TestRecordMigrationSQL(t *testing.T) {

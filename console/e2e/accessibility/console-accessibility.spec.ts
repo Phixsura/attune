@@ -44,6 +44,7 @@ const zh = {
   semanticSearch: '\u8bed\u4e49',
   runSemanticSearch: '\u8fd0\u884c\u8bed\u4e49\u641c\u7d22',
   evidenceLabel: '\u5339\u914d\u4f9d\u636e',
+  externalSync: '\u5916\u90e8\u540c\u6b65',
   showScopes: '\u67e5\u770b\u751f\u6548\u6743\u9650',
   submitApiKey: '\u65b0\u5efa',
   secretDialog: '\u4f60\u7684\u65b0\u0020\u006b\u0065\u0079',
@@ -119,6 +120,7 @@ const routes = [
   { path: '/feedback', title: zh.feedback, heading: zh.feedback },
   { path: '/feedback/terminal-failures', title: zh.terminalFailures, heading: zh.feedback },
   { path: '/integrations/api-keys', title: zh.apiKeys, heading: zh.apiKeys },
+  { path: '/integrations/external-sync', title: zh.externalSync, heading: zh.externalSync },
   {
     path: '/integrations/reply-send-hook',
     title: zh.replySendHook,
@@ -551,6 +553,10 @@ test.describe('Console accessibility browser gate', () => {
     ).toBeVisible()
     await page.getByRole('button', { name: zh.replySendHookDisableConfirm }).click()
     await expectToastStatus(page, zh.replySendHookDisabled)
+    await expect(
+      page.getByRole('alertdialog', { name: zh.replySendHookDisableDialog }),
+    ).toHaveCount(0)
+    await expect(page.locator('.min-h-screen[aria-hidden="true"]')).toHaveCount(0)
     await expect(page.getByText(zh.replySendHookDisabled)).toBeVisible()
 
     expect(apiMocks.replySendHookRequests).toEqual([

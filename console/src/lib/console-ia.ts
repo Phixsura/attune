@@ -15,6 +15,7 @@ import {
   Lock,
   Radar,
   Radio,
+  RefreshCcw,
   Scale,
   Search,
   Send,
@@ -185,6 +186,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
     path: '/integrations/notify-targets',
     permission: 'settings:notify_targets:view',
     settingsAliases: ['notify-targets', 'notify_targets'],
+  },
+  {
+    group: 'integrations',
+    icon: RefreshCcw,
+    labelKey: 'nav.external_sync',
+    path: '/integrations/external-sync',
+    permission: 'settings:external_sync:view',
+    settingsAliases: ['external-sync', 'external_sync'],
   },
   {
     group: 'integrations',

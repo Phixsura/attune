@@ -9,6 +9,44 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **External sync framework foundation.**
+  Added tenant-scoped external connection, object mapping, object link, cursor,
+  sync-run, attempt, record-failure, and conflict tables; generated Console API
+  contracts; encrypted connection credential storage; provider registry and
+  no-op adapter; GitHub Issues repository checks, paginated issue pulls, issue
+  create/update pushes, Customer Request push-record preparation, provider
+  write-result application, and Customer Request marker bridging; idempotent
+  pull and push ledger application with cursor advancement, Customer Request
+  issue-link bridging, partial-run conflict/failure handling, external sync
+  tombstone revival handling, provider-classified retryable and terminal run
+  failures, provider event ledger and replay APIs for signed webhook delivery
+  diagnostics, Console event-detail inspection for dedupe keys and normalized
+  delivery payloads, encrypted webhook secret storage, a GitHub
+  `X-Hub-Signature-256` webhook receiver, worker lifecycle, audit actions,
+  provider schema discovery APIs, Console provider-schema visibility,
+  required/writable field metadata, schema-aware mapping JSON validation,
+  mapping preview diagnostics, Console operations page with connection
+  editing, credential and webhook secret rotation controls,
+  mapping-direction-aware run requests, operator-safe cursor reset that clears
+  mapping cursors and enqueues recovery pull runs, explicit backfill requests
+  with optional cursor reset, record timelines for object-link, failure,
+  conflict, and run ledger inspection,
+  health-summary breakdowns for throttled, unauthorized, provider-unavailable,
+  delayed-retry sync runs, repeatedly failing connections, and quarantined
+  connections, provider `Retry-After`-aware run scheduling, automatic
+  connection quarantine after repeated terminal failures, explicit quarantined
+  connection resume actions, connection qualification reports that run provider
+  checks, schema discovery, schema metadata inspection, and scope visibility
+  checks, batch conflict resolution, emitted record/conflict counters plus lag
+  and dead-run gauges for external sync dashboards,
+  per-connection paginated run history, run-detail diagnostics for provider
+  request ids, HTTP status, `Retry-After` hints, payload digests, normalized payloads,
+  conflict snapshots, and explicit conflict resolution choices, webhook secret
+  configuration state,
+  filterable run-list and event-list APIs, record-failure retries that enqueue
+  retry runs, adapter authoring documentation, and low-cardinality Prometheus
+  metrics for provider operations.
+
 - **Customer Requests now turn feedback evidence into product request objects.**
   Added tenant-scoped Customer Requests with stable display IDs, status,
   priority, owners, linked feedback evidence, explicit customer/account links,
@@ -93,6 +131,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   actions now also emit audit events.
 
 ### Fixed
+
+- **External sync browser E2E findings are closed.**
+  External connection qualification and resume actions now satisfy the database
+  audit action constraint, active external sync runs refresh in the Console
+  until queued/running work settles, and canceled external sync health requests
+  propagate through the shared client-canceled path instead of being logged as
+  internal failures. External sync action buttons also re-enable after
+  successful mutations instead of staying disabled on the last mutation target.
+
+- **External sync Console layout and select accessibility now pass the browser gate.**
+  The external sync operations page now keeps its two-column workspace,
+  connection actions, and mapping controls inside narrow and text-zoomed
+  viewports, and its select triggers expose explicit labels for assistive
+  technology.
 
 - **Feedback tag combobox now suppresses duplicate-looking create actions for already assigned tags.**
   The feedback detail sheet now checks the full tag catalog before showing the

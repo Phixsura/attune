@@ -5,6 +5,8 @@ package ha
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/taskoutbox"
 	"github.com/Phixsura/attune/internal/testdb"
 )
@@ -426,8 +429,12 @@ func TestExtremeConcurrency_100Workers(t *testing.T) {
 
 	q := taskoutbox.New(pool, "reply_draft_task", "reply_draft_enabled")
 
-	var claimedCount atomic.Int64
+	claimedCount := ptrext.Of(atomic.Int64{})
+	claimed := make(map[int64]string, numTasks)
+	claimedMu := ptrext.Of(sync.Mutex{})
 	var wg sync.WaitGroup
+	errCh := make(chan error, 100)
+	deadline := time.Now().Add(10 * time.Second)
 
 	// 100 workers competing
 	for i := 0; i < 100; i++ {
@@ -435,23 +442,65 @@ func TestExtremeConcurrency_100Workers(t *testing.T) {
 		go func(workerID int) {
 			defer wg.Done()
 			owner := "worker-" + string(rune('A'+workerID%26)) + "-" + string(rune('0'+workerID/26))
-
-			// Each worker tries to claim multiple times
-			for j := 0; j < 10; j++ {
-				task, err := q.TryClaimWithOwner(ctx, 5*time.Minute, owner)
-				if err == nil && task != nil {
-					claimedCount.Add(1)
-					// Complete it
-					_, _ = q.MarkDone(ctx, task.ID, owner)
-				}
-			}
+			claimTasksUntilComplete(ctx, q, owner, deadline, numTasks, claimedCount, claimed, claimedMu, errCh)
 		}(i)
 	}
 
 	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
 
 	// Should have claimed all tasks (each task once)
 	require.Equal(t, int64(numTasks), claimedCount.Load(), "all tasks should be claimed exactly once")
+	require.Len(t, claimed, numTasks, "all task ids should be unique")
+}
+
+func claimTasksUntilComplete(
+	ctx context.Context,
+	q *taskoutbox.Queue,
+	owner string,
+	deadline time.Time,
+	numTasks int,
+	claimedCount *atomic.Int64,
+	claimed map[int64]string,
+	claimedMu *sync.Mutex,
+	errCh chan<- error,
+) {
+	for time.Now().Before(deadline) && claimedCount.Load() < int64(numTasks) {
+		task, err := q.TryClaimWithOwner(ctx, 5*time.Minute, owner)
+		if errors.Is(err, taskoutbox.ErrNoTask) {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		if err != nil {
+			errCh <- err
+			return
+		}
+		if task == nil {
+			continue
+		}
+		if err := recordClaimedTask(task.ID, owner, claimed, claimedMu); err != nil {
+			errCh <- err
+			return
+		}
+		claimedCount.Add(1)
+		if _, err := q.MarkDone(ctx, task.ID, owner); err != nil {
+			errCh <- err
+			return
+		}
+	}
+}
+
+func recordClaimedTask(taskID int64, owner string, claimed map[int64]string, claimedMu *sync.Mutex) error {
+	claimedMu.Lock()
+	defer claimedMu.Unlock()
+	if previous, ok := claimed[taskID]; ok {
+		return fmt.Errorf("task %d claimed by both %s and %s", taskID, previous, owner)
+	}
+	claimed[taskID] = owner
+	return nil
 }
 
 func TestHeartbeatRace(t *testing.T) {

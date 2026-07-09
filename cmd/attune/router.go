@@ -27,6 +27,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/handlers/apiversion"
 	"github.com/Phixsura/attune/internal/handlers/console"
+	"github.com/Phixsura/attune/internal/handlers/externalsyncwebhook"
 	"github.com/Phixsura/attune/internal/handlers/mcp"
 	"github.com/Phixsura/attune/internal/handlers/security"
 	"github.com/Phixsura/attune/internal/infra/apikey"
@@ -43,6 +44,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	"github.com/Phixsura/attune/internal/repo/feedbacktag"
@@ -53,6 +55,7 @@ import (
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
+	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
@@ -114,6 +117,10 @@ func buildRouter(
 		// it here exposes them under /v1/inbound/<channel>/...
 		if inboundMux != nil {
 			r.Mount("/inbound", inboundMux)
+		}
+		if inboundSecrets != nil {
+			webhooks := externalsyncwebhook.NewHandler(externalsyncsvc.New(externalsyncrepo.New(pool), inboundSecrets))
+			r.Mount("/external-sync/webhooks", webhooks.Routes())
 		}
 
 		r.Group(func(r chi.Router) {

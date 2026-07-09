@@ -273,6 +273,61 @@ var OutboxDeadRows = prometheus.NewGauge(
 	},
 )
 
+// ExternalSyncRunsTotal counts external sync runs by provider, object type, and result.
+var ExternalSyncRunsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_external_sync_runs_total",
+		Help: "External sync runs by provider, object type, and result.",
+	},
+	[]string{"provider", "object_type", "result"},
+)
+
+// ExternalSyncRecordsTotal counts records processed by external sync.
+var ExternalSyncRecordsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_external_sync_records_total",
+		Help: "External sync records by provider, object type, operation, and result.",
+	},
+	[]string{"provider", "object_type", "operation", "result"},
+)
+
+// ExternalSyncRunDuration tracks external sync run duration.
+var ExternalSyncRunDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_external_sync_run_duration_seconds",
+		Help:    "External sync run duration by provider, object type, and result.",
+		Buckets: prometheus.ExponentialBuckets(0.25, 2, 12),
+	},
+	[]string{"provider", "object_type", "result"},
+)
+
+// ExternalSyncLagSeconds gauges lag for external sync streams.
+var ExternalSyncLagSeconds = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_external_sync_lag_seconds",
+		Help: "External sync lag in seconds by provider and object type.",
+	},
+	[]string{"provider", "object_type"},
+)
+
+// ExternalSyncConflictsTotal counts conflict resolutions.
+var ExternalSyncConflictsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_external_sync_conflicts_total",
+		Help: "External sync conflicts by provider, object type, and resolution.",
+	},
+	[]string{"provider", "object_type", "resolution"},
+)
+
+// ExternalSyncDeadRuns gauges dead external sync runs.
+var ExternalSyncDeadRuns = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_external_sync_dead_runs",
+		Help: "Dead external sync runs by provider and object type.",
+	},
+	[]string{"provider", "object_type"},
+)
+
 // ClaimContentionTotal counts when an enricher tryClaim hit a row that
 // another worker had already claimed. Useful health signal — high
 // contention = consider tuning enricher_batch / interval.
@@ -1048,6 +1103,12 @@ var allMetrics = []prometheus.Collector{
 	OutboundRetryAfterTotal,
 	OutboxLagSeconds,
 	OutboxDeadRows,
+	ExternalSyncRunsTotal,
+	ExternalSyncRecordsTotal,
+	ExternalSyncRunDuration,
+	ExternalSyncLagSeconds,
+	ExternalSyncConflictsTotal,
+	ExternalSyncDeadRuns,
 	ClaimContentionTotal,
 	IngestRateLimitTotal,
 	TriageDecisionsTotal,
@@ -1126,6 +1187,11 @@ var allMetrics = []prometheus.Collector{
 // package. Keep it sorted in registration order so drift-test failures are easy
 // to compare with allMetrics.
 func RegisteredMetricNames() []string {
+	names := registeredMetricNamesCore()
+	return append(names, registeredMetricNamesRuntime()...)
+}
+
+func registeredMetricNamesCore() []string {
 	return []string{
 		"attune_ingest_total",
 		"attune_enrich_duration_seconds",
@@ -1151,6 +1217,12 @@ func RegisteredMetricNames() []string {
 		"attune_outbound_retry_after_total",
 		"attune_outbox_lag_seconds",
 		"attune_outbox_dead_rows",
+		"attune_external_sync_runs_total",
+		"attune_external_sync_records_total",
+		"attune_external_sync_run_duration_seconds",
+		"attune_external_sync_lag_seconds",
+		"attune_external_sync_conflicts_total",
+		"attune_external_sync_dead_runs",
 		"attune_claim_contention_total",
 		"attune_ingest_rate_limit_total",
 		"attune_triage_decisions_total",
@@ -1172,6 +1244,11 @@ func RegisteredMetricNames() []string {
 		"attune_digest_duration_seconds",
 		"attune_digest_clustering_fallback_total",
 		"attune_digest_cluster_count",
+	}
+}
+
+func registeredMetricNamesRuntime() []string {
+	return []string{
 		"attune_workflow_transitions_total",
 		"attune_workflow_batch_size",
 		"attune_batch_jobs_claimed_total",

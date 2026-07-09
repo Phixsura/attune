@@ -32,6 +32,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
+	consoleexternalsync "github.com/Phixsura/attune/internal/handlers/console/externalsync"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
@@ -90,6 +91,7 @@ var (
 	NewUsageHandler              = usage.NewUsageHandler
 	NewEnrichConfigHandler       = enrichconfig.NewHandler
 	NewEnrichmentRuntimeHandler  = consoleenrichmentruntime.NewHandler
+	NewExternalSyncHandler       = consoleexternalsync.NewHandler
 	NewGuardPolicyHandler        = consoleguardpolicy.NewHandler
 	NewInboundHandler            = consoleinbound.NewHandler
 	NewLLMConfigHandler          = consolellmconfig.NewHandler
@@ -178,6 +180,7 @@ type Router struct {
 	usage              *usage.UsageHandler
 	enrichConfig       *enrichconfig.Handler
 	enrichmentRuntime  *consoleenrichmentruntime.Handler
+	externalSync       *consoleexternalsync.Handler
 	guardPolicies      *consoleguardpolicy.Handler
 	inbound            *consoleinbound.Handler
 	llmConfig          *consolellmconfig.Handler
@@ -397,6 +400,7 @@ func (r *Router) mountSession(m chi.Router) {
 	})
 	r.mountEnrichConfig(m)
 	r.mountEnrichmentRuntime(m)
+	r.mountExternalSync(m)
 	r.mountGuardPolicies(m)
 	r.mountInbound(m)
 	r.mountJobs(m)
@@ -2734,6 +2738,382 @@ func (r *Router) mountInbound(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) SetExternalSyncHandler(h *consoleexternalsync.Handler) {
+	r.externalSync = h
+}
+
+func (r *Router) mountExternalSync(m chi.Router) {
+	if r.externalSync == nil {
+		return
+	}
+	m.Route("/external-sync", func(es chi.Router) {
+		es.Use(r.requireDelegatedAdmin)
+		r.mountExternalSyncConnectionRoutes(es)
+		r.mountExternalSyncMappingRoutes(es)
+		r.mountExternalSyncRunRoutes(es)
+		r.mountExternalSyncEventRoutes(es)
+		es.Get("/health", dispatcher.Bind(
+			"console.ExternalSyncHandler.Health",
+			dispatcher.Empty(func() *attunev1.GetExternalSyncHealthRequest {
+				return ptrext.Of(attunev1.GetExternalSyncHealthRequest{})
+			}),
+			r.externalSync.Health,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetExternalSyncHealthRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
+}
+
+func (r *Router) mountExternalSyncConnectionRoutes(es chi.Router) {
+	es.Get("/connections", dispatcher.Bind(
+		"console.ExternalSyncHandler.ListConnections",
+		dispatcher.Empty(func() *attunev1.ListExternalConnectionsRequest {
+			return ptrext.Of(attunev1.ListExternalConnectionsRequest{})
+		}),
+		r.externalSync.ListConnections,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExternalConnectionsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/connections", dispatcher.Bind(
+		"console.ExternalSyncHandler.CreateConnection",
+		dispatcher.JSON(func() *attunev1.CreateExternalConnectionRequest {
+			return ptrext.Of(attunev1.CreateExternalConnectionRequest{})
+		}),
+		r.externalSync.CreateConnection,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateExternalConnectionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Patch("/connections/{id}", dispatcher.Bind(
+		"console.ExternalSyncHandler.UpdateConnection",
+		dispatcher.Combine(
+			func() *attunev1.UpdateExternalConnectionRequest {
+				return ptrext.Of(attunev1.UpdateExternalConnectionRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateExternalConnectionRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateExternalConnectionRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.UpdateConnection,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateExternalConnectionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Delete("/connections/{id}", dispatcher.Bind(
+		"console.ExternalSyncHandler.DeleteConnection",
+		dispatcher.Path(
+			func() *attunev1.DeleteExternalConnectionRequest {
+				return ptrext.Of(attunev1.DeleteExternalConnectionRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.DeleteExternalConnectionRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.DeleteConnection,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteExternalConnectionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/connections/{id}:test", dispatcher.Bind(
+		"console.ExternalSyncHandler.TestConnection",
+		dispatcher.Path(
+			func() *attunev1.TestExternalConnectionRequest {
+				return ptrext.Of(attunev1.TestExternalConnectionRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.TestExternalConnectionRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.TestConnection,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestExternalConnectionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/connections/{id}:resume", dispatcher.Bind(
+		"console.ExternalSyncHandler.ResumeConnection",
+		dispatcher.Path(
+			func() *attunev1.ResumeExternalConnectionRequest {
+				return ptrext.Of(attunev1.ResumeExternalConnectionRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.ResumeExternalConnectionRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.ResumeConnection,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResumeExternalConnectionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/connections/{id}:qualify", dispatcher.Bind(
+		"console.ExternalSyncHandler.QualifyConnection",
+		dispatcher.Path(
+			func() *attunev1.QualifyExternalConnectionRequest {
+				return ptrext.Of(attunev1.QualifyExternalConnectionRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.QualifyExternalConnectionRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.QualifyConnection,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.QualifyExternalConnectionRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.Get("/connections/{id}/schema", dispatcher.Bind(
+		"console.ExternalSyncHandler.DiscoverConnectionSchema",
+		dispatcher.Path(
+			func() *attunev1.DiscoverExternalConnectionSchemaRequest {
+				return ptrext.Of(attunev1.DiscoverExternalConnectionSchemaRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.DiscoverExternalConnectionSchemaRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.DiscoverConnectionSchema,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DiscoverExternalConnectionSchemaRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountExternalSyncMappingRoutes(es chi.Router) {
+	es.Get("/mappings", dispatcher.Bind(
+		"console.ExternalSyncHandler.ListMappings",
+		dispatcher.Query(
+			func() *attunev1.ListExternalObjectMappingsRequest {
+				return ptrext.Of(attunev1.ListExternalObjectMappingsRequest{})
+			},
+			func(r *http.Request, req *attunev1.ListExternalObjectMappingsRequest) error {
+				req.ConnectionId = r.URL.Query().Get("connection_id")
+				return nil
+			},
+		),
+		r.externalSync.ListMappings,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExternalObjectMappingsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Put("/mappings/{id}", dispatcher.Bind(
+		"console.ExternalSyncHandler.UpdateMapping",
+		dispatcher.Combine(
+			func() *attunev1.UpdateExternalObjectMappingRequest {
+				return ptrext.Of(attunev1.UpdateExternalObjectMappingRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateExternalObjectMappingRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateExternalObjectMappingRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.UpdateMapping,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateExternalObjectMappingRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.Post("/mappings/{id}:preview", dispatcher.Bind(
+		"console.ExternalSyncHandler.PreviewMapping",
+		dispatcher.Combine(
+			func() *attunev1.PreviewExternalObjectMappingRequest {
+				return ptrext.Of(attunev1.PreviewExternalObjectMappingRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.PreviewExternalObjectMappingRequest],
+			dispatcher.Param("id", func(req *attunev1.PreviewExternalObjectMappingRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.PreviewMapping,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PreviewExternalObjectMappingRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/mappings/{id}:reset-cursor", dispatcher.Bind(
+		"console.ExternalSyncHandler.ResetCursor",
+		dispatcher.Path(
+			func() *attunev1.ResetExternalSyncCursorRequest {
+				return ptrext.Of(attunev1.ResetExternalSyncCursorRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.ResetExternalSyncCursorRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.ResetCursor,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResetExternalSyncCursorRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/mappings/{id}:backfill", dispatcher.Bind(
+		"console.ExternalSyncHandler.RequestBackfill",
+		dispatcher.Combine(
+			func() *attunev1.RequestExternalSyncBackfillRequest {
+				return ptrext.Of(attunev1.RequestExternalSyncBackfillRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.RequestExternalSyncBackfillRequest],
+			dispatcher.Param("id", func(req *attunev1.RequestExternalSyncBackfillRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.RequestBackfill,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RequestExternalSyncBackfillRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountExternalSyncRunRoutes(es chi.Router) {
+	es.With(r.requireDelegatedAdminStrict).Post("/runs", dispatcher.Bind(
+		"console.ExternalSyncHandler.RequestRun",
+		dispatcher.JSON(func() *attunev1.RequestExternalSyncRunRequest {
+			return ptrext.Of(attunev1.RequestExternalSyncRunRequest{})
+		}),
+		r.externalSync.RequestRun,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RequestExternalSyncRunRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.Get("/runs", dispatcher.Bind(
+		"console.ExternalSyncHandler.ListRuns",
+		dispatcher.Query(
+			func() *attunev1.ListExternalSyncRunsRequest {
+				return ptrext.Of(attunev1.ListExternalSyncRunsRequest{})
+			},
+			consoleexternalsync.BindListRunsRequest,
+		),
+		r.externalSync.ListRuns,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExternalSyncRunsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.Get("/runs/{id}", dispatcher.Bind(
+		"console.ExternalSyncHandler.GetRun",
+		dispatcher.Path(
+			func() *attunev1.GetExternalSyncRunRequest {
+				return ptrext.Of(attunev1.GetExternalSyncRunRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.GetExternalSyncRunRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.GetRun,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetExternalSyncRunRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.Post("/records:timeline", dispatcher.Bind(
+		"console.ExternalSyncHandler.RecordTimeline",
+		dispatcher.JSON(func() *attunev1.GetExternalSyncRecordTimelineRequest {
+			return ptrext.Of(attunev1.GetExternalSyncRecordTimelineRequest{})
+		}),
+		r.externalSync.RecordTimeline,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetExternalSyncRecordTimelineRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/runs/{id}:retry", dispatcher.Bind(
+		"console.ExternalSyncHandler.RetryRun",
+		dispatcher.Path(
+			func() *attunev1.RetryExternalSyncRunRequest {
+				return ptrext.Of(attunev1.RetryExternalSyncRunRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.RetryExternalSyncRunRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.RetryRun,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RetryExternalSyncRunRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/failures/{id}:retry", dispatcher.Bind(
+		"console.ExternalSyncHandler.RetryFailure",
+		dispatcher.Path(
+			func() *attunev1.RetryExternalSyncFailureRequest {
+				return ptrext.Of(attunev1.RetryExternalSyncFailureRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.RetryExternalSyncFailureRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.RetryFailure,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RetryExternalSyncFailureRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/conflicts/{id}:resolve", dispatcher.Bind(
+		"console.ExternalSyncHandler.ResolveConflict",
+		dispatcher.Combine(
+			func() *attunev1.ResolveExternalSyncConflictRequest {
+				return ptrext.Of(attunev1.ResolveExternalSyncConflictRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.ResolveExternalSyncConflictRequest],
+			dispatcher.Param("id", func(req *attunev1.ResolveExternalSyncConflictRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.ResolveConflict,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ResolveExternalSyncConflictRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/conflicts:batch-resolve", dispatcher.Bind(
+		"console.ExternalSyncHandler.BatchResolveConflicts",
+		dispatcher.JSON(func() *attunev1.BatchResolveExternalSyncConflictsRequest {
+			return ptrext.Of(attunev1.BatchResolveExternalSyncConflictsRequest{})
+		}),
+		r.externalSync.BatchResolveConflicts,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchResolveExternalSyncConflictsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountExternalSyncEventRoutes(es chi.Router) {
+	es.Get("/events", dispatcher.Bind(
+		"console.ExternalSyncHandler.ListEvents",
+		dispatcher.Query(
+			func() *attunev1.ListExternalSyncEventsRequest {
+				return ptrext.Of(attunev1.ListExternalSyncEventsRequest{})
+			},
+			consoleexternalsync.BindListEventsRequest,
+		),
+		r.externalSync.ListEvents,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExternalSyncEventsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.Get("/events/{id}", dispatcher.Bind(
+		"console.ExternalSyncHandler.GetEvent",
+		dispatcher.Path(
+			func() *attunev1.GetExternalSyncEventRequest {
+				return ptrext.Of(attunev1.GetExternalSyncEventRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.GetExternalSyncEventRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.GetEvent,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetExternalSyncEventRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/events/{id}:replay", dispatcher.Bind(
+		"console.ExternalSyncHandler.ReplayEvent",
+		dispatcher.Path(
+			func() *attunev1.ReplayExternalSyncEventRequest {
+				return ptrext.Of(attunev1.ReplayExternalSyncEventRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.ReplayExternalSyncEventRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.ReplayEvent,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ReplayExternalSyncEventRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountClusters(m chi.Router) {

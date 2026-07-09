@@ -205,7 +205,7 @@ func aiPipelineDashboard() dashboard {
 func operationsDashboard() dashboard {
 	d := newDashboard("attune-operations", "Attune Operations", "attune-operations.json", []string{"operations"}, tenantVar("attune_workflow_transitions_total"))
 	d.Panels = []panel{
-		textPanel(1, "Operations lens", "How to read background system health.", "**Targets:** Outbox lag <= 60s · Batch p95 stays bounded · Search p95 <= 1s · Claim contention near zero · Migration pending = 0 · Checksum drift = 0\n\n**Flow:** backlog summary -> workflow/batch health -> idempotency/search -> delivery and contention -> database migrations.", gp(0, 0, 24, 4)),
+		textPanel(1, "Operations lens", "How to read background system health.", "**Targets:** Outbox lag <= 60s · Batch p95 stays bounded · Search p95 <= 1s · Claim contention near zero · External sync failures explainable · Migration pending = 0 · Checksum drift = 0\n\n**Flow:** backlog summary -> workflow/batch health -> idempotency/search -> delivery and contention -> external sync -> database migrations.", gp(0, 0, 24, 4)),
 		rowPanel(2, "Backlog summary", 2),
 		statDesc(3, "Workflow transitions", "Workflow transitions in the selected range. Sudden drops can mean workers stopped or feature traffic disappeared.", zero(`sum(increase(attune_workflow_transitions_total{tenant=~"$tenant"}[$__range]))`), "short", gp(0, 3, 4, 4), nil),
 		statDesc(4, "Batch jobs claimed", "Batch jobs claimed by workers. If this is flat while backlog exists, workers are not picking up work.", zero(`sum(increase(attune_batch_jobs_claimed_total{tenant=~"$tenant"}[$__range]))`), "short", gp(4, 3, 4, 4), nil),
@@ -269,31 +269,44 @@ func operationsDashboard() dashboard {
 			targetExpr("O", `sum by (name) (rate(attune_circuit_breaker_rejected_total[$__rate_interval]))`, "circuit rejected / {{name}}"),
 			targetExpr("P", `sum by (name, from, to) (increase(attune_circuit_breaker_transitions_total[$__range]))`, "circuit state / {{name}} / {{from}}->{{to}}"),
 		}, "short", gp(0, 43, 24, 8)),
-		rowPanel(22, "Database migrations", 51),
-		statDesc(23, "Pending migrations", "Unapplied migrations at last startup. Non-zero after startup means migrations are failing or the binary has new migrations not yet applied.", `attune_migration_pending`, "short", gp(0, 52, 6, 4), greenWarnRed(1, 5)),
-		statDesc(24, "Checksum drift", "Migration files modified after apply. Should always be zero — any non-zero value is a release hygiene violation requiring investigation.", zero(`increase(attune_migration_checksum_drift_total[$__range])`), "short", gp(6, 52, 6, 4), greenRed(1)),
-		statDesc(25, "Migrations applied", "Migrations applied in the selected range. Non-zero values expected only after deployments with schema changes.", zero(`sum(increase(attune_migration_applied_total[$__range]))`), "short", gp(12, 52, 6, 4), nil),
-		statDesc(26, "Apply p95", "P95 migration apply duration. Use this to size deployment timeouts and detect regressions from large backfills.", zero(`histogram_quantile(0.95, sum by (le) (rate(attune_migration_apply_duration_seconds_bucket[$__rate_interval])))`), "s", gp(18, 52, 6, 4), greenWarnRed(30, 300)),
-		seriesDesc(27, "Migration history", "Migration apply rate and duration over time. Spikes indicate deployments with schema changes.", []target{
+		rowPanel(22, "External sync", 51),
+		externalSyncHealthPanel(),
+		rowPanel(24, "Database migrations", 60),
+		statDesc(25, "Pending migrations", "Unapplied migrations at last startup. Non-zero after startup means migrations are failing or the binary has new migrations not yet applied.", `attune_migration_pending`, "short", gp(0, 61, 6, 4), greenWarnRed(1, 5)),
+		statDesc(26, "Checksum drift", "Migration files modified after apply. Should always be zero — any non-zero value is a release hygiene violation requiring investigation.", zero(`increase(attune_migration_checksum_drift_total[$__range])`), "short", gp(6, 61, 6, 4), greenRed(1)),
+		statDesc(27, "Migrations applied", "Migrations applied in the selected range. Non-zero values expected only after deployments with schema changes.", zero(`sum(increase(attune_migration_applied_total[$__range]))`), "short", gp(12, 61, 6, 4), nil),
+		statDesc(28, "Apply p95", "P95 migration apply duration. Use this to size deployment timeouts and detect regressions from large backfills.", zero(`histogram_quantile(0.95, sum by (le) (rate(attune_migration_apply_duration_seconds_bucket[$__rate_interval])))`), "s", gp(18, 61, 6, 4), greenWarnRed(30, 300)),
+		seriesDesc(29, "Migration history", "Migration apply rate and duration over time. Spikes indicate deployments with schema changes.", []target{
 			targetExpr("A", `sum by (version) (rate(attune_migration_applied_total[$__rate_interval]))`, "applied / v{{version}}"),
 			targetExpr("B", `histogram_quantile(0.95, sum by (le) (rate(attune_migration_apply_duration_seconds_bucket[$__rate_interval])))`, "duration p95"),
 			targetExpr("C", `attune_migration_pending`, "pending"),
 			targetExpr("D", `increase(attune_migration_checksum_drift_total[$__rate_interval])`, "checksum drift"),
-		}, "short", gp(0, 56, 24, 8)),
-		rowPanel(28, "Dependency health", 64),
-		seriesDesc(29, "Dependency health checks", "Health check outcomes and latency for upstream dependencies. Use this to detect connectivity issues before they impact user traffic.", []target{
+		}, "short", gp(0, 65, 24, 8)),
+		rowPanel(30, "Dependency health", 73),
+		seriesDesc(31, "Dependency health checks", "Health check outcomes and latency for upstream dependencies. Use this to detect connectivity issues before they impact user traffic.", []target{
 			targetExpr("A", `sum by (dependency, result) (rate(attune_dependency_health_check_total[$__rate_interval]))`, "{{dependency}} / {{result}}"),
 			targetExpr("B", `histogram_quantile(0.95, sum by (le, dependency) (rate(attune_dependency_health_check_duration_seconds_bucket[$__rate_interval])))`, "{{dependency}} p95"),
-		}, "short", gp(0, 65, 24, 8)),
-		rowPanel(30, "Backup recoverability", 73),
-		statDesc(31, "Time since last drill success", "Age of the most recent non-failing (pass or warn) backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. A near-zero epoch value means no drill has ever succeeded (the backup:restore_drill preflight check warns).", `time() - max(attune_restore_drill_last_success_timestamp_seconds)`, "s", gp(0, 74, 8, 4), greenWarnRed(7*24*3600, 8*24*3600)),
-		statDesc(32, "Last restore time (RTO)", "Measured restore duration of the most recent drill that recorded one. Trends time-to-recover against your RTO objective.", `attune_restore_drill_last_rto_seconds`, "s", gp(8, 74, 8, 4), nil),
-		seriesDesc(33, "Restore drills by outcome", "Recorded restore drills by status. A rising fail count — or the absence of recent pass/warn — means the latest backups may not be recoverable.", []target{
+		}, "short", gp(0, 74, 24, 8)),
+		rowPanel(32, "Backup recoverability", 82),
+		statDesc(33, "Time since last drill success", "Age of the most recent non-failing (pass or warn) backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. A near-zero epoch value means no drill has ever succeeded (the backup:restore_drill preflight check warns).", `time() - max(attune_restore_drill_last_success_timestamp_seconds)`, "s", gp(0, 83, 8, 4), greenWarnRed(7*24*3600, 8*24*3600)),
+		statDesc(34, "Last restore time (RTO)", "Measured restore duration of the most recent drill that recorded one. Trends time-to-recover against your RTO objective.", `attune_restore_drill_last_rto_seconds`, "s", gp(8, 83, 8, 4), nil),
+		seriesDesc(35, "Restore drills by outcome", "Recorded restore drills by status. A rising fail count — or the absence of recent pass/warn — means the latest backups may not be recoverable.", []target{
 			targetExpr("A", `attune_restore_drill_runs_total`, "{{status}}"),
-		}, "short", gp(16, 74, 8, 8)),
+		}, "short", gp(16, 83, 8, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 7, 7)
 	return d
+}
+
+func externalSyncHealthPanel() panel {
+	return seriesDesc(23, "External sync health", "External connection sync outcomes, record operations, duration, lag, conflicts, and dead runs. Use this before blaming provider adapters or manual conflict handling.", []target{
+		targetExpr("A", `sum by (provider, object_type, result) (rate(attune_external_sync_runs_total[$__rate_interval]))`, "runs / {{provider}} / {{object_type}} / {{result}}"),
+		targetExpr("B", `sum by (provider, object_type, operation, result) (rate(attune_external_sync_records_total[$__rate_interval]))`, "records / {{provider}} / {{object_type}} / {{operation}} / {{result}}"),
+		targetExpr("C", `histogram_quantile(0.95, sum by (le, provider, object_type, result) (rate(attune_external_sync_run_duration_seconds_bucket[$__rate_interval])))`, "run p95 / {{provider}} / {{object_type}} / {{result}}"),
+		targetExpr("D", `max by (provider, object_type) (attune_external_sync_lag_seconds)`, "lag / {{provider}} / {{object_type}}"),
+		targetExpr("E", `sum by (provider, object_type, resolution) (rate(attune_external_sync_conflicts_total[$__rate_interval]))`, "conflicts / {{provider}} / {{object_type}} / {{resolution}}"),
+		targetExpr("F", `sum by (provider, object_type) (attune_external_sync_dead_runs)`, "dead / {{provider}} / {{object_type}}"),
+	}, "short", gp(0, 52, 24, 8))
 }
 
 func securityDashboard() dashboard {
