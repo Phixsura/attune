@@ -377,12 +377,14 @@ conflicting states after approve, reject, hide, spam, or restore.
 
 ### Public Routes
 
-Issue #215 adds one narrow public read endpoint so the visibility contract is
-executable and testable:
+Issue #215 adds a narrow public read surface so the visibility contract is
+executable and testable across both request-board and roadmap views:
 
+- `GET /v1/portal/{tenant_slug}/requests`
 - `GET /v1/portal/{tenant_slug}/requests/{public_slug}`
+- `GET /v1/portal/{tenant_slug}/roadmap`
 
-The endpoint returns `PublicCustomerRequestDetail` only when:
+The request detail endpoint returns `PublicCustomerRequestDetail` only when:
 
 - The tenant slug resolves to a tenant.
 - The public API version middleware accepts the request.
@@ -398,8 +400,14 @@ apply anonymous rate limiting and should set noindex metadata when
 content, so hide and restore actions are not masked by browser or intermediary
 caches.
 
-List, submission, vote, comment, roadmap, and changelog routes can reuse the
-same policy and projection path.
+The request list and roadmap list endpoints return the same
+`PublicCustomerRequestSummary` projection. Request lists require the request
+surface to be enabled and `included_in_portal` to be true. Roadmap lists require
+the roadmap surface to be enabled and `included_in_roadmap` to be true. Both
+lists require approved moderation subjects and live Customer Requests, hide
+pending, rejected, hidden, spam, excluded, archived, merged, and cross-tenant
+records, and use the same count, submitter identity, timestamp, no-store, and
+noindex controls as request detail responses.
 
 ### Audit
 
@@ -495,10 +503,9 @@ permission models while still preserving surface-specific subject ids.
    submitter fingerprints, and public-safe projection helpers.
 6. Add Console handlers, generated routes, router registration, permission
    checks, audit inventory entries, and request validation.
-7. Add the minimal public read endpoint
-   `GET /v1/portal/{tenant_slug}/requests/{public_slug}` with API version
-   enforcement, tenant slug resolution, rate limiting, and `404` behavior for
-   disabled or unapproved records.
+7. Add public read endpoints for request lists, request detail, and roadmap
+   lists with API version enforcement, tenant slug resolution, rate limiting,
+   and `404` behavior for disabled or unapproved records.
 8. Add Console settings and moderation queue views with permission-gated actions.
 9. Add public projection tests and route tests that prove forbidden internal
    fields never appear in JSON, illegal moderation transitions fail without

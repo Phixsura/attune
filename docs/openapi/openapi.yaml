@@ -8413,6 +8413,74 @@ paths:
                             description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
                             schema:
                                 type: string
+    /v1/portal/{tenantSlug}/requests:
+        get:
+            tags:
+                - PortalService
+            operationId: PortalService_ListPublicCustomerRequests
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListPublicCustomerRequestsResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
     /v1/portal/{tenantSlug}/requests/{publicSlug}:
         get:
             tags:
@@ -8443,6 +8511,74 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PublicCustomerRequestDetail'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/portal/{tenantSlug}/roadmap:
+        get:
+            tags:
+                - PortalService
+            operationId: PortalService_ListPublicRoadmap
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListPublicRoadmapResponse'
                     headers:
                         X-Attune-Api-Version:
                             description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
@@ -12848,6 +12984,24 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Project'
+        ListPublicCustomerRequestsResponse:
+            type: object
+            properties:
+                requests:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PublicCustomerRequestSummary'
+                nextCursor:
+                    type: string
+        ListPublicRoadmapResponse:
+            type: object
+            properties:
+                columns:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PublicRoadmapColumn'
+                nextCursor:
+                    type: string
         ListQualityActionsResponse:
             type: object
             properties:
@@ -13617,6 +13771,15 @@ components:
                     $ref: '#/components/schemas/PublicRequestProfile'
                 moderation:
                     $ref: '#/components/schemas/ModerationSubject'
+        PublicRoadmapColumn:
+            type: object
+            properties:
+                name:
+                    type: string
+                requests:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PublicCustomerRequestSummary'
         PublicVisibilityPolicy:
             type: object
             properties:

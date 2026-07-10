@@ -137,6 +137,28 @@ type PublicRequestCandidate struct {
 	CustomerRequestLive bool
 }
 
+type PublicRequestListFilter struct {
+	TenantSlug string
+	Roadmap    bool
+	Limit      int
+	Cursor     string
+}
+
+type PublicRequestListCandidate struct {
+	Profile           RequestProfile
+	Moderation        ModerationSubject
+	VoteCount         int
+	CommentCount      int
+	SubmitterDisplay  string
+	CustomerRequestID uuid.UUID
+}
+
+type PublicRequestListResult struct {
+	Policy     Policy
+	Items      []PublicRequestListCandidate
+	NextCursor string
+}
+
 type RequestPublication struct {
 	Profile    RequestProfile
 	Moderation ModerationSubject
@@ -517,6 +539,76 @@ func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string,
 	return ptrext.Of(out), nil
 }
 
+func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicRequestListFilter) (PublicRequestListResult, error) {
+	limit := boundedLimit(filter.Limit)
+	offset, err := parseCursor(filter.Cursor)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+	tenantID, err := r.ResolveTenantIDBySlug(ctx, filter.TenantSlug)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+	policy, err := r.GetPolicy(ctx, tenantID)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+
+	includedClause := "prp.included_in_portal = TRUE"
+	orderBy := "prp.updated_at DESC, prp.id DESC"
+	if filter.Roadmap {
+		includedClause = "prp.included_in_roadmap = TRUE"
+		orderBy = "LOWER(NULLIF(prp.roadmap_column, '')) ASC NULLS LAST, prp.updated_at DESC, prp.id DESC"
+	}
+	q := `
+		SELECT
+			` + prefixedProfileColumns("prp") + `,
+			` + prefixedSubjectColumns("pms") + `,
+			COALESCE(votes.vote_count, 0),
+			0::bigint AS comment_count,
+			cr.id
+		FROM public_request_profiles prp
+		JOIN public_moderation_subjects pms
+		  ON pms.tenant_id = prp.tenant_id
+		 AND pms.surface = 'request'
+		 AND pms.subject_id = prp.id::text
+		 AND pms.state = 'approved'
+		JOIN customer_requests cr
+		  ON cr.tenant_id = prp.tenant_id
+		 AND cr.id = prp.request_id
+		 AND cr.archived_at IS NULL
+		 AND cr.merged_into_request_id IS NULL
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS vote_count
+			FROM customer_request_votes v
+			WHERE v.tenant_id = prp.tenant_id
+			  AND v.request_id = prp.request_id
+		) votes ON true
+		WHERE prp.tenant_id = $1
+		  AND ` + includedClause + `
+		ORDER BY ` + orderBy + `
+		LIMIT $2 OFFSET $3`
+	rows, err := r.pool.Query(ctx, q, tenantID, limit+1, offset)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+	defer rows.Close()
+	items, err := scanPublicRequestListCandidates(rows)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		next = strconv.Itoa(offset + limit)
+	}
+	return PublicRequestListResult{
+		Policy:     ptrext.Indirect(policy),
+		Items:      items,
+		NextCursor: next,
+	}, nil
+}
+
 type queryer interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
@@ -693,6 +785,29 @@ func scanSubjects(rows pgx.Rows) ([]ModerationSubject, error) {
 			return nil, err
 		}
 		out = append(out, subject)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func scanPublicRequestListCandidates(rows pgx.Rows) ([]PublicRequestListCandidate, error) {
+	var out []PublicRequestListCandidate
+	for rows.Next() {
+		var candidate PublicRequestListCandidate
+		var votes int64
+		var comments int64
+		targets := profileScanTargets(&candidate.Profile)                          // ptrext:allow scan-target
+		targets = append(targets, subjectScanTargets(&candidate.Moderation)...)    // ptrext:allow scan-target
+		targets = append(targets, &votes, &comments, &candidate.CustomerRequestID) // ptrext:allow scan-target
+		if err := rows.Scan(targets...); err != nil {
+			return nil, err
+		}
+		candidate.VoteCount = int(votes)
+		candidate.CommentCount = int(comments)
+		candidate.SubmitterDisplay = candidate.Moderation.SubmittedByDisplay
+		out = append(out, candidate)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

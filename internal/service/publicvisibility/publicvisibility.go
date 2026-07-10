@@ -73,6 +73,7 @@ type repository interface {
 		reviewedAt time.Time,
 	) (*repo.ModerationSubject, error)
 	GetPublicRequestCandidate(ctx context.Context, tenantSlug string, publicSlug string) (*repo.PublicRequestCandidate, error)
+	ListPublicRequestCandidates(ctx context.Context, filter repo.PublicRequestListFilter) (repo.PublicRequestListResult, error)
 }
 
 type UpdatePolicyInput struct {
@@ -145,6 +146,12 @@ type PublicRequest struct {
 	Comments         int
 	SubmitterDisplay string
 	NoIndex          bool
+}
+
+type PublicRequestList struct {
+	Requests   []PublicRequest
+	NoIndex    bool
+	NextCursor string
 }
 
 func (s *Service) GetPolicy(ctx context.Context, tenantID string) (repo.Policy, error) {
@@ -318,6 +325,54 @@ func (s *Service) GetPublicRequest(ctx context.Context, tenantSlug string, publi
 	return publicRequestFromCandidate(ptrext.Indirect(candidate)), nil
 }
 
+func (s *Service) ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string) (PublicRequestList, error) {
+	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, false)
+}
+
+func (s *Service) ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string) (PublicRequestList, error) {
+	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, true)
+}
+
+func (s *Service) listPublicRequests(
+	ctx context.Context,
+	tenantSlug string,
+	limit int,
+	cursor string,
+	roadmap bool,
+) (PublicRequestList, error) {
+	tenantSlug = strings.TrimSpace(tenantSlug)
+	if tenantSlug == "" {
+		return PublicRequestList{}, ErrNotFound
+	}
+	result, err := s.repo.ListPublicRequestCandidates(ctx, repo.PublicRequestListFilter{
+		TenantSlug: tenantSlug,
+		Roadmap:    roadmap,
+		Limit:      limit,
+		Cursor:     strings.TrimSpace(cursor),
+	})
+	if errors.Is(err, repo.ErrNotFound) {
+		return PublicRequestList{}, ErrNotFound
+	}
+	if errors.Is(err, repo.ErrInvalidInput) {
+		return PublicRequestList{}, ErrValidation
+	}
+	if err != nil {
+		return PublicRequestList{}, err
+	}
+	if !publicRequestListVisible(result.Policy, roadmap) {
+		return PublicRequestList{}, ErrNotFound
+	}
+	requests := make([]PublicRequest, 0, len(result.Items))
+	for _, item := range result.Items {
+		requests = append(requests, publicRequestFromListCandidate(result.Policy, item))
+	}
+	return PublicRequestList{
+		Requests:   requests,
+		NoIndex:    !result.Policy.SearchIndexingEnabled,
+		NextCursor: result.NextCursor,
+	}, nil
+}
+
 func defaultPolicy(tenantID string) repo.Policy {
 	return repo.Policy{
 		TenantID:              tenantID,
@@ -456,6 +511,16 @@ func publicRequestVisible(candidate repo.PublicRequestCandidate) bool {
 		candidate.CustomerRequestLive
 }
 
+func publicRequestListVisible(policy repo.Policy, roadmap bool) bool {
+	if policy.PortalAccessMode != repo.AccessModePublic {
+		return false
+	}
+	if roadmap {
+		return policy.RoadmapEnabled
+	}
+	return policy.RequestsEnabled
+}
+
 func publicRequestFromCandidate(candidate repo.PublicRequestCandidate) PublicRequest {
 	return PublicRequest{
 		Summary:          candidate.Profile,
@@ -464,6 +529,17 @@ func publicRequestFromCandidate(candidate repo.PublicRequestCandidate) PublicReq
 		Comments:         candidate.CommentCount,
 		SubmitterDisplay: publicSubmitterDisplay(candidate.Policy, candidate.SubmitterDisplay),
 		NoIndex:          !candidate.Policy.SearchIndexingEnabled,
+	}
+}
+
+func publicRequestFromListCandidate(policy repo.Policy, candidate repo.PublicRequestListCandidate) PublicRequest {
+	return PublicRequest{
+		Summary:          candidate.Profile,
+		Policy:           policy,
+		Votes:            candidate.VoteCount,
+		Comments:         candidate.CommentCount,
+		SubmitterDisplay: publicSubmitterDisplay(policy, candidate.SubmitterDisplay),
+		NoIndex:          !policy.SearchIndexingEnabled,
 	}
 }
 

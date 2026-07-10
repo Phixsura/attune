@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   before they can be silently coerced into default policy or moderation filters.
   Database constraints now also reject rejected, hidden, or spam policy default
   states, so direct writes cannot bypass the runtime default-state contract.
+  Public portal APIs now include tenant-scoped request-list and roadmap-list
+  endpoints that share the same policy, moderation, live-record, field
+  allowlist, no-store cache, and noindex controls as public request details.
   Moderation actions now carry stable
   reason codes and optional bounded notes, the Console queue can switch between
   pending, published, blocked, and all review states, and public request reads

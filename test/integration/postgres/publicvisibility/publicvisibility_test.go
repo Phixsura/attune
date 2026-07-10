@@ -160,6 +160,78 @@ func TestPGPublicVisibilityRejectsBlockedDefaultPolicyStates(t *testing.T) {
 	}
 }
 
+func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
+	e := setup(t)
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+
+	portalRoadmapRequest := e.createRequest(t, "Portal roadmap request")
+	portalRoadmap := e.upsertRequestPublicationCustom(t, portalRoadmapRequest.ID,
+		"portal-roadmap", "Portal roadmap", "Now", true, true)
+	e.addVote(t, portalRoadmapRequest.ID, "user:portal-roadmap")
+	e.approve(t, portalRoadmap.Moderation.ID)
+
+	portalOnlyRequest := e.createRequest(t, "Portal only request")
+	portalOnly := e.upsertRequestPublicationCustom(t, portalOnlyRequest.ID,
+		"portal-only", "Portal only", "Inbox", true, false)
+	e.approve(t, portalOnly.Moderation.ID)
+
+	roadmapOnlyRequest := e.createRequest(t, "Roadmap only request")
+	roadmapOnly := e.upsertRequestPublicationCustom(t, roadmapOnlyRequest.ID,
+		"roadmap-only", "Roadmap only", "Next", false, true)
+	e.approve(t, roadmapOnly.Moderation.ID)
+
+	pendingRequest := e.createRequest(t, "Pending public request")
+	e.upsertRequestPublicationCustom(t, pendingRequest.ID, "pending-request", "Pending request", "Now", true, true)
+
+	hiddenRequest := e.createRequest(t, "Hidden public request")
+	hidden := e.upsertRequestPublicationCustom(t, hiddenRequest.ID, "hidden-request", "Hidden request", "Now", true, true)
+	e.approve(t, hidden.Moderation.ID)
+	e.setModerationState(t, hidden.Moderation.ID, pvrepo.ModerationStateHidden)
+
+	excludedRequest := e.createRequest(t, "Excluded public request")
+	excluded := e.upsertRequestPublicationCustom(t, excludedRequest.ID, "excluded-request", "Excluded request", "Now", false, false)
+	e.approve(t, excluded.Moderation.ID)
+
+	archivedRequest := e.createRequest(t, "Archived public request")
+	archived := e.upsertRequestPublicationCustom(t, archivedRequest.ID, "archived-request", "Archived request", "Now", true, true)
+	e.approve(t, archived.Moderation.ID)
+	e.archiveRequest(t, archivedRequest.ID)
+
+	portalList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug: e.tenantSlug,
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(portal): %v", err)
+	}
+	assertPublicListSlugs(t, portalList.Items, []string{"portal-roadmap", "portal-only"})
+	if portalList.Policy.TenantID != e.tenantID || publicListVoteCount(portalList.Items, "portal-roadmap") != 1 {
+		t.Fatalf("portal list = %+v, want tenant policy and vote count", portalList)
+	}
+
+	roadmapList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug: e.tenantSlug,
+		Roadmap:    true,
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(roadmap): %v", err)
+	}
+	assertPublicListSlugs(t, roadmapList.Items, []string{"portal-roadmap", "roadmap-only"})
+
+	service := pvsvc.New(e.publicRepo, nil)
+	publicRequests, err := service.ListPublicRequests(e.ctx, e.tenantSlug, 10, "")
+	if err != nil {
+		t.Fatalf("ListPublicRequests: %v", err)
+	}
+	assertPublicRequestSlugs(t, publicRequests.Requests, []string{"portal-roadmap", "portal-only"})
+	publicRoadmap, err := service.ListPublicRoadmap(e.ctx, e.tenantSlug, 10, "")
+	if err != nil {
+		t.Fatalf("ListPublicRoadmap: %v", err)
+	}
+	assertPublicRequestSlugs(t, publicRoadmap.Requests, []string{"portal-roadmap", "roadmap-only"})
+}
+
 func TestPGPublicVisibilityServiceWritesAuditRows(t *testing.T) {
 	e := setup(t)
 	request := e.createRequest(t, "Audited request")
@@ -258,17 +330,30 @@ func (e env) publicPolicy(defaultState pvrepo.ModerationState) pvrepo.Policy {
 
 func (e env) upsertRequestPublication(t *testing.T, requestID uuid.UUID, slug string) pvrepo.RequestPublication {
 	t.Helper()
+	return e.upsertRequestPublicationCustom(t, requestID, slug, "Pricing API", "next", true, true)
+}
+
+func (e env) upsertRequestPublicationCustom(
+	t *testing.T,
+	requestID uuid.UUID,
+	slug string,
+	title string,
+	roadmapColumn string,
+	includedInPortal bool,
+	includedInRoadmap bool,
+) pvrepo.RequestPublication {
+	t.Helper()
 	tx := e.begin(t)
 	publication, err := e.publicRepo.UpsertRequestPublicationTx(e.ctx, tx, pvrepo.RequestProfile{
 		TenantID:          e.tenantID,
 		RequestID:         requestID,
 		PublicSlug:        slug,
-		PublicTitle:       "Pricing API",
+		PublicTitle:       title,
 		PublicSummary:     "Public-safe summary",
 		PublicState:       "planned",
-		RoadmapColumn:     "next",
-		IncludedInPortal:  true,
-		IncludedInRoadmap: true,
+		RoadmapColumn:     roadmapColumn,
+		IncludedInPortal:  includedInPortal,
+		IncludedInRoadmap: includedInRoadmap,
 		UpdatedBy:         "operator",
 	}, pvrepo.ModerationStatePending, "Ada", "tenant-local-digest")
 	if err != nil {
@@ -281,10 +366,15 @@ func (e env) upsertRequestPublication(t *testing.T, requestID uuid.UUID, slug st
 
 func (e env) approve(t *testing.T, subjectID uuid.UUID) {
 	t.Helper()
+	e.setModerationState(t, subjectID, pvrepo.ModerationStateApproved)
+}
+
+func (e env) setModerationState(t *testing.T, subjectID uuid.UUID, state pvrepo.ModerationState) {
+	t.Helper()
 	tx := e.begin(t)
 	reviewedAt := time.Now().UTC()
 	subject, err := e.publicRepo.UpdateSubjectStateTx(e.ctx, tx, e.tenantID, subjectID,
-		pvrepo.ModerationStateApproved, "safe", "approved for public portal", "reviewer", reviewedAt)
+		state, "safe", "reviewed for public portal", "reviewer", reviewedAt)
 	if err != nil {
 		rollback(t, e.ctx, tx)
 		t.Fatalf("UpdateSubjectStateTx: %v", err)
@@ -294,6 +384,16 @@ func (e env) approve(t *testing.T, subjectID uuid.UUID) {
 		t.Fatalf("approved subject = %+v, want reviewer fields", subject)
 	}
 	commit(t, e.ctx, tx)
+}
+
+func (e env) archiveRequest(t *testing.T, requestID uuid.UUID) {
+	t.Helper()
+	if _, err := e.pool.Exec(e.ctx, `
+		UPDATE customer_requests
+		SET archived_at = NOW()
+		WHERE tenant_id = $1 AND id = $2`, e.tenantID, requestID); err != nil {
+		t.Fatalf("archive request: %v", err)
+	}
 }
 
 func (e env) createRequest(t *testing.T, title string) crrepo.Summary {
@@ -375,4 +475,47 @@ func commit(t *testing.T, ctx context.Context, tx pgx.Tx) {
 func rollback(t *testing.T, ctx context.Context, tx pgx.Tx) {
 	t.Helper()
 	_ = tx.Rollback(ctx)
+}
+
+func assertPublicListSlugs(t *testing.T, items []pvrepo.PublicRequestListCandidate, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.Profile.PublicSlug)
+	}
+	assertSlugSet(t, got, want)
+}
+
+func publicListVoteCount(items []pvrepo.PublicRequestListCandidate, slug string) int {
+	for _, item := range items {
+		if item.Profile.PublicSlug == slug {
+			return item.VoteCount
+		}
+	}
+	return -1
+}
+
+func assertPublicRequestSlugs(t *testing.T, items []pvsvc.PublicRequest, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, item.Summary.PublicSlug)
+	}
+	assertSlugSet(t, got, want)
+}
+
+func assertSlugSet(t *testing.T, got []string, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("slugs = %#v, want %#v", got, want)
+	}
+	seen := make(map[string]int, len(got))
+	for _, slug := range got {
+		seen[slug]++
+	}
+	for _, slug := range want {
+		if seen[slug] != 1 {
+			t.Fatalf("slugs = %#v, want %#v", got, want)
+		}
+	}
 }

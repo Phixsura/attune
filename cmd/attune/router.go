@@ -130,6 +130,23 @@ func buildRouter(
 		r.Group(func(r chi.Router) {
 			r.Use(versionMW)
 			r.Use(portalLimiter.Middleware)
+			r.Use(portal.NoStore)
+			r.Get("/portal/{tenant_slug}/requests", dispatcher.Bind(
+				"portal.Handler.ListPublicCustomerRequests",
+				dispatcher.Query(
+					func() *attunev1.ListPublicCustomerRequestsRequest {
+						return ptrext.Of(attunev1.ListPublicCustomerRequestsRequest{})
+					},
+					dispatcher.Param("tenant_slug", func(req *attunev1.ListPublicCustomerRequestsRequest, slug string) {
+						req.TenantSlug = slug
+					}),
+					portal.BindListCustomerRequests,
+				),
+				portalHandler.ListPublicCustomerRequests,
+				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.ListPublicCustomerRequestsRequest) (struct{}, error) {
+					return struct{}{}, nil
+				}),
+			))
 			r.Get("/portal/{tenant_slug}/requests/{public_slug}", dispatcher.Bind(
 				"portal.Handler.GetPublicCustomerRequest",
 				dispatcher.Path(
@@ -145,6 +162,22 @@ func buildRouter(
 				),
 				portalHandler.GetPublicCustomerRequest,
 				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.GetPublicCustomerRequestRequest) (struct{}, error) {
+					return struct{}{}, nil
+				}),
+			))
+			r.Get("/portal/{tenant_slug}/roadmap", dispatcher.Bind(
+				"portal.Handler.ListPublicRoadmap",
+				dispatcher.Query(
+					func() *attunev1.ListPublicRoadmapRequest {
+						return ptrext.Of(attunev1.ListPublicRoadmapRequest{})
+					},
+					dispatcher.Param("tenant_slug", func(req *attunev1.ListPublicRoadmapRequest, slug string) {
+						req.TenantSlug = slug
+					}),
+					portal.BindListRoadmap,
+				),
+				portalHandler.ListPublicRoadmap,
+				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.ListPublicRoadmapRequest) (struct{}, error) {
 					return struct{}{}, nil
 				}),
 			))

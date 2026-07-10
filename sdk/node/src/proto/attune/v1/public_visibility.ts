@@ -198,6 +198,33 @@ export interface GetPublicCustomerRequestRequest {
   publicSlug: string;
 }
 
+export interface ListPublicCustomerRequestsRequest {
+  tenantSlug: string;
+  limit: number;
+  cursor: string;
+}
+
+export interface ListPublicCustomerRequestsResponse {
+  requests: PublicCustomerRequestSummary[];
+  nextCursor?: string | undefined;
+}
+
+export interface ListPublicRoadmapRequest {
+  tenantSlug: string;
+  limit: number;
+  cursor: string;
+}
+
+export interface PublicRoadmapColumn {
+  name: string;
+  requests: PublicCustomerRequestSummary[];
+}
+
+export interface ListPublicRoadmapResponse {
+  columns: PublicRoadmapColumn[];
+  nextCursor?: string | undefined;
+}
+
 export interface PublicCustomerRequestSummary {
   id: string;
   slug: string;
@@ -231,5 +258,7 @@ export interface PublicVisibilityService {
 }
 
 export interface PortalService {
+  ListPublicCustomerRequests(request: ListPublicCustomerRequestsRequest): Promise<ListPublicCustomerRequestsResponse>;
   GetPublicCustomerRequest(request: GetPublicCustomerRequestRequest): Promise<PublicCustomerRequestDetail>;
+  ListPublicRoadmap(request: ListPublicRoadmapRequest): Promise<ListPublicRoadmapResponse>;
 }

@@ -120,6 +120,27 @@ func TestPublicRequestVisible(t *testing.T) {
 	}
 }
 
+func TestPublicRequestListVisible(t *testing.T) {
+	t.Parallel()
+
+	policy := repo.Policy{
+		PortalAccessMode: repo.AccessModePublic,
+		RequestsEnabled:  true,
+		RoadmapEnabled:   true,
+	}
+	if !publicRequestListVisible(policy, false) || !publicRequestListVisible(policy, true) {
+		t.Fatalf("publicRequestListVisible(%#v) = false, want true for request and roadmap lists", policy)
+	}
+	policy.RequestsEnabled = false
+	if publicRequestListVisible(policy, false) || !publicRequestListVisible(policy, true) {
+		t.Fatalf("publicRequestListVisible(%#v) should hide requests and keep roadmap", policy)
+	}
+	policy.PortalAccessMode = repo.AccessModeDisabled
+	if publicRequestListVisible(policy, true) {
+		t.Fatalf("publicRequestListVisible(%#v) = true, want disabled portal hidden", policy)
+	}
+}
+
 func TestNormalizePolicyInput(t *testing.T) {
 	t.Parallel()
 
@@ -292,17 +313,80 @@ func TestPublicMethodsValidateBeforeRepositoryAccess(t *testing.T) {
 	if _, err := service.GetPublicRequest(ctx, "tenant", " "); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetPublicRequest(empty slug) error = %v, want %v", err, ErrNotFound)
 	}
+	if _, err := service.ListPublicRequests(ctx, " ", 0, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListPublicRequests(empty tenant) error = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := service.ListPublicRoadmap(ctx, " ", 0, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListPublicRoadmap(empty tenant) error = %v, want %v", err, ErrNotFound)
+	}
 }
 
-func TestServiceReadMethodsUseRepository(t *testing.T) {
+func TestServicePolicyModerationAndPublicationReadsUseRepository(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	service, fake, requestID := serviceReadFixture(t)
+
+	gotPolicy, err := service.GetPolicy(ctx, " tenant-a ")
+	if err != nil || gotPolicy.TenantID != "tenant-a" || fake.policyTenant != "tenant-a" {
+		t.Fatalf("GetPolicy() = %#v, %v, tenant=%q", gotPolicy, err, fake.policyTenant)
+	}
+	list, err := service.ListModeration(ctx, ListModerationInput{TenantID: " tenant-a ", Cursor: " next "})
+	if err != nil || len(list.Items) != 1 || fake.listFilter.Cursor != "next" {
+		t.Fatalf("ListModeration() = %#v, %v, filter=%#v", list, err, fake.listFilter)
+	}
+	gotPublication, err := service.GetRequestPublication(ctx, "tenant-a", requestID)
+	if err != nil || gotPublication.Profile.RequestID != requestID {
+		t.Fatalf("GetRequestPublication() = %#v, %v", gotPublication, err)
+	}
+}
+
+func TestServiceGetPublicRequestUsesRepository(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, _, _ := serviceReadFixture(t)
+
+	publicRequest, err := service.GetPublicRequest(ctx, " tenant-slug ", " pricing-api ")
+	if err != nil || publicRequest.Votes != 7 || publicRequest.SubmitterDisplay != "Ada" {
+		t.Fatalf("GetPublicRequest() = %#v, %v", publicRequest, err)
+	}
+}
+
+func TestServiceListPublicRequestsUsesRepository(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, fake, _ := serviceReadFixture(t)
+
+	publicRequests, err := service.ListPublicRequests(ctx, " tenant-slug ", 10, " 0 ")
+	if err != nil || len(publicRequests.Requests) != 1 || publicRequests.NextCursor != "50" ||
+		fake.publicListFilter.TenantSlug != "tenant-slug" || fake.publicListFilter.Roadmap {
+		t.Fatalf("ListPublicRequests() = %#v, %v, filter=%#v", publicRequests, err, fake.publicListFilter)
+	}
+}
+
+func TestServiceListPublicRoadmapUsesRepository(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	service, fake, _ := serviceReadFixture(t)
+
+	publicRoadmap, err := service.ListPublicRoadmap(ctx, " tenant-slug ", 10, " 0 ")
+	if err != nil || len(publicRoadmap.Requests) != 1 || !fake.publicListFilter.Roadmap {
+		t.Fatalf("ListPublicRoadmap() = %#v, %v, filter=%#v", publicRoadmap, err, fake.publicListFilter)
+	}
+}
+
+func serviceReadFixture(t *testing.T) (*Service, *fakePublicRepo, uuid.UUID) {
+	t.Helper()
+
 	requestID := uuid.New()
 	policy := defaultPolicy("tenant-a")
 	policy.PortalAccessMode = repo.AccessModePublic
 	policy.SearchIndexingEnabled = true
 	policy.RequestsEnabled = true
+	policy.RoadmapEnabled = true
 	policy.SubmitterIdentityMode = repo.IdentityModeDisplayName
 	policy.ShowSubmitterDisplay = true
 	publication := servicePublication(requestID)
@@ -321,25 +405,19 @@ func TestServiceReadMethodsUseRepository(t *testing.T) {
 			SubmitterDisplay:    "Ada",
 			CustomerRequestLive: true,
 		}),
+		publicListResult: repo.PublicRequestListResult{
+			Policy: policy,
+			Items: []repo.PublicRequestListCandidate{{
+				Profile:          publication.Profile,
+				Moderation:       publication.Moderation,
+				VoteCount:        3,
+				CommentCount:     1,
+				SubmitterDisplay: "Ada",
+			}},
+			NextCursor: "50",
+		},
 	})
-	service := ptrext.Of(Service{repo: fake})
-
-	gotPolicy, err := service.GetPolicy(ctx, " tenant-a ")
-	if err != nil || gotPolicy.TenantID != "tenant-a" || fake.policyTenant != "tenant-a" {
-		t.Fatalf("GetPolicy() = %#v, %v, tenant=%q", gotPolicy, err, fake.policyTenant)
-	}
-	list, err := service.ListModeration(ctx, ListModerationInput{TenantID: " tenant-a ", Cursor: " next "})
-	if err != nil || len(list.Items) != 1 || fake.listFilter.Cursor != "next" {
-		t.Fatalf("ListModeration() = %#v, %v, filter=%#v", list, err, fake.listFilter)
-	}
-	gotPublication, err := service.GetRequestPublication(ctx, "tenant-a", requestID)
-	if err != nil || gotPublication.Profile.RequestID != requestID {
-		t.Fatalf("GetRequestPublication() = %#v, %v", gotPublication, err)
-	}
-	publicRequest, err := service.GetPublicRequest(ctx, " tenant-slug ", " pricing-api ")
-	if err != nil || publicRequest.Votes != 7 || publicRequest.SubmitterDisplay != "Ada" {
-		t.Fatalf("GetPublicRequest() = %#v, %v", publicRequest, err)
-	}
+	return ptrext.Of(Service{repo: fake}), fake, requestID
 }
 
 func TestServiceReadMethodErrors(t *testing.T) {
@@ -379,6 +457,23 @@ func TestServiceReadMethodErrors(t *testing.T) {
 	fake.candidateErr = boom
 	if _, err := service.GetPublicRequest(ctx, "tenant", "slug"); !errors.Is(err, boom) {
 		t.Fatalf("GetPublicRequest(repo error) error = %v, want %v", err, boom)
+	}
+	fake.publicListErr = repo.ErrNotFound
+	if _, err := service.ListPublicRequests(ctx, "tenant", 0, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListPublicRequests(not found) error = %v, want %v", err, ErrNotFound)
+	}
+	fake.publicListErr = repo.ErrInvalidInput
+	if _, err := service.ListPublicRoadmap(ctx, "tenant", 0, "bad"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("ListPublicRoadmap(invalid cursor) error = %v, want %v", err, ErrValidation)
+	}
+	fake.publicListErr = nil
+	fake.publicListResult = repo.PublicRequestListResult{Policy: repo.Policy{PortalAccessMode: repo.AccessModeDisabled}}
+	if _, err := service.ListPublicRequests(ctx, "tenant", 0, ""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ListPublicRequests(hidden policy) error = %v, want %v", err, ErrNotFound)
+	}
+	fake.publicListErr = boom
+	if _, err := service.ListPublicRequests(ctx, "tenant", 0, ""); !errors.Is(err, boom) {
+		t.Fatalf("ListPublicRequests(repo error) error = %v, want %v", err, boom)
 	}
 }
 
@@ -441,6 +536,18 @@ func TestPublicRequestFromCandidate(t *testing.T) {
 	candidate.Policy.ShowSubmitterDisplay = false
 	if got := publicRequestFromCandidate(candidate); got.SubmitterDisplay != "" {
 		t.Fatalf("publicRequestFromCandidate(hidden display) = %#v, want hidden submitter", got)
+	}
+
+	listCandidate := repo.PublicRequestListCandidate{
+		Profile:          candidate.Profile,
+		VoteCount:        5,
+		CommentCount:     1,
+		SubmitterDisplay: "Grace",
+	}
+	candidate.Policy.ShowSubmitterDisplay = true
+	got = publicRequestFromListCandidate(candidate.Policy, listCandidate)
+	if got.Votes != 5 || got.Comments != 1 || got.SubmitterDisplay != "Grace" {
+		t.Fatalf("publicRequestFromListCandidate() = %#v, want counts and submitter display", got)
 	}
 }
 
@@ -622,16 +729,19 @@ func servicePublication(requestID uuid.UUID) repo.RequestPublication {
 }
 
 type fakePublicRepo struct {
-	policy         *repo.Policy
-	policyErr      error
-	policyTenant   string
-	listResult     repo.ListResult
-	listErr        error
-	listFilter     repo.ListFilter
-	publication    *repo.RequestPublication
-	publicationErr error
-	candidate      *repo.PublicRequestCandidate
-	candidateErr   error
+	policy           *repo.Policy
+	policyErr        error
+	policyTenant     string
+	listResult       repo.ListResult
+	listErr          error
+	listFilter       repo.ListFilter
+	publication      *repo.RequestPublication
+	publicationErr   error
+	candidate        *repo.PublicRequestCandidate
+	candidateErr     error
+	publicListResult repo.PublicRequestListResult
+	publicListErr    error
+	publicListFilter repo.PublicRequestListFilter
 }
 
 func (r *fakePublicRepo) Begin(context.Context) (pgx.Tx, error) {
@@ -700,4 +810,12 @@ func (r *fakePublicRepo) GetPublicRequestCandidate(
 	string,
 ) (*repo.PublicRequestCandidate, error) {
 	return r.candidate, r.candidateErr
+}
+
+func (r *fakePublicRepo) ListPublicRequestCandidates(
+	_ context.Context,
+	filter repo.PublicRequestListFilter,
+) (repo.PublicRequestListResult, error) {
+	r.publicListFilter = filter
+	return r.publicListResult, r.publicListErr
 }

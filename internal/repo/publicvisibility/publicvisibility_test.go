@@ -233,6 +233,38 @@ func TestScanSubjects(t *testing.T) {
 	}
 }
 
+func TestScanPublicRequestListCandidates(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	requestID := uuid.New()
+	row := append(profileValues(requestID, now), subjectValues(uuid.New(), now)...)
+	row = append(row, int64(4), int64(2), requestID)
+	rows := ptrext.Of(fakeRows{rows: []fakeRow{{values: row}}})
+
+	items, err := scanPublicRequestListCandidates(rows)
+	if err != nil {
+		t.Fatalf("scanPublicRequestListCandidates() error = %v", err)
+	}
+	if len(items) != 1 || !rows.closed {
+		t.Fatalf("scanPublicRequestListCandidates() = %#v closed=%v, want one closed row", items, rows.closed)
+	}
+	if items[0].Profile.RequestID != requestID || items[0].VoteCount != 4 ||
+		items[0].CommentCount != 2 || items[0].SubmitterDisplay != "Ada" {
+		t.Fatalf("scanPublicRequestListCandidates() = %#v, want public request list candidate", items[0])
+	}
+
+	rows = ptrext.Of(fakeRows{err: errors.New("read failed")})
+	if _, err := scanPublicRequestListCandidates(rows); err == nil {
+		t.Fatal("scanPublicRequestListCandidates() error = nil, want rows error")
+	}
+
+	rows = ptrext.Of(fakeRows{rows: []fakeRow{{err: errors.New("scan failed")}}})
+	if _, err := scanPublicRequestListCandidates(rows); err == nil {
+		t.Fatal("scanPublicRequestListCandidates() error = nil, want row scan error")
+	}
+}
+
 func TestPaginationAndWriteErrorHelpers(t *testing.T) {
 	t.Parallel()
 

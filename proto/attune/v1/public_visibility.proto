@@ -60,8 +60,14 @@ service PublicVisibilityService {
 }
 
 service PortalService {
+  rpc ListPublicCustomerRequests(ListPublicCustomerRequestsRequest) returns (ListPublicCustomerRequestsResponse) {
+    option (google.api.http) = {get: "/v1/portal/{tenant_slug}/requests"};
+  }
   rpc GetPublicCustomerRequest(GetPublicCustomerRequestRequest) returns (PublicCustomerRequestDetail) {
     option (google.api.http) = {get: "/v1/portal/{tenant_slug}/requests/{public_slug}"};
+  }
+  rpc ListPublicRoadmap(ListPublicRoadmapRequest) returns (ListPublicRoadmapResponse) {
+    option (google.api.http) = {get: "/v1/portal/{tenant_slug}/roadmap"};
   }
 }
 
@@ -247,6 +253,33 @@ message UpsertPublicRequestProfileRequest {
 message GetPublicCustomerRequestRequest {
   string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
   string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ListPublicCustomerRequestsRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message ListPublicCustomerRequestsResponse {
+  repeated PublicCustomerRequestSummary requests = 1;
+  optional string next_cursor = 2;
+}
+
+message ListPublicRoadmapRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  uint32 limit = 2;
+  string cursor = 3;
+}
+
+message PublicRoadmapColumn {
+  string name = 1;
+  repeated PublicCustomerRequestSummary requests = 2;
+}
+
+message ListPublicRoadmapResponse {
+  repeated PublicRoadmapColumn columns = 1;
+  optional string next_cursor = 2;
 }
 
 message PublicCustomerRequestSummary {
