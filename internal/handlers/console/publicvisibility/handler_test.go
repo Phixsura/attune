@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,92 @@ func TestUpdatePolicyMapsRequestToService(t *testing.T) {
 	requireActor(t, got.Actor)
 }
 
+func TestUpdatePolicyRejectsUnknownEnumValuesBeforeService(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(ptrext.Of(fakeService{
+		updatePolicy: func(context.Context, svc.UpdatePolicyInput) (repo.Policy, error) {
+			t.Fatal("UpdatePolicy service must not be called for unknown proto enum values")
+			return repo.Policy{}, nil
+		},
+	}))
+	base := func() *attunev1.UpdatePublicVisibilityPolicyRequest {
+		return ptrext.Of(attunev1.UpdatePublicVisibilityPolicyRequest{
+			PortalAccessMode:      attunev1.PublicAccessMode_PUBLIC_ACCESS_MODE_PUBLIC,
+			SubmissionWriteMode:   attunev1.PublicWriteMode_PUBLIC_WRITE_MODE_IDENTIFIED,
+			CommentWriteMode:      attunev1.PublicWriteMode_PUBLIC_WRITE_MODE_DISABLED,
+			VoteWriteMode:         attunev1.PublicWriteMode_PUBLIC_WRITE_MODE_ANONYMOUS,
+			DefaultRequestState:   attunev1.ModerationState_MODERATION_STATE_PENDING,
+			DefaultCommentState:   attunev1.ModerationState_MODERATION_STATE_APPROVED,
+			SubmitterIdentityMode: attunev1.PublicIdentityMode_PUBLIC_IDENTITY_MODE_DISPLAY_NAME,
+		})
+	}
+
+	cases := []struct {
+		name   string
+		mutate func(*attunev1.UpdatePublicVisibilityPolicyRequest)
+	}{
+		{name: "access mode", mutate: func(req *attunev1.UpdatePublicVisibilityPolicyRequest) {
+			req.PortalAccessMode = attunev1.PublicAccessMode(999)
+		}},
+		{name: "submission write mode", mutate: func(req *attunev1.UpdatePublicVisibilityPolicyRequest) {
+			req.SubmissionWriteMode = attunev1.PublicWriteMode(999)
+		}},
+		{name: "comment write mode", mutate: func(req *attunev1.UpdatePublicVisibilityPolicyRequest) {
+			req.CommentWriteMode = attunev1.PublicWriteMode(999)
+		}},
+		{name: "vote write mode", mutate: func(req *attunev1.UpdatePublicVisibilityPolicyRequest) {
+			req.VoteWriteMode = attunev1.PublicWriteMode(999)
+		}},
+		{name: "request state", mutate: func(req *attunev1.UpdatePublicVisibilityPolicyRequest) {
+			req.DefaultRequestState = attunev1.ModerationState(999)
+		}},
+		{name: "comment state", mutate: func(req *attunev1.UpdatePublicVisibilityPolicyRequest) {
+			req.DefaultCommentState = attunev1.ModerationState(999)
+		}},
+		{name: "identity mode", mutate: func(req *attunev1.UpdatePublicVisibilityPolicyRequest) {
+			req.SubmitterIdentityMode = attunev1.PublicIdentityMode(999)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := base()
+			tc.mutate(req)
+			_, err := handler.UpdatePolicy(testCtx(), req)
+			requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+		})
+	}
+}
+
+func TestUpdatePolicyRejectsUnknownEnumNumbersDecodedFromJSON(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(ptrext.Of(fakeService{
+		updatePolicy: func(context.Context, svc.UpdatePolicyInput) (repo.Policy, error) {
+			t.Fatal("UpdatePolicy service must not be called for unknown JSON enum numbers")
+			return repo.Policy{}, nil
+		},
+	}))
+	req := ptrext.Of(attunev1.UpdatePublicVisibilityPolicyRequest{})
+	body := `{
+		"portalAccessMode": 999,
+		"submissionWriteMode": "PUBLIC_WRITE_MODE_IDENTIFIED",
+		"commentWriteMode": "PUBLIC_WRITE_MODE_DISABLED",
+		"voteWriteMode": "PUBLIC_WRITE_MODE_ANONYMOUS",
+		"defaultRequestState": "MODERATION_STATE_PENDING",
+		"defaultCommentState": "MODERATION_STATE_APPROVED",
+		"submitterIdentityMode": "PUBLIC_IDENTITY_MODE_DISPLAY_NAME"
+	}`
+
+	err := dispatcher.JSONBody(httptest.NewRequest(http.MethodPut, "/policy", strings.NewReader(body)), req)
+	require.NoError(t, err)
+	require.Equal(t, attunev1.PublicAccessMode(999), req.GetPortalAccessMode())
+
+	_, err = handler.UpdatePolicy(testCtx(), req)
+	requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+}
+
 func TestListModerationMapsFiltersAndCursor(t *testing.T) {
 	t.Parallel()
 
@@ -222,6 +309,42 @@ func TestListModerationMapsFiltersAndCursor(t *testing.T) {
 	require.Equal(t, subjectID.String(), result.Body.GetSubjects()[0].GetId())
 	require.Equal(t, attunev1.PublicSurface_PUBLIC_SURFACE_REQUEST_COMMENT, result.Body.GetSubjects()[0].GetSurface())
 	require.Equal(t, "2026-07-10T10:00:00Z", result.Body.GetSubjects()[0].GetReviewedAt())
+}
+
+func TestListModerationRejectsUnknownEnumFiltersBeforeService(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(ptrext.Of(fakeService{
+		listModeration: func(context.Context, svc.ListModerationInput) (repo.ListResult, error) {
+			t.Fatal("ListModeration service must not be called for unknown proto enum filters")
+			return repo.ListResult{}, nil
+		},
+	}))
+
+	cases := []struct {
+		name string
+		req  *attunev1.ListModerationSubjectsRequest
+	}{
+		{
+			name: "surface",
+			req: ptrext.Of(attunev1.ListModerationSubjectsRequest{
+				Surface: []attunev1.PublicSurface{attunev1.PublicSurface(999)},
+			}),
+		},
+		{
+			name: "state",
+			req: ptrext.Of(attunev1.ListModerationSubjectsRequest{
+				State: []attunev1.ModerationState{attunev1.ModerationState(999)},
+			}),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := handler.ListModeration(testCtx(), tc.req)
+			requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+		})
+	}
 }
 
 func TestRequestProfileHandlersMapIDsAndPayloads(t *testing.T) {

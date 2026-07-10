@@ -60,6 +60,15 @@ func (h *Handler) UpdatePolicy(
 	if h.service == nil {
 		return dispatcher.Fail[*attunev1.PublicVisibilityPolicy](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "public visibility not configured")
 	}
+	if !knownAccessModeProto(req.GetPortalAccessMode()) ||
+		!knownWriteModeProto(req.GetSubmissionWriteMode()) ||
+		!knownWriteModeProto(req.GetCommentWriteMode()) ||
+		!knownWriteModeProto(req.GetVoteWriteMode()) ||
+		!knownStateProto(req.GetDefaultRequestState()) ||
+		!knownStateProto(req.GetDefaultCommentState()) ||
+		!knownIdentityModeProto(req.GetSubmitterIdentityMode()) {
+		return dispatcher.Fail[*attunev1.PublicVisibilityPolicy](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid public visibility enum")
+	}
 	policy, err := h.service.UpdatePolicy(ctx, svc.UpdatePolicyInput{
 		TenantID:              ctx.Auth.TenantID,
 		PortalAccessMode:      accessModeFromProto(req.GetPortalAccessMode()),
@@ -92,6 +101,9 @@ func (h *Handler) ListModeration(
 ) (dispatcher.Result[*attunev1.ListModerationSubjectsResponse], error) {
 	if h.service == nil {
 		return dispatcher.Fail[*attunev1.ListModerationSubjectsResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "public visibility not configured")
+	}
+	if !knownSurfacesProto(req.GetSurface()) || !knownStatesProto(req.GetState()) {
+		return dispatcher.Fail[*attunev1.ListModerationSubjectsResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid public visibility enum")
 	}
 	result, err := h.service.ListModeration(ctx, svc.ListModerationInput{
 		TenantID: ctx.Auth.TenantID,
@@ -448,6 +460,49 @@ func surfacesFromProto(values []attunev1.PublicSurface) []repo.Surface {
 		out = append(out, surfaceFromProto(value))
 	}
 	return out
+}
+
+func knownSurfacesProto(values []attunev1.PublicSurface) bool {
+	for _, value := range values {
+		if !knownSurfaceProto(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func knownStatesProto(values []attunev1.ModerationState) bool {
+	for _, value := range values {
+		if !knownStateProto(value) {
+			return false
+		}
+	}
+	return true
+}
+
+func knownSurfaceProto(value attunev1.PublicSurface) bool {
+	_, ok := attunev1.PublicSurface_name[int32(value)]
+	return ok
+}
+
+func knownStateProto(value attunev1.ModerationState) bool {
+	_, ok := attunev1.ModerationState_name[int32(value)]
+	return ok
+}
+
+func knownAccessModeProto(value attunev1.PublicAccessMode) bool {
+	_, ok := attunev1.PublicAccessMode_name[int32(value)]
+	return ok
+}
+
+func knownWriteModeProto(value attunev1.PublicWriteMode) bool {
+	_, ok := attunev1.PublicWriteMode_name[int32(value)]
+	return ok
+}
+
+func knownIdentityModeProto(value attunev1.PublicIdentityMode) bool {
+	_, ok := attunev1.PublicIdentityMode_name[int32(value)]
+	return ok
 }
 
 func statesFromProto(values []attunev1.ModerationState) []repo.ModerationState {
