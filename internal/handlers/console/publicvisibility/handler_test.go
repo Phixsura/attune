@@ -569,7 +569,7 @@ func TestBindListRequest(t *testing.T) {
 
 	req := ptrext.Of(attunev1.ListModerationSubjectsRequest{})
 	err := BindListRequest(httptest.NewRequest(http.MethodGet,
-		"/?surface=PUBLIC_SURFACE_REQUEST,PUBLIC_SURFACE_CHANGELOG_POST&surface=bad&state=MODERATION_STATE_PENDING&state=MODERATION_STATE_SPAM&limit=42&cursor=next",
+		"/?surface=PUBLIC_SURFACE_REQUEST,PUBLIC_SURFACE_CHANGELOG_POST&state=MODERATION_STATE_PENDING&state=MODERATION_STATE_SPAM&limit=42&cursor=next",
 		http.NoBody), req)
 
 	require.NoError(t, err)
@@ -583,6 +583,25 @@ func TestBindListRequest(t *testing.T) {
 	}, req.GetState())
 	require.Equal(t, uint32(42), req.GetLimit())
 	require.Equal(t, "next", req.GetCursor())
+}
+
+func TestBindListRequestRejectsUnknownFilters(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		url  string
+	}{
+		{name: "surface", url: "/?surface=PUBLIC_SURFACE_REQUEST,NOPE"},
+		{name: "state", url: "/?state=MODERATION_STATE_PENDING&state=NOPE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			req := ptrext.Of(attunev1.ListModerationSubjectsRequest{})
+			err := BindListRequest(httptest.NewRequest(http.MethodGet, tc.url, http.NoBody), req)
+			requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+		})
+	}
 }
 
 func TestBindListRequestRejectsInvalidLimit(t *testing.T) {

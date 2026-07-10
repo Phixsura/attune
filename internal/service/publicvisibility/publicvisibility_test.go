@@ -86,9 +86,26 @@ func TestPublicRequestVisible(t *testing.T) {
 		{name: "portal disabled", mutate: func(candidate *repo.PublicRequestCandidate) {
 			candidate.Policy.PortalAccessMode = repo.AccessModeDisabled
 		}},
+		{name: "authenticated portal access is not public", mutate: func(candidate *repo.PublicRequestCandidate) {
+			candidate.Policy.PortalAccessMode = repo.AccessModeAuthenticated
+		}},
+		{name: "invite-only portal access is not public", mutate: func(candidate *repo.PublicRequestCandidate) {
+			candidate.Policy.PortalAccessMode = repo.AccessModeInviteOnly
+		}},
 		{name: "requests disabled", mutate: func(candidate *repo.PublicRequestCandidate) { candidate.Policy.RequestsEnabled = false }},
 		{name: "profile excluded", mutate: func(candidate *repo.PublicRequestCandidate) { candidate.Profile.IncludedInPortal = false }},
-		{name: "not approved", mutate: func(candidate *repo.PublicRequestCandidate) { candidate.Moderation.State = repo.ModerationStatePending }},
+		{name: "pending moderation", mutate: func(candidate *repo.PublicRequestCandidate) {
+			candidate.Moderation.State = repo.ModerationStatePending
+		}},
+		{name: "rejected moderation", mutate: func(candidate *repo.PublicRequestCandidate) {
+			candidate.Moderation.State = repo.ModerationStateRejected
+		}},
+		{name: "hidden moderation", mutate: func(candidate *repo.PublicRequestCandidate) {
+			candidate.Moderation.State = repo.ModerationStateHidden
+		}},
+		{name: "spam moderation", mutate: func(candidate *repo.PublicRequestCandidate) {
+			candidate.Moderation.State = repo.ModerationStateSpam
+		}},
 		{name: "request not live", mutate: func(candidate *repo.PublicRequestCandidate) { candidate.CustomerRequestLive = false }},
 	}
 

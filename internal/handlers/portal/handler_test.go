@@ -4,6 +4,7 @@ package portal
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -162,6 +163,61 @@ func TestGetPublicCustomerRequestSetsNoStoreHeaderOnNotFound(t *testing.T) {
 	}
 	if got := rec.Header().Get("Cache-Control"); got != publicRequestCacheControl {
 		t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
+	}
+}
+
+func TestGetPublicCustomerRequestSetsNoStoreHeaderOnErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		handler *Handler
+		status  int
+	}{
+		{
+			name:    "validation",
+			handler: NewHandler(fakePublicRequestService{err: pvsvc.ErrValidation}),
+			status:  http.StatusBadRequest,
+		},
+		{
+			name:    "internal",
+			handler: NewHandler(fakePublicRequestService{err: errors.New("repo down")}),
+			status:  http.StatusInternalServerError,
+		},
+		{
+			name:    "not configured",
+			handler: NewHandler(nil),
+			status:  http.StatusNotImplemented,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			bound := dispatcher.Bind(
+				"portal.Handler.GetPublicCustomerRequest",
+				dispatcher.Empty(func() *attunev1.GetPublicCustomerRequestRequest {
+					return ptrext.Of(attunev1.GetPublicCustomerRequestRequest{
+						TenantSlug: "acme",
+						PublicSlug: "pricing-api",
+					})
+				}),
+				tt.handler.GetPublicCustomerRequest,
+				dispatcher.WithAuth(func(*http.Request, *attunev1.GetPublicCustomerRequestRequest) (struct{}, error) {
+					return struct{}{}, nil
+				}),
+			)
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/requests/pricing-api", nil)
+			bound(rec, req)
+
+			if rec.Code != tt.status {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tt.status, rec.Body.String())
+			}
+			if got := rec.Header().Get("Cache-Control"); got != publicRequestCacheControl {
+				t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
+			}
+		})
 	}
 }
 

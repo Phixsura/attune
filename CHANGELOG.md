@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   vote write mode, comment default state, submitter identity, and count/display
   controls, while public request projections enforce anonymous identity mode
   before emitting submitter display names. Console public-visibility handlers
-  also reject unknown numeric enum values before they can be silently coerced
-  into default policy or moderation filters. Moderation actions now carry stable
+  also reject unknown numeric enum values and unknown query-string enum filters
+  before they can be silently coerced into default policy or moderation filters.
+  Moderation actions now carry stable
   reason codes and optional bounded notes, the Console queue can switch between
   pending, published, blocked, and all review states, and public request reads
   emit a no-store cache policy on success and not-found responses so moderation

@@ -532,8 +532,16 @@ func optionalTime(t *time.Time) *string {
 
 func BindListRequest(r *http.Request, req *attunev1.ListModerationSubjectsRequest) error {
 	q := r.URL.Query()
-	req.Surface = parseSurfaces(q["surface"])
-	req.State = parseStates(q["state"])
+	surfaces, err := parseSurfaces(q["surface"])
+	if err != nil {
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid moderation surface")
+	}
+	states, err := parseStates(q["state"])
+	if err != nil {
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid moderation state")
+	}
+	req.Surface = surfaces
+	req.State = states
 	if limit := strings.TrimSpace(q.Get("limit")); limit != "" {
 		parsed, err := parseUint32(limit)
 		if err != nil {
@@ -545,24 +553,28 @@ func BindListRequest(r *http.Request, req *attunev1.ListModerationSubjectsReques
 	return nil
 }
 
-func parseSurfaces(raw []string) []attunev1.PublicSurface {
+func parseSurfaces(raw []string) ([]attunev1.PublicSurface, error) {
 	var out []attunev1.PublicSurface
 	for _, item := range splitCSV(raw) {
 		if value, ok := attunev1.PublicSurface_value[item]; ok {
 			out = append(out, attunev1.PublicSurface(value))
+			continue
 		}
+		return nil, errors.New("invalid moderation surface")
 	}
-	return out
+	return out, nil
 }
 
-func parseStates(raw []string) []attunev1.ModerationState {
+func parseStates(raw []string) ([]attunev1.ModerationState, error) {
 	var out []attunev1.ModerationState
 	for _, item := range splitCSV(raw) {
 		if value, ok := attunev1.ModerationState_value[item]; ok {
 			out = append(out, attunev1.ModerationState(value))
+			continue
 		}
+		return nil, errors.New("invalid moderation state")
 	}
-	return out
+	return out, nil
 }
 
 func splitCSV(raw []string) []string {
