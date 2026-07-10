@@ -38,9 +38,9 @@ CREATE TABLE IF NOT EXISTS public_visibility_policies (
     CONSTRAINT chk_public_visibility_policy_vote_write_mode
         CHECK (vote_write_mode IN ('disabled', 'anonymous', 'identified')),
     CONSTRAINT chk_public_visibility_policy_default_request_state
-        CHECK (default_request_state IN ('pending', 'approved', 'rejected', 'hidden', 'spam')),
+        CHECK (default_request_state IN ('pending', 'approved')),
     CONSTRAINT chk_public_visibility_policy_default_comment_state
-        CHECK (default_comment_state IN ('pending', 'approved', 'rejected', 'hidden', 'spam')),
+        CHECK (default_comment_state IN ('pending', 'approved')),
     CONSTRAINT chk_public_visibility_policy_identity_mode
         CHECK (submitter_identity_mode IN ('anonymous', 'display_name', 'organization')),
     CONSTRAINT chk_public_visibility_policy_updated_by_length CHECK (length(updated_by) BETWEEN 1 AND 256)

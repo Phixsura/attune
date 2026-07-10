@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   before emitting submitter display names. Console public-visibility handlers
   also reject unknown numeric enum values and unknown query-string enum filters
   before they can be silently coerced into default policy or moderation filters.
+  Database constraints now also reject rejected, hidden, or spam policy default
+  states, so direct writes cannot bypass the runtime default-state contract.
   Moderation actions now carry stable
   reason codes and optional bounded notes, the Console queue can switch between
   pending, published, blocked, and all review states, and public request reads

@@ -211,6 +211,9 @@ bounded text lengths. `portal_access_mode` should allow `disabled`, `public`,
 `authenticated`, and `invite_only`; #215 implements disabled and public
 behavior and defines the other values as invalid for runtime policy updates
 until customer-authenticated portal access exists.
+`default_request_state` and `default_comment_state` should allow only `pending`
+and `approved`, because rejected, hidden, and spam are moderation outcomes rather
+than safe defaults for newly published subjects.
 `submission_write_mode`, `comment_write_mode`, and `vote_write_mode` should
 allow `disabled`, `anonymous`, and `identified`. `search_indexing_enabled`
 defaults to false so newly enabled portals are unindexed until an operator opts

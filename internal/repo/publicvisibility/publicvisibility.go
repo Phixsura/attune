@@ -216,7 +216,7 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 			hide_public_timestamps = EXCLUDED.hide_public_timestamps,
 			updated_by = EXCLUDED.updated_by
 		RETURNING ` + policyColumns()
-	return scanPolicy(tx.QueryRow(ctx, q,
+	policyOut, err := scanPolicy(tx.QueryRow(ctx, q,
 		policy.TenantID,
 		policy.PortalAccessMode,
 		policy.SearchIndexingEnabled,
@@ -236,6 +236,10 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 		policy.HidePublicTimestamps,
 		policy.UpdatedBy,
 	))
+	if err != nil {
+		return nil, mapWriteError(err)
+	}
+	return policyOut, nil
 }
 
 func (r *Repo) ListSubjects(ctx context.Context, filter ListFilter) (ListResult, error) {

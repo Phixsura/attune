@@ -117,6 +117,49 @@ func TestPGPublicVisibilityRejectsDuplicateSlug(t *testing.T) {
 	}
 }
 
+func TestPGPublicVisibilityRejectsBlockedDefaultPolicyStates(t *testing.T) {
+	e := setup(t)
+	tests := []struct {
+		name    string
+		mutate  func(*pvrepo.Policy)
+		wantErr string
+	}{
+		{
+			name: "rejected request default",
+			mutate: func(policy *pvrepo.Policy) {
+				policy.DefaultRequestState = pvrepo.ModerationStateRejected
+			},
+			wantErr: "chk_public_visibility_policy_default_request_state",
+		},
+		{
+			name: "hidden comment default",
+			mutate: func(policy *pvrepo.Policy) {
+				policy.DefaultCommentState = pvrepo.ModerationStateHidden
+			},
+			wantErr: "chk_public_visibility_policy_default_comment_state",
+		},
+		{
+			name: "spam request default",
+			mutate: func(policy *pvrepo.Policy) {
+				policy.DefaultRequestState = pvrepo.ModerationStateSpam
+			},
+			wantErr: "chk_public_visibility_policy_default_request_state",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tx := e.begin(t)
+			policy := e.publicPolicy(pvrepo.ModerationStatePending)
+			tt.mutate(&policy)
+			_, err := e.publicRepo.UpsertPolicyTx(e.ctx, tx, policy)
+			rollback(t, e.ctx, tx)
+			if !errors.Is(err, pvrepo.ErrInvalidInput) || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("UpsertPolicyTx error = %v, want ErrInvalidInput containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestPGPublicVisibilityServiceWritesAuditRows(t *testing.T) {
 	e := setup(t)
 	request := e.createRequest(t, "Audited request")
@@ -183,7 +226,16 @@ func TestPGPublicVisibilityServiceWritesAuditRows(t *testing.T) {
 func (e env) upsertPublicPolicy(t *testing.T, defaultState pvrepo.ModerationState) {
 	t.Helper()
 	tx := e.begin(t)
-	_, err := e.publicRepo.UpsertPolicyTx(e.ctx, tx, pvrepo.Policy{
+	_, err := e.publicRepo.UpsertPolicyTx(e.ctx, tx, e.publicPolicy(defaultState))
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("UpsertPolicyTx: %v", err)
+	}
+	commit(t, e.ctx, tx)
+}
+
+func (e env) publicPolicy(defaultState pvrepo.ModerationState) pvrepo.Policy {
+	return pvrepo.Policy{
 		TenantID:              e.tenantID,
 		PortalAccessMode:      pvrepo.AccessModePublic,
 		SearchIndexingEnabled: true,
@@ -201,12 +253,7 @@ func (e env) upsertPublicPolicy(t *testing.T, defaultState pvrepo.ModerationStat
 		ShowCommentCount:      true,
 		ShowSubmitterDisplay:  true,
 		UpdatedBy:             "operator",
-	})
-	if err != nil {
-		rollback(t, e.ctx, tx)
-		t.Fatalf("UpsertPolicyTx: %v", err)
 	}
-	commit(t, e.ctx, tx)
 }
 
 func (e env) upsertRequestPublication(t *testing.T, requestID uuid.UUID, slug string) pvrepo.RequestPublication {
