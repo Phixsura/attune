@@ -517,15 +517,14 @@ permission models while still preserving surface-specific subject ids.
 - `pnpm tsc -b --noEmit`
 - `pnpm biome check`
 - `pnpm vitest run --coverage`
-- Visible in-app browser E2E: login, open public visibility, save policy, verify
-  duplicate slug rejection, save a request profile, confirm pending records
-  remain public-404, approve to public-200 with `no-store` and `noindex`, hide to
-  same-URL public-404, restore hidden content to public-200, mark approved
-  content as spam to same-URL public-404, restore spam content to pending, and
-  approve again to public-200. The run also verifies moderation-blocked 404
-  responses use `Cache-Control: no-store`, profile moderation state reloads from
-  queue action results, and mobile viewport rendering keeps policy, profile, and
-  queue controls reachable without page-level horizontal overflow.
+- `pnpm test:e2e:a11y`
+- Browser behavior E2E: open public visibility in the real Console router, save
+  policy, load and save a request profile, approve, reject, hide, mark spam, and
+  restore moderation subjects, and verify member users can triage without seeing
+  policy/profile editing or enforcement controls. The run covers desktop and
+  mobile Chromium, asserts API request payloads, rejects unmocked Console API
+  calls, checks console diagnostics, and verifies the page has no horizontal
+  overflow.
 - `scripts/lint-artifacts.sh --strict`
 - `make ci-check`
 
