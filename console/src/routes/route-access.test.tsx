@@ -11,6 +11,7 @@ import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
 import { Route as ExternalSyncRoute } from '@/routes/_authed.integrations.external-sync'
+import { Route as PublicVisibilityRoute } from '@/routes/_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
 import { Route as SettingsRoute } from '@/routes/_authed.settings'
 import { server } from '@/testing/mocks/server'
@@ -90,6 +91,37 @@ describe('route access guards', () => {
 
     await expect(loader({ context: { queryClient } })).resolves.toEqual([])
     expect(seenPaths).toEqual(new Set(['/fb/v1/console/api-keys']))
+  })
+
+  it('allows members to view public visibility moderation but redirects viewers', async () => {
+    mockMe('member')
+    expect(await callBeforeLoad(PublicVisibilityRoute.options.beforeLoad)).toBeNull()
+
+    mockMe('viewer')
+    const thrown = await callBeforeLoad(PublicVisibilityRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+  })
+
+  it('preloads the public visibility moderation queue for the integration route', async () => {
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/public-visibility/moderation', ({ request }) => {
+        const url = new URL(request.url)
+        seenPaths.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json({ subjects: [] })
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const loader = PublicVisibilityRoute.options.loader as (args: {
+      context: { queryClient: QueryClient }
+    }) => Promise<unknown>
+
+    await expect(loader({ context: { queryClient } })).resolves.toBeUndefined()
+    expect(seenPaths).toEqual(new Set(['/fb/v1/console/public-visibility/moderation?limit=50']))
   })
 
   it('redirects members away from GDPR administration pages', async () => {

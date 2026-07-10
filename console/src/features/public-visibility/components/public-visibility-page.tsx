@@ -1154,3 +1154,22 @@ export function syncPublicationModeration(
   }
   return { ...current, moderation: subject }
 }
+
+export const publicVisibilityPageTestables = {
+  actionRequiresReason,
+  countStates,
+  defaultForm,
+  defaultProfileForm,
+  filterSubjects,
+  formatDate,
+  formatReasonCode,
+  formatState,
+  formatSurface,
+  formFromPolicy,
+  messageOf,
+  policyRequestFromForm,
+  profileFormFromPublication,
+  profileRequestFromForm,
+  reasonCodeForAction,
+  reasonOptionsForAction,
+}
