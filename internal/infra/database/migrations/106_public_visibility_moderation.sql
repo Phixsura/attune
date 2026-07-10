@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS public_moderation_subjects (
         CHECK (surface IN ('request', 'request_comment', 'roadmap_item', 'changelog_post', 'portal_submission')),
     CONSTRAINT chk_public_moderation_subjects_state
         CHECK (state IN ('pending', 'approved', 'rejected', 'hidden', 'spam')),
+    CONSTRAINT chk_public_moderation_subjects_subject_id_length CHECK (length(subject_id) BETWEEN 1 AND 256),
     CONSTRAINT chk_public_moderation_subjects_reason_code_length CHECK (length(reason_code) <= 80),
     CONSTRAINT chk_public_moderation_subjects_reason_code_format
         CHECK (reason_code = '' OR reason_code ~ '^[a-z0-9][a-z0-9_.-]{0,79}$'),

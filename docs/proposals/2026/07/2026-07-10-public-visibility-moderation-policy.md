@@ -40,21 +40,23 @@ establishes one tenant-scoped visibility and moderation contract.
   `pending`, `approved`, `rejected`, `hidden`, and `spam`.
 - Provide public-safe DTO and query helpers that use an explicit allowlist
   instead of redacting the existing Console DTOs.
-- Add one minimal public request read endpoint that exercises the shared policy,
-  moderation, and projection path without becoming an interactive request list.
+- Add public request list, request detail, and roadmap list endpoints that
+  exercise the shared policy, moderation, and projection path without exposing
+  Console-only fields.
 - Add Console policy settings and a moderation queue that can review public
   submissions and comments across surfaces.
 - Audit policy updates and moderation decisions.
 - Prove tenant isolation, field-boundary enforcement, and moderation-state
-  behavior with tests.
+  behavior with tests, including non-request moderation subjects such as
+  comments and portal submissions.
 - Give future public-facing surfaces one shared visibility and moderation
   contract.
 
 ## Non-goals
 
 - Build visitor-initiated feedback intake.
-- Build interactive public request listing or voting.
-- Build a full public roadmap.
+- Build visitor voting.
+- Build a rendered public portal UI.
 - Build a full public changelog and feed system.
 - Replace the internal Customer Request DTOs used by authenticated Console
   operators.
@@ -377,7 +379,7 @@ conflicting states after approve, reject, hide, spam, or restore.
 
 ### Public Routes
 
-Issue #215 adds a narrow public read surface so the visibility contract is
+Issue #215 adds narrow public read APIs so the visibility contract is
 executable and testable across both request-board and roadmap views:
 
 - `GET /v1/portal/{tenant_slug}/requests`
@@ -535,6 +537,10 @@ permission models while still preserving surface-specific subject ids.
   mobile Chromium, asserts API request payloads, rejects unmocked Console API
   calls, checks console diagnostics, and verifies the page has no horizontal
   overflow.
+- Public endpoint E2E: exercise request list, request detail, roadmap list,
+  moderation-blocked not-found responses, invalid query handling, pagination,
+  no-store/noindex headers, and leak scans against a temporary Postgres-backed
+  server.
 - `scripts/lint-artifacts.sh --strict`
 - `make ci-check`
 

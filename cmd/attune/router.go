@@ -129,8 +129,8 @@ func buildRouter(
 		}
 		r.Group(func(r chi.Router) {
 			r.Use(versionMW)
-			r.Use(portalLimiter.Middleware)
 			r.Use(portal.NoStore)
+			r.Use(portalLimiter.Middleware)
 			r.Get("/portal/{tenant_slug}/requests", dispatcher.Bind(
 				"portal.Handler.ListPublicCustomerRequests",
 				dispatcher.Query(

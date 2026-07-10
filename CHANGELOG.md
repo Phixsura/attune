@@ -26,11 +26,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Public portal APIs now include tenant-scoped request-list and roadmap-list
   endpoints that share the same policy, moderation, live-record, field
   allowlist, no-store cache, and noindex controls as public request details.
+  Public moderation subjects now enforce bounded non-empty subject identifiers
+  and are covered across request-comment and portal-submission surfaces, so the
+  shared queue contract is not request-only.
   Moderation actions now carry stable
   reason codes and optional bounded notes, the Console queue can switch between
   pending, published, blocked, and all review states, and public request reads
-  emit a no-store cache policy on success and not-found responses so moderation
-  hides and restores take effect in browsers.
+  emit a no-store cache policy on success, not-found, invalid-query, and
+  rate-limited responses so moderation hides and restores take effect in
+  browsers.
   Console request-profile details now update their displayed moderation state
   immediately after approve, hide, spam, reject, or restore actions.
 

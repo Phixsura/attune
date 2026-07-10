@@ -232,6 +232,134 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	assertPublicRequestSlugs(t, publicRoadmap.Requests, []string{"portal-roadmap", "roadmap-only"})
 }
 
+func TestPGPublicVisibilityModeratesCommentAndSubmissionSubjects(t *testing.T) {
+	e := setup(t)
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+	auditRepo := auditlogrepo.New(e.pool)
+	service := pvsvc.New(e.publicRepo, auditlogsvc.New(auditRepo))
+	actor := auditlogsvc.Actor{Type: "admin", ID: "operator", Email: "operator@example.com"}
+
+	comment := e.createModerationSubject(t,
+		pvrepo.SurfaceRequestComment, "request-comment-1", pvrepo.ModerationStatePending)
+	submission := e.createModerationSubject(t,
+		pvrepo.SurfacePortalSubmission, "portal-submission-1", pvrepo.ModerationStatePending)
+
+	pending, err := service.ListModeration(e.ctx, pvsvc.ListModerationInput{
+		TenantID: e.tenantID,
+		Surfaces: []pvrepo.Surface{
+			pvrepo.SurfaceRequestComment,
+			pvrepo.SurfacePortalSubmission,
+		},
+		States: []pvrepo.ModerationState{pvrepo.ModerationStatePending},
+	})
+	if err != nil {
+		t.Fatalf("ListModeration(pending comment/submission): %v", err)
+	}
+	assertModerationSubjectSet(t, pending.Items, []string{
+		"request_comment:request-comment-1",
+		"portal_submission:portal-submission-1",
+	})
+
+	approvedComment, err := service.Moderate(e.ctx, pvsvc.ModerateInput{
+		TenantID: e.tenantID,
+		ID:       comment.ID,
+		Action:   pvsvc.ActionApprove,
+		Actor:    actor,
+	})
+	if err != nil {
+		t.Fatalf("Moderate approve comment: %v", err)
+	}
+	if approvedComment.Surface != pvrepo.SurfaceRequestComment ||
+		approvedComment.State != pvrepo.ModerationStateApproved {
+		t.Fatalf("approved comment = %+v, want approved request_comment", approvedComment)
+	}
+
+	hiddenComment, err := service.Moderate(e.ctx, pvsvc.ModerateInput{
+		TenantID:   e.tenantID,
+		ID:         comment.ID,
+		Action:     pvsvc.ActionHide,
+		ReasonCode: "privacy",
+		ReasonNote: "contains private customer detail",
+		Actor:      actor,
+	})
+	if err != nil {
+		t.Fatalf("Moderate hide comment: %v", err)
+	}
+	if hiddenComment.Surface != pvrepo.SurfaceRequestComment ||
+		hiddenComment.State != pvrepo.ModerationStateHidden ||
+		hiddenComment.ReasonCode != "privacy" {
+		t.Fatalf("hidden comment = %+v, want hidden request_comment with reason", hiddenComment)
+	}
+
+	spamSubmission, err := service.Moderate(e.ctx, pvsvc.ModerateInput{
+		TenantID:   e.tenantID,
+		ID:         submission.ID,
+		Action:     pvsvc.ActionMarkSpam,
+		ReasonCode: "abuse.spam",
+		ReasonNote: "automated spam submission",
+		Actor:      actor,
+	})
+	if err != nil {
+		t.Fatalf("Moderate spam submission: %v", err)
+	}
+	if spamSubmission.Surface != pvrepo.SurfacePortalSubmission ||
+		spamSubmission.State != pvrepo.ModerationStateSpam {
+		t.Fatalf("spam submission = %+v, want spam portal_submission", spamSubmission)
+	}
+
+	blocked, err := service.ListModeration(e.ctx, pvsvc.ListModerationInput{
+		TenantID: e.tenantID,
+		Surfaces: []pvrepo.Surface{
+			pvrepo.SurfaceRequestComment,
+			pvrepo.SurfacePortalSubmission,
+		},
+		States: []pvrepo.ModerationState{
+			pvrepo.ModerationStateHidden,
+			pvrepo.ModerationStateSpam,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ListModeration(blocked comment/submission): %v", err)
+	}
+	assertModerationSubjectSet(t, blocked.Items, []string{
+		"request_comment:request-comment-1",
+		"portal_submission:portal-submission-1",
+	})
+	e.assertAuditActions(t, auditRepo, []string{
+		"moderation.approve",
+		"moderation.hide",
+		"moderation.mark_spam",
+	})
+}
+
+func TestPGPublicVisibilityRejectsInvalidGenericSubjectID(t *testing.T) {
+	e := setup(t)
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+
+	for _, tc := range []struct {
+		name      string
+		subjectID string
+	}{
+		{name: "empty", subjectID: ""},
+		{name: "too long", subjectID: strings.Repeat("s", 257)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := e.begin(t)
+			_, err := e.publicRepo.CreateModerationSubjectTx(e.ctx, tx, pvrepo.ModerationSubject{
+				TenantID:           e.tenantID,
+				Surface:            pvrepo.SurfacePortalSubmission,
+				SubjectID:          tc.subjectID,
+				State:              pvrepo.ModerationStatePending,
+				SubmittedByDisplay: "Ada",
+			})
+			rollback(t, e.ctx, tx)
+			if !errors.Is(err, pvrepo.ErrInvalidInput) {
+				t.Fatalf("CreateModerationSubjectTx(%q) error = %v, want ErrInvalidInput", tc.name, err)
+			}
+		})
+	}
+}
+
 func TestPGPublicVisibilityServiceWritesAuditRows(t *testing.T) {
 	e := setup(t)
 	request := e.createRequest(t, "Audited request")
@@ -386,6 +514,30 @@ func (e env) setModerationState(t *testing.T, subjectID uuid.UUID, state pvrepo.
 	commit(t, e.ctx, tx)
 }
 
+func (e env) createModerationSubject(
+	t *testing.T,
+	surface pvrepo.Surface,
+	subjectID string,
+	state pvrepo.ModerationState,
+) pvrepo.ModerationSubject {
+	t.Helper()
+	tx := e.begin(t)
+	subject, err := e.publicRepo.CreateModerationSubjectTx(e.ctx, tx, pvrepo.ModerationSubject{
+		TenantID:               e.tenantID,
+		Surface:                surface,
+		SubjectID:              subjectID,
+		State:                  state,
+		SubmittedByDisplay:     "Ada",
+		SubmittedByFingerprint: "tenant-local-digest",
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("CreateModerationSubjectTx: %v", err)
+	}
+	commit(t, e.ctx, tx)
+	return ptrext.Indirect(subject)
+}
+
 func (e env) archiveRequest(t *testing.T, requestID uuid.UUID) {
 	t.Helper()
 	if _, err := e.pool.Exec(e.ctx, `
@@ -500,6 +652,15 @@ func assertPublicRequestSlugs(t *testing.T, items []pvsvc.PublicRequest, want []
 	got := make([]string, 0, len(items))
 	for _, item := range items {
 		got = append(got, item.Summary.PublicSlug)
+	}
+	assertSlugSet(t, got, want)
+}
+
+func assertModerationSubjectSet(t *testing.T, items []pvrepo.ModerationSubject, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(items))
+	for _, item := range items {
+		got = append(got, string(item.Surface)+":"+item.SubjectID)
 	}
 	assertSlugSet(t, got, want)
 }
