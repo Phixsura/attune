@@ -38,12 +38,41 @@ var (
 )
 
 type Service struct {
-	repo  *repo.Repo
+	repo  repository
 	audit *auditlogsvc.Service
 }
 
 func New(r *repo.Repo, audit *auditlogsvc.Service) *Service {
 	return ptrext.Of(Service{repo: r, audit: audit})
+}
+
+type repository interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	GetPolicy(ctx context.Context, tenantID string) (*repo.Policy, error)
+	ListSubjects(ctx context.Context, filter repo.ListFilter) (repo.ListResult, error)
+	GetRequestPublication(ctx context.Context, tenantID string, requestID uuid.UUID) (*repo.RequestPublication, error)
+	UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy repo.Policy) (*repo.Policy, error)
+	UpsertRequestPublicationTx(
+		ctx context.Context,
+		tx pgx.Tx,
+		profile repo.RequestProfile,
+		defaultState repo.ModerationState,
+		submittedByDisplay string,
+		submittedByFingerprint string,
+	) (*repo.RequestPublication, error)
+	GetSubjectForUpdateTx(ctx context.Context, tx pgx.Tx, tenantID string, id uuid.UUID) (*repo.ModerationSubject, error)
+	UpdateSubjectStateTx(
+		ctx context.Context,
+		tx pgx.Tx,
+		tenantID string,
+		id uuid.UUID,
+		state repo.ModerationState,
+		reasonCode string,
+		reasonNote string,
+		reviewedBy string,
+		reviewedAt time.Time,
+	) (*repo.ModerationSubject, error)
+	GetPublicRequestCandidate(ctx context.Context, tenantSlug string, publicSlug string) (*repo.PublicRequestCandidate, error)
 }
 
 type UpdatePolicyInput struct {
