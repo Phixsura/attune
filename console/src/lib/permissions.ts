@@ -20,6 +20,12 @@ export type Permission =
   | 'customer_request:edit'
   | 'customer_request:merge'
   | 'customer_request:configure'
+  // Public Visibility
+  | 'public_policy:view'
+  | 'public_policy:edit'
+  | 'moderation:view'
+  | 'moderation:triage'
+  | 'moderation:enforce'
   // Settings - AI Classification
   | 'settings:enrich_config:view'
   | 'settings:enrich_config:edit'
@@ -89,6 +95,11 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'customer_request:edit',
     'customer_request:merge',
     'customer_request:configure',
+    'public_policy:view',
+    'public_policy:edit',
+    'moderation:view',
+    'moderation:triage',
+    'moderation:enforce',
     // Settings - full access
     'settings:enrich_config:view',
     'settings:enrich_config:edit',
@@ -137,6 +148,11 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'customer_request:edit',
     'customer_request:merge',
     'customer_request:configure',
+    'public_policy:view',
+    'public_policy:edit',
+    'moderation:view',
+    'moderation:triage',
+    'moderation:enforce',
     // Settings - operational access
     'settings:enrich_config:view',
     'settings:enrich_config:edit',
@@ -169,6 +185,8 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'feedback:delete',
     'customer_request:view',
     'customer_request:edit',
+    'moderation:view',
+    'moderation:triage',
     // Settings - view only (no edit)
     'settings:enrich_config:view',
     'settings:guard_policies:view',

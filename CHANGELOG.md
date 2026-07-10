@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Public visibility policy and moderation foundation.**
+  Added tenant-scoped public visibility policy storage, moderation subject
+  state transitions, audit events, generated Console and public portal
+  contracts, a public-safe Customer Request read projection under `/v1/portal`,
+  anonymous portal rate limiting, Console request-profile publication APIs, and
+  a Console policy/moderation page for reviewing public-facing request
+  visibility through the shared contract. Moderation actions now carry stable
+  reason codes and optional bounded notes, the Console queue can switch between
+  pending, published, blocked, and all review states, and public request reads
+  emit a no-store cache policy on success and not-found responses so moderation
+  hides and restores take effect in browsers.
+  Console request-profile details now update their displayed moderation state
+  immediately after approve, hide, spam, reject, or restore actions.
+
 - **External sync framework foundation.**
   Added tenant-scoped external connection, object mapping, object link, cursor,
   sync-run, attempt, record-failure, and conflict tables; generated Console API

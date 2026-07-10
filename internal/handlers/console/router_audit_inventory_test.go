@@ -28,6 +28,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/me"
 	"github.com/Phixsura/attune/internal/handlers/console/member"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
+	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -55,6 +56,7 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		feedbackBatch:      &feedback.BatchHandler{},
 		feedbackSearch:     &feedback.SearchHandler{},
 		feedbackJob:        &feedbackjob.Handler{},
+		publicVisibility:   &consolepublicvisibility.Handler{},
 		usage:              &usage.UsageHandler{},
 		enrichConfig:       &enrichconfig.Handler{},
 		enrichmentRuntime:  &consoleenrichmentruntime.Handler{},
@@ -128,6 +130,13 @@ var auditEmittedActions = []string{
 	"reply_draft.send.failure",
 	"reply_send_hook.upsert",
 	"reply_send_hook.disable",
+	"public_policy.update",
+	"public_request_profile.upsert",
+	"moderation.approve",
+	"moderation.reject",
+	"moderation.hide",
+	"moderation.mark_spam",
+	"moderation.restore",
 }
 
 // TestAuditedRouteActionsAreRegistered asserts every emitted audit action is
@@ -150,6 +159,7 @@ func expectedMutatingRouteCoverage() map[string]string {
 	mergeMutatingRouteCoverage(coverage, adminMutatingRouteCoverage())
 	mergeMutatingRouteCoverage(coverage, workflowMutatingRouteCoverage())
 	mergeMutatingRouteCoverage(coverage, replyDraftMutatingRouteCoverage())
+	mergeMutatingRouteCoverage(coverage, publicVisibilityMutatingRouteCoverage())
 	return coverage
 }
 
@@ -282,5 +292,17 @@ func replyDraftMutatingRouteCoverage() map[string]string {
 		"POST /reply-send-hook/test":                      "audited: reply_send_hook.test",
 		"POST /reply-send-hook/deliveries/{id}/redeliver": "audited: reply_send_hook.redeliver",
 		"DELETE /reply-send-hook":                         "audited: reply_send_hook.disable",
+	}
+}
+
+func publicVisibilityMutatingRouteCoverage() map[string]string {
+	return map[string]string{
+		"PUT /public-visibility/policy":                        "audited: public_policy.update",
+		"PUT /public-visibility/requests/{request_id}/profile": "audited: public_request_profile.upsert",
+		"POST /public-visibility/moderation/{id}:approve":      "audited: moderation.approve",
+		"POST /public-visibility/moderation/{id}:reject":       "audited: moderation.reject",
+		"POST /public-visibility/moderation/{id}:hide":         "audited: moderation.hide",
+		"POST /public-visibility/moderation/{id}:mark-spam":    "audited: moderation.mark_spam",
+		"POST /public-visibility/moderation/{id}:restore":      "audited: moderation.restore",
 	}
 }

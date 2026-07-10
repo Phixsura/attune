@@ -29,6 +29,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/externalsyncwebhook"
 	"github.com/Phixsura/attune/internal/handlers/mcp"
+	"github.com/Phixsura/attune/internal/handlers/portal"
 	"github.com/Phixsura/attune/internal/handlers/security"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
@@ -51,12 +52,14 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
+	publicvisibilityrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
 	"github.com/Phixsura/attune/internal/service/ingest"
+	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
 
@@ -110,6 +113,8 @@ func buildRouter(
 	rateLimiter := buildRateLimiter(cfg)
 	perKeyRateLimiter := buildPerKeyRateLimiter(cfg)
 	versionMW := apiversion.Middleware(apiversion.DefaultConfig())
+	portalLimiter := newPortalAnonymousLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
+	portalHandler := portal.NewHandler(publicvisibilitysvc.New(publicvisibilityrepo.New(pool), nil))
 
 	r.Route("/v1", func(r chi.Router) {
 		// Inbound adapter mux. Adapters have already registered their
@@ -122,6 +127,28 @@ func buildRouter(
 			webhooks := externalsyncwebhook.NewHandler(externalsyncsvc.New(externalsyncrepo.New(pool), inboundSecrets))
 			r.Mount("/external-sync/webhooks", webhooks.Routes())
 		}
+		r.Group(func(r chi.Router) {
+			r.Use(versionMW)
+			r.Use(portalLimiter.Middleware)
+			r.Get("/portal/{tenant_slug}/requests/{public_slug}", dispatcher.Bind(
+				"portal.Handler.GetPublicCustomerRequest",
+				dispatcher.Path(
+					func() *attunev1.GetPublicCustomerRequestRequest {
+						return ptrext.Of(attunev1.GetPublicCustomerRequestRequest{})
+					},
+					dispatcher.Param("tenant_slug", func(req *attunev1.GetPublicCustomerRequestRequest, slug string) {
+						req.TenantSlug = slug
+					}),
+					dispatcher.Param("public_slug", func(req *attunev1.GetPublicCustomerRequestRequest, slug string) {
+						req.PublicSlug = slug
+					}),
+				),
+				portalHandler.GetPublicCustomerRequest,
+				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.GetPublicCustomerRequestRequest) (struct{}, error) {
+					return struct{}{}, nil
+				}),
+			))
+		})
 
 		r.Group(func(r chi.Router) {
 			// Auth verify endpoint - requires valid API key but no specific scope.

@@ -1,0 +1,269 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+service PublicVisibilityService {
+  rpc GetPublicVisibilityPolicy(GetPublicVisibilityPolicyRequest) returns (PublicVisibilityPolicy) {
+    option (google.api.http) = {get: "/fb/v1/console/public-visibility/policy"};
+  }
+  rpc UpdatePublicVisibilityPolicy(UpdatePublicVisibilityPolicyRequest) returns (PublicVisibilityPolicy) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/public-visibility/policy"
+      body: "*"
+    };
+  }
+  rpc ListModerationSubjects(ListModerationSubjectsRequest) returns (ListModerationSubjectsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/public-visibility/moderation"};
+  }
+  rpc GetPublicRequestProfile(GetPublicRequestProfileRequest) returns (PublicRequestPublication) {
+    option (google.api.http) = {get: "/fb/v1/console/public-visibility/requests/{request_id}/profile"};
+  }
+  rpc UpsertPublicRequestProfile(UpsertPublicRequestProfileRequest) returns (PublicRequestPublication) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/public-visibility/requests/{request_id}/profile"
+      body: "*"
+    };
+  }
+  rpc ApproveModerationSubject(ApproveModerationSubjectRequest) returns (ModerationSubject) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/public-visibility/moderation/{id}:approve"
+      body: "*"
+    };
+  }
+  rpc RejectModerationSubject(RejectModerationSubjectRequest) returns (ModerationSubject) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/public-visibility/moderation/{id}:reject"
+      body: "*"
+    };
+  }
+  rpc HideModerationSubject(HideModerationSubjectRequest) returns (ModerationSubject) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/public-visibility/moderation/{id}:hide"
+      body: "*"
+    };
+  }
+  rpc MarkModerationSubjectSpam(MarkModerationSubjectSpamRequest) returns (ModerationSubject) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/public-visibility/moderation/{id}:mark-spam"
+      body: "*"
+    };
+  }
+  rpc RestoreModerationSubject(RestoreModerationSubjectRequest) returns (ModerationSubject) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/public-visibility/moderation/{id}:restore"
+      body: "*"
+    };
+  }
+}
+
+service PortalService {
+  rpc GetPublicCustomerRequest(GetPublicCustomerRequestRequest) returns (PublicCustomerRequestDetail) {
+    option (google.api.http) = {get: "/v1/portal/{tenant_slug}/requests/{public_slug}"};
+  }
+}
+
+enum PublicSurface {
+  PUBLIC_SURFACE_UNSPECIFIED = 0;
+  PUBLIC_SURFACE_REQUEST = 1;
+  PUBLIC_SURFACE_REQUEST_COMMENT = 2;
+  PUBLIC_SURFACE_ROADMAP_ITEM = 3;
+  PUBLIC_SURFACE_CHANGELOG_POST = 4;
+  PUBLIC_SURFACE_PORTAL_SUBMISSION = 5;
+}
+
+enum ModerationState {
+  MODERATION_STATE_UNSPECIFIED = 0;
+  MODERATION_STATE_PENDING = 1;
+  MODERATION_STATE_APPROVED = 2;
+  MODERATION_STATE_REJECTED = 3;
+  MODERATION_STATE_HIDDEN = 4;
+  MODERATION_STATE_SPAM = 5;
+}
+
+enum PublicIdentityMode {
+  PUBLIC_IDENTITY_MODE_UNSPECIFIED = 0;
+  PUBLIC_IDENTITY_MODE_ANONYMOUS = 1;
+  PUBLIC_IDENTITY_MODE_DISPLAY_NAME = 2;
+  PUBLIC_IDENTITY_MODE_ORGANIZATION = 3;
+}
+
+enum PublicAccessMode {
+  PUBLIC_ACCESS_MODE_UNSPECIFIED = 0;
+  PUBLIC_ACCESS_MODE_DISABLED = 1;
+  PUBLIC_ACCESS_MODE_PUBLIC = 2;
+  PUBLIC_ACCESS_MODE_AUTHENTICATED = 3;
+  PUBLIC_ACCESS_MODE_INVITE_ONLY = 4;
+}
+
+enum PublicWriteMode {
+  PUBLIC_WRITE_MODE_UNSPECIFIED = 0;
+  PUBLIC_WRITE_MODE_DISABLED = 1;
+  PUBLIC_WRITE_MODE_ANONYMOUS = 2;
+  PUBLIC_WRITE_MODE_IDENTIFIED = 3;
+}
+
+message PublicVisibilityPolicy {
+  string tenant_id = 1;
+  PublicAccessMode portal_access_mode = 2;
+  bool search_indexing_enabled = 3;
+  bool requests_enabled = 4;
+  bool comments_enabled = 5;
+  bool roadmap_enabled = 6;
+  bool changelog_enabled = 7;
+  PublicWriteMode submission_write_mode = 8;
+  PublicWriteMode comment_write_mode = 9;
+  PublicWriteMode vote_write_mode = 10;
+  ModerationState default_request_state = 11;
+  ModerationState default_comment_state = 12;
+  PublicIdentityMode submitter_identity_mode = 13;
+  bool show_vote_count = 14;
+  bool show_comment_count = 15;
+  bool show_submitter_display = 16;
+  bool hide_public_timestamps = 17;
+  string updated_by = 18;
+  string created_at = 19;
+  string updated_at = 20;
+}
+
+message GetPublicVisibilityPolicyRequest {}
+
+message UpdatePublicVisibilityPolicyRequest {
+  PublicAccessMode portal_access_mode = 1 [(google.api.field_behavior) = REQUIRED];
+  bool search_indexing_enabled = 2;
+  bool requests_enabled = 3;
+  bool comments_enabled = 4;
+  bool roadmap_enabled = 5;
+  bool changelog_enabled = 6;
+  PublicWriteMode submission_write_mode = 7 [(google.api.field_behavior) = REQUIRED];
+  PublicWriteMode comment_write_mode = 8 [(google.api.field_behavior) = REQUIRED];
+  PublicWriteMode vote_write_mode = 9 [(google.api.field_behavior) = REQUIRED];
+  ModerationState default_request_state = 10 [(google.api.field_behavior) = REQUIRED];
+  ModerationState default_comment_state = 11 [(google.api.field_behavior) = REQUIRED];
+  PublicIdentityMode submitter_identity_mode = 12 [(google.api.field_behavior) = REQUIRED];
+  bool show_vote_count = 13;
+  bool show_comment_count = 14;
+  bool show_submitter_display = 15;
+  bool hide_public_timestamps = 16;
+}
+
+message ListModerationSubjectsRequest {
+  repeated PublicSurface surface = 1;
+  repeated ModerationState state = 2;
+  uint32 limit = 3;
+  string cursor = 4;
+}
+
+message ListModerationSubjectsResponse {
+  repeated ModerationSubject subjects = 1;
+  optional string next_cursor = 2;
+}
+
+message ModerationSubject {
+  string id = 1;
+  string tenant_id = 2;
+  PublicSurface surface = 3;
+  string subject_id = 4;
+  ModerationState state = 5;
+  string reason_code = 6;
+  string reason_note = 7;
+  string submitted_by_display = 8;
+  string reviewed_by = 9;
+  optional string reviewed_at = 10;
+  string created_at = 11;
+  string updated_at = 12;
+}
+
+message ApproveModerationSubjectRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string reason_code = 2;
+  string reason_note = 3;
+}
+
+message RejectModerationSubjectRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string reason_code = 2;
+  string reason_note = 3;
+}
+
+message HideModerationSubjectRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string reason_code = 2;
+  string reason_note = 3;
+}
+
+message MarkModerationSubjectSpamRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string reason_code = 2;
+  string reason_note = 3;
+}
+
+message RestoreModerationSubjectRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string reason_code = 2;
+  string reason_note = 3;
+}
+
+message PublicRequestProfile {
+  string id = 1;
+  string tenant_id = 2;
+  string request_id = 3;
+  string public_slug = 4;
+  string public_title = 5;
+  string public_summary = 6;
+  string public_state = 7;
+  string roadmap_column = 8;
+  bool included_in_portal = 9;
+  bool included_in_roadmap = 10;
+  optional string published_at = 11;
+  string updated_by = 12;
+  string created_at = 13;
+  string updated_at = 14;
+}
+
+message PublicRequestPublication {
+  PublicRequestProfile profile = 1;
+  ModerationSubject moderation = 2;
+}
+
+message GetPublicRequestProfileRequest {
+  string request_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message UpsertPublicRequestProfileRequest {
+  string request_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+  string public_title = 3 [(google.api.field_behavior) = REQUIRED];
+  string public_summary = 4;
+  string public_state = 5;
+  string roadmap_column = 6;
+  bool included_in_portal = 7;
+  bool included_in_roadmap = 8;
+  string submitted_by_display = 9;
+}
+
+message GetPublicCustomerRequestRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message PublicCustomerRequestSummary {
+  string id = 1;
+  string slug = 2;
+  string title = 3;
+  string summary = 4;
+  string state = 5;
+  string roadmap_column = 6;
+  optional uint32 vote_count = 7;
+  optional uint32 comment_count = 8;
+  optional string submitted_by_display = 9;
+  optional string created_at = 10;
+  optional string updated_at = 11;
+}
+
+message PublicCustomerRequestDetail {
+  PublicCustomerRequestSummary request = 1;
+  repeated string links = 2;
+}

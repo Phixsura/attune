@@ -197,6 +197,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
   {
     group: 'integrations',
+    icon: ShieldCheck,
+    labelKey: 'nav.public_visibility',
+    path: '/integrations/public-visibility',
+    permission: 'moderation:view',
+    settingsAliases: ['public-visibility', 'public_visibility', 'portal'],
+  },
+  {
+    group: 'integrations',
     icon: Send,
     labelKey: 'nav.reply_send_hook',
     path: '/integrations/reply-send-hook',

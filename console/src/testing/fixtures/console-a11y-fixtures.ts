@@ -51,6 +51,15 @@ import {
   OutboxFailureKind,
   type RetryDeliveryResponse,
 } from '../../proto/attune/v1/outbox'
+import {
+  type ListModerationSubjectsResponse,
+  ModerationState,
+  PublicAccessMode,
+  PublicIdentityMode,
+  PublicSurface,
+  type PublicVisibilityPolicy,
+  PublicWriteMode,
+} from '../../proto/attune/v1/public_visibility'
 import type { GetMeResponse } from '../../proto/attune/v1/session'
 import type { ListTagsResponse, Tag } from '../../proto/attune/v1/tag'
 import type {
@@ -78,6 +87,61 @@ export const consoleA11yMe: GetMeResponse = {
 export const consoleA11yAuthProviders = {
   providers: [{ type: 'local' }],
   oidc_only: false,
+}
+
+export const consoleA11yPublicVisibilityPolicy: PublicVisibilityPolicy = {
+  tenantId: 'tenant-a11y',
+  portalAccessMode: PublicAccessMode.PUBLIC_ACCESS_MODE_PUBLIC,
+  searchIndexingEnabled: false,
+  requestsEnabled: true,
+  commentsEnabled: true,
+  roadmapEnabled: true,
+  changelogEnabled: true,
+  submissionWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_IDENTIFIED,
+  commentWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_DISABLED,
+  voteWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_ANONYMOUS,
+  defaultRequestState: ModerationState.MODERATION_STATE_PENDING,
+  defaultCommentState: ModerationState.MODERATION_STATE_PENDING,
+  submitterIdentityMode: PublicIdentityMode.PUBLIC_IDENTITY_MODE_DISPLAY_NAME,
+  showVoteCount: true,
+  showCommentCount: true,
+  showSubmitterDisplay: true,
+  hidePublicTimestamps: false,
+  updatedBy: 'user-a11y',
+  createdAt: '2026-07-10T00:00:00Z',
+  updatedAt: '2026-07-10T00:05:00Z',
+}
+
+export const consoleA11yModerationSubjects: ListModerationSubjectsResponse = {
+  subjects: [
+    {
+      id: 'moderation-a11y-pending',
+      tenantId: 'tenant-a11y',
+      surface: PublicSurface.PUBLIC_SURFACE_REQUEST,
+      subjectId: 'public-request-a11y',
+      state: ModerationState.MODERATION_STATE_PENDING,
+      reasonCode: '',
+      reasonNote: '',
+      submittedByDisplay: 'Ada Lovelace',
+      reviewedBy: '',
+      createdAt: '2026-07-10T00:01:00Z',
+      updatedAt: '2026-07-10T00:01:00Z',
+    },
+    {
+      id: 'moderation-a11y-approved',
+      tenantId: 'tenant-a11y',
+      surface: PublicSurface.PUBLIC_SURFACE_REQUEST_COMMENT,
+      subjectId: 'public-comment-a11y',
+      state: ModerationState.MODERATION_STATE_APPROVED,
+      reasonCode: 'safe',
+      reasonNote: '',
+      submittedByDisplay: 'Grace Hopper',
+      reviewedBy: 'user-a11y',
+      reviewedAt: '2026-07-10T00:04:00Z',
+      createdAt: '2026-07-10T00:02:00Z',
+      updatedAt: '2026-07-10T00:04:00Z',
+    },
+  ],
 }
 
 export const consoleA11yWorkflowStates: WorkflowState[] = [

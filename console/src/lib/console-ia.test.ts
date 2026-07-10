@@ -103,6 +103,27 @@ describe('console IA', () => {
     expect(canAccessConsoleItem('delegated_admin', apiKeys)).toBe(false)
   })
 
+  it('exposes public visibility moderation to operators but not viewers', () => {
+    const item = consoleNavItems.find(
+      (candidate) => candidate.path === '/integrations/public-visibility',
+    )
+
+    expect(item).toBeDefined()
+    if (!item) {
+      throw new Error('public visibility nav item missing')
+    }
+    expect(item).toMatchObject({
+      group: 'integrations',
+      labelKey: 'nav.public_visibility',
+      path: '/integrations/public-visibility',
+      permission: 'moderation:view',
+    })
+    expect(canAccessConsoleItem('admin', item)).toBe(true)
+    expect(canAccessConsoleItem('delegated_admin', item)).toBe(true)
+    expect(canAccessConsoleItem('member', item)).toBe(true)
+    expect(canAccessConsoleItem('viewer', item)).toBe(false)
+  })
+
   it('derives visible items from the same access rules used by routes', () => {
     const memberItems = getConsoleItemsForRole('member')
     const viewerItems = getConsoleItemsForRole('viewer')
