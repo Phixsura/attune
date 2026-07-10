@@ -462,9 +462,16 @@ func publicRequestFromCandidate(candidate repo.PublicRequestCandidate) PublicReq
 		Policy:           candidate.Policy,
 		Votes:            candidate.VoteCount,
 		Comments:         candidate.CommentCount,
-		SubmitterDisplay: candidate.SubmitterDisplay,
+		SubmitterDisplay: publicSubmitterDisplay(candidate.Policy, candidate.SubmitterDisplay),
 		NoIndex:          !candidate.Policy.SearchIndexingEnabled,
 	}
+}
+
+func publicSubmitterDisplay(policy repo.Policy, display string) string {
+	if !policy.ShowSubmitterDisplay || policy.SubmitterIdentityMode == repo.IdentityModeAnonymous {
+		return ""
+	}
+	return display
 }
 
 func validAccessMode(mode repo.AccessMode) bool {

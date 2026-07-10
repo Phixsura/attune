@@ -286,6 +286,8 @@ func TestServiceReadMethodsUseRepository(t *testing.T) {
 	policy.PortalAccessMode = repo.AccessModePublic
 	policy.SearchIndexingEnabled = true
 	policy.RequestsEnabled = true
+	policy.SubmitterIdentityMode = repo.IdentityModeDisplayName
+	policy.ShowSubmitterDisplay = true
 	publication := servicePublication(requestID)
 	fake := ptrext.Of(fakePublicRepo{
 		policy: ptrext.Of(policy),
@@ -386,7 +388,9 @@ func TestPublicRequestFromCandidate(t *testing.T) {
 		Policy: repo.Policy{
 			TenantID:              "tenant-a",
 			SearchIndexingEnabled: false,
+			SubmitterIdentityMode: repo.IdentityModeDisplayName,
 			ShowVoteCount:         true,
+			ShowSubmitterDisplay:  true,
 		},
 		Profile: repo.RequestProfile{
 			RequestID:     requestID,
@@ -410,6 +414,16 @@ func TestPublicRequestFromCandidate(t *testing.T) {
 	}
 	if got.SubmitterDisplay != "Ada" || !got.NoIndex {
 		t.Fatalf("publicRequestFromCandidate() = %#v, want submitter display and noindex", got)
+	}
+
+	candidate.Policy.SubmitterIdentityMode = repo.IdentityModeAnonymous
+	if got := publicRequestFromCandidate(candidate); got.SubmitterDisplay != "" {
+		t.Fatalf("publicRequestFromCandidate(anonymous identity) = %#v, want hidden submitter", got)
+	}
+	candidate.Policy.SubmitterIdentityMode = repo.IdentityModeDisplayName
+	candidate.Policy.ShowSubmitterDisplay = false
+	if got := publicRequestFromCandidate(candidate); got.SubmitterDisplay != "" {
+		t.Fatalf("publicRequestFromCandidate(hidden display) = %#v, want hidden submitter", got)
 	}
 }
 

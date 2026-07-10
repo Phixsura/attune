@@ -343,6 +343,53 @@ export function PublicVisibilityPage() {
                           }
                         />
                       </Field>
+                      <Field label={t('public_visibility.votes')}>
+                        <WriteModeSelect
+                          ariaLabel={t('public_visibility.votes')}
+                          value={form.voteWriteMode}
+                          disabled={!canEditPolicy}
+                          onChange={(value) =>
+                            setForm((prev) => ({ ...prev, voteWriteMode: value }))
+                          }
+                        />
+                      </Field>
+                      <Field label={t('public_visibility.default_comment_state')}>
+                        <Select
+                          value={form.defaultCommentState}
+                          disabled={!canEditPolicy}
+                          onValueChange={(value) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              defaultCommentState: value as ModerationState,
+                            }))
+                          }
+                        >
+                          <SelectTrigger
+                            className="w-full"
+                            aria-label={t('public_visibility.default_comment_state')}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ModerationState.MODERATION_STATE_PENDING}>
+                              {t('public_visibility.states.pending')}
+                            </SelectItem>
+                            <SelectItem value={ModerationState.MODERATION_STATE_APPROVED}>
+                              {t('public_visibility.states.approved')}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label={t('public_visibility.submitter_identity')}>
+                        <IdentityModeSelect
+                          ariaLabel={t('public_visibility.submitter_identity')}
+                          value={form.submitterIdentityMode}
+                          disabled={!canEditPolicy}
+                          onChange={(value) =>
+                            setForm((prev) => ({ ...prev, submitterIdentityMode: value }))
+                          }
+                        />
+                      </Field>
                     </div>
 
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -392,6 +439,30 @@ export function PublicVisibilityPage() {
                         disabled={!canEditPolicy}
                         onChange={(checked) =>
                           setForm((prev) => ({ ...prev, hidePublicTimestamps: checked }))
+                        }
+                      />
+                      <Toggle
+                        label={t('public_visibility.toggles.show_vote_count')}
+                        checked={form.showVoteCount}
+                        disabled={!canEditPolicy}
+                        onChange={(checked) =>
+                          setForm((prev) => ({ ...prev, showVoteCount: checked }))
+                        }
+                      />
+                      <Toggle
+                        label={t('public_visibility.toggles.show_comment_count')}
+                        checked={form.showCommentCount}
+                        disabled={!canEditPolicy}
+                        onChange={(checked) =>
+                          setForm((prev) => ({ ...prev, showCommentCount: checked }))
+                        }
+                      />
+                      <Toggle
+                        label={t('public_visibility.toggles.show_submitter')}
+                        checked={form.showSubmitterDisplay}
+                        disabled={!canEditPolicy}
+                        onChange={(checked) =>
+                          setForm((prev) => ({ ...prev, showSubmitterDisplay: checked }))
                         }
                       />
                     </div>
@@ -749,6 +820,42 @@ function WriteModeSelect({
         </SelectItem>
         <SelectItem value={PublicWriteMode.PUBLIC_WRITE_MODE_IDENTIFIED}>
           {t('public_visibility.write.identified')}
+        </SelectItem>
+      </SelectContent>
+    </Select>
+  )
+}
+
+function IdentityModeSelect({
+  ariaLabel,
+  value,
+  disabled,
+  onChange,
+}: {
+  ariaLabel: string
+  value: PublicIdentityMode
+  disabled: boolean
+  onChange: (value: PublicIdentityMode) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Select
+      value={value}
+      disabled={disabled}
+      onValueChange={(next) => onChange(next as PublicIdentityMode)}
+    >
+      <SelectTrigger className="w-full" aria-label={ariaLabel}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={PublicIdentityMode.PUBLIC_IDENTITY_MODE_ANONYMOUS}>
+          {t('public_visibility.identity.anonymous')}
+        </SelectItem>
+        <SelectItem value={PublicIdentityMode.PUBLIC_IDENTITY_MODE_DISPLAY_NAME}>
+          {t('public_visibility.identity.display_name')}
+        </SelectItem>
+        <SelectItem value={PublicIdentityMode.PUBLIC_IDENTITY_MODE_ORGANIZATION}>
+          {t('public_visibility.identity.organization')}
         </SelectItem>
       </SelectContent>
     </Select>

@@ -28,6 +28,7 @@ const zh = {
   comments: '\u8bc4\u8bba\u5199\u5165',
   commentsToggle: '\u516c\u5f00\u8bc4\u8bba',
   currentSlug: '\u5f53\u524d slug',
+  defaultCommentState: '\u8bc4\u8bba\u9ed8\u8ba4\u72b6\u6001',
   defaultState: '\u9700\u6c42\u9ed8\u8ba4\u72b6\u6001',
   hide: '\u9690\u85cf',
   hideTimestamps: '\u9690\u85cf\u516c\u5f00\u65f6\u95f4',
@@ -38,6 +39,7 @@ const zh = {
   pending: '\u5f85\u5ba1',
   policyTitle: '\u516c\u5f00\u7b56\u7565',
   profileTitle: '\u516c\u5f00\u9700\u6c42\u8d44\u6599',
+  organization: '\u7ec4\u7ec7\u540d',
   publicSummaryPlaceholder: '\u53ea\u5199\u53ef\u4ee5\u516c\u5f00\u5c55\u793a\u7684\u4fe1\u606f',
   publicTitlePlaceholder: '\u9762\u5411\u5ba2\u6237\u5c55\u793a\u7684\u6807\u9898',
   publicVisibility: '\u516c\u5f00\u53ef\u89c1\u6027',
@@ -49,9 +51,14 @@ const zh = {
   roadmapToggle: '\u516c\u5f00\u8def\u7ebf\u56fe',
   savePolicy: '\u4fdd\u5b58\u7b56\u7565',
   saveProfile: '\u4fdd\u5b58\u8d44\u6599',
+  showCommentCount: '\u663e\u793a\u8bc4\u8bba\u6570',
+  showSubmitter: '\u663e\u793a\u63d0\u4ea4\u8005',
+  showVoteCount: '\u663e\u793a\u6295\u7968\u6570',
   spam: '\u6807\u8bb0\u5783\u573e',
   submitDecision: '\u63d0\u4ea4\u5ba1\u6838',
   submissions: '\u6295\u7a3f\u5199\u5165',
+  submitterIdentity: '\u63d0\u4ea4\u8005\u8eab\u4efd',
+  votes: '\u6295\u7968\u5199\u5165',
 } as const
 
 const requestID = '11111111-1111-4111-8111-111111111111'
@@ -76,24 +83,36 @@ test.describe('Public visibility browser behavior', () => {
     await selectOption(page, zh.defaultState, zh.approvedState)
     await selectOption(page, zh.submissions, zh.anonymous)
     await selectOption(page, zh.comments, zh.identified)
+    await selectOption(page, zh.votes, zh.close)
+    await selectOption(page, zh.defaultCommentState, zh.approvedState)
+    await selectOption(page, zh.submitterIdentity, zh.organization)
     await page.getByRole('checkbox', { exact: true, name: zh.requestsToggle }).click()
     await page.getByRole('checkbox', { exact: true, name: zh.commentsToggle }).click()
     await page.getByRole('checkbox', { exact: true, name: zh.roadmapToggle }).click()
     await page.getByRole('checkbox', { exact: true, name: zh.indexing }).click()
     await page.getByRole('checkbox', { exact: true, name: zh.hideTimestamps }).click()
+    await page.getByRole('checkbox', { exact: true, name: zh.showVoteCount }).click()
+    await page.getByRole('checkbox', { exact: true, name: zh.showCommentCount }).click()
+    await page.getByRole('checkbox', { exact: true, name: zh.showSubmitter }).click()
     await page.getByRole('button', { name: zh.savePolicy }).click()
 
     await expect.poll(() => mock.policyUpdates.length).toBe(1)
     expect(mock.policyUpdates[0]).toMatchObject({
       portalAccessMode: PublicAccessMode.PUBLIC_ACCESS_MODE_DISABLED,
       defaultRequestState: ModerationState.MODERATION_STATE_APPROVED,
+      defaultCommentState: ModerationState.MODERATION_STATE_APPROVED,
       submissionWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_ANONYMOUS,
       commentWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_IDENTIFIED,
+      voteWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_DISABLED,
+      submitterIdentityMode: PublicIdentityMode.PUBLIC_IDENTITY_MODE_ORGANIZATION,
       requestsEnabled: false,
       commentsEnabled: false,
       roadmapEnabled: false,
       searchIndexingEnabled: true,
       hidePublicTimestamps: true,
+      showVoteCount: false,
+      showCommentCount: false,
+      showSubmitterDisplay: false,
     })
 
     await page.getByPlaceholder(/customer request UUID/).fill(` ${requestID} `)

@@ -59,15 +59,30 @@ describe('PublicVisibilityPage', () => {
     await user.click(await screen.findByRole('option', { name: '匿名' }))
     await user.click(screen.getByRole('combobox', { name: '评论写入' }))
     await user.click(await screen.findByRole('option', { name: '需身份' }))
+    await user.click(screen.getByRole('combobox', { name: '投票写入' }))
+    await user.click(await screen.findByRole('option', { name: '关闭' }))
+    await user.click(screen.getByRole('combobox', { name: '评论默认状态' }))
+    await user.click(await screen.findByRole('option', { name: '已批准' }))
+    await user.click(screen.getByRole('combobox', { name: '提交者身份' }))
+    await user.click(await screen.findByRole('option', { name: '组织名' }))
     await user.click(await screen.findByRole('checkbox', { name: '公开需求' }))
+    await user.click(screen.getByRole('checkbox', { name: '显示投票数' }))
+    await user.click(screen.getByRole('checkbox', { name: '显示评论数' }))
+    await user.click(screen.getByRole('checkbox', { name: '显示提交者' }))
     await user.click(screen.getByRole('button', { name: '保存策略' }))
     await waitFor(() => {
       expect(savedPolicy).toMatchObject({
         portalAccessMode: PublicAccessMode.PUBLIC_ACCESS_MODE_DISABLED,
         defaultRequestState: ModerationState.MODERATION_STATE_APPROVED,
+        defaultCommentState: ModerationState.MODERATION_STATE_APPROVED,
         submissionWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_ANONYMOUS,
         commentWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_IDENTIFIED,
+        voteWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_DISABLED,
+        submitterIdentityMode: PublicIdentityMode.PUBLIC_IDENTITY_MODE_ORGANIZATION,
         requestsEnabled: false,
+        showVoteCount: false,
+        showCommentCount: false,
+        showSubmitterDisplay: false,
       })
     })
 

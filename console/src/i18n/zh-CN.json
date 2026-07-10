@@ -157,8 +157,11 @@
     "save_profile": "保存资料",
     "access_mode": "入口访问",
     "default_state": "需求默认状态",
+    "default_comment_state": "评论默认状态",
     "submissions": "投稿写入",
     "comments": "评论写入",
+    "votes": "投票写入",
+    "submitter_identity": "提交者身份",
     "empty_title": "没有待显示的审核项",
     "empty_description": "新的公开投稿、评论或公开需求会出现在这里。",
     "profile_title": "公开需求资料",
@@ -199,13 +202,21 @@
       "anonymous": "匿名",
       "identified": "需身份"
     },
+    "identity": {
+      "anonymous": "匿名",
+      "display_name": "展示名",
+      "organization": "组织名"
+    },
     "toggles": {
       "requests": "公开需求",
       "comments": "公开评论",
       "roadmap": "公开路线图",
       "changelog": "公开更新日志",
       "indexing": "允许搜索索引",
-      "hide_timestamps": "隐藏公开时间"
+      "hide_timestamps": "隐藏公开时间",
+      "show_vote_count": "显示投票数",
+      "show_comment_count": "显示评论数",
+      "show_submitter": "显示提交者"
     },
     "states": {
       "MODERATION_STATE_PENDING": "待审",
