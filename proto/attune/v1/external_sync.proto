@@ -1,0 +1,580 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+
+// ExternalSyncService manages tenant-scoped external system connections and
+// the sync-run ledger that keeps Attune objects aligned with external issues.
+service ExternalSyncService {
+  rpc ListExternalConnections(ListExternalConnectionsRequest) returns (ListExternalConnectionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/connections"};
+  }
+  rpc CreateExternalConnection(CreateExternalConnectionRequest) returns (ExternalConnection) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/connections"
+      body: "*"
+    };
+  }
+  rpc UpdateExternalConnection(UpdateExternalConnectionRequest) returns (ExternalConnection) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/external-sync/connections/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteExternalConnection(DeleteExternalConnectionRequest) returns (DeleteExternalConnectionResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/external-sync/connections/{id}"};
+  }
+  rpc TestExternalConnection(TestExternalConnectionRequest) returns (TestExternalConnectionResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/connections/{id}:test"
+      body: "*"
+    };
+  }
+  rpc ResumeExternalConnection(ResumeExternalConnectionRequest) returns (ExternalConnection) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/connections/{id}:resume"
+      body: "*"
+    };
+  }
+  rpc QualifyExternalConnection(QualifyExternalConnectionRequest) returns (QualifyExternalConnectionResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/connections/{id}:qualify"
+      body: "*"
+    };
+  }
+  rpc DiscoverExternalConnectionSchema(DiscoverExternalConnectionSchemaRequest) returns (DiscoverExternalConnectionSchemaResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/connections/{id}/schema"};
+  }
+  rpc ListExternalObjectMappings(ListExternalObjectMappingsRequest) returns (ListExternalObjectMappingsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/mappings"};
+  }
+  rpc UpdateExternalObjectMapping(UpdateExternalObjectMappingRequest) returns (ExternalObjectMapping) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/external-sync/mappings/{id}"
+      body: "*"
+    };
+  }
+  rpc PreviewExternalObjectMapping(PreviewExternalObjectMappingRequest) returns (PreviewExternalObjectMappingResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/mappings/{id}:preview"
+      body: "*"
+    };
+  }
+  rpc ResetExternalSyncCursor(ResetExternalSyncCursorRequest) returns (ResetExternalSyncCursorResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/mappings/{id}:reset-cursor"
+      body: "*"
+    };
+  }
+  rpc RequestExternalSyncBackfill(RequestExternalSyncBackfillRequest) returns (RequestExternalSyncBackfillResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/mappings/{id}:backfill"
+      body: "*"
+    };
+  }
+  rpc RequestExternalSyncRun(RequestExternalSyncRunRequest) returns (ExternalSyncRun) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/runs"
+      body: "*"
+    };
+  }
+  rpc ListExternalSyncRuns(ListExternalSyncRunsRequest) returns (ListExternalSyncRunsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/runs"};
+  }
+  rpc GetExternalSyncRun(GetExternalSyncRunRequest) returns (ExternalSyncRunDetail) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/runs/{id}"};
+  }
+  rpc GetExternalSyncRecordTimeline(GetExternalSyncRecordTimelineRequest) returns (ExternalSyncRecordTimelineResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/records:timeline"
+      body: "*"
+    };
+  }
+  rpc RetryExternalSyncRun(RetryExternalSyncRunRequest) returns (ExternalSyncRun) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/runs/{id}:retry"
+      body: "*"
+    };
+  }
+  rpc RetryExternalSyncFailure(RetryExternalSyncFailureRequest) returns (ExternalSyncRecordFailure) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/failures/{id}:retry"
+      body: "*"
+    };
+  }
+  rpc ResolveExternalSyncConflict(ResolveExternalSyncConflictRequest) returns (ExternalSyncConflict) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/conflicts/{id}:resolve"
+      body: "*"
+    };
+  }
+  rpc BatchResolveExternalSyncConflicts(BatchResolveExternalSyncConflictsRequest) returns (BatchResolveExternalSyncConflictsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/conflicts:batch-resolve"
+      body: "*"
+    };
+  }
+  rpc ListExternalSyncEvents(ListExternalSyncEventsRequest) returns (ListExternalSyncEventsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/events"};
+  }
+  rpc GetExternalSyncEvent(GetExternalSyncEventRequest) returns (ExternalSyncEvent) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/events/{id}"};
+  }
+  rpc ReplayExternalSyncEvent(ReplayExternalSyncEventRequest) returns (ReplayExternalSyncEventResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/events/{id}:replay"
+      body: "*"
+    };
+  }
+  rpc GetExternalSyncHealth(GetExternalSyncHealthRequest) returns (ExternalSyncHealthResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/health"};
+  }
+}
+
+enum ExternalSyncDirection {
+  EXTERNAL_SYNC_DIRECTION_UNSPECIFIED = 0;
+  EXTERNAL_SYNC_DIRECTION_PULL = 1;
+  EXTERNAL_SYNC_DIRECTION_PUSH = 2;
+  EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL = 3;
+}
+
+enum ExternalSyncRunTrigger {
+  EXTERNAL_SYNC_RUN_TRIGGER_UNSPECIFIED = 0;
+  EXTERNAL_SYNC_RUN_TRIGGER_MANUAL = 1;
+  EXTERNAL_SYNC_RUN_TRIGGER_SCHEDULE = 2;
+  EXTERNAL_SYNC_RUN_TRIGGER_RETRY = 3;
+  EXTERNAL_SYNC_RUN_TRIGGER_SYSTEM = 4;
+  EXTERNAL_SYNC_RUN_TRIGGER_WEBHOOK = 5;
+  EXTERNAL_SYNC_RUN_TRIGGER_BACKFILL = 6;
+}
+
+enum ExternalSyncRunStatus {
+  EXTERNAL_SYNC_RUN_STATUS_UNSPECIFIED = 0;
+  EXTERNAL_SYNC_RUN_STATUS_QUEUED = 1;
+  EXTERNAL_SYNC_RUN_STATUS_RUNNING = 2;
+  EXTERNAL_SYNC_RUN_STATUS_SUCCEEDED = 3;
+  EXTERNAL_SYNC_RUN_STATUS_PARTIAL = 4;
+  EXTERNAL_SYNC_RUN_STATUS_FAILED = 5;
+  EXTERNAL_SYNC_RUN_STATUS_CANCELLED = 6;
+  EXTERNAL_SYNC_RUN_STATUS_DEAD = 7;
+}
+
+enum ExternalSyncEventSignatureStatus {
+  EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_UNSPECIFIED = 0;
+  EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_VERIFIED = 1;
+  EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_FAILED = 2;
+  EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_NOT_REQUIRED = 3;
+}
+
+enum ExternalSyncEventStatus {
+  EXTERNAL_SYNC_EVENT_STATUS_UNSPECIFIED = 0;
+  EXTERNAL_SYNC_EVENT_STATUS_RECEIVED = 1;
+  EXTERNAL_SYNC_EVENT_STATUS_REPLAYED = 2;
+  EXTERNAL_SYNC_EVENT_STATUS_IGNORED = 3;
+  EXTERNAL_SYNC_EVENT_STATUS_FAILED = 4;
+}
+
+enum ExternalSyncConflictResolution {
+  EXTERNAL_SYNC_CONFLICT_RESOLUTION_UNSPECIFIED = 0;
+  EXTERNAL_SYNC_CONFLICT_RESOLUTION_LOCAL_WINS = 1;
+  EXTERNAL_SYNC_CONFLICT_RESOLUTION_EXTERNAL_WINS = 2;
+  EXTERNAL_SYNC_CONFLICT_RESOLUTION_MANUAL_MERGE = 3;
+  EXTERNAL_SYNC_CONFLICT_RESOLUTION_IGNORED = 4;
+}
+
+enum ExternalSyncQualificationCheckStatus {
+  EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_UNSPECIFIED = 0;
+  EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_OK = 1;
+  EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_WARNING = 2;
+  EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_FAILED = 3;
+}
+
+message ExternalConnection {
+  string id = 1;
+  string tenant_id = 2;
+  string provider = 3;
+  string name = 4;
+  bool enabled = 5;
+  string status = 6;
+  string auth_type = 7;
+  string base_url = 8;
+  string provider_config_json = 9;
+  repeated string scopes = 10;
+  string last_tested_at = 11;
+  string last_test_status = 12;
+  string last_error = 13;
+  string created_by = 14;
+  string updated_by = 15;
+  string created_at = 16;
+  string updated_at = 17;
+  bool webhook_secret_configured = 18;
+}
+
+message ExternalObjectMapping {
+  string id = 1;
+  string tenant_id = 2;
+  string connection_id = 3;
+  string local_object_type = 4;
+  string external_object_type = 5;
+  ExternalSyncDirection direction = 6;
+  string field_mapping_json = 7;
+  string status_mapping_json = 8;
+  string conflict_policy = 9;
+  string tombstone_policy = 10;
+  bool enabled = 11;
+  int32 mapping_version = 12;
+  string created_at = 13;
+  string updated_at = 14;
+}
+
+message ExternalObjectSchema {
+  string type = 1;
+  repeated string fields = 2;
+  repeated string required_fields = 3;
+  repeated string writable_fields = 4;
+}
+
+message ExternalSyncRun {
+  string id = 1;
+  string tenant_id = 2;
+  string connection_id = 3;
+  string mapping_id = 4;
+  ExternalSyncDirection direction = 5;
+  ExternalSyncRunTrigger trigger = 6;
+  ExternalSyncRunStatus status = 7;
+  int32 attempts = 8;
+  string next_retry_at = 9;
+  string started_at = 10;
+  string finished_at = 11;
+  string cursor_before_json = 12;
+  string cursor_after_json = 13;
+  int32 records_seen = 14;
+  int32 records_changed = 15;
+  int32 records_failed = 16;
+  int32 conflicts_created = 17;
+  string error_kind = 18;
+  string error_message = 19;
+  string actor_id = 20;
+  string created_at = 21;
+  string updated_at = 22;
+  bool in_flight = 23;
+}
+
+message ExternalSyncAttempt {
+  int64 id = 1;
+  string run_id = 2;
+  int32 attempt_number = 3;
+  string started_at = 4;
+  string finished_at = 5;
+  string result = 6;
+  int32 http_status = 7;
+  string provider_request_id = 8;
+  string retry_after = 9;
+  string error_kind = 10;
+  string error_message = 11;
+}
+
+message ExternalSyncRecordFailure {
+  string id = 1;
+  string tenant_id = 2;
+  string run_id = 3;
+  string mapping_id = 4;
+  string operation = 5;
+  string local_object_id = 6;
+  string external_key = 7;
+  string failure_kind = 8;
+  string message = 9;
+  string payload_digest = 10;
+  string retry_mode = 11;
+  string normalized_payload_json = 12;
+  bool retryable = 13;
+  string resolved_at = 14;
+  string resolved_by = 15;
+  string created_at = 16;
+}
+
+message ExternalSyncConflict {
+  string id = 1;
+  string tenant_id = 2;
+  string mapping_id = 3;
+  string local_object_id = 4;
+  string external_key = 5;
+  string conflict_kind = 6;
+  string status = 7;
+  string local_snapshot_json = 8;
+  string external_snapshot_json = 9;
+  string resolution = 10;
+  string resolved_at = 11;
+  string resolved_by = 12;
+  string created_at = 13;
+  string updated_at = 14;
+}
+
+message ExternalSyncEvent {
+  string id = 1;
+  string tenant_id = 2;
+  string connection_id = 3;
+  string mapping_id = 4;
+  string provider = 5;
+  string event_type = 6;
+  string external_event_id = 7;
+  string dedupe_key = 8;
+  ExternalSyncEventSignatureStatus signature_status = 9;
+  ExternalSyncEventStatus status = 10;
+  string payload_digest = 11;
+  string normalized_payload_json = 12;
+  string received_at = 13;
+  string replayed_at = 14;
+  string replayed_by = 15;
+  string run_id = 16;
+  string failure_reason = 17;
+  string created_at = 18;
+  string updated_at = 19;
+}
+
+message ExternalSyncRunDetail {
+  ExternalSyncRun run = 1;
+  repeated ExternalSyncAttempt attempts = 2;
+  repeated ExternalSyncRecordFailure failures = 3;
+  repeated ExternalSyncConflict conflicts = 4;
+}
+
+message ExternalSyncRecordTimelineEntry {
+  string kind = 1;
+  string occurred_at = 2;
+  string run_id = 3;
+  string status = 4;
+  string operation = 5;
+  string local_object_id = 6;
+  string external_key = 7;
+  string summary = 8;
+  string detail_json = 9;
+}
+
+message ExternalSyncHealthResponse {
+  int32 enabled_connections = 1;
+  int32 failing_connections = 2;
+  int32 stale_connections = 3;
+  int32 active_runs = 4;
+  int32 retryable_runs = 5;
+  int32 dead_runs = 6;
+  int32 open_conflicts = 7;
+  string newest_successful_run_at = 8;
+  int32 disabled_connections = 9;
+  int32 throttled_runs = 10;
+  int32 unauthorized_runs = 11;
+  int32 provider_unavailable_runs = 12;
+  int32 delayed_retry_runs = 13;
+  string newest_retry_after = 14;
+  int32 degraded_connections = 15;
+  int32 quarantined_connections = 16;
+}
+
+message ExternalSyncQualificationCheck {
+  string name = 1;
+  ExternalSyncQualificationCheckStatus status = 2;
+  string summary = 3;
+  string detail_json = 4;
+}
+
+message ListExternalConnectionsRequest {}
+
+message ListExternalConnectionsResponse {
+  repeated ExternalConnection connections = 1;
+}
+
+message CreateExternalConnectionRequest {
+  string provider = 1 [(google.api.field_behavior) = REQUIRED];
+  string name = 2 [(google.api.field_behavior) = REQUIRED];
+  string auth_type = 3 [(google.api.field_behavior) = REQUIRED];
+  string credential = 4 [(google.api.field_behavior) = REQUIRED];
+  string base_url = 5;
+  string provider_config_json = 6;
+  repeated string scopes = 7;
+  optional bool enabled = 8;
+  string webhook_secret = 9;
+}
+
+message UpdateExternalConnectionRequest {
+  string id = 1;
+  optional string name = 2;
+  optional bool enabled = 3;
+  optional string credential = 4;
+  optional string base_url = 5;
+  optional string provider_config_json = 6;
+  repeated string scopes = 7;
+  optional string webhook_secret = 8;
+}
+
+message DeleteExternalConnectionRequest {
+  string id = 1;
+}
+
+message DeleteExternalConnectionResponse {}
+
+message TestExternalConnectionRequest {
+  string id = 1;
+}
+
+message TestExternalConnectionResponse {
+  bool ok = 1;
+  string error = 2;
+  int64 latency_ms = 3;
+}
+
+message ResumeExternalConnectionRequest {
+  string id = 1;
+}
+
+message QualifyExternalConnectionRequest {
+  string id = 1;
+}
+
+message QualifyExternalConnectionResponse {
+  string connection_id = 1;
+  bool ready = 2;
+  repeated ExternalSyncQualificationCheck checks = 3;
+}
+
+message DiscoverExternalConnectionSchemaRequest {
+  string id = 1;
+}
+
+message DiscoverExternalConnectionSchemaResponse {
+  repeated ExternalObjectSchema schemas = 1;
+}
+
+message ListExternalObjectMappingsRequest {
+  string connection_id = 1;
+}
+
+message ListExternalObjectMappingsResponse {
+  repeated ExternalObjectMapping mappings = 1;
+}
+
+message UpdateExternalObjectMappingRequest {
+  string id = 1;
+  ExternalSyncDirection direction = 2;
+  string field_mapping_json = 3;
+  string status_mapping_json = 4;
+  string conflict_policy = 5;
+  string tombstone_policy = 6;
+  optional bool enabled = 7;
+}
+
+message PreviewExternalObjectMappingRequest {
+  string id = 1;
+  optional string field_mapping_json = 2;
+  optional string status_mapping_json = 3;
+}
+
+message PreviewExternalObjectMappingResponse {
+  ExternalObjectSchema schema = 1;
+  repeated string errors = 2;
+  repeated string warnings = 3;
+}
+
+message ResetExternalSyncCursorRequest {
+  string id = 1;
+}
+
+message ResetExternalSyncCursorResponse {
+  ExternalObjectMapping mapping = 1;
+  ExternalSyncRun run = 2;
+}
+
+message RequestExternalSyncBackfillRequest {
+  string id = 1;
+  bool reset_cursor = 2;
+}
+
+message RequestExternalSyncBackfillResponse {
+  ExternalObjectMapping mapping = 1;
+  ExternalSyncRun run = 2;
+}
+
+message RequestExternalSyncRunRequest {
+  string connection_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string mapping_id = 2;
+  ExternalSyncDirection direction = 3;
+}
+
+message ListExternalSyncRunsRequest {
+  string connection_id = 1;
+  string mapping_id = 2;
+  string status = 3;
+  int32 limit = 4;
+  string before_id = 5;
+}
+
+message ListExternalSyncRunsResponse {
+  repeated ExternalSyncRun runs = 1;
+  string next_before_id = 2;
+}
+
+message GetExternalSyncRunRequest {
+  string id = 1;
+}
+
+message GetExternalSyncRecordTimelineRequest {
+  string mapping_id = 1;
+  string local_object_id = 2;
+  string external_key = 3;
+  int32 limit = 4;
+}
+
+message ExternalSyncRecordTimelineResponse {
+  repeated ExternalSyncRecordTimelineEntry entries = 1;
+}
+
+message RetryExternalSyncRunRequest {
+  string id = 1;
+}
+
+message RetryExternalSyncFailureRequest {
+  string id = 1;
+}
+
+message ResolveExternalSyncConflictRequest {
+  string id = 1;
+  ExternalSyncConflictResolution resolution = 2;
+}
+
+message BatchResolveExternalSyncConflictsRequest {
+  repeated string ids = 1;
+  ExternalSyncConflictResolution resolution = 2;
+}
+
+message BatchResolveExternalSyncConflictsResponse {
+  repeated ExternalSyncConflict conflicts = 1;
+  int32 resolved_count = 2;
+}
+
+message ListExternalSyncEventsRequest {
+  string connection_id = 1;
+  string status = 2;
+  int32 limit = 3;
+  string before_id = 4;
+}
+
+message ListExternalSyncEventsResponse {
+  repeated ExternalSyncEvent events = 1;
+  string next_before_id = 2;
+}
+
+message GetExternalSyncEventRequest {
+  string id = 1;
+}
+
+message ReplayExternalSyncEventRequest {
+  string id = 1;
+}
+
+message ReplayExternalSyncEventResponse {
+  ExternalSyncEvent event = 1;
+  ExternalSyncRun run = 2;
+}
+
+message GetExternalSyncHealthRequest {}

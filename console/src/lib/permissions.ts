@@ -35,6 +35,9 @@ export type Permission =
   // Settings - Notify Targets
   | 'settings:notify_targets:view'
   | 'settings:notify_targets:edit'
+  // Settings - External Sync
+  | 'settings:external_sync:view'
+  | 'settings:external_sync:edit'
   // Settings - Digest
   | 'settings:digest:view'
   | 'settings:digest:edit'
@@ -97,6 +100,8 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'settings:inbound:edit',
     'settings:notify_targets:view',
     'settings:notify_targets:edit',
+    'settings:external_sync:view',
+    'settings:external_sync:edit',
     'settings:digest:view',
     'settings:digest:edit',
     'settings:api_keys:view',
@@ -141,6 +146,8 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'settings:inbound:edit',
     'settings:notify_targets:view',
     'settings:notify_targets:edit',
+    'settings:external_sync:view',
+    'settings:external_sync:edit',
     'settings:digest:view',
     'settings:digest:edit',
     'settings:tags:view',

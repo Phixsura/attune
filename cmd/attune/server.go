@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/externalsync"
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/inbound"
@@ -41,6 +42,7 @@ import (
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	enrichmentruntimerepo "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/feedback"
 	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	"github.com/Phixsura/attune/internal/repo/guardpolicy"
@@ -59,6 +61,7 @@ import (
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
+	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	llmauditsvc "github.com/Phixsura/attune/internal/service/llmaudit"
@@ -163,31 +166,7 @@ func runServer() error {
 	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, runtimeDeps.tenantRepo, runtimeDeps.notifyTargetRepo); err != nil {
 		return fmt.Errorf("sync custom webhooks: %w", err)
 	}
-	// Outbox wiring: enricher writes raw-webhook rows in same tx as
-	// MarkDone (at-least-once); a background worker drains them.
-	runtimeDeps.enricher.SetOutbox(runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo)
-	outboxWorker := outbox.NewOutboxWorker(
-		runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo,
-		notify.NewTransport(nil, notify.DefaultRetry()),
-	)
-	safego(ctx, "outbox", func() { outboxWorker.Run(ctx) })
-	// attune_outbox_lag_seconds is refreshed on a 30s ticker rather than
-	// on every Prometheus scrape — avoids hammering the DB.
-	safego(ctx, "outbox_lag_refresher", func() { runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo) })
-	safego(ctx, "audit_pruner", func() {
-		runAuditPruner(ctx, pool, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
-	})
-	// Release stale ingest idempotency keys so the partial unique index stays
-	// bounded to the recent retry window (#37).
-	safego(ctx, "idempotency_key_pruner", func() {
-		runIdempotencyKeyPruner(ctx, pool, runtimeDeps.feedbackRepo, idempotencyKeyRetention, idempotencyKeyPruneInterval)
-	})
-	// MCP OAuth cleanup: expired codes, revoked tokens, idle sessions (#93).
-	safego(ctx, "mcp_pruner", func() {
-		runMCPPruner(ctx, pool, mcpPruneInterval, mcpSessionIdleLimit)
-	})
-
-	batchJobWorker := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets, cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
+	batchJobWorker := startRuntimeWorkers(ctx, pool, cfg, runtimeDeps, secrets)
 	defer batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor, runtimeDeps.sources)
@@ -248,11 +227,46 @@ func applyRuntimeHardening(cfg *config.Config) {
 	// link-local); config relaxes loopback/private for dev / on-prem.
 	egress := cfg.EgressPolicy()
 	notify.SetEgressPolicy(egress)
+	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
 	replydraftsvc.SetEgressPolicy(egress)
 	// Trusted-proxy hop count for client-IP resolution outside the API-key
 	// middleware (audit actor IP, etc.).
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
+}
+
+func startRuntimeWorkers(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	cfg *config.Config,
+	runtimeDeps runtimeServices,
+	secrets *secretstore.TinkStore,
+) *batchjob.Worker {
+	// Outbox wiring: enricher writes raw-webhook rows in same tx as MarkDone
+	// (at-least-once); a background worker drains them.
+	runtimeDeps.enricher.SetOutbox(runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo)
+	outboxWorker := outbox.NewOutboxWorker(
+		runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo,
+		notify.NewTransport(nil, notify.DefaultRetry()),
+	)
+	safego(ctx, "outbox", func() { outboxWorker.Run(ctx) })
+
+	externalSyncService := externalsyncsvc.New(externalsyncrepo.New(pool), secrets)
+	externalSyncWorker := externalsyncsvc.NewWorker(externalSyncService)
+	safego(ctx, "external_sync", func() { externalSyncWorker.Run(ctx) })
+	safego(ctx, "outbox_lag_refresher", func() { runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo) })
+	safego(ctx, "audit_pruner", func() {
+		runAuditPruner(ctx, pool, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
+	})
+	safego(ctx, "idempotency_key_pruner", func() {
+		runIdempotencyKeyPruner(ctx, pool, runtimeDeps.feedbackRepo, idempotencyKeyRetention, idempotencyKeyPruneInterval)
+	})
+	safego(ctx, "mcp_pruner", func() {
+		runMCPPruner(ctx, pool, mcpPruneInterval, mcpSessionIdleLimit)
+	})
+
+	return startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets,
+		cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
 }
 
 func setupRuntimeServices(

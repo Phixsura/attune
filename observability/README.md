@@ -74,6 +74,12 @@ exposition plus the portable assets in this directory.
 | `attune_digest_duration_seconds` | histogram | `tenant` | end-to-end digest aggregation + delivery latency per run (#27) |
 | `attune_digest_clustering_fallback_total` | counter | `tenant`, `reason` | cluster-based theme extraction fallbacks to naive path (#27) |
 | `attune_digest_cluster_count` | histogram | `tenant` | number of clusters found per digest run (#27) |
+| `attune_external_sync_runs_total` | counter | `provider`, `object_type`, `result` | external sync run outcomes by provider and object type (#214) |
+| `attune_external_sync_records_total` | counter | `provider`, `object_type`, `operation`, `result` | external sync record-level operations and outcomes (#214) |
+| `attune_external_sync_run_duration_seconds` | histogram | `provider`, `object_type`, `result` | external sync run latency by provider, object type, and outcome (#214) |
+| `attune_external_sync_lag_seconds` | gauge | `provider`, `object_type` | age of the latest successful external sync cursor by provider and object type (#214) |
+| `attune_external_sync_conflicts_total` | counter | `provider`, `object_type`, `resolution` | external sync conflicts resolved or ignored by resolution (#214) |
+| `attune_external_sync_dead_runs` | gauge | `provider`, `object_type` | external sync runs exhausted after retries and requiring operator attention (#214) |
 | `attune_workflow_transitions_total` | counter | `tenant`, `result` | workflow state transitions by outcome — `success` / `invalid` / `error` (#29) |
 | `attune_workflow_batch_size` | histogram | — | number of feedback items per batch-transition call (#29) |
 | `attune_batch_jobs_claimed_total` | counter | `tenant` | async batch jobs claimed by workers (#30) |

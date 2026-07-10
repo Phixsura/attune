@@ -3,6 +3,7 @@ package enrich
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -59,9 +60,15 @@ func TestRunnerProcessBatchHonorsWorkerLimit(t *testing.T) {
 	var current atomic.Int32
 	var maxSeen atomic.Int32
 	done := make(chan struct{})
+	var release sync.Once
+	releaseWorkers := func() {
+		release.Do(func() {
+			close(done)
+		})
+	}
+	defer releaseWorkers()
 
 	runner := ptrext.Of(Runner{
-		queue: NewMemoryQueue(10),
 		cfg: RunnerConfig{
 			QueueLen:      10,
 			Workers:       3,
@@ -83,23 +90,30 @@ func TestRunnerProcessBatchHonorsWorkerLimit(t *testing.T) {
 		},
 	})
 
+	batch := make([]Job, 0, 6)
 	for i := 0; i < 6; i++ {
-		if err := runner.Submit(context.Background(), Job{ID: int64(i + 1)}); err != nil {
-			t.Fatalf("submit %d: %v", i, err)
-		}
+		batch = append(batch, Job{ID: int64(i + 1)})
 	}
-	_ = runner.queue.Close()
 
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		runner.runProcessor(context.Background())
+		runner.processBatch(context.Background(), batch)
 	}()
 
-	for maxSeen.Load() < 3 {
+	deadline := time.Now().Add(2 * time.Second)
+	for maxSeen.Load() < 3 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	close(done)
+	if maxSeen.Load() < 3 {
+		releaseWorkers()
+		select {
+		case <-finished:
+		case <-time.After(2 * time.Second):
+		}
+		t.Fatalf("max concurrency never reached worker limit; got %d, want 3", maxSeen.Load())
+	}
+	releaseWorkers()
 
 	select {
 	case <-finished:

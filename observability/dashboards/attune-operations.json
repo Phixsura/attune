@@ -46,7 +46,7 @@
         "y": 0
       },
       "options": {
-        "content": "**Targets:** Outbox lag \u003c= 60s · Batch p95 stays bounded · Search p95 \u003c= 1s · Claim contention near zero · Migration pending = 0 · Checksum drift = 0\n\n**Flow:** backlog summary -\u003e workflow/batch health -\u003e idempotency/search -\u003e delivery and contention -\u003e database migrations.",
+        "content": "**Targets:** Outbox lag \u003c= 60s · Batch p95 stays bounded · Search p95 \u003c= 1s · Claim contention near zero · External sync failures explainable · Migration pending = 0 · Checksum drift = 0\n\n**Flow:** backlog summary -\u003e workflow/batch health -\u003e idempotency/search -\u003e delivery and contention -\u003e external sync -\u003e database migrations.",
         "mode": "markdown"
       }
     },
@@ -977,7 +977,7 @@
     {
       "id": 22,
       "type": "row",
-      "title": "Database migrations",
+      "title": "External sync",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -987,6 +987,87 @@
     },
     {
       "id": 23,
+      "type": "timeseries",
+      "title": "External sync health",
+      "description": "External connection sync outcomes, record operations, duration, lag, conflicts, and dead runs. Use this before blaming provider adapters or manual conflict handling.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 59
+      },
+      "targets": [
+        {
+          "expr": "(sum by (provider, object_type, result) (rate(attune_external_sync_runs_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "runs / {{provider}} / {{object_type}} / {{result}}",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum by (provider, object_type, operation, result) (rate(attune_external_sync_records_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "records / {{provider}} / {{object_type}} / {{operation}} / {{result}}",
+          "refId": "B"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le, provider, object_type, result) (rate(attune_external_sync_run_duration_seconds_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "run p95 / {{provider}} / {{object_type}} / {{result}}",
+          "refId": "C"
+        },
+        {
+          "expr": "(max by (provider, object_type) (attune_external_sync_lag_seconds)) or vector(0)",
+          "legendFormat": "lag / {{provider}} / {{object_type}}",
+          "refId": "D"
+        },
+        {
+          "expr": "(sum by (provider, object_type, resolution) (rate(attune_external_sync_conflicts_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "conflicts / {{provider}} / {{object_type}} / {{resolution}}",
+          "refId": "E"
+        },
+        {
+          "expr": "(sum by (provider, object_type) (attune_external_sync_dead_runs)) or vector(0)",
+          "legendFormat": "dead / {{provider}} / {{object_type}}",
+          "refId": "F"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "row",
+      "title": "Database migrations",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      }
+    },
+    {
+      "id": 25,
       "type": "stat",
       "title": "Pending migrations",
       "description": "Unapplied migrations at last startup. Non-zero after startup means migrations are failing or the binary has new migrations not yet applied.",
@@ -994,7 +1075,7 @@
         "h": 4,
         "w": 6,
         "x": 0,
-        "y": 59
+        "y": 68
       },
       "targets": [
         {
@@ -1051,7 +1132,7 @@
       }
     },
     {
-      "id": 24,
+      "id": 26,
       "type": "stat",
       "title": "Checksum drift",
       "description": "Migration files modified after apply. Should always be zero — any non-zero value is a release hygiene violation requiring investigation.",
@@ -1059,7 +1140,7 @@
         "h": 4,
         "w": 6,
         "x": 6,
-        "y": 59
+        "y": 68
       },
       "targets": [
         {
@@ -1112,7 +1193,7 @@
       }
     },
     {
-      "id": 25,
+      "id": 27,
       "type": "stat",
       "title": "Migrations applied",
       "description": "Migrations applied in the selected range. Non-zero values expected only after deployments with schema changes.",
@@ -1120,7 +1201,7 @@
         "h": 4,
         "w": 6,
         "x": 12,
-        "y": 59
+        "y": 68
       },
       "targets": [
         {
@@ -1160,7 +1241,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 28,
       "type": "stat",
       "title": "Apply p95",
       "description": "P95 migration apply duration. Use this to size deployment timeouts and detect regressions from large backfills.",
@@ -1168,7 +1249,7 @@
         "h": 4,
         "w": 6,
         "x": 18,
-        "y": 59
+        "y": 68
       },
       "targets": [
         {
@@ -1225,7 +1306,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 29,
       "type": "timeseries",
       "title": "Migration history",
       "description": "Migration apply rate and duration over time. Spikes indicate deployments with schema changes.",
@@ -1233,7 +1314,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 72
       },
       "targets": [
         {
@@ -1285,18 +1366,18 @@
       }
     },
     {
-      "id": 28,
+      "id": 30,
       "type": "row",
       "title": "Dependency health",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 71
+        "y": 80
       }
     },
     {
-      "id": 29,
+      "id": 31,
       "type": "timeseries",
       "title": "Dependency health checks",
       "description": "Health check outcomes and latency for upstream dependencies. Use this to detect connectivity issues before they impact user traffic.",
@@ -1304,7 +1385,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 72
+        "y": 81
       },
       "targets": [
         {
@@ -1346,18 +1427,18 @@
       }
     },
     {
-      "id": 30,
+      "id": 32,
       "type": "row",
       "title": "Backup recoverability",
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 80
+        "y": 89
       }
     },
     {
-      "id": 31,
+      "id": 33,
       "type": "stat",
       "title": "Time since last drill success",
       "description": "Age of the most recent non-failing (pass or warn) backup/restore drill. Red beyond 8 days means recent backups are unverified — this is the AttuneRestoreDrillStale alert's signal. A near-zero epoch value means no drill has ever succeeded (the backup:restore_drill preflight check warns).",
@@ -1365,7 +1446,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 81
+        "y": 90
       },
       "targets": [
         {
@@ -1422,7 +1503,7 @@
       }
     },
     {
-      "id": 32,
+      "id": 34,
       "type": "stat",
       "title": "Last restore time (RTO)",
       "description": "Measured restore duration of the most recent drill that recorded one. Trends time-to-recover against your RTO objective.",
@@ -1430,7 +1511,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 81
+        "y": 90
       },
       "targets": [
         {
@@ -1470,7 +1551,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 35,
       "type": "timeseries",
       "title": "Restore drills by outcome",
       "description": "Recorded restore drills by status. A rising fail count — or the absence of recent pass/warn — means the latest backups may not be recoverable.",
@@ -1478,7 +1559,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 81
+        "y": 90
       },
       "targets": [
         {

@@ -2355,6 +2355,690 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/conflicts/{id}:resolve:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ResolveExternalSyncConflict
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ResolveExternalSyncConflictRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncConflict'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/conflicts:batch-resolve:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_BatchResolveExternalSyncConflicts
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/BatchResolveExternalSyncConflictsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/BatchResolveExternalSyncConflictsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/connections:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalConnections
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalConnectionsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_CreateExternalConnection
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateExternalConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalConnection'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/connections/{id}:
+        delete:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_DeleteExternalConnection
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteExternalConnectionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        patch:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_UpdateExternalConnection
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateExternalConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalConnection'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/connections/{id}/schema:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_DiscoverExternalConnectionSchema
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DiscoverExternalConnectionSchemaResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/connections/{id}:qualify:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_QualifyExternalConnection
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/QualifyExternalConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QualifyExternalConnectionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/connections/{id}:resume:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ResumeExternalConnection
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ResumeExternalConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalConnection'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/connections/{id}:test:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_TestExternalConnection
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TestExternalConnectionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TestExternalConnectionResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/events:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalSyncEvents
+            parameters:
+                - name: connectionId
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: beforeId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalSyncEventsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/events/{id}:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_GetExternalSyncEvent
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncEvent'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/events/{id}:replay:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ReplayExternalSyncEvent
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ReplayExternalSyncEventRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ReplayExternalSyncEventResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/failures/{id}:retry:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_RetryExternalSyncFailure
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RetryExternalSyncFailureRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncRecordFailure'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/health:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_GetExternalSyncHealth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncHealthResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/mappings:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalObjectMappings
+            parameters:
+                - name: connectionId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalObjectMappingsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/mappings/{id}:
+        put:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_UpdateExternalObjectMapping
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateExternalObjectMappingRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalObjectMapping'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/mappings/{id}:backfill:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_RequestExternalSyncBackfill
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RequestExternalSyncBackfillRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestExternalSyncBackfillResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/mappings/{id}:preview:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_PreviewExternalObjectMapping
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PreviewExternalObjectMappingRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreviewExternalObjectMappingResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/mappings/{id}:reset-cursor:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ResetExternalSyncCursor
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ResetExternalSyncCursorRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ResetExternalSyncCursorResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/records:timeline:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_GetExternalSyncRecordTimeline
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GetExternalSyncRecordTimelineRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncRecordTimelineResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/runs:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalSyncRuns
+            parameters:
+                - name: connectionId
+                  in: query
+                  schema:
+                    type: string
+                - name: mappingId
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: beforeId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalSyncRunsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_RequestExternalSyncRun
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RequestExternalSyncRunRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncRun'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/runs/{id}:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_GetExternalSyncRun
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncRunDetail'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/runs/{id}:retry:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_RetryExternalSyncRun
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RetryExternalSyncRunRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalSyncRun'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/feedback:
         get:
             tags:
@@ -7917,6 +8601,32 @@ components:
                 delete:
                     $ref: '#/components/schemas/BatchDeleteOp'
             description: BatchOperation is the discriminated union of supported batch operations.
+        BatchResolveExternalSyncConflictsRequest:
+            type: object
+            properties:
+                ids:
+                    type: array
+                    items:
+                        type: string
+                resolution:
+                    enum:
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_UNSPECIFIED
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_LOCAL_WINS
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_EXTERNAL_WINS
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_MANUAL_MERGE
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_IGNORED
+                    type: string
+                    format: enum
+        BatchResolveExternalSyncConflictsResponse:
+            type: object
+            properties:
+                conflicts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncConflict'
+                resolvedCount:
+                    type: integer
+                    format: int32
         BatchTagOp:
             type: object
             properties:
@@ -8451,6 +9161,34 @@ components:
             properties:
                 subscription:
                     $ref: '#/components/schemas/EventSubscription'
+        CreateExternalConnectionRequest:
+            required:
+                - provider
+                - name
+                - authType
+                - credential
+            type: object
+            properties:
+                provider:
+                    type: string
+                name:
+                    type: string
+                authType:
+                    type: string
+                credential:
+                    type: string
+                baseUrl:
+                    type: string
+                providerConfigJson:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                enabled:
+                    type: boolean
+                webhookSecret:
+                    type: string
         CreateGuardPolicyRequest:
             type: object
             properties:
@@ -9268,6 +10006,9 @@ components:
         DeleteDigestSubscriptionResponse:
             type: object
             properties: {}
+        DeleteExternalConnectionResponse:
+            type: object
+            properties: {}
         DeleteGdprSubjectRequest:
             type: object
             properties:
@@ -9449,6 +10190,13 @@ components:
                 Dimension is one enrichment axis the LLM populates for each row.
                  Per-tenant DimensionSet is open in count and closed in shape —
                  adding any new dim is a Settings edit, not a code change.
+        DiscoverExternalConnectionSchemaResponse:
+            type: object
+            properties:
+                schemas:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalObjectSchema'
         EmailConnConfig:
             type: object
             properties:
@@ -9864,6 +10612,47 @@ components:
                 retryAfterSeconds:
                     type: integer
                     format: int32
+        ExternalConnection:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                provider:
+                    type: string
+                name:
+                    type: string
+                enabled:
+                    type: boolean
+                status:
+                    type: string
+                authType:
+                    type: string
+                baseUrl:
+                    type: string
+                providerConfigJson:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                lastTestedAt:
+                    type: string
+                lastTestStatus:
+                    type: string
+                lastError:
+                    type: string
+                createdBy:
+                    type: string
+                updatedBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                webhookSecretConfigured:
+                    type: boolean
         ExternalDocs:
             type: object
             properties:
@@ -9876,6 +10665,398 @@ components:
                     items:
                         $ref: '#/components/schemas/NamedAny'
             description: Allows referencing an external resource for extended documentation.
+        ExternalObjectMapping:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                connectionId:
+                    type: string
+                localObjectType:
+                    type: string
+                externalObjectType:
+                    type: string
+                direction:
+                    enum:
+                        - EXTERNAL_SYNC_DIRECTION_UNSPECIFIED
+                        - EXTERNAL_SYNC_DIRECTION_PULL
+                        - EXTERNAL_SYNC_DIRECTION_PUSH
+                        - EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL
+                    type: string
+                    format: enum
+                fieldMappingJson:
+                    type: string
+                statusMappingJson:
+                    type: string
+                conflictPolicy:
+                    type: string
+                tombstonePolicy:
+                    type: string
+                enabled:
+                    type: boolean
+                mappingVersion:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ExternalObjectSchema:
+            type: object
+            properties:
+                type:
+                    type: string
+                fields:
+                    type: array
+                    items:
+                        type: string
+                requiredFields:
+                    type: array
+                    items:
+                        type: string
+                writableFields:
+                    type: array
+                    items:
+                        type: string
+        ExternalSyncAttempt:
+            type: object
+            properties:
+                id:
+                    type: string
+                runId:
+                    type: string
+                attemptNumber:
+                    type: integer
+                    format: int32
+                startedAt:
+                    type: string
+                finishedAt:
+                    type: string
+                result:
+                    type: string
+                httpStatus:
+                    type: integer
+                    format: int32
+                providerRequestId:
+                    type: string
+                retryAfter:
+                    type: string
+                errorKind:
+                    type: string
+                errorMessage:
+                    type: string
+        ExternalSyncConflict:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                mappingId:
+                    type: string
+                localObjectId:
+                    type: string
+                externalKey:
+                    type: string
+                conflictKind:
+                    type: string
+                status:
+                    type: string
+                localSnapshotJson:
+                    type: string
+                externalSnapshotJson:
+                    type: string
+                resolution:
+                    type: string
+                resolvedAt:
+                    type: string
+                resolvedBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ExternalSyncEvent:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
+                provider:
+                    type: string
+                eventType:
+                    type: string
+                externalEventId:
+                    type: string
+                dedupeKey:
+                    type: string
+                signatureStatus:
+                    enum:
+                        - EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_UNSPECIFIED
+                        - EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_VERIFIED
+                        - EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_FAILED
+                        - EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_NOT_REQUIRED
+                    type: string
+                    format: enum
+                status:
+                    enum:
+                        - EXTERNAL_SYNC_EVENT_STATUS_UNSPECIFIED
+                        - EXTERNAL_SYNC_EVENT_STATUS_RECEIVED
+                        - EXTERNAL_SYNC_EVENT_STATUS_REPLAYED
+                        - EXTERNAL_SYNC_EVENT_STATUS_IGNORED
+                        - EXTERNAL_SYNC_EVENT_STATUS_FAILED
+                    type: string
+                    format: enum
+                payloadDigest:
+                    type: string
+                normalizedPayloadJson:
+                    type: string
+                receivedAt:
+                    type: string
+                replayedAt:
+                    type: string
+                replayedBy:
+                    type: string
+                runId:
+                    type: string
+                failureReason:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ExternalSyncHealthResponse:
+            type: object
+            properties:
+                enabledConnections:
+                    type: integer
+                    format: int32
+                failingConnections:
+                    type: integer
+                    format: int32
+                staleConnections:
+                    type: integer
+                    format: int32
+                activeRuns:
+                    type: integer
+                    format: int32
+                retryableRuns:
+                    type: integer
+                    format: int32
+                deadRuns:
+                    type: integer
+                    format: int32
+                openConflicts:
+                    type: integer
+                    format: int32
+                newestSuccessfulRunAt:
+                    type: string
+                disabledConnections:
+                    type: integer
+                    format: int32
+                throttledRuns:
+                    type: integer
+                    format: int32
+                unauthorizedRuns:
+                    type: integer
+                    format: int32
+                providerUnavailableRuns:
+                    type: integer
+                    format: int32
+                delayedRetryRuns:
+                    type: integer
+                    format: int32
+                newestRetryAfter:
+                    type: string
+                degradedConnections:
+                    type: integer
+                    format: int32
+                quarantinedConnections:
+                    type: integer
+                    format: int32
+        ExternalSyncQualificationCheck:
+            type: object
+            properties:
+                name:
+                    type: string
+                status:
+                    enum:
+                        - EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_UNSPECIFIED
+                        - EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_OK
+                        - EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_WARNING
+                        - EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_FAILED
+                    type: string
+                    format: enum
+                summary:
+                    type: string
+                detailJson:
+                    type: string
+        ExternalSyncRecordFailure:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                runId:
+                    type: string
+                mappingId:
+                    type: string
+                operation:
+                    type: string
+                localObjectId:
+                    type: string
+                externalKey:
+                    type: string
+                failureKind:
+                    type: string
+                message:
+                    type: string
+                payloadDigest:
+                    type: string
+                retryMode:
+                    type: string
+                normalizedPayloadJson:
+                    type: string
+                retryable:
+                    type: boolean
+                resolvedAt:
+                    type: string
+                resolvedBy:
+                    type: string
+                createdAt:
+                    type: string
+        ExternalSyncRecordTimelineEntry:
+            type: object
+            properties:
+                kind:
+                    type: string
+                occurredAt:
+                    type: string
+                runId:
+                    type: string
+                status:
+                    type: string
+                operation:
+                    type: string
+                localObjectId:
+                    type: string
+                externalKey:
+                    type: string
+                summary:
+                    type: string
+                detailJson:
+                    type: string
+        ExternalSyncRecordTimelineResponse:
+            type: object
+            properties:
+                entries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncRecordTimelineEntry'
+        ExternalSyncRun:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
+                direction:
+                    enum:
+                        - EXTERNAL_SYNC_DIRECTION_UNSPECIFIED
+                        - EXTERNAL_SYNC_DIRECTION_PULL
+                        - EXTERNAL_SYNC_DIRECTION_PUSH
+                        - EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL
+                    type: string
+                    format: enum
+                trigger:
+                    enum:
+                        - EXTERNAL_SYNC_RUN_TRIGGER_UNSPECIFIED
+                        - EXTERNAL_SYNC_RUN_TRIGGER_MANUAL
+                        - EXTERNAL_SYNC_RUN_TRIGGER_SCHEDULE
+                        - EXTERNAL_SYNC_RUN_TRIGGER_RETRY
+                        - EXTERNAL_SYNC_RUN_TRIGGER_SYSTEM
+                        - EXTERNAL_SYNC_RUN_TRIGGER_WEBHOOK
+                        - EXTERNAL_SYNC_RUN_TRIGGER_BACKFILL
+                    type: string
+                    format: enum
+                status:
+                    enum:
+                        - EXTERNAL_SYNC_RUN_STATUS_UNSPECIFIED
+                        - EXTERNAL_SYNC_RUN_STATUS_QUEUED
+                        - EXTERNAL_SYNC_RUN_STATUS_RUNNING
+                        - EXTERNAL_SYNC_RUN_STATUS_SUCCEEDED
+                        - EXTERNAL_SYNC_RUN_STATUS_PARTIAL
+                        - EXTERNAL_SYNC_RUN_STATUS_FAILED
+                        - EXTERNAL_SYNC_RUN_STATUS_CANCELLED
+                        - EXTERNAL_SYNC_RUN_STATUS_DEAD
+                    type: string
+                    format: enum
+                attempts:
+                    type: integer
+                    format: int32
+                nextRetryAt:
+                    type: string
+                startedAt:
+                    type: string
+                finishedAt:
+                    type: string
+                cursorBeforeJson:
+                    type: string
+                cursorAfterJson:
+                    type: string
+                recordsSeen:
+                    type: integer
+                    format: int32
+                recordsChanged:
+                    type: integer
+                    format: int32
+                recordsFailed:
+                    type: integer
+                    format: int32
+                conflictsCreated:
+                    type: integer
+                    format: int32
+                errorKind:
+                    type: string
+                errorMessage:
+                    type: string
+                actorId:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                inFlight:
+                    type: boolean
+        ExternalSyncRunDetail:
+            type: object
+            properties:
+                run:
+                    $ref: '#/components/schemas/ExternalSyncRun'
+                attempts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncAttempt'
+                failures:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncRecordFailure'
+                conflicts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncConflict'
         Feedback:
             type: object
             properties:
@@ -10363,6 +11544,18 @@ components:
                     items:
                         $ref: '#/components/schemas/SuggestedRecommendation'
                     description: Actionable recommendations for high-confidence candidates.
+        GetExternalSyncRecordTimelineRequest:
+            type: object
+            properties:
+                mappingId:
+                    type: string
+                localObjectId:
+                    type: string
+                externalKey:
+                    type: string
+                limit:
+                    type: integer
+                    format: int32
         GetFeedbackStatsResponse:
             type: object
             properties:
@@ -11108,6 +12301,38 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ApiKey'
+        ListExternalConnectionsResponse:
+            type: object
+            properties:
+                connections:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalConnection'
+        ListExternalObjectMappingsResponse:
+            type: object
+            properties:
+                mappings:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalObjectMapping'
+        ListExternalSyncEventsResponse:
+            type: object
+            properties:
+                events:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncEvent'
+                nextBeforeId:
+                    type: string
+        ListExternalSyncRunsResponse:
+            type: object
+            properties:
+                runs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncRun'
+                nextBeforeId:
+                    type: string
         ListFeedbackResponse:
             type: object
             properties:
@@ -11771,6 +12996,28 @@ components:
                     type: string
                 promptPolicy:
                     $ref: '#/components/schemas/EnrichPromptPolicy'
+        PreviewExternalObjectMappingRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                fieldMappingJson:
+                    type: string
+                statusMappingJson:
+                    type: string
+        PreviewExternalObjectMappingResponse:
+            type: object
+            properties:
+                schema:
+                    $ref: '#/components/schemas/ExternalObjectSchema'
+                errors:
+                    type: array
+                    items:
+                        type: string
+                warnings:
+                    type: array
+                    items:
+                        type: string
         Project:
             type: object
             properties:
@@ -11847,6 +13094,22 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/Dimension'
                     description: The updated dimension with the new taxonomy value.
+        QualifyExternalConnectionRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        QualifyExternalConnectionResponse:
+            type: object
+            properties:
+                connectionId:
+                    type: string
+                ready:
+                    type: boolean
+                checks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncQualificationCheck'
         QualityAction:
             type: object
             properties:
@@ -12071,6 +13334,18 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/WorkflowTransition'
+        ReplayExternalSyncEventRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        ReplayExternalSyncEventResponse:
+            type: object
+            properties:
+                event:
+                    $ref: '#/components/schemas/ExternalSyncEvent'
+                run:
+                    $ref: '#/components/schemas/ExternalSyncRun'
         ReplyDraftEvent:
             type: object
             properties:
@@ -12284,6 +13559,37 @@ components:
                     $ref: '#/components/schemas/ReplySendHookDelivery'
                 latestProblem:
                     $ref: '#/components/schemas/ReplySendHookDelivery'
+        RequestExternalSyncBackfillRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                resetCursor:
+                    type: boolean
+        RequestExternalSyncBackfillResponse:
+            type: object
+            properties:
+                mapping:
+                    $ref: '#/components/schemas/ExternalObjectMapping'
+                run:
+                    $ref: '#/components/schemas/ExternalSyncRun'
+        RequestExternalSyncRunRequest:
+            required:
+                - connectionId
+            type: object
+            properties:
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
+                direction:
+                    enum:
+                        - EXTERNAL_SYNC_DIRECTION_UNSPECIFIED
+                        - EXTERNAL_SYNC_DIRECTION_PULL
+                        - EXTERNAL_SYNC_DIRECTION_PUSH
+                        - EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL
+                    type: string
+                    format: enum
         ResetEnrichmentRuntimeRequest:
             type: object
             properties:
@@ -12302,6 +13608,32 @@ components:
             properties:
                 runtime:
                     $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
+        ResetExternalSyncCursorRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        ResetExternalSyncCursorResponse:
+            type: object
+            properties:
+                mapping:
+                    $ref: '#/components/schemas/ExternalObjectMapping'
+                run:
+                    $ref: '#/components/schemas/ExternalSyncRun'
+        ResolveExternalSyncConflictRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                resolution:
+                    enum:
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_UNSPECIFIED
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_LOCAL_WINS
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_EXTERNAL_WINS
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_MANUAL_MERGE
+                        - EXTERNAL_SYNC_CONFLICT_RESOLUTION_IGNORED
+                    type: string
+                    format: enum
         ResolveGuardPolicyRequest:
             type: object
             properties:
@@ -12324,6 +13656,11 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/GuardRule'
+        ResumeExternalConnectionRequest:
+            type: object
+            properties:
+                id:
+                    type: string
         ResumeInboundSourceRequest:
             type: object
             properties:
@@ -12356,6 +13693,16 @@ components:
                     type: integer
                     format: int32
                 enrichmentNextRetryAt:
+                    type: string
+        RetryExternalSyncFailureRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        RetryExternalSyncRunRequest:
+            type: object
+            properties:
+                id:
                     type: string
         ReviewApprovalRequest:
             type: object
@@ -13064,6 +14411,20 @@ components:
                         type: string
                 remediationHint:
                     type: string
+        TestExternalConnectionRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        TestExternalConnectionResponse:
+            type: object
+            properties:
+                ok:
+                    type: boolean
+                error:
+                    type: string
+                latencyMs:
+                    type: string
         TestInboundConnectionRequest:
             required:
                 - channel
@@ -13289,6 +14650,50 @@ components:
             properties:
                 runtime:
                     $ref: '#/components/schemas/EnrichmentRuntimeReadModel'
+        UpdateExternalConnectionRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                enabled:
+                    type: boolean
+                credential:
+                    type: string
+                baseUrl:
+                    type: string
+                providerConfigJson:
+                    type: string
+                scopes:
+                    type: array
+                    items:
+                        type: string
+                webhookSecret:
+                    type: string
+        UpdateExternalObjectMappingRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                direction:
+                    enum:
+                        - EXTERNAL_SYNC_DIRECTION_UNSPECIFIED
+                        - EXTERNAL_SYNC_DIRECTION_PULL
+                        - EXTERNAL_SYNC_DIRECTION_PUSH
+                        - EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL
+                    type: string
+                    format: enum
+                fieldMappingJson:
+                    type: string
+                statusMappingJson:
+                    type: string
+                conflictPolicy:
+                    type: string
+                tombstonePolicy:
+                    type: string
+                enabled:
+                    type: boolean
         UpdateGuardPoliciesRequest:
             type: object
             properties:
@@ -13708,6 +15113,10 @@ tags:
          metadata-driven Dimension set (#10 → E3 proposal
          docs/proposals/2026/06/2026-06-07-flat-labels.md).
     - name: EnrichmentRuntimeService
+    - name: ExternalSyncService
+      description: |-
+        ExternalSyncService manages tenant-scoped external system connections and
+         the sync-run ledger that keeps Attune objects aligned with external issues.
     - name: FeedbackService
       description: |-
         FeedbackService is attune's feedback API. Today it exposes Ingest

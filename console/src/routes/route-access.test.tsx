@@ -10,6 +10,7 @@ import { Route as SecurityRoute } from '@/routes/_authed.administration.security
 import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
+import { Route as ExternalSyncRoute } from '@/routes/_authed.integrations.external-sync'
 import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
 import { Route as SettingsRoute } from '@/routes/_authed.settings'
 import { server } from '@/testing/mocks/server'
@@ -141,6 +142,50 @@ describe('route access guards', () => {
 
     mockMe('admin')
     expect(await callBeforeLoad(ReplySendHookRoute.options.beforeLoad)).toBeNull()
+  })
+
+  it('keeps external sync operational-only and preloads its console shell data', async () => {
+    mockMe('member')
+    const thrown = await callBeforeLoad(ExternalSyncRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+
+    mockMe('delegated_admin')
+    expect(await callBeforeLoad(ExternalSyncRoute.options.beforeLoad)).toBeNull()
+
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/external-sync/health', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          enabledConnections: 1,
+          failingConnections: 0,
+          staleConnections: 0,
+          activeRuns: 0,
+          retryableRuns: 0,
+          deadRuns: 0,
+          openConflicts: 0,
+          newestSuccessfulRunAt: '',
+        })
+      }),
+      http.get('/fb/v1/console/external-sync/connections', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ connections: [] })
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const loader = ExternalSyncRoute.options.loader as (args: {
+      context: { queryClient: QueryClient }
+    }) => Promise<unknown>
+
+    await expect(loader({ context: { queryClient } })).resolves.toBeUndefined()
+    expect(ExternalSyncRoute.options.component).toBeTypeOf('function')
+    expect(seenPaths).toEqual(
+      new Set(['/fb/v1/console/external-sync/health', '/fb/v1/console/external-sync/connections']),
+    )
   })
 
   it('maps legacy settings deep links to the first section a member can still access', async () => {

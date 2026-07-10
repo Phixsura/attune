@@ -42,6 +42,10 @@ import (
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/githubissue"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/lark"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/slack"
+
+	// #214 external sync providers self-register via init(); cmd/attune owns
+	// the production registry population point.
+	_ "github.com/Phixsura/attune/internal/externalsync/adapter/githubissue"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args
