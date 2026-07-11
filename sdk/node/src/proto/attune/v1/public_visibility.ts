@@ -89,10 +89,10 @@ export interface PublicVisibilityPolicy {
   showCommentCount: boolean;
   showSubmitterDisplay: boolean;
   hidePublicTimestamps: boolean;
-  portalSubmissionForm?: PortalSubmissionFormConfig | undefined;
   updatedBy: string;
   createdAt: string;
   updatedAt: string;
+  portalSubmissionForm?: PortalSubmissionFormConfig | undefined;
 }
 
 export interface GetPublicVisibilityPolicyRequest {

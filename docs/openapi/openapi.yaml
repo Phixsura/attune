@@ -14135,14 +14135,14 @@ components:
                     type: boolean
                 hidePublicTimestamps:
                     type: boolean
-                portalSubmissionForm:
-                    $ref: '#/components/schemas/PortalSubmissionFormConfig'
                 updatedBy:
                     type: string
                 createdAt:
                     type: string
                 updatedAt:
                     type: string
+                portalSubmissionForm:
+                    $ref: '#/components/schemas/PortalSubmissionFormConfig'
         QualifyExternalConnectionRequest:
             type: object
             properties:

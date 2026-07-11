@@ -155,10 +155,10 @@ message PublicVisibilityPolicy {
   bool show_comment_count = 15;
   bool show_submitter_display = 16;
   bool hide_public_timestamps = 17;
-  PortalSubmissionFormConfig portal_submission_form = 18;
-  string updated_by = 19;
-  string created_at = 20;
-  string updated_at = 21;
+  string updated_by = 18;
+  string created_at = 19;
+  string updated_at = 20;
+  PortalSubmissionFormConfig portal_submission_form = 21;
 }
 
 message GetPublicVisibilityPolicyRequest {}
