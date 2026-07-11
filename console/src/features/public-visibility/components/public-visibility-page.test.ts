@@ -233,7 +233,9 @@ describe('publicVisibilityPageTestables', () => {
       ),
     ).toBe('boolean')
     expect(
-      publicVisibilityPageTestables.portalSubmissionFieldKindName(99 as PortalSubmissionFieldKind),
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        99 as unknown as PortalSubmissionFieldKind,
+      ),
     ).toBe('text')
 
     expect(
