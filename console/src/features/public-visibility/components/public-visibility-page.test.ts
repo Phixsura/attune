@@ -196,6 +196,146 @@ describe('publicVisibilityPageTestables', () => {
     )
     expect(publicVisibilityPageTestables.messageOf('unknown')).toBe('failed')
   })
+
+  it('normalizes portal submission form configs and field kinds', () => {
+    const t = ((key: string) => key) as TFunction
+
+    expect(publicVisibilityPageTestables.defaultForm().portalSubmissionForm).toEqual(
+      publicVisibilityPageTestables.defaultPortalSubmissionForm(),
+    )
+    expect(publicVisibilityPageTestables.portalSubmissionFormFromPolicy(undefined)).toEqual(
+      publicVisibilityPageTestables.defaultPortalSubmissionForm(),
+    )
+
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT,
+      ),
+    ).toBe('text')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA,
+      ),
+    ).toBe('textarea')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+      ),
+    ).toBe('select')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+      ),
+    ).toBe('multiselect')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN,
+      ),
+    ).toBe('boolean')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(99 as PortalSubmissionFieldKind),
+    ).toBe('text')
+
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindLabel(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+        t,
+      ),
+    ).toBe('public_visibility.portal.field.kind_values.select')
+    expect(publicVisibilityPageTestables.portalSubmissionFieldKindOptions(t)).toEqual([
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT,
+        label: 'public_visibility.portal.field.kind_values.text',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA,
+        label: 'public_visibility.portal.field.kind_values.textarea',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+        label: 'public_visibility.portal.field.kind_values.select',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+        label: 'public_visibility.portal.field.kind_values.multiselect',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN,
+        label: 'public_visibility.portal.field.kind_values.boolean',
+      },
+    ])
+
+    const policyForm = publicVisibilityPageTestables.portalSubmissionFormFromPolicy({
+      headline: 'Portal title',
+      description: 'Portal description',
+      acknowledgement: 'Portal acknowledgement',
+      submitButtonLabel: 'Send it',
+      showPageUrl: false,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          placeholder: 'Choose a severity',
+          options: ['low', 'medium', 'high'],
+        },
+      ],
+    })
+    expect(policyForm).toEqual({
+      headline: 'Portal title',
+      description: 'Portal description',
+      acknowledgement: 'Portal acknowledgement',
+      submitButtonLabel: 'Send it',
+      showPageUrl: false,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          placeholder: 'Choose a severity',
+          options: ['low', 'medium', 'high'],
+        },
+      ],
+    })
+
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFormRequestFromForm({
+        headline: ' Portal title ',
+        description: ' Portal description ',
+        acknowledgement: ' Thanks ',
+        submitButtonLabel: ' Send it ',
+        showPageUrl: true,
+        fields: [
+          {
+            key: ' Severity ',
+            label: ' Severity ',
+            kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+            required: true,
+            placeholder: ' Choose a severity ',
+            options: [' alpha ', ' ', ' beta '],
+          },
+        ],
+      }),
+    ).toEqual({
+      headline: 'Portal title',
+      description: 'Portal description',
+      acknowledgement: 'Thanks',
+      submitButtonLabel: 'Send it',
+      showPageUrl: true,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+          required: true,
+          placeholder: 'Choose a severity',
+          options: ['alpha', 'beta'],
+        },
+      ],
+    })
+  })
 })
 
 function publicationWithModeration(moderation: ModerationSubject): PublicRequestPublication {

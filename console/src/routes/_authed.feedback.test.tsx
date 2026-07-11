@@ -1,7 +1,11 @@
 import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { Route as FeedbackShellRoute } from '@/routes/_authed.feedback'
+import { Route as FeedbackClustersRoute } from '@/routes/_authed.feedback.clusters'
 import { Route as FeedbackIndexRoute } from '@/routes/_authed.feedback.index'
+import { Route as PortalInboxRoute } from '@/routes/_authed.feedback.portal'
+import { Route as TerminalFailuresRoute } from '@/routes/_authed.feedback.terminal-failures'
 import { FeedbackRoutePage } from '@/routes/-feedback-route-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
@@ -141,6 +145,13 @@ describe('_authed.feedback route — user flow smoke', () => {
       confidence_lte: 0.55,
       quality_signal: 'low_confidence',
     })
+  })
+
+  it('wires the feedback route shells to the shared pages', () => {
+    expect(FeedbackShellRoute.options.component).toBeTypeOf('function')
+    expect(FeedbackClustersRoute.options.component).toBeTypeOf('function')
+    expect(PortalInboxRoute.options.component).toBeTypeOf('function')
+    expect(TerminalFailuresRoute.options.component).toBeTypeOf('function')
   })
 
   it('renders title + table row from the list query, opens sheet with detail on row click', async () => {

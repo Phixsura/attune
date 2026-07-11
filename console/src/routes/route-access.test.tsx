@@ -121,6 +121,7 @@ describe('route access guards', () => {
     }) => Promise<unknown>
 
     await expect(loader({ context: { queryClient } })).resolves.toBeUndefined()
+    expect(PublicVisibilityRoute.options.component).toBeTypeOf('function')
     expect(seenPaths).toEqual(new Set(['/fb/v1/console/public-visibility/moderation?limit=50']))
   })
 
