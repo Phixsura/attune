@@ -73,8 +73,8 @@ test.describe('Public visibility browser behavior', () => {
     await gotoConsoleRoute(page, '/integrations/public-visibility')
 
     await expect(page.getByRole('heading', { level: 1, name: zh.publicVisibility })).toBeVisible()
-    await expect(page.getByText(zh.policyTitle)).toBeVisible()
-    await expect(page.getByText(zh.profileTitle)).toBeVisible()
+    await expect(page.getByText(zh.policyTitle, { exact: true })).toBeVisible()
+    await expect(page.getByText(zh.profileTitle, { exact: true })).toBeVisible()
     await expect(queueButton(page, zh.pending)).toHaveText(`${zh.pending} (2)`)
     await expect(queueButton(page, zh.approved)).toHaveText(`${zh.approved} (1)`)
     await expect(queueButton(page, zh.blocked)).toHaveText(`${zh.blocked} (1)`)
@@ -192,8 +192,8 @@ test.describe('Public visibility browser behavior', () => {
     await gotoConsoleRoute(page, '/integrations/public-visibility')
 
     await expect(page.getByRole('heading', { level: 1, name: zh.publicVisibility })).toBeVisible()
-    await expect(page.getByText(zh.policyTitle)).toHaveCount(0)
-    await expect(page.getByText(zh.profileTitle)).toHaveCount(0)
+    await expect(page.getByText(zh.policyTitle, { exact: true })).toHaveCount(0)
+    await expect(page.getByText(zh.profileTitle, { exact: true })).toHaveCount(0)
     await expect(moderationRow(page, 'profile-approve')).toBeVisible()
     await expect(
       moderationRow(page, 'profile-approve').getByRole('button', { name: zh.approve }),
