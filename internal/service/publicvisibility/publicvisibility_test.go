@@ -153,6 +153,23 @@ func TestNormalizePolicyInput(t *testing.T) {
 		DefaultRequestState:   repo.ModerationStateApproved,
 		DefaultCommentState:   repo.ModerationStatePending,
 		SubmitterIdentityMode: repo.IdentityModeDisplayName,
+		PortalSubmissionForm: repo.PortalSubmissionForm{
+			Headline:          " Share feedback ",
+			Description:       " Tell us what is broken, missing, or worth improving. ",
+			Acknowledgement:   " Thanks. We will review your submission. ",
+			SubmitButtonLabel: " Submit feedback ",
+			ShowPageURL:       true,
+			Fields: []repo.PortalSubmissionField{
+				{
+					Key:         " severity ",
+					Label:       " Severity ",
+					Kind:        repo.PortalSubmissionFieldKindSelect,
+					Required:    true,
+					Options:     []string{" low ", " medium ", " high "},
+					Placeholder: " Choose a severity ",
+				},
+			},
+		},
 		Actor: auditlogsvc.Actor{
 			ID:   uuid.NewString(),
 			Type: "admin",
@@ -164,6 +181,11 @@ func TestNormalizePolicyInput(t *testing.T) {
 	}
 	if policy.TenantID != valid.TenantID || policy.UpdatedBy != valid.Actor.ID {
 		t.Fatalf("normalizePolicyInput() = %#v, want tenant and actor normalized", policy)
+	}
+	if policy.PortalSubmissionForm.Headline != "Share feedback" ||
+		policy.PortalSubmissionForm.Fields[0].Key != "severity" ||
+		policy.PortalSubmissionForm.Fields[0].Options[0] != "low" {
+		t.Fatalf("normalizePolicyInput() portal form = %#v, want normalized portal form", policy.PortalSubmissionForm)
 	}
 
 	invalid := valid
@@ -212,6 +234,78 @@ func TestNormalizeRequestProfileInput(t *testing.T) {
 			tt.mutate(input)
 			if _, err := normalizeRequestProfileInput(ptrext.Indirect(input)); !errors.Is(err, ErrValidation) {
 				t.Fatalf("normalizeRequestProfileInput() error = %v, want %v", err, ErrValidation)
+			}
+		})
+	}
+}
+
+func TestNormalizePortalSubmissionForm(t *testing.T) {
+	t.Parallel()
+
+	form, err := normalizePortalSubmissionForm(repo.PortalSubmissionForm{
+		Headline:          " Share feedback ",
+		Description:       " Tell us what is broken, missing, or worth improving. ",
+		Acknowledgement:   " Thanks. We will review your submission. ",
+		SubmitButtonLabel: " Submit feedback ",
+		ShowPageURL:       true,
+		Fields: []repo.PortalSubmissionField{
+			{
+				Key:         " severity ",
+				Label:       " Severity ",
+				Kind:        repo.PortalSubmissionFieldKindSelect,
+				Required:    true,
+				Options:     []string{" low ", " medium ", " high "},
+				Placeholder: " Choose a severity ",
+			},
+			{
+				Key:         "notes",
+				Label:       "Notes",
+				Kind:        repo.PortalSubmissionFieldKindTextarea,
+				Placeholder: "Optional notes",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizePortalSubmissionForm() unexpected error: %v", err)
+	}
+	if form.Headline != "Share feedback" || form.Fields[0].Key != "severity" ||
+		form.Fields[0].Options[2] != "high" {
+		t.Fatalf("normalizePortalSubmissionForm() = %#v, want normalized portal form", form)
+	}
+
+	tests := []struct {
+		name string
+		form repo.PortalSubmissionForm
+	}{
+		{
+			name: "reserved key",
+			form: repo.PortalSubmissionForm{Fields: []repo.PortalSubmissionField{{
+				Key:   "title",
+				Label: "Title",
+				Kind:  repo.PortalSubmissionFieldKindText,
+			}}},
+		},
+		{
+			name: "duplicate key",
+			form: repo.PortalSubmissionForm{Fields: []repo.PortalSubmissionField{
+				{Key: "severity", Label: "Severity", Kind: repo.PortalSubmissionFieldKindText},
+				{Key: "severity", Label: "Severity 2", Kind: repo.PortalSubmissionFieldKindText},
+			}},
+		},
+		{
+			name: "invalid options on text field",
+			form: repo.PortalSubmissionForm{Fields: []repo.PortalSubmissionField{{
+				Key:     "severity",
+				Label:   "Severity",
+				Kind:    repo.PortalSubmissionFieldKindText,
+				Options: []string{"bad"},
+			}}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := normalizePortalSubmissionForm(tt.form); !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizePortalSubmissionForm() error = %v, want %v", err, ErrValidation)
 			}
 		})
 	}
@@ -489,6 +583,9 @@ func TestDefaultPolicy(t *testing.T) {
 	}
 	if !policy.ShowVoteCount || !policy.ShowCommentCount || policy.ShowSubmitterDisplay {
 		t.Fatalf("defaultPolicy() = %#v, want conservative visibility defaults", policy)
+	}
+	if policy.PortalSubmissionForm.Headline != "Send feedback" || !policy.PortalSubmissionForm.ShowPageURL {
+		t.Fatalf("defaultPolicy() = %#v, want default portal submission form", policy)
 	}
 }
 

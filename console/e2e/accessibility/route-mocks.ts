@@ -50,6 +50,7 @@ import {
   consoleA11yModerationSubjects,
   consoleA11yOutboxDeliveries,
   consoleA11yOutboxRetry,
+  consoleA11yPortalFeedbackDetail,
   consoleA11yPublicVisibilityPolicy,
   consoleA11yReplyDraftWorkflow,
   consoleA11yReplySendHook,
@@ -113,6 +114,7 @@ export async function installConsoleApiMocks(
         consoleA11yReplyDraftWorkflow,
       ),
       'feedback-201': clone(consoleA11yTerminalFeedbackDetail),
+      'feedback-301': clone(consoleA11yPortalFeedbackDetail),
     },
     replyDraftWorkflow: clone(consoleA11yReplyDraftWorkflow),
     replySendHook: clone(consoleA11yReplySendHook),
@@ -188,7 +190,8 @@ async function handleRoute(
 
   if (method === 'GET' && path === '/feedback') {
     const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
-    await fulfillJson(route, feedbackListResponse(state, terminalOnly))
+    const source = url.searchParams.get('source')
+    await fulfillJson(route, feedbackListResponse(state, terminalOnly, source))
     return true
   }
   if (method === 'GET' && path === '/feedback/stats') {
@@ -714,12 +717,25 @@ function syncReplyDraftFeedbackDetail(state: ApiMockState) {
   )
 }
 
-function feedbackListResponse(state: ApiMockState, terminalOnly: boolean) {
-  const items = terminalOnly
-    ? [state.feedbackDetails['feedback-201']]
-    : [state.feedbackDetails['feedback-101'], state.feedbackDetails['feedback-201']]
+function feedbackListResponse(state: ApiMockState, terminalOnly: boolean, source?: string | null) {
+  const items = [
+    state.feedbackDetails['feedback-101'],
+    state.feedbackDetails['feedback-201'],
+    state.feedbackDetails['feedback-301'],
+  ].filter((item): item is FeedbackDetail => Boolean(item))
+
+  const scopedItems = source
+    ? items.filter((item) => item.source === source)
+    : items.filter((item) => item.source !== 'portal')
+
+  const filteredItems = terminalOnly
+    ? scopedItems.filter(
+        (item) => item.enrichmentStatus === 'failed' && (item.enrichmentAttempts ?? 0) >= 5,
+      )
+    : scopedItems
+
   return {
-    items: items.map((item) => clone(item)),
+    items: filteredItems.map((item) => clone(item)),
   }
 }
 

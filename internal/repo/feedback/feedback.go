@@ -35,6 +35,10 @@ type FeedbackRepo struct {
 	pool *pgxpool.Pool
 }
 
+type queryer interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 const (
 	maxEnrichmentAttempts      = 5
 	initialEnrichmentBackoff   = time.Minute
@@ -54,37 +58,18 @@ func (r *FeedbackRepo) Insert(
 	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
 	in domain.IngestInput,
 ) (int64, error) {
-	const where = "repo.FeedbackRepo.Insert"
-	sourceMetaJSON := []byte("{}")
-	if in.SourceMeta != nil {
-		b, err := json.Marshal(in.SourceMeta)
-		if err != nil {
-			logext.Errorf(ctx, "[%s] marshal source_meta failed,tenant_id:%s,err:%+v",
-				where, tenantID, err.Error())
-			return 0, fmt.Errorf("marshal source_meta: %w", err)
-		}
-		sourceMetaJSON = b
-	}
-	inboundSourceID := inboundSourceIDFromMeta(in.SourceMeta)
-	var id int64
-	err := r.pool.QueryRow(
-		ctx, `
-		INSERT INTO user_feedback
-		 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id)
-		VALUES
-		 ($1, $2, $3, $4, $5, 'other', $6, $7, '[]'::jsonb, $8, $9,
-		  (SELECT id FROM inbound_sources WHERE id = $10 AND tenant_id = $2 AND channel = $8),
-		  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1))
-		RETURNING id`,
-		userID, tenantID, subjectKey, subjectDisplay, subjectHash,
-		in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
-	).Scan(&id)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
-			where, tenantID, in.Source, err.Error())
-		return 0, fmt.Errorf("insert feedback: %w", err)
-	}
-	return id, nil
+	return insertFeedback(ctx, r.pool, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
+}
+
+// InsertTx is the transaction-scoped variant of Insert. Use it when the caller
+// needs the feedback row and follow-up writes to commit atomically.
+func (r *FeedbackRepo) InsertTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+	in domain.IngestInput,
+) (int64, error) {
+	return insertFeedback(ctx, tx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
 }
 
 // InsertIdempotent inserts the row keyed by in.IdempotencyKey, deduping under
@@ -101,73 +86,18 @@ func (r *FeedbackRepo) InsertIdempotent(
 	in domain.IngestInput,
 	idemHash []byte,
 ) (int64, bool, error) {
-	const where = "repo.FeedbackRepo.InsertIdempotent"
-	sourceMetaJSON := []byte("{}")
-	if in.SourceMeta != nil {
-		b, err := json.Marshal(in.SourceMeta)
-		if err != nil {
-			logext.Errorf(ctx, "[%s] marshal source_meta failed,tenant_id:%s,err:%+v",
-				where, tenantID, err.Error())
-			return 0, false, fmt.Errorf("marshal source_meta: %w", err)
-		}
-		sourceMetaJSON = b
-	}
-	inboundSourceID := inboundSourceIDFromMeta(in.SourceMeta)
+	return insertFeedbackIdempotent(ctx, r.pool, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in, idemHash)
+}
 
-	// Bounded retry: the read-back after a conflict can race with a concurrent
-	// delete of the conflicting row (e.g. GDPR erasure), which frees the key —
-	// re-attempt the insert rather than misreporting a vanished row.
-	const maxAttempts = 3
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		var id int64
-		err := r.pool.QueryRow(
-			ctx, `
-			INSERT INTO user_feedback
-			 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id, idempotency_key, idempotency_hash)
-			VALUES
-			 ($1, $2, $3, $4, $5, 'other', $6, $7, '[]'::jsonb, $8, $9,
-			  (SELECT id FROM inbound_sources WHERE id = $10 AND tenant_id = $2 AND channel = $8),
-			  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1),
-			  $11, $12)
-			ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
-			DO NOTHING
-			RETURNING id`,
-			userID, tenantID, subjectKey, subjectDisplay, subjectHash,
-			in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
-			in.IdempotencyKey, idemHash,
-		).Scan(&id)
-		if err == nil {
-			return id, false, nil // fresh insert
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
-				where, tenantID, in.Source, err.Error())
-			return 0, false, fmt.Errorf("insert feedback (idempotent): %w", err)
-		}
-
-		// Conflict: a row with this key already exists. Read it back and compare
-		// the request fingerprint to tell a true replay from a key reuse.
-		var existingHash []byte
-		err = r.pool.QueryRow(
-			ctx, `
-			SELECT id, idempotency_hash FROM user_feedback
-			WHERE tenant_id = $1 AND idempotency_key = $2`,
-			tenantID, in.IdempotencyKey,
-		).Scan(&id, &existingHash)
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue // conflicting row vanished between insert and read — retry
-		}
-		if err != nil {
-			logext.Errorf(ctx, "[%s] read existing failed,tenant_id:%s,err:%+v",
-				where, tenantID, err.Error())
-			return 0, false, fmt.Errorf("read idempotent feedback: %w", err)
-		}
-		if subtle.ConstantTimeCompare(existingHash, idemHash) != 1 {
-			return 0, false, ErrIdempotencyConflict
-		}
-		return id, true, nil // replay → existing row, no new insert
-	}
-	return 0, false, fmt.Errorf("insert feedback (idempotent): key contention exceeded %d attempts,tenant_id:%s", maxAttempts, tenantID)
+// InsertIdempotentTx is the transaction-scoped variant of InsertIdempotent.
+func (r *FeedbackRepo) InsertIdempotentTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+	in domain.IngestInput,
+	idemHash []byte,
+) (int64, bool, error) {
+	return insertFeedbackIdempotent(ctx, tx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in, idemHash)
 }
 
 // PurgeExpiredIdempotencyKeys clears idempotency_key/idempotency_hash on rows
@@ -189,6 +119,136 @@ func (r *FeedbackRepo) PurgeExpiredIdempotencyKeys(ctx context.Context, retentio
 		return 0, fmt.Errorf("purge idempotency keys: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+func insertFeedback(
+	ctx context.Context,
+	db queryer,
+	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+	in domain.IngestInput,
+) (int64, error) {
+	const where = "repo.FeedbackRepo.Insert"
+	sourceMetaJSON, err := marshalSourceMeta(ctx, where, tenantID, in.SourceMeta)
+	if err != nil {
+		return 0, err
+	}
+	inboundSourceID := inboundSourceIDFromMeta(in.SourceMeta)
+	var id int64
+	err = db.QueryRow(
+		ctx, `
+		INSERT INTO user_feedback
+		 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id)
+		VALUES
+		 ($1, $2, $3, $4, $5, $6, $7, $8, '[]'::jsonb, $9, $10,
+		  (SELECT id FROM inbound_sources WHERE id = $11 AND tenant_id = $2 AND channel = $9),
+		  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1))
+		RETURNING id`,
+		userID, tenantID, subjectKey, subjectDisplay, subjectHash, feedbackType(in),
+		in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
+	).Scan(&id)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
+			where, tenantID, in.Source, err.Error())
+		return 0, fmt.Errorf("insert feedback: %w", err)
+	}
+	return id, nil
+}
+
+func insertFeedbackIdempotent(
+	ctx context.Context,
+	db queryer,
+	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+	in domain.IngestInput,
+	idemHash []byte,
+) (int64, bool, error) {
+	const where = "repo.FeedbackRepo.InsertIdempotent"
+	sourceMetaJSON, err := marshalSourceMeta(ctx, where, tenantID, in.SourceMeta)
+	if err != nil {
+		return 0, false, err
+	}
+	inboundSourceID := inboundSourceIDFromMeta(in.SourceMeta)
+
+	// Bounded retry: the read-back after a conflict can race with a concurrent
+	// delete of the conflicting row (e.g. GDPR erasure), which frees the key —
+	// re-attempt the insert rather than misreporting a vanished row.
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var id int64
+		err := db.QueryRow(
+			ctx, `
+			INSERT INTO user_feedback
+			 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id, idempotency_key, idempotency_hash)
+			VALUES
+			 ($1, $2, $3, $4, $5, $6, $7, $8, '[]'::jsonb, $9, $10,
+			  (SELECT id FROM inbound_sources WHERE id = $11 AND tenant_id = $2 AND channel = $9),
+			  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1),
+			  $12, $13)
+			ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
+			DO NOTHING
+			RETURNING id`,
+			userID, tenantID, subjectKey, subjectDisplay, subjectHash, feedbackType(in),
+			in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
+			in.IdempotencyKey, idemHash,
+		).Scan(&id)
+		if err == nil {
+			return id, false, nil // fresh insert
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
+				where, tenantID, in.Source, err.Error())
+			return 0, false, fmt.Errorf("insert feedback (idempotent): %w", err)
+		}
+
+		// Conflict: a row with this key already exists. Read it back and compare
+		// the request fingerprint to tell a true replay from a key reuse.
+		var existingHash []byte
+		err = db.QueryRow(
+			ctx, `
+			SELECT id, idempotency_hash FROM user_feedback
+			WHERE tenant_id = $1 AND idempotency_key = $2`,
+			tenantID, in.IdempotencyKey,
+		).Scan(&id, &existingHash)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue // conflicting row vanished between insert and read — retry
+		}
+		if err != nil {
+			logext.Errorf(ctx, "[%s] read existing failed,tenant_id:%s,err:%+v",
+				where, tenantID, err.Error())
+			return 0, false, fmt.Errorf("read idempotent feedback: %w", err)
+		}
+		if subtle.ConstantTimeCompare(existingHash, idemHash) != 1 {
+			return 0, false, ErrIdempotencyConflict
+		}
+		return id, true, nil // replay → existing row, no new insert
+	}
+	return 0, false, fmt.Errorf("insert feedback (idempotent): key contention exceeded %d attempts,tenant_id:%s", maxAttempts, tenantID)
+}
+
+func marshalSourceMeta(
+	ctx context.Context,
+	where string,
+	tenantID string,
+	sourceMeta map[string]any,
+) ([]byte, error) {
+	sourceMetaJSON := []byte("{}")
+	if sourceMeta == nil {
+		return sourceMetaJSON, nil
+	}
+	b, err := json.Marshal(sourceMeta)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] marshal source_meta failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return nil, fmt.Errorf("marshal source_meta: %w", err)
+	}
+	return b, nil
+}
+
+func feedbackType(in domain.IngestInput) string {
+	kind := strings.ToLower(strings.TrimSpace(in.Type))
+	if kind == "" {
+		return "other"
+	}
+	return kind
 }
 
 // TryClaim atomically transitions a row into 'enriching' if it's eligible:

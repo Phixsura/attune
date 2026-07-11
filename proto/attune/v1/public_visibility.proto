@@ -4,6 +4,7 @@ package attune.v1;
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
 
 service PublicVisibilityService {
   rpc GetPublicVisibilityPolicy(GetPublicVisibilityPolicyRequest) returns (PublicVisibilityPolicy) {
@@ -60,6 +61,15 @@ service PublicVisibilityService {
 }
 
 service PortalService {
+  rpc GetPublicSubmissionConfig(GetPublicSubmissionConfigRequest) returns (PortalSubmissionConfig) {
+    option (google.api.http) = {get: "/v1/portal/{tenant_slug}/submission-config"};
+  }
+  rpc CreatePublicSubmission(CreatePublicSubmissionRequest) returns (CreatePublicSubmissionResponse) {
+    option (google.api.http) = {
+      post: "/v1/portal/{tenant_slug}/submissions"
+      body: "*"
+    };
+  }
   rpc ListPublicCustomerRequests(ListPublicCustomerRequestsRequest) returns (ListPublicCustomerRequestsResponse) {
     option (google.api.http) = {get: "/v1/portal/{tenant_slug}/requests"};
   }
@@ -111,6 +121,22 @@ enum PublicWriteMode {
   PUBLIC_WRITE_MODE_IDENTIFIED = 3;
 }
 
+enum PortalSubmissionKind {
+  PORTAL_SUBMISSION_KIND_UNSPECIFIED = 0;
+  PORTAL_SUBMISSION_KIND_REQUEST = 1;
+  PORTAL_SUBMISSION_KIND_BUG = 2;
+  PORTAL_SUBMISSION_KIND_GENERAL = 3;
+}
+
+enum PortalSubmissionFieldKind {
+  PORTAL_SUBMISSION_FIELD_KIND_UNSPECIFIED = 0;
+  PORTAL_SUBMISSION_FIELD_KIND_TEXT = 1;
+  PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA = 2;
+  PORTAL_SUBMISSION_FIELD_KIND_SELECT = 3;
+  PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT = 4;
+  PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN = 5;
+}
+
 message PublicVisibilityPolicy {
   string tenant_id = 1;
   PublicAccessMode portal_access_mode = 2;
@@ -129,9 +155,10 @@ message PublicVisibilityPolicy {
   bool show_comment_count = 15;
   bool show_submitter_display = 16;
   bool hide_public_timestamps = 17;
-  string updated_by = 18;
-  string created_at = 19;
-  string updated_at = 20;
+  PortalSubmissionFormConfig portal_submission_form = 18;
+  string updated_by = 19;
+  string created_at = 20;
+  string updated_at = 21;
 }
 
 message GetPublicVisibilityPolicyRequest {}
@@ -153,6 +180,60 @@ message UpdatePublicVisibilityPolicyRequest {
   bool show_comment_count = 14;
   bool show_submitter_display = 15;
   bool hide_public_timestamps = 16;
+  PortalSubmissionFormConfig portal_submission_form = 17;
+}
+
+message PortalSubmissionField {
+  string key = 1;
+  string label = 2;
+  PortalSubmissionFieldKind kind = 3;
+  bool required = 4;
+  repeated string options = 5;
+  string placeholder = 6;
+}
+
+message PortalSubmissionFormConfig {
+  string headline = 1;
+  string description = 2;
+  string acknowledgement = 3;
+  string submit_button_label = 4;
+  bool show_page_url = 5;
+  repeated PortalSubmissionField fields = 6;
+}
+
+message PortalSubmissionConfig {
+  string tenant_id = 1;
+  string tenant_slug = 2;
+  string tenant_name = 3;
+  PublicAccessMode portal_access_mode = 4;
+  PublicWriteMode submission_write_mode = 5;
+  PublicIdentityMode submitter_identity_mode = 6;
+  PortalSubmissionFormConfig form = 7;
+  bool can_submit = 8;
+}
+
+message GetPublicSubmissionConfigRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message CreatePublicSubmissionRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  PortalSubmissionKind kind = 2 [(google.api.field_behavior) = REQUIRED];
+  string title = 3 [(google.api.field_behavior) = REQUIRED];
+  string details = 4 [(google.api.field_behavior) = REQUIRED];
+  string page_url = 5;
+  string display_name = 6;
+  string organization = 7;
+  google.protobuf.Struct custom_fields = 8;
+  string idempotency_key = 9;
+  string honeypot = 10;
+}
+
+message CreatePublicSubmissionResponse {
+  string submission_id = 1;
+  PortalSubmissionKind kind = 2;
+  ModerationState moderation_state = 3;
+  string acknowledgement = 4;
 }
 
 message ListModerationSubjectsRequest {

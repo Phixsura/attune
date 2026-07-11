@@ -7,6 +7,7 @@ import type {
 } from '@/proto/attune/v1/public_visibility'
 import {
   ModerationState,
+  PortalSubmissionFieldKind,
   PublicAccessMode,
   PublicIdentityMode,
   PublicSurface,
@@ -60,7 +61,8 @@ describe('publicVisibilityPageTestables', () => {
 
   it('maps policy and profile records into editable form payloads', () => {
     const policy = policyFixture()
-    expect(publicVisibilityPageTestables.formFromPolicy(policy)).toMatchObject({
+    const policyForm = publicVisibilityPageTestables.formFromPolicy(policy)
+    expect(policyForm).toMatchObject({
       portalAccessMode: PublicAccessMode.PUBLIC_ACCESS_MODE_PUBLIC,
       searchIndexingEnabled: true,
       requestsEnabled: true,
@@ -68,8 +70,43 @@ describe('publicVisibilityPageTestables', () => {
       defaultRequestState: ModerationState.MODERATION_STATE_PENDING,
       submitterIdentityMode: PublicIdentityMode.PUBLIC_IDENTITY_MODE_DISPLAY_NAME,
       showSubmitterDisplay: true,
+      portalSubmissionForm: {
+        headline: 'Share feedback',
+        description: 'Tell us what is broken, missing, or worth improving.',
+        acknowledgement: 'Thanks. We will review your submission.',
+        submitButtonLabel: 'Submit feedback',
+        showPageUrl: true,
+        fields: [
+          {
+            key: 'severity',
+            label: 'Severity',
+            kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+            required: true,
+            placeholder: 'Choose a severity',
+            options: ['low', 'medium', 'high'],
+          },
+        ],
+      },
     })
-    expect(publicVisibilityPageTestables.policyRequestFromForm({ ...policy })).toEqual(policy)
+    expect(publicVisibilityPageTestables.policyRequestFromForm(policyForm)).toMatchObject({
+      portalAccessMode: policy.portalAccessMode,
+      searchIndexingEnabled: policy.searchIndexingEnabled,
+      requestsEnabled: policy.requestsEnabled,
+      commentsEnabled: policy.commentsEnabled,
+      roadmapEnabled: policy.roadmapEnabled,
+      changelogEnabled: policy.changelogEnabled,
+      submissionWriteMode: policy.submissionWriteMode,
+      commentWriteMode: policy.commentWriteMode,
+      voteWriteMode: policy.voteWriteMode,
+      defaultRequestState: policy.defaultRequestState,
+      defaultCommentState: policy.defaultCommentState,
+      submitterIdentityMode: policy.submitterIdentityMode,
+      showVoteCount: policy.showVoteCount,
+      showCommentCount: policy.showCommentCount,
+      showSubmitterDisplay: policy.showSubmitterDisplay,
+      hidePublicTimestamps: policy.hidePublicTimestamps,
+      portalSubmissionForm: policyForm.portalSubmissionForm,
+    })
 
     const form = publicVisibilityPageTestables.profileFormFromPublication(
       publicationWithModeration(
@@ -90,6 +127,14 @@ describe('publicVisibilityPageTestables', () => {
         'r-2',
       ),
     ).toEqual({ ...publicVisibilityPageTestables.defaultProfileForm(), requestId: 'r-2' })
+    expect(publicVisibilityPageTestables.defaultPortalSubmissionForm()).toEqual({
+      headline: 'Send feedback',
+      description: 'Share bugs, ideas, or anything blocking your work.',
+      acknowledgement: 'Thanks. We will review your submission.',
+      submitButtonLabel: 'Submit feedback',
+      showPageUrl: true,
+      fields: [],
+    })
     expect(
       publicVisibilityPageTestables.profileRequestFromForm({
         ...publicVisibilityPageTestables.defaultProfileForm(),
@@ -213,6 +258,23 @@ function policyFixture(): PublicVisibilityPolicy {
     showCommentCount: false,
     showSubmitterDisplay: true,
     hidePublicTimestamps: false,
+    portalSubmissionForm: {
+      headline: 'Share feedback',
+      description: 'Tell us what is broken, missing, or worth improving.',
+      acknowledgement: 'Thanks. We will review your submission.',
+      submitButtonLabel: 'Submit feedback',
+      showPageUrl: true,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          options: ['low', 'medium', 'high'],
+          placeholder: 'Choose a severity',
+        },
+      ],
+    },
     updatedBy: 'admin-1',
     createdAt: '2026-07-10T00:00:00Z',
     updatedAt: '2026-07-10T00:00:00Z',

@@ -43,10 +43,11 @@ const MaxContentLen = 5000
 // resolver all keep theirs private). Read it via IsReservedSource (membership)
 // or CoreSources (a defensive clone).
 var coreSources = map[string]string{
-	"api":   "API client",
-	"web":   "Web Widget",
-	"mcp":   "MCP",
-	"other": "Other",
+	"api":    "API client",
+	"web":    "Web Widget",
+	"mcp":    "MCP",
+	"other":  "Other",
+	"portal": "Portal",
 }
 
 // CoreSources returns a copy of the reserved core source→label map for the
@@ -159,6 +160,7 @@ func SourceDisplayName(source string) string {
 type IngestInput struct {
 	Content    string         `json:"content"`
 	Source     string         `json:"source"`
+	Type       string         `json:"type,omitempty"`
 	SourceUser string         `json:"sourceUser,omitempty"`
 	SourceMeta map[string]any `json:"sourceMeta,omitempty"`
 	PageURL    string         `json:"pageUrl,omitempty"`

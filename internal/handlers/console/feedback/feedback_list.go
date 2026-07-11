@@ -19,6 +19,8 @@ var listFeedbackReservedQuery = map[string]struct{}{
 	"cursor":               {},
 	"limit":                {},
 	"q":                    {},
+	"source":               {},
+	"type":                 {},
 	"urgent":               {},
 	"tag":                  {},
 	"workflow_state":       {},
@@ -39,6 +41,8 @@ func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 	req.Cursor = queryStr(q, "cursor")
 	req.Limit = queryInt32(q, "limit")
 	req.Q = queryStr(q, "q")
+	req.Source = queryStr(q, "source")
+	req.Type = queryStr(q, "type")
 	req.Urgent = queryBool(q, "urgent")
 	req.TagId = queryStr(q, "tag")
 	req.WorkflowStateId = queryStr(q, "workflow_state")

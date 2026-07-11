@@ -152,11 +152,12 @@ func hashIngest(tenantID string, keyID uuid.UUID, in domain.IngestInput) []byte 
 		TenantID   string         `json:"t"`
 		KeyID      string         `json:"k"`
 		Content    string         `json:"c"`
+		Type       string         `json:"y"`
 		Source     string         `json:"s"`
 		SourceUser string         `json:"u"`
 		PageURL    string         `json:"p"`
 		SourceMeta map[string]any `json:"m"`
-	}{tenantID, keyID.String(), in.Content, in.Source, in.SourceUser, in.PageURL, in.SourceMeta}
+	}{tenantID, keyID.String(), in.Content, in.Type, in.Source, in.SourceUser, in.PageURL, in.SourceMeta}
 	data, _ := json.Marshal(canonical)
 	sum := sha256.Sum256(data)
 	return sum[:]

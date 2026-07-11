@@ -20,6 +20,8 @@ export interface FeedbackListFilters {
   // (AND-composed) but the SPA's per-dim Select only ever sends one.
   attrs: AttrFilterEntry[]
   q?: string
+  source?: string
+  type?: string
   urgent?: boolean
   tag?: string
   workflowState?: string
@@ -48,6 +50,8 @@ export const feedbackListInfiniteQuery = (filters: FeedbackListFilters) =>
         if (dim && value) params.append(dim, value)
       }
       if (filters.q) params.set('q', filters.q)
+      if (filters.source) params.set('source', filters.source)
+      if (filters.type) params.set('type', filters.type)
       if (filters.tag) params.set('tag', filters.tag)
       if (filters.workflowState) params.set('workflow_state', filters.workflowState)
       if (filters.urgent != null) params.set('urgent', String(filters.urgent))

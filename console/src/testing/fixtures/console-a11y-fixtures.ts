@@ -54,6 +54,7 @@ import {
 import {
   type ListModerationSubjectsResponse,
   ModerationState,
+  PortalSubmissionFieldKind,
   PublicAccessMode,
   PublicIdentityMode,
   PublicSurface,
@@ -107,6 +108,23 @@ export const consoleA11yPublicVisibilityPolicy: PublicVisibilityPolicy = {
   showCommentCount: true,
   showSubmitterDisplay: true,
   hidePublicTimestamps: false,
+  portalSubmissionForm: {
+    headline: 'Share feedback',
+    description: 'Tell us what is broken, missing, or worth improving.',
+    acknowledgement: 'Thanks. We will review your submission.',
+    submitButtonLabel: 'Submit feedback',
+    showPageUrl: true,
+    fields: [
+      {
+        key: 'severity',
+        label: 'Severity',
+        kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+        required: true,
+        options: ['low', 'medium', 'high'],
+        placeholder: 'Choose a severity',
+      },
+    ],
+  },
   updatedBy: 'user-a11y',
   createdAt: '2026-07-10T00:00:00Z',
   updatedAt: '2026-07-10T00:05:00Z',
@@ -289,6 +307,25 @@ export const consoleA11yFeedbackItems: Feedback[] = [
     workflowState: consoleA11yWorkflowStates[0],
     allowedNextStates: [consoleA11yWorkflowStates[1]],
   },
+  {
+    id: 'feedback-301',
+    content: 'portal submission from a customer',
+    source: 'portal',
+    type: 'request',
+    userId: 'portal-user-1',
+    pageUrl: 'https://app.example.com/login?next=%3Ctag%3E',
+    enrichedTitle: 'Portal submission',
+    enrichedDisplayTitle: '门户提交',
+    enrichedAttrs: { severity: 'high' },
+    isUrgent: false,
+    enrichmentStatus: 'done',
+    createdAt: '2026-06-24T07:00:00Z',
+    language: 'en',
+    classificationConfidence: 0.88,
+    tags: [],
+    workflowState: consoleA11yWorkflowStates[0],
+    allowedNextStates: [consoleA11yWorkflowStates[1]],
+  },
 ]
 
 export const consoleA11yFeedbackList: ListFeedbackResponse = {
@@ -352,6 +389,33 @@ export const consoleA11yTerminalFeedbackDetail: FeedbackDetail = {
   enrichedRationale: 'Terminal failure sample.',
   enrichedDisplayRationale: 'Terminal failure sample.',
   sourceMeta: { browser: 'Chromium' },
+  replyDraftEnabled: false,
+}
+
+export const consoleA11yPortalFeedbackDetail: FeedbackDetail = {
+  ...consoleA11yFeedbackItems[2],
+  attachments: [],
+  enrichmentError: '',
+  enrichedAt: '2026-06-24T07:05:00Z',
+  enrichedRationale: '',
+  enrichedDisplayRationale: '',
+  sourceMeta: {
+    portal_submission: {
+      kind: 'request',
+      title: '<img src=x onerror="window.__portalXssTitle=1">',
+      details: 'line1\n<svg onload="window.__portalXssDetails=1"></svg>',
+      page_url: 'https://app.example.com/login?next=%3Ctag%3E',
+      private_contact: {
+        display_name: '<b>Ada</b>',
+        organization: 'Acme',
+      },
+      custom_fields: {
+        note: '<em>xss</em>',
+        flags: ['<script>alert(1)</script>'],
+      },
+      user_agent: 'PortalTest/1.0',
+    },
+  },
   replyDraftEnabled: false,
 }
 

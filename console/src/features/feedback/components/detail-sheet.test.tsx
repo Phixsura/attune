@@ -1,6 +1,6 @@
 import userEvent from '@testing-library/user-event'
 import { delay, HttpResponse, http } from 'msw'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
@@ -15,6 +15,39 @@ import {
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+
+vi.mock('@tanstack/react-router', async () => {
+  const actual =
+    await vi.importActual<typeof import('@tanstack/react-router')>('@tanstack/react-router')
+
+  return {
+    ...actual,
+    Link: ({
+      children,
+      to,
+      search,
+      ...props
+    }: {
+      children: ReactNode
+      to?: string
+      search?: Record<string, unknown>
+    }) => {
+      const params = new URLSearchParams()
+      if (search) {
+        for (const [key, value] of Object.entries(search)) {
+          if (value == null) continue
+          params.set(key, String(value))
+        }
+      }
+      const qs = params.toString()
+      return (
+        <a href={`${to ?? '#'}${qs ? `?${qs}` : ''}`} {...props}>
+          {children}
+        </a>
+      )
+    },
+  }
+})
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
@@ -44,6 +77,7 @@ describe('FeedbackDetailSheet', () => {
       value: { writeText: vi.fn().mockResolvedValue(undefined) },
       configurable: true,
     })
+    server.use(http.get(customerRequestsURL, () => HttpResponse.json({ requests: [] })))
   })
 
   it('id=null renders nothing (sheet closed)', () => {
@@ -88,6 +122,118 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getByText(/AI 中文解读/i)).toBeInTheDocument()
     expect(screen.getByText(/AI rationale/i)).toBeInTheDocument()
     expect(screen.getAllByTitle('原文语言：英文').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('renders structured portal submission evidence when source meta contains portal data', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          feedbackRow('401', {
+            source: 'portal',
+            userId: 'portal_user',
+            sourceMeta: {
+              portal_submission: {
+                kind: 'bug',
+                title: 'Login fails',
+                details: 'After SSO redirect\nThe form resets.',
+                page_url: 'https://app.example.com/login',
+                private_contact: {
+                  display_name: 'Ada Lovelace',
+                  organization: 'Acme',
+                },
+                custom_fields: {
+                  severity: 'high',
+                  components: ['ui', 'api'],
+                  consent: true,
+                },
+                user_agent: 'PortalTest/1.0',
+              },
+            },
+          }),
+        ),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet id="portal-1" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    const portalHeading = await screen.findByRole('heading', { name: '门户投稿' })
+    const portalSection = portalHeading.closest('section')
+    expect(portalSection).not.toBeNull()
+    const portal = within(portalSection as HTMLElement)
+
+    expect(portal.getByText('缺陷')).toBeInTheDocument()
+    expect(portal.getByText('Login fails')).toBeInTheDocument()
+    expect(portal.getByText(/After SSO redirect/)).toBeInTheDocument()
+    expect(portal.getByRole('link', { name: 'https://app.example.com/login' })).toHaveAttribute(
+      'href',
+      'https://app.example.com/login',
+    )
+    expect(portal.getByText('显示名')).toBeInTheDocument()
+    expect(portal.getByText('Ada Lovelace')).toBeInTheDocument()
+    expect(portal.getByText('组织')).toBeInTheDocument()
+    expect(portal.getByText('Acme')).toBeInTheDocument()
+    expect(portal.getByText('severity')).toBeInTheDocument()
+    expect(portal.getByText('high')).toBeInTheDocument()
+    expect(portal.getByText('components')).toBeInTheDocument()
+    expect(portal.getByText(/"ui"/, { selector: 'pre' })).toBeInTheDocument()
+    expect(portal.getByText(/"api"/, { selector: 'pre' })).toBeInTheDocument()
+    expect(portal.getByText('consent')).toBeInTheDocument()
+    expect(portal.getByText('true')).toBeInTheDocument()
+    expect(portal.getByText('PortalTest/1.0')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(portal.getByRole('link', { name: '转为客户需求' })).toHaveAttribute(
+        'href',
+        '/feedback/customer-requests?promote_feedback_ids=401&feedback_id=401',
+      ),
+    )
+  })
+
+  it('renders HTML-like portal submission text as escaped text nodes', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          feedbackRow('402', {
+            source: 'portal',
+            userId: 'portal_user',
+            sourceMeta: {
+              portal_submission: {
+                kind: 'request',
+                title: '<img src=x onerror="window.__portalXssTitle=1">',
+                details: 'line1\n<svg onload="window.__portalXssDetails=1"></svg>',
+                page_url: 'https://app.example.com/login?next=%3Ctag%3E',
+                private_contact: {
+                  display_name: '<b>Ada</b>',
+                },
+                custom_fields: {
+                  note: '<em>xss</em>',
+                  flags: ['<script>alert(1)</script>'],
+                },
+                user_agent: 'PortalTest/1.0',
+              },
+            },
+          }),
+        ),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="402" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    const portalHeading = await screen.findByRole('heading', { name: '门户投稿' })
+    const portalSection = portalHeading.closest('section')
+    expect(portalSection).not.toBeNull()
+
+    const portal = within(portalSection as HTMLElement)
+    const portalHTML = (portalSection as HTMLElement).innerHTML
+    expect(portalHTML).toContain('&lt;img src=x onerror="window.__portalXssTitle=1"&gt;')
+    expect(portalHTML).toContain('&lt;svg onload="window.__portalXssDetails=1"&gt;&lt;/svg&gt;')
+    expect(portal.getByText('<b>Ada</b>')).toBeInTheDocument()
+    expect(portal.getByText('<em>xss</em>')).toBeInTheDocument()
+    expect(portal.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument()
+    expect(portal.getByText('PortalTest/1.0')).toBeInTheDocument()
+    expect(portal.queryByRole('img')).not.toBeInTheDocument()
   })
 
   it('renders linked customer requests and unlinks them from the feedback detail', async () => {

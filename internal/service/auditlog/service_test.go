@@ -307,6 +307,9 @@ func TestIsKnownAction_Valid(t *testing.T) {
 	if !IsKnownAction("api_key.create") {
 		t.Fatal("expected 'api_key.create' to be a known action")
 	}
+	if !IsKnownAction("portal_submission.create") {
+		t.Fatal("expected 'portal_submission.create' to be a known action")
+	}
 }
 
 func TestIsKnownAction_Invalid(t *testing.T) {

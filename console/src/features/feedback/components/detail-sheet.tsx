@@ -1,4 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { format, formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import type { TFunction } from 'i18next'
@@ -8,6 +9,7 @@ import {
   CheckCircle,
   ClipboardList,
   Copy,
+  ExternalLink,
   GitCompareArrows,
   History,
   ListChecks,
@@ -219,6 +221,7 @@ function DetailBody({
   renderAuditLog?: (data: FeedbackDetail) => React.ReactNode
 }) {
   const { t } = useTranslation()
+  const permissions = usePermissions()
   const displayOf = useDisplayName()
   const attrs = (data.enrichedAttrs ?? {}) as Record<string, unknown>
   const displayRationale = data.enrichedDisplayRationale || data.enrichedRationale
@@ -237,6 +240,8 @@ function DetailBody({
   const summaryState = detailSummaryState(data, hasClassificationSignal, t)
   const workbenchCue = detailWorkbenchCue(workbenchMode, hasClassificationSignal, t)
   const hasFailureSnapshot = terminalFailureSnapshotPresent(data)
+  const portalSubmission = portalSubmissionMeta(data.sourceMeta)
+  const canPromoteCustomerRequest = permissions.can('customer_request:edit')
   return (
     <div className="space-y-5">
       <Card className="border-border/60 shadow-none">
@@ -448,12 +453,34 @@ function DetailBody({
         </div>
 
         <div className="space-y-5">
+          {portalSubmission ? (
+            <PortalSubmissionSection
+              feedbackId={String(data.id)}
+              canPromoteCustomerRequest={canPromoteCustomerRequest}
+              submission={portalSubmission}
+            />
+          ) : null}
+
           <Section label={t('feedback.detail.source')}>
             <dl className="space-y-3">
               <FactRow label={t('feedback.detail.source')} value={data.source || '—'} mono />
               <FactRow label="userId" value={data.userId || '—'} mono />
               {data.pageUrl ? (
-                <FactRow label="URL" value={data.pageUrl} className="break-all" />
+                <FactRow
+                  label="URL"
+                  valueNode={
+                    <a
+                      href={data.pageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 break-all text-primary underline-offset-2 hover:underline"
+                    >
+                      <span>{data.pageUrl}</span>
+                      <ExternalLink className="size-3.5 shrink-0" />
+                    </a>
+                  }
+                  className="break-all"
+                />
               ) : null}
               {data.enrichedAt ? (
                 <FactRow
@@ -1635,11 +1662,13 @@ function DetailBadge({
 function FactRow({
   label,
   value,
+  valueNode,
   mono,
   className,
 }: {
   label: string
-  value: string
+  value?: string
+  valueNode?: React.ReactNode
   mono?: boolean
   className?: string
 }) {
@@ -1655,7 +1684,7 @@ function FactRow({
           className,
         )}
       >
-        {value}
+        {valueNode ?? value ?? '—'}
       </dd>
     </div>
   )
@@ -1866,6 +1895,222 @@ function JsonSection({ label, value }: { label: string; value: unknown }) {
       </details>
     </Section>
   )
+}
+
+type PortalSubmissionEvidence = {
+  kind: string
+  title: string
+  details: string
+  pageUrl?: string
+  privateContact?: Record<string, unknown>
+  customFields?: Record<string, unknown>
+  userAgent?: string
+}
+
+function portalSubmissionMeta(
+  sourceMeta: FeedbackDetail['sourceMeta'],
+): PortalSubmissionEvidence | null {
+  if (!isPortalRecord(sourceMeta)) return null
+  const raw = sourceMeta.portal_submission
+  if (!isPortalRecord(raw)) return null
+
+  const kind = portalSubmissionText(raw.kind, true)
+  const title = portalSubmissionText(raw.title, true)
+  const details = portalSubmissionText(raw.details, true)
+  const pageUrl = portalSubmissionText(raw.page_url, true)
+  const userAgent = portalSubmissionText(raw.user_agent, true)
+  const privateContact =
+    isPortalRecord(raw.private_contact) && Object.keys(raw.private_contact).length > 0
+      ? raw.private_contact
+      : undefined
+  const customFields =
+    isPortalRecord(raw.custom_fields) && Object.keys(raw.custom_fields).length > 0
+      ? raw.custom_fields
+      : undefined
+
+  if (!kind && !title && !details && !pageUrl && !userAgent && !privateContact && !customFields) {
+    return null
+  }
+
+  return {
+    kind: kind || '—',
+    title: title || '—',
+    details: details || '—',
+    ...(pageUrl ? { pageUrl } : {}),
+    ...(privateContact ? { privateContact } : {}),
+    ...(customFields ? { customFields } : {}),
+    ...(userAgent ? { userAgent } : {}),
+  }
+}
+
+function PortalSubmissionSection({
+  feedbackId,
+  canPromoteCustomerRequest,
+  submission,
+}: {
+  feedbackId: string
+  canPromoteCustomerRequest: boolean
+  submission: PortalSubmissionEvidence
+}) {
+  const { t } = useTranslation()
+  const privateContactEntries = portalSubmissionEntries(submission.privateContact)
+  const customFieldEntries = portalSubmissionEntries(submission.customFields)
+
+  return (
+    <Section label={t('feedback.detail.portal_submission')}>
+      <div className="space-y-4">
+        <dl className="grid gap-3 sm:grid-cols-2">
+          <FactRow
+            label={t('feedback.detail.portal_submission_kind')}
+            value={portalSubmissionKindLabel(submission.kind, t)}
+          />
+          <FactRow label={t('feedback.detail.portal_submission_title')} value={submission.title} />
+          {submission.pageUrl ? (
+            <FactRow
+              label={t('feedback.detail.portal_submission_page_url')}
+              valueNode={
+                <a
+                  href={submission.pageUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 break-all text-primary underline-offset-2 hover:underline"
+                >
+                  <span>{submission.pageUrl}</span>
+                  <ExternalLink className="size-3.5 shrink-0" />
+                </a>
+              }
+              className="break-all"
+            />
+          ) : null}
+          {submission.userAgent ? (
+            <FactRow
+              label={t('feedback.detail.portal_submission_user_agent')}
+              value={submission.userAgent}
+              mono
+              className="break-all"
+            />
+          ) : null}
+        </dl>
+
+        {canPromoteCustomerRequest && isPositiveIntString(feedbackId) ? (
+          <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+                  {t('feedback.detail.portal_submission_promote_title')}
+                </div>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {t('feedback.detail.portal_submission_promote_body')}
+                </p>
+              </div>
+              <Button asChild size="sm" className="shrink-0">
+                <Link
+                  to="/feedback/customer-requests"
+                  search={{
+                    promote_feedback_ids: feedbackId,
+                    feedback_id: feedbackId,
+                  }}
+                >
+                  {t('feedback.detail.portal_submission_promote_action')}
+                </Link>
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="rounded-lg border border-border/50 bg-muted/10 px-3 py-3">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            {t('feedback.detail.portal_submission_details')}
+          </div>
+          <p className="mt-2 whitespace-pre-wrap break-words leading-6 text-foreground">
+            {submission.details}
+          </p>
+        </div>
+
+        {privateContactEntries.length > 0 ? (
+          <div className="space-y-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              {t('feedback.detail.portal_submission_private_contact')}
+            </div>
+            <dl className="space-y-3">
+              {privateContactEntries.map(([key, value]) => (
+                <FactRow
+                  key={key}
+                  label={portalSubmissionContactFieldLabel(key, t)}
+                  valueNode={portalSubmissionValueNode(value)}
+                  className="break-all"
+                />
+              ))}
+            </dl>
+          </div>
+        ) : null}
+
+        {customFieldEntries.length > 0 ? (
+          <div className="space-y-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+              {t('feedback.detail.portal_submission_custom_fields')}
+            </div>
+            <dl className="space-y-3">
+              {customFieldEntries.map(([key, value]) => (
+                <FactRow
+                  key={key}
+                  label={key}
+                  valueNode={portalSubmissionValueNode(value)}
+                  className="break-all"
+                />
+              ))}
+            </dl>
+          </div>
+        ) : null}
+      </div>
+    </Section>
+  )
+}
+
+function portalSubmissionEntries(values?: Record<string, unknown>) {
+  return values ? Object.entries(values).sort(([left], [right]) => left.localeCompare(right)) : []
+}
+
+function portalSubmissionKindLabel(kind: string, t: TFunction) {
+  if (kind === 'request') return t('feedback.type.request')
+  if (kind === 'bug') return t('feedback.type.bug')
+  if (kind === 'general') return t('feedback.type.general')
+  return kind || '—'
+}
+
+function portalSubmissionContactFieldLabel(key: string, t: TFunction) {
+  if (key === 'display_name') return t('feedback.detail.portal_submission_display_name')
+  if (key === 'organization') return t('feedback.detail.portal_submission_organization')
+  return key
+}
+
+function portalSubmissionValueNode(value: unknown) {
+  if (value == null) return '—'
+  if (typeof value === 'string') return value.trim() || '—'
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value)
+  }
+  if (Array.isArray(value) || isPortalRecord(value)) {
+    try {
+      return (
+        <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-border/50 bg-background px-3 py-2 font-mono text-xs text-foreground">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      )
+    } catch {
+      return '—'
+    }
+  }
+  return String(value)
+}
+
+function portalSubmissionText(value: unknown, trim = false) {
+  if (typeof value !== 'string') return ''
+  return trim ? value.trim() : value
+}
+
+function isPortalRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function EnrichmentStatusBanner({

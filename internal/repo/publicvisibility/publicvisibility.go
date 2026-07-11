@@ -6,6 +6,7 @@ package publicvisibility
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -88,9 +89,38 @@ type Policy struct {
 	ShowCommentCount      bool
 	ShowSubmitterDisplay  bool
 	HidePublicTimestamps  bool
+	PortalSubmissionForm  PortalSubmissionForm
 	UpdatedBy             string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+type PortalSubmissionFieldKind string
+
+const (
+	PortalSubmissionFieldKindText        PortalSubmissionFieldKind = "text"
+	PortalSubmissionFieldKindTextarea    PortalSubmissionFieldKind = "textarea"
+	PortalSubmissionFieldKindSelect      PortalSubmissionFieldKind = "select"
+	PortalSubmissionFieldKindMultiSelect PortalSubmissionFieldKind = "multiselect"
+	PortalSubmissionFieldKindBoolean     PortalSubmissionFieldKind = "boolean"
+)
+
+type PortalSubmissionField struct {
+	Key         string                    `json:"key"`
+	Label       string                    `json:"label"`
+	Kind        PortalSubmissionFieldKind `json:"kind"`
+	Required    bool                      `json:"required"`
+	Options     []string                  `json:"options,omitempty"`
+	Placeholder string                    `json:"placeholder,omitempty"`
+}
+
+type PortalSubmissionForm struct {
+	Headline          string                  `json:"headline"`
+	Description       string                  `json:"description"`
+	Acknowledgement   string                  `json:"acknowledgement"`
+	SubmitButtonLabel string                  `json:"submit_button_label"`
+	ShowPageURL       bool                    `json:"show_page_url"`
+	Fields            []PortalSubmissionField `json:"fields,omitempty"`
 }
 
 type ModerationSubject struct {
@@ -215,9 +245,9 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 			submission_write_mode, comment_write_mode, vote_write_mode,
 			default_request_state, default_comment_state, submitter_identity_mode,
 			show_vote_count, show_comment_count, show_submitter_display,
-			hide_public_timestamps, updated_by
+			hide_public_timestamps, portal_submission_form, updated_by
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
 		)
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			portal_access_mode = EXCLUDED.portal_access_mode,
@@ -236,8 +266,13 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 			show_comment_count = EXCLUDED.show_comment_count,
 			show_submitter_display = EXCLUDED.show_submitter_display,
 			hide_public_timestamps = EXCLUDED.hide_public_timestamps,
+			portal_submission_form = EXCLUDED.portal_submission_form,
 			updated_by = EXCLUDED.updated_by
 		RETURNING ` + policyColumns()
+	formJSON, err := json.Marshal(policy.PortalSubmissionForm)
+	if err != nil {
+		return nil, fmt.Errorf("marshal portal submission form: %w", err)
+	}
 	policyOut, err := scanPolicy(tx.QueryRow(ctx, q,
 		policy.TenantID,
 		policy.PortalAccessMode,
@@ -256,6 +291,7 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 		policy.ShowCommentCount,
 		policy.ShowSubmitterDisplay,
 		policy.HidePublicTimestamps,
+		formJSON,
 		policy.UpdatedBy,
 	))
 	if err != nil {
@@ -520,7 +556,8 @@ func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string,
 	var out PublicRequestCandidate
 	var votes int64
 	var comments int64
-	targets := policyScanTargets(&out.Policy)                         // ptrext:allow scan-target
+	var formJSON []byte
+	targets := policyScanTargets(&out.Policy, &formJSON)              // ptrext:allow scan-target
 	targets = append(targets, profileScanTargets(&out.Profile)...)    // ptrext:allow scan-target
 	targets = append(targets, subjectScanTargets(&out.Moderation)...) // ptrext:allow scan-target
 	targets = append(targets,
@@ -657,6 +694,7 @@ func policyColumns() string {
 		"show_comment_count",
 		"show_submitter_display",
 		"hide_public_timestamps",
+		"portal_submission_form",
 		"updated_by",
 		"created_at",
 		"updated_at",
@@ -722,20 +760,26 @@ func prefixColumns(alias string, columns string) string {
 
 func scanPolicy(row rowScanner) (*Policy, error) {
 	var policy Policy
-	if err := row.Scan(policyScanTargets(&policy)...); err != nil { // ptrext:allow scan-target
+	var formJSON []byte
+	if err := row.Scan(policyScanTargets(&policy, &formJSON)...); err != nil { // ptrext:allow scan-target
 		return nil, err
+	}
+	if len(formJSON) > 0 {
+		if err := json.Unmarshal(formJSON, &policy.PortalSubmissionForm); err != nil {
+			return nil, fmt.Errorf("unmarshal portal submission form: %w", err)
+		}
 	}
 	return ptrext.Of(policy), nil
 }
 
-func policyScanTargets(policy *Policy, extra ...any) []any {
+func policyScanTargets(policy *Policy, formJSON *[]byte, extra ...any) []any {
 	targets := []any{
 		&policy.TenantID, &policy.PortalAccessMode, &policy.SearchIndexingEnabled, // ptrext:allow scan-target
 		&policy.RequestsEnabled, &policy.CommentsEnabled, &policy.RoadmapEnabled, // ptrext:allow scan-target
 		&policy.ChangelogEnabled, &policy.SubmissionWriteMode, &policy.CommentWriteMode, // ptrext:allow scan-target
 		&policy.VoteWriteMode, &policy.DefaultRequestState, &policy.DefaultCommentState, // ptrext:allow scan-target
 		&policy.SubmitterIdentityMode, &policy.ShowVoteCount, &policy.ShowCommentCount, // ptrext:allow scan-target
-		&policy.ShowSubmitterDisplay, &policy.HidePublicTimestamps, &policy.UpdatedBy, // ptrext:allow scan-target
+		&policy.ShowSubmitterDisplay, &policy.HidePublicTimestamps, formJSON, &policy.UpdatedBy, // ptrext:allow scan-target
 		&policy.CreatedAt, &policy.UpdatedAt, // ptrext:allow scan-target
 	}
 	return append(targets, extra...)

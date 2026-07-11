@@ -4,6 +4,7 @@ import { PublicVisibilityPage } from '@/features/public-visibility/components/pu
 import {
   ModerationState,
   type ModerationSubject,
+  PortalSubmissionFieldKind,
   PublicAccessMode,
   PublicIdentityMode,
   type PublicRequestPublication,
@@ -20,6 +21,7 @@ vi.mock('sonner', () => ({
 
 describe('PublicVisibilityPage', () => {
   it('lets admins save public policy and request profile changes', async () => {
+    mockMe('admin')
     let savedPolicy: unknown
     let loadedProfilePath = ''
     let savedProfile: unknown
@@ -50,6 +52,12 @@ describe('PublicVisibilityPage', () => {
     await waitFor(() => expect(screen.getByText('公开策略')).toBeInTheDocument())
     expect(screen.getByText('审核队列')).toBeInTheDocument()
     expect(screen.getByText('公开需求资料')).toBeInTheDocument()
+    expect(screen.getByText('门户投稿表单')).toBeInTheDocument()
+    expect(screen.getByText('实时预览')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '打开公开门户' })).toHaveAttribute(
+      'href',
+      '/portal/tenant',
+    )
 
     await user.click(await screen.findByRole('combobox', { name: '入口访问' }))
     await user.click(await screen.findByRole('option', { name: '关闭' }))
@@ -83,6 +91,23 @@ describe('PublicVisibilityPage', () => {
         showVoteCount: false,
         showCommentCount: false,
         showSubmitterDisplay: false,
+        portalSubmissionForm: {
+          headline: 'Share feedback',
+          description: 'Tell us what is broken, missing, or worth improving.',
+          acknowledgement: 'Thanks. We will review your submission.',
+          submitButtonLabel: 'Submit feedback',
+          showPageUrl: true,
+          fields: [
+            {
+              key: 'severity',
+              label: 'Severity',
+              kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+              required: true,
+              options: ['low', 'medium', 'high'],
+              placeholder: 'Choose a severity',
+            },
+          ],
+        },
       })
     })
 
@@ -336,6 +361,23 @@ function policyFixture(overrides: Partial<PublicVisibilityPolicy> = {}): PublicV
     showCommentCount: true,
     showSubmitterDisplay: true,
     hidePublicTimestamps: false,
+    portalSubmissionForm: {
+      headline: 'Share feedback',
+      description: 'Tell us what is broken, missing, or worth improving.',
+      acknowledgement: 'Thanks. We will review your submission.',
+      submitButtonLabel: 'Submit feedback',
+      showPageUrl: true,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          options: ['low', 'medium', 'high'],
+          placeholder: 'Choose a severity',
+        },
+      ],
+    },
     updatedBy: 'admin-1',
     createdAt: '2026-07-10T00:00:00Z',
     updatedAt: '2026-07-10T00:00:00Z',

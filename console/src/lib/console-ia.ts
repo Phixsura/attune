@@ -13,6 +13,7 @@ import {
   Layers,
   LayoutDashboard,
   Lock,
+  MailOpen,
   Radar,
   Radio,
   RefreshCcw,
@@ -83,6 +84,12 @@ export const consoleNavItems: ConsoleNavItem[] = [
     labelKey: 'nav.feedback',
     path: '/feedback',
     exact: true,
+  },
+  {
+    group: 'feedback',
+    icon: MailOpen,
+    labelKey: 'nav.portal_inbox',
+    path: '/feedback/portal',
   },
   {
     group: 'feedback',

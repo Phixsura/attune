@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import {
   Check,
+  ExternalLink,
   EyeOff,
   Loader2,
   RotateCcw,
@@ -45,6 +46,8 @@ import {
   type ModerationSubject,
   markModerationSubjectSpam,
   moderationSubjectsQuery,
+  PortalSubmissionFieldKind,
+  type PortalSubmissionFormConfig,
   PublicAccessMode,
   PublicIdentityMode,
   type PublicRequestPublication,
@@ -58,6 +61,7 @@ import {
   updatePublicVisibilityPolicy,
   upsertPublicRequestProfile,
 } from '@/features/public-visibility/api/public-visibility'
+import { meQuery } from '@/features/session/api/get-me'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 
@@ -78,6 +82,25 @@ type PolicyForm = {
   showCommentCount: boolean
   showSubmitterDisplay: boolean
   hidePublicTimestamps: boolean
+  portalSubmissionForm: PortalSubmissionFormState
+}
+
+type PortalSubmissionFormState = {
+  headline: string
+  description: string
+  acknowledgement: string
+  submitButtonLabel: string
+  showPageUrl: boolean
+  fields: PortalSubmissionFieldState[]
+}
+
+type PortalSubmissionFieldState = {
+  key: string
+  label: string
+  kind: PortalSubmissionFieldKind
+  required: boolean
+  placeholder: string
+  options: string[]
 }
 
 type RequestProfileForm = {
@@ -106,6 +129,7 @@ export function PublicVisibilityPage() {
   const { t } = useTranslation()
   const permissions = usePermissions()
   const queryClient = useQueryClient()
+  const me = useQuery(meQuery())
   useDocumentTitle(t('nav.public_visibility'))
 
   const canViewPolicy = permissions.can('public_policy:view')
@@ -127,6 +151,9 @@ export function PublicVisibilityPage() {
   const [loadedPublication, setLoadedPublication] = useState<PublicRequestPublication | null>(null)
   const [queueView, setQueueView] = useState<QueueView>('pending')
   const [moderationDialog, setModerationDialog] = useState<ModerationDialogState | null>(null)
+  const portalHref = me.data?.tenant?.slug
+    ? `/portal/${encodeURIComponent(me.data.tenant.slug)}`
+    : null
 
   useEffect(() => {
     if (policyQuery.data) {
@@ -268,7 +295,7 @@ export function PublicVisibilityPage() {
                   <Loading />
                 ) : (
                   <>
-                    <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <Field label={t('public_visibility.access_mode')}>
                         <Select
                           value={form.portalAccessMode}
@@ -392,7 +419,7 @@ export function PublicVisibilityPage() {
                       </Field>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <Toggle
                         label={t('public_visibility.toggles.requests')}
                         checked={form.requestsEnabled}
@@ -487,6 +514,23 @@ export function PublicVisibilityPage() {
                 )}
               </CardContent>
             </Card>
+          )}
+
+          {canViewPolicy && (
+            <PortalSubmissionFormCard
+              form={form.portalSubmissionForm}
+              writeMode={form.submissionWriteMode}
+              identityMode={form.submitterIdentityMode}
+              canEdit={canEditPolicy}
+              saving={policySaving}
+              portalHref={portalHref}
+              onChange={(next) =>
+                setForm((prev) => ({
+                  ...prev,
+                  portalSubmissionForm: next,
+                }))
+              }
+            />
           )}
 
           {canEditPolicy && (
@@ -1035,6 +1079,519 @@ function RequestProfileCard({
   )
 }
 
+function PortalSubmissionFormCard({
+  form,
+  writeMode,
+  identityMode,
+  canEdit,
+  saving,
+  portalHref,
+  onChange,
+}: {
+  form: PortalSubmissionFormState
+  writeMode: PublicWriteMode
+  identityMode: PublicIdentityMode
+  canEdit: boolean
+  saving: boolean
+  portalHref: string | null
+  onChange: (next: PortalSubmissionFormState) => void
+}) {
+  const { t } = useTranslation()
+
+  const updateField = (
+    index: number,
+    mutate: (field: PortalSubmissionFieldState) => PortalSubmissionFieldState,
+  ) => {
+    onChange({
+      ...form,
+      fields: form.fields.map((field, currentIndex) =>
+        currentIndex === index ? mutate(field) : field,
+      ),
+    })
+  }
+
+  const addField = () => {
+    onChange({
+      ...form,
+      fields: [...form.fields, defaultPortalSubmissionField(form.fields.length + 1)],
+    })
+  }
+
+  const removeField = (index: number) => {
+    onChange({
+      ...form,
+      fields: form.fields.filter((_, currentIndex) => currentIndex !== index),
+    })
+  }
+
+  const moveField = (index: number, offset: number) => {
+    const nextIndex = index + offset
+    if (nextIndex < 0 || nextIndex >= form.fields.length) return
+    const next = [...form.fields]
+    const [field] = next.splice(index, 1)
+    next.splice(nextIndex, 0, field)
+    onChange({ ...form, fields: next })
+  }
+
+  return (
+    <Card className="border-border/60 shadow-none">
+      <CardHeader>
+        <CardTitle className="text-base">{t('public_visibility.portal_title')}</CardTitle>
+        <CardDescription>{t('public_visibility.portal_help')}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5 pt-6">
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Field label={t('public_visibility.portal.headline')}>
+                <Input
+                  value={form.headline}
+                  disabled={!canEdit || saving}
+                  aria-label={t('public_visibility.portal.headline')}
+                  onChange={(event) => onChange({ ...form, headline: event.target.value })}
+                  placeholder={t('public_visibility.portal.headline_placeholder')}
+                />
+              </Field>
+              <Field label={t('public_visibility.portal.submit_button_label')}>
+                <Input
+                  value={form.submitButtonLabel}
+                  disabled={!canEdit || saving}
+                  aria-label={t('public_visibility.portal.submit_button_label')}
+                  onChange={(event) => onChange({ ...form, submitButtonLabel: event.target.value })}
+                  placeholder={t('public_visibility.portal.submit_button_placeholder')}
+                />
+              </Field>
+            </div>
+
+            <Field label={t('public_visibility.portal.description')}>
+              <textarea
+                className="min-h-28 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                value={form.description}
+                disabled={!canEdit || saving}
+                aria-label={t('public_visibility.portal.description')}
+                onChange={(event) => onChange({ ...form, description: event.target.value })}
+                placeholder={t('public_visibility.portal.description_placeholder')}
+              />
+            </Field>
+
+            <Field label={t('public_visibility.portal.acknowledgement')}>
+              <textarea
+                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                value={form.acknowledgement}
+                disabled={!canEdit || saving}
+                aria-label={t('public_visibility.portal.acknowledgement')}
+                onChange={(event) => onChange({ ...form, acknowledgement: event.target.value })}
+                placeholder={t('public_visibility.portal.acknowledgement_placeholder')}
+              />
+            </Field>
+
+            <Toggle
+              label={t('public_visibility.portal.show_page_url')}
+              checked={form.showPageUrl}
+              disabled={!canEdit || saving}
+              onChange={(checked) => onChange({ ...form, showPageUrl: checked })}
+            />
+
+            <div className="rounded-2xl border border-border/70 bg-background/85 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-foreground">
+                    {t('public_visibility.portal.fields_title')}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {t('public_visibility.portal.fields_help')}
+                  </div>
+                </div>
+                {canEdit && (
+                  <Button type="button" variant="outline" size="sm" onClick={addField}>
+                    {t('public_visibility.portal.add_field')}
+                  </Button>
+                )}
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {form.fields.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border/70 bg-muted/20 px-4 py-8 text-sm text-muted-foreground">
+                    {t('public_visibility.portal.fields_empty')}
+                  </div>
+                ) : (
+                  form.fields.map((field, index) => (
+                    <PortalSubmissionFieldEditor
+                      key={field.key || field.label || 'field'}
+                      field={field}
+                      index={index}
+                      canEdit={canEdit}
+                      saving={saving}
+                      onChange={(next) => updateField(index, () => next)}
+                      onRemove={() => removeField(index)}
+                      onMoveUp={() => moveField(index, -1)}
+                      onMoveDown={() => moveField(index, 1)}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+
+            {canEdit ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+                {t('public_visibility.portal.save_hint')}
+              </div>
+            ) : null}
+          </div>
+
+          <PortalSubmissionPreview
+            form={form}
+            writeMode={writeMode}
+            identityMode={identityMode}
+            fieldCount={form.fields.length}
+            portalHref={portalHref}
+          />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PortalSubmissionFieldEditor({
+  field,
+  index,
+  canEdit,
+  saving,
+  onChange,
+  onRemove,
+  onMoveUp,
+  onMoveDown,
+}: {
+  field: PortalSubmissionFieldState
+  index: number
+  canEdit: boolean
+  saving: boolean
+  onChange: (next: PortalSubmissionFieldState) => void
+  onRemove: () => void
+  onMoveUp: () => void
+  onMoveDown: () => void
+}) {
+  const { t } = useTranslation()
+  const kindOptions = portalSubmissionFieldKindOptions(t)
+  const kindNeedsOptions =
+    field.kind === PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT ||
+    field.kind === PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(247,249,252,0.98))] p-4 shadow-[0_14px_36px_-30px_rgba(15,23,42,0.25)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">
+            {t('public_visibility.portal.field.title', { index: index + 1 })}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {t(
+              `public_visibility.portal.field.kind_values.${portalSubmissionFieldKindName(field.kind)}`,
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!canEdit || saving || index === 0}
+            onClick={onMoveUp}
+          >
+            {t('public_visibility.portal.field.move_up')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!canEdit || saving}
+            onClick={onMoveDown}
+          >
+            {t('public_visibility.portal.field.move_down')}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!canEdit || saving}
+            onClick={onRemove}
+          >
+            {t('public_visibility.portal.field.remove')}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Field label={t('public_visibility.portal.field.key')}>
+          <Input
+            value={field.key}
+            disabled={!canEdit || saving}
+            aria-label={t('public_visibility.portal.field.key')}
+            onChange={(event) => onChange({ ...field, key: event.target.value })}
+            placeholder={t('public_visibility.portal.field.key_placeholder')}
+          />
+        </Field>
+        <Field label={t('public_visibility.portal.field.label')}>
+          <Input
+            value={field.label}
+            disabled={!canEdit || saving}
+            aria-label={t('public_visibility.portal.field.label')}
+            onChange={(event) => onChange({ ...field, label: event.target.value })}
+            placeholder={t('public_visibility.portal.field.label_placeholder')}
+          />
+        </Field>
+        <Field label={t('public_visibility.portal.field.kind_label')}>
+          <Select
+            value={field.kind}
+            disabled={!canEdit || saving}
+            onValueChange={(value) =>
+              onChange({
+                ...field,
+                kind: value as PortalSubmissionFieldKind,
+                options:
+                  value === PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN ||
+                  value === PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT ||
+                  value === PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA
+                    ? []
+                    : field.options,
+              })
+            }
+          >
+            <SelectTrigger
+              className="w-full"
+              aria-label={t('public_visibility.portal.field.kind_label')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {kindOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t('public_visibility.portal.field.placeholder')}>
+          <Input
+            value={field.placeholder}
+            disabled={!canEdit || saving}
+            aria-label={t('public_visibility.portal.field.placeholder')}
+            onChange={(event) => onChange({ ...field, placeholder: event.target.value })}
+            placeholder={t('public_visibility.portal.field.placeholder_placeholder')}
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)]">
+        <Toggle
+          label={t('public_visibility.portal.field.required')}
+          checked={field.required}
+          disabled={!canEdit || saving}
+          onChange={(checked) => onChange({ ...field, required: checked })}
+        />
+        <div className="rounded-xl border border-border/50 bg-background px-3 py-2 text-xs text-muted-foreground">
+          {t('public_visibility.portal.field.help', {
+            kind: t(
+              `public_visibility.portal.field.kind_values.${portalSubmissionFieldKindName(field.kind)}`,
+            ),
+          })}
+        </div>
+      </div>
+
+      {kindNeedsOptions && (
+        <Field label={t('public_visibility.portal.field.options')}>
+          <textarea
+            className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+            value={field.options.join('\n')}
+            disabled={!canEdit || saving}
+            aria-label={t('public_visibility.portal.field.options')}
+            onChange={(event) =>
+              onChange({ ...field, options: parsePortalFieldOptions(event.target.value) })
+            }
+            placeholder={t('public_visibility.portal.field.options_placeholder')}
+          />
+        </Field>
+      )}
+    </div>
+  )
+}
+
+function PortalSubmissionPreview({
+  form,
+  writeMode,
+  identityMode,
+  fieldCount,
+  portalHref,
+}: {
+  form: PortalSubmissionFormState
+  writeMode: PublicWriteMode
+  identityMode: PublicIdentityMode
+  fieldCount: number
+  portalHref: string | null
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="rounded-[1.75rem] border border-border/70 bg-[radial-gradient(circle_at_top,rgba(31,111,235,0.09),transparent_36%),linear-gradient(180deg,rgba(245,247,252,0.98),rgba(255,255,255,0.99))] p-4 shadow-[0_22px_48px_-42px_rgba(15,23,42,0.35)]">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+            {t('public_visibility.portal.preview_label')}
+          </div>
+          <div className="mt-1 text-sm text-muted-foreground">
+            {t('public_visibility.portal.preview_help')}
+          </div>
+        </div>
+        <div className="rounded-full border border-border/70 bg-background px-3 py-1 text-xs font-medium text-muted-foreground">
+          {t('public_visibility.portal.preview.field_count', { count: fieldCount })}
+        </div>
+      </div>
+
+      {portalHref ? (
+        <div className="mt-3 flex justify-end">
+          <Button asChild variant="outline" size="sm" className="h-8 gap-1.5">
+            <a href={portalHref} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              {t('public_visibility.portal.preview.open_portal')}
+            </a>
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="mt-4 rounded-[1.6rem] border border-border/70 bg-white px-5 py-5 shadow-[0_16px_34px_-30px_rgba(15,23,42,0.22)]">
+        <div className="flex flex-wrap gap-2 text-[11px] font-semibold tracking-[0.16em] text-muted-foreground">
+          <span className="rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-primary">
+            {t(`public_visibility.write.${portalWriteModeName(writeMode)}`)}
+          </span>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+            {t(`public_visibility.identity.${portalIdentityModeName(identityMode)}`)}
+          </span>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">
+            {form.showPageUrl
+              ? t('public_visibility.portal.preview.page_url_on')
+              : t('public_visibility.portal.preview.page_url_off')}
+          </span>
+        </div>
+
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary">
+            {t('public_visibility.portal.preview.eyebrow')}
+          </p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+            {form.headline || t('public_visibility.portal.preview.headline_fallback')}
+          </h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            {form.description || t('public_visibility.portal.preview.description_fallback')}
+          </p>
+        </div>
+
+        <div className="mt-5 space-y-3 rounded-2xl border border-border/60 bg-[linear-gradient(180deg,rgba(249,250,251,0.98),rgba(255,255,255,1))] p-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <PortalPreviewChip label={t('public_visibility.portal.preview.kind.request')} active />
+            <PortalPreviewChip label={t('public_visibility.portal.preview.kind.bug')} />
+            <PortalPreviewChip label={t('public_visibility.portal.preview.kind.general')} />
+          </div>
+
+          {form.showPageUrl && (
+            <PortalPreviewRow
+              label={t('public_visibility.portal.preview.page_url')}
+              value="https://app.example.com/..."
+            />
+          )}
+
+          {form.fields.length > 0 ? (
+            <div className="space-y-3">
+              {form.fields.map((field) => (
+                <PortalPreviewField key={`${field.key}-${field.label}`} field={field} />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
+              {t('public_visibility.portal.preview.no_fields')}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
+          {form.acknowledgement || t('public_visibility.portal.preview.acknowledgement_fallback')}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-muted-foreground">
+            {t('public_visibility.portal.preview.identity_hint', {
+              value: t(`public_visibility.identity.${portalIdentityModeName(identityMode)}`),
+            })}
+          </div>
+          <Button type="button" disabled>
+            {form.submitButtonLabel || t('public_visibility.portal.preview.submit_fallback')}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PortalPreviewChip({ label, active = false }: { label: string; active?: boolean }) {
+  return (
+    <div
+      className={`rounded-xl border px-3 py-2 text-sm font-medium ${
+        active
+          ? 'border-primary/25 bg-primary/10 text-primary'
+          : 'border-border/70 bg-muted/20 text-muted-foreground'
+      }`}
+    >
+      {label}
+    </div>
+  )
+}
+
+function PortalPreviewRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-background px-3 py-3">
+      <div className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 break-words text-sm text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function PortalPreviewField({ field }: { field: PortalSubmissionFieldState }) {
+  const { t } = useTranslation()
+  return (
+    <div className="rounded-xl border border-border/60 bg-white px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-medium text-foreground">
+          {field.label || field.key || 'Custom field'}
+          {field.required ? <span className="text-rose-500"> *</span> : null}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          {portalSubmissionFieldKindLabel(field.kind, t)}
+        </div>
+      </div>
+      <div className="mt-2 text-sm text-muted-foreground">{field.placeholder || ' '}</div>
+      {field.options.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {field.options.slice(0, 4).map((option) => (
+            <span
+              key={option}
+              className="rounded-full border border-border/60 bg-muted/20 px-2.5 py-1 text-xs text-foreground"
+            >
+              {option}
+            </span>
+          ))}
+          {field.options.length > 4 ? (
+            <span className="rounded-full border border-border/60 bg-muted/20 px-2.5 py-1 text-xs text-muted-foreground">
+              +{field.options.length - 4}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function IconAction({
   label,
   disabled,
@@ -1079,7 +1636,37 @@ function defaultForm(): PolicyForm {
     showCommentCount: true,
     showSubmitterDisplay: false,
     hidePublicTimestamps: false,
+    portalSubmissionForm: defaultPortalSubmissionForm(),
   }
+}
+
+function defaultPortalSubmissionForm(): PortalSubmissionFormState {
+  return {
+    headline: 'Send feedback',
+    description: 'Share bugs, ideas, or anything blocking your work.',
+    acknowledgement: 'Thanks. We will review your submission.',
+    submitButtonLabel: 'Submit feedback',
+    showPageUrl: true,
+    fields: [],
+  }
+}
+
+function defaultPortalSubmissionField(index = 1): PortalSubmissionFieldState {
+  return {
+    key: `custom_field_${index}`,
+    label: `Custom field ${index}`,
+    kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT,
+    required: false,
+    placeholder: 'Additional context',
+    options: [],
+  }
+}
+
+function parsePortalFieldOptions(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
 }
 
 function defaultProfileForm(): RequestProfileForm {
@@ -1149,11 +1736,126 @@ function formFromPolicy(policy: PublicVisibilityPolicy): PolicyForm {
     showCommentCount: policy.showCommentCount,
     showSubmitterDisplay: policy.showSubmitterDisplay,
     hidePublicTimestamps: policy.hidePublicTimestamps,
+    portalSubmissionForm: portalSubmissionFormFromPolicy(policy.portalSubmissionForm),
+  }
+}
+
+function portalSubmissionFormFromPolicy(
+  form: PortalSubmissionFormConfig | undefined,
+): PortalSubmissionFormState {
+  const defaults = defaultPortalSubmissionForm()
+  if (!form) return defaults
+  return {
+    headline: form.headline || defaults.headline,
+    description: form.description || defaults.description,
+    acknowledgement: form.acknowledgement || defaults.acknowledgement,
+    submitButtonLabel: form.submitButtonLabel || defaults.submitButtonLabel,
+    showPageUrl: form.showPageUrl,
+    fields: (form.fields ?? []).map((field) => ({
+      key: field.key,
+      label: field.label,
+      kind: field.kind,
+      required: field.required,
+      placeholder: field.placeholder,
+      options: [...(field.options ?? [])],
+    })),
+  }
+}
+
+function portalSubmissionFormRequestFromForm(
+  form: PortalSubmissionFormState,
+): PortalSubmissionFormConfig {
+  return {
+    headline: form.headline.trim(),
+    description: form.description.trim(),
+    acknowledgement: form.acknowledgement.trim(),
+    submitButtonLabel: form.submitButtonLabel.trim(),
+    showPageUrl: form.showPageUrl,
+    fields: form.fields.map((field) => ({
+      key: field.key.trim().toLowerCase(),
+      label: field.label.trim(),
+      kind: field.kind,
+      required: field.required,
+      placeholder: field.placeholder.trim(),
+      options: field.options.map((option) => option.trim()).filter(Boolean),
+    })),
   }
 }
 
 function policyRequestFromForm(form: PolicyForm) {
-  return form
+  return {
+    portalAccessMode: form.portalAccessMode,
+    searchIndexingEnabled: form.searchIndexingEnabled,
+    requestsEnabled: form.requestsEnabled,
+    commentsEnabled: form.commentsEnabled,
+    roadmapEnabled: form.roadmapEnabled,
+    changelogEnabled: form.changelogEnabled,
+    submissionWriteMode: form.submissionWriteMode,
+    commentWriteMode: form.commentWriteMode,
+    voteWriteMode: form.voteWriteMode,
+    defaultRequestState: form.defaultRequestState,
+    defaultCommentState: form.defaultCommentState,
+    submitterIdentityMode: form.submitterIdentityMode,
+    showVoteCount: form.showVoteCount,
+    showCommentCount: form.showCommentCount,
+    showSubmitterDisplay: form.showSubmitterDisplay,
+    hidePublicTimestamps: form.hidePublicTimestamps,
+    portalSubmissionForm: portalSubmissionFormRequestFromForm(form.portalSubmissionForm),
+  }
+}
+
+function portalSubmissionFieldKindName(kind: PortalSubmissionFieldKind) {
+  switch (kind) {
+    case PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA:
+      return 'textarea'
+    case PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT:
+      return 'select'
+    case PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT:
+      return 'multiselect'
+    case PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN:
+      return 'boolean'
+    default:
+      return 'text'
+  }
+}
+
+function portalSubmissionFieldKindLabel(kind: PortalSubmissionFieldKind, t: TFunction) {
+  return t(`public_visibility.portal.field.kind_values.${portalSubmissionFieldKindName(kind)}`)
+}
+
+function portalSubmissionFieldKindOptions(t: TFunction) {
+  return [
+    PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT,
+    PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA,
+    PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+    PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+    PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN,
+  ].map((value) => ({
+    value,
+    label: portalSubmissionFieldKindLabel(value, t),
+  }))
+}
+
+function portalWriteModeName(mode: PublicWriteMode) {
+  switch (mode) {
+    case PublicWriteMode.PUBLIC_WRITE_MODE_ANONYMOUS:
+      return 'anonymous'
+    case PublicWriteMode.PUBLIC_WRITE_MODE_IDENTIFIED:
+      return 'identified'
+    default:
+      return 'disabled'
+  }
+}
+
+function portalIdentityModeName(mode: PublicIdentityMode) {
+  switch (mode) {
+    case PublicIdentityMode.PUBLIC_IDENTITY_MODE_DISPLAY_NAME:
+      return 'display_name'
+    case PublicIdentityMode.PUBLIC_IDENTITY_MODE_ORGANIZATION:
+      return 'organization'
+    default:
+      return 'anonymous'
+  }
 }
 
 function countStates(subjects: ModerationSubject[]) {
@@ -1266,6 +1968,7 @@ export const publicVisibilityPageTestables = {
   actionRequiresReason,
   countStates,
   defaultForm,
+  defaultPortalSubmissionForm,
   defaultProfileForm,
   filterSubjects,
   formatDate,
@@ -1277,6 +1980,11 @@ export const publicVisibilityPageTestables = {
   policyRequestFromForm,
   profileFormFromPublication,
   profileRequestFromForm,
+  portalSubmissionFieldKindLabel,
+  portalSubmissionFieldKindName,
+  portalSubmissionFieldKindOptions,
+  portalSubmissionFormFromPolicy,
+  portalSubmissionFormRequestFromForm,
   reasonCodeForAction,
   reasonOptionsForAction,
 }
