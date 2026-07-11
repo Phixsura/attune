@@ -5457,6 +5457,306 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/moderation:
+        get:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_ListModerationSubjects
+            parameters:
+                - name: surface
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        enum:
+                            - PUBLIC_SURFACE_UNSPECIFIED
+                            - PUBLIC_SURFACE_REQUEST
+                            - PUBLIC_SURFACE_REQUEST_COMMENT
+                            - PUBLIC_SURFACE_ROADMAP_ITEM
+                            - PUBLIC_SURFACE_CHANGELOG_POST
+                            - PUBLIC_SURFACE_PORTAL_SUBMISSION
+                        type: string
+                        format: enum
+                - name: state
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        enum:
+                            - MODERATION_STATE_UNSPECIFIED
+                            - MODERATION_STATE_PENDING
+                            - MODERATION_STATE_APPROVED
+                            - MODERATION_STATE_REJECTED
+                            - MODERATION_STATE_HIDDEN
+                            - MODERATION_STATE_SPAM
+                        type: string
+                        format: enum
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListModerationSubjectsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/moderation/{id}:approve:
+        post:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_ApproveModerationSubject
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ApproveModerationSubjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModerationSubject'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/moderation/{id}:hide:
+        post:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_HideModerationSubject
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/HideModerationSubjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModerationSubject'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/moderation/{id}:mark-spam:
+        post:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_MarkModerationSubjectSpam
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/MarkModerationSubjectSpamRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModerationSubject'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/moderation/{id}:reject:
+        post:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_RejectModerationSubject
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RejectModerationSubjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModerationSubject'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/moderation/{id}:restore:
+        post:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_RestoreModerationSubject
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RestoreModerationSubjectRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ModerationSubject'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/policy:
+        get:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_GetPublicVisibilityPolicy
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicVisibilityPolicy'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        put:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_UpdatePublicVisibilityPolicy
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdatePublicVisibilityPolicyRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicVisibilityPolicy'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/requests/{requestId}/profile:
+        get:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_GetPublicRequestProfile
+            parameters:
+                - name: requestId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicRequestPublication'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        put:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_UpsertPublicRequestProfile
+            parameters:
+                - name: requestId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpsertPublicRequestProfileRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicRequestPublication'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/quality-actions:
         get:
             tags:
@@ -8113,6 +8413,206 @@ paths:
                             description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
                             schema:
                                 type: string
+    /v1/portal/{tenantSlug}/requests:
+        get:
+            tags:
+                - PortalService
+            operationId: PortalService_ListPublicCustomerRequests
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListPublicCustomerRequestsResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/portal/{tenantSlug}/requests/{publicSlug}:
+        get:
+            tags:
+                - PortalService
+            operationId: PortalService_GetPublicCustomerRequest
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: publicSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicCustomerRequestDetail'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/portal/{tenantSlug}/roadmap:
+        get:
+            tags:
+                - PortalService
+            operationId: PortalService_ListPublicRoadmap
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: uint32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListPublicRoadmapResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
 components:
     schemas:
         AIAgentConfig:
@@ -8387,6 +8887,17 @@ components:
                 expiresAt:
                     type: string
             description: Approval workflows
+        ApproveModerationSubjectRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                reasonCode:
+                    type: string
+                reasonNote:
+                    type: string
         ApproveReplyDraftRequest:
             type: object
             properties:
@@ -11828,6 +12339,17 @@ components:
                     type: array
                     items:
                         type: string
+        HideModerationSubjectRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                reasonCode:
+                    type: string
+                reasonNote:
+                    type: string
         I18nString:
             type: object
             properties:
@@ -12432,6 +12954,15 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Member'
+        ListModerationSubjectsResponse:
+            type: object
+            properties:
+                subjects:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ModerationSubject'
+                nextCursor:
+                    type: string
         ListNotifyTargetsResponse:
             type: object
             properties:
@@ -12453,6 +12984,24 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/Project'
+        ListPublicCustomerRequestsResponse:
+            type: object
+            properties:
+                requests:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PublicCustomerRequestSummary'
+                nextCursor:
+                    type: string
+        ListPublicRoadmapResponse:
+            type: object
+            properties:
+                columns:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PublicRoadmapColumn'
+                nextCursor:
+                    type: string
         ListQualityActionsResponse:
             type: object
             properties:
@@ -12767,6 +13316,17 @@ components:
                 createdAt:
                     type: string
             description: Managed identities
+        MarkModerationSubjectSpamRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                reasonCode:
+                    type: string
+                reasonNote:
+                    type: string
         Member:
             type: object
             properties:
@@ -12799,6 +13359,49 @@ components:
                 targetId:
                     type: string
                 idempotencyKey:
+                    type: string
+        ModerationSubject:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                surface:
+                    enum:
+                        - PUBLIC_SURFACE_UNSPECIFIED
+                        - PUBLIC_SURFACE_REQUEST
+                        - PUBLIC_SURFACE_REQUEST_COMMENT
+                        - PUBLIC_SURFACE_ROADMAP_ITEM
+                        - PUBLIC_SURFACE_CHANGELOG_POST
+                        - PUBLIC_SURFACE_PORTAL_SUBMISSION
+                    type: string
+                    format: enum
+                subjectId:
+                    type: string
+                state:
+                    enum:
+                        - MODERATION_STATE_UNSPECIFIED
+                        - MODERATION_STATE_PENDING
+                        - MODERATION_STATE_APPROVED
+                        - MODERATION_STATE_REJECTED
+                        - MODERATION_STATE_HIDDEN
+                        - MODERATION_STATE_SPAM
+                    type: string
+                    format: enum
+                reasonCode:
+                    type: string
+                reasonNote:
+                    type: string
+                submittedByDisplay:
+                    type: string
+                reviewedBy:
+                    type: string
+                reviewedAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
                     type: string
         NamedAny:
             type: object
@@ -13094,6 +13697,179 @@ components:
                     allOf:
                         - $ref: '#/components/schemas/Dimension'
                     description: The updated dimension with the new taxonomy value.
+        PublicCustomerRequestDetail:
+            type: object
+            properties:
+                request:
+                    $ref: '#/components/schemas/PublicCustomerRequestSummary'
+                links:
+                    type: array
+                    items:
+                        type: string
+        PublicCustomerRequestSummary:
+            type: object
+            properties:
+                id:
+                    type: string
+                slug:
+                    type: string
+                title:
+                    type: string
+                summary:
+                    type: string
+                state:
+                    type: string
+                roadmapColumn:
+                    type: string
+                voteCount:
+                    type: integer
+                    format: uint32
+                commentCount:
+                    type: integer
+                    format: uint32
+                submittedByDisplay:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        PublicRequestProfile:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                requestId:
+                    type: string
+                publicSlug:
+                    type: string
+                publicTitle:
+                    type: string
+                publicSummary:
+                    type: string
+                publicState:
+                    type: string
+                roadmapColumn:
+                    type: string
+                includedInPortal:
+                    type: boolean
+                includedInRoadmap:
+                    type: boolean
+                publishedAt:
+                    type: string
+                updatedBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        PublicRequestPublication:
+            type: object
+            properties:
+                profile:
+                    $ref: '#/components/schemas/PublicRequestProfile'
+                moderation:
+                    $ref: '#/components/schemas/ModerationSubject'
+        PublicRoadmapColumn:
+            type: object
+            properties:
+                name:
+                    type: string
+                requests:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PublicCustomerRequestSummary'
+        PublicVisibilityPolicy:
+            type: object
+            properties:
+                tenantId:
+                    type: string
+                portalAccessMode:
+                    enum:
+                        - PUBLIC_ACCESS_MODE_UNSPECIFIED
+                        - PUBLIC_ACCESS_MODE_DISABLED
+                        - PUBLIC_ACCESS_MODE_PUBLIC
+                        - PUBLIC_ACCESS_MODE_AUTHENTICATED
+                        - PUBLIC_ACCESS_MODE_INVITE_ONLY
+                    type: string
+                    format: enum
+                searchIndexingEnabled:
+                    type: boolean
+                requestsEnabled:
+                    type: boolean
+                commentsEnabled:
+                    type: boolean
+                roadmapEnabled:
+                    type: boolean
+                changelogEnabled:
+                    type: boolean
+                submissionWriteMode:
+                    enum:
+                        - PUBLIC_WRITE_MODE_UNSPECIFIED
+                        - PUBLIC_WRITE_MODE_DISABLED
+                        - PUBLIC_WRITE_MODE_ANONYMOUS
+                        - PUBLIC_WRITE_MODE_IDENTIFIED
+                    type: string
+                    format: enum
+                commentWriteMode:
+                    enum:
+                        - PUBLIC_WRITE_MODE_UNSPECIFIED
+                        - PUBLIC_WRITE_MODE_DISABLED
+                        - PUBLIC_WRITE_MODE_ANONYMOUS
+                        - PUBLIC_WRITE_MODE_IDENTIFIED
+                    type: string
+                    format: enum
+                voteWriteMode:
+                    enum:
+                        - PUBLIC_WRITE_MODE_UNSPECIFIED
+                        - PUBLIC_WRITE_MODE_DISABLED
+                        - PUBLIC_WRITE_MODE_ANONYMOUS
+                        - PUBLIC_WRITE_MODE_IDENTIFIED
+                    type: string
+                    format: enum
+                defaultRequestState:
+                    enum:
+                        - MODERATION_STATE_UNSPECIFIED
+                        - MODERATION_STATE_PENDING
+                        - MODERATION_STATE_APPROVED
+                        - MODERATION_STATE_REJECTED
+                        - MODERATION_STATE_HIDDEN
+                        - MODERATION_STATE_SPAM
+                    type: string
+                    format: enum
+                defaultCommentState:
+                    enum:
+                        - MODERATION_STATE_UNSPECIFIED
+                        - MODERATION_STATE_PENDING
+                        - MODERATION_STATE_APPROVED
+                        - MODERATION_STATE_REJECTED
+                        - MODERATION_STATE_HIDDEN
+                        - MODERATION_STATE_SPAM
+                    type: string
+                    format: enum
+                submitterIdentityMode:
+                    enum:
+                        - PUBLIC_IDENTITY_MODE_UNSPECIFIED
+                        - PUBLIC_IDENTITY_MODE_ANONYMOUS
+                        - PUBLIC_IDENTITY_MODE_DISPLAY_NAME
+                        - PUBLIC_IDENTITY_MODE_ORGANIZATION
+                    type: string
+                    format: enum
+                showVoteCount:
+                    type: boolean
+                showCommentCount:
+                    type: boolean
+                showSubmitterDisplay:
+                    type: boolean
+                hidePublicTimestamps:
+                    type: boolean
+                updatedBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
         QualifyExternalConnectionRequest:
             type: object
             properties:
@@ -13240,6 +14016,17 @@ components:
                     type: string
                 workflow:
                     $ref: '#/components/schemas/ReplyDraftWorkflow'
+        RejectModerationSubjectRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                reasonCode:
+                    type: string
+                reasonNote:
+                    type: string
         RejectReplyDraftRequest:
             type: object
             properties:
@@ -13656,6 +14443,17 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/GuardRule'
+        RestoreModerationSubjectRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                reasonCode:
+                    type: string
+                reasonNote:
+                    type: string
         ResumeExternalConnectionRequest:
             type: object
             properties:
@@ -14796,6 +15594,96 @@ components:
             properties:
                 policy:
                     $ref: '#/components/schemas/ApiKeyPolicy'
+        UpdatePublicVisibilityPolicyRequest:
+            required:
+                - portalAccessMode
+                - submissionWriteMode
+                - commentWriteMode
+                - voteWriteMode
+                - defaultRequestState
+                - defaultCommentState
+                - submitterIdentityMode
+            type: object
+            properties:
+                portalAccessMode:
+                    enum:
+                        - PUBLIC_ACCESS_MODE_UNSPECIFIED
+                        - PUBLIC_ACCESS_MODE_DISABLED
+                        - PUBLIC_ACCESS_MODE_PUBLIC
+                        - PUBLIC_ACCESS_MODE_AUTHENTICATED
+                        - PUBLIC_ACCESS_MODE_INVITE_ONLY
+                    type: string
+                    format: enum
+                searchIndexingEnabled:
+                    type: boolean
+                requestsEnabled:
+                    type: boolean
+                commentsEnabled:
+                    type: boolean
+                roadmapEnabled:
+                    type: boolean
+                changelogEnabled:
+                    type: boolean
+                submissionWriteMode:
+                    enum:
+                        - PUBLIC_WRITE_MODE_UNSPECIFIED
+                        - PUBLIC_WRITE_MODE_DISABLED
+                        - PUBLIC_WRITE_MODE_ANONYMOUS
+                        - PUBLIC_WRITE_MODE_IDENTIFIED
+                    type: string
+                    format: enum
+                commentWriteMode:
+                    enum:
+                        - PUBLIC_WRITE_MODE_UNSPECIFIED
+                        - PUBLIC_WRITE_MODE_DISABLED
+                        - PUBLIC_WRITE_MODE_ANONYMOUS
+                        - PUBLIC_WRITE_MODE_IDENTIFIED
+                    type: string
+                    format: enum
+                voteWriteMode:
+                    enum:
+                        - PUBLIC_WRITE_MODE_UNSPECIFIED
+                        - PUBLIC_WRITE_MODE_DISABLED
+                        - PUBLIC_WRITE_MODE_ANONYMOUS
+                        - PUBLIC_WRITE_MODE_IDENTIFIED
+                    type: string
+                    format: enum
+                defaultRequestState:
+                    enum:
+                        - MODERATION_STATE_UNSPECIFIED
+                        - MODERATION_STATE_PENDING
+                        - MODERATION_STATE_APPROVED
+                        - MODERATION_STATE_REJECTED
+                        - MODERATION_STATE_HIDDEN
+                        - MODERATION_STATE_SPAM
+                    type: string
+                    format: enum
+                defaultCommentState:
+                    enum:
+                        - MODERATION_STATE_UNSPECIFIED
+                        - MODERATION_STATE_PENDING
+                        - MODERATION_STATE_APPROVED
+                        - MODERATION_STATE_REJECTED
+                        - MODERATION_STATE_HIDDEN
+                        - MODERATION_STATE_SPAM
+                    type: string
+                    format: enum
+                submitterIdentityMode:
+                    enum:
+                        - PUBLIC_IDENTITY_MODE_UNSPECIFIED
+                        - PUBLIC_IDENTITY_MODE_ANONYMOUS
+                        - PUBLIC_IDENTITY_MODE_DISPLAY_NAME
+                        - PUBLIC_IDENTITY_MODE_ORGANIZATION
+                    type: string
+                    format: enum
+                showVoteCount:
+                    type: boolean
+                showCommentCount:
+                    type: boolean
+                showSubmitterDisplay:
+                    type: boolean
+                hidePublicTimestamps:
+                    type: boolean
         UpdateQualityActionRequest:
             type: object
             properties:
@@ -14945,6 +15833,31 @@ components:
                     type: string
                 enabled:
                     type: boolean
+        UpsertPublicRequestProfileRequest:
+            required:
+                - requestId
+                - publicSlug
+                - publicTitle
+            type: object
+            properties:
+                requestId:
+                    type: string
+                publicSlug:
+                    type: string
+                publicTitle:
+                    type: string
+                publicSummary:
+                    type: string
+                publicState:
+                    type: string
+                roadmapColumn:
+                    type: string
+                includedInPortal:
+                    type: boolean
+                includedInRoadmap:
+                    type: boolean
+                submittedByDisplay:
+                    type: string
         UpsertReplySendHookRequest:
             type: object
             properties:
@@ -15156,6 +16069,8 @@ tags:
          contract only exposes visibility + manual re-arm.
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
+    - name: PortalService
+    - name: PublicVisibilityService
     - name: QualityActionService
       description: |-
         QualityActionService stores the operator action ledger behind the control

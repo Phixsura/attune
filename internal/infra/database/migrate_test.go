@@ -95,7 +95,26 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 105, count, "should match current migration count")
+	require.Equal(t, 106, count, "should match current migration count")
+}
+
+func TestPublicVisibilityMigrationAllowsPublicModerationAuditActions(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/106_public_visibility_moderation.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, action := range []string{
+		"public_policy.update",
+		"public_request_profile.upsert",
+		"moderation.approve",
+		"moderation.reject",
+		"moderation.hide",
+		"moderation.mark_spam",
+		"moderation.restore",
+	} {
+		require.Contains(t, sql, "'"+action+"'", "migration should allow %s audit action", action)
+	}
 }
 
 func TestExternalSyncMigrationAllowsAllExternalSyncAuditActions(t *testing.T) {

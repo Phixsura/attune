@@ -18,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
+	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
 	"github.com/Phixsura/attune/internal/handlers/console/system"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
@@ -55,6 +56,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	oidcuserrepo "github.com/Phixsura/attune/internal/repo/oidcuser"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
+	publicvisibilityrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	systemsettingsrepo "github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -78,6 +80,7 @@ import (
 	llmconfigsvc "github.com/Phixsura/attune/internal/service/llmconfig"
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/oidcauth"
+	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 	"github.com/Phixsura/attune/internal/service/securityalert"
 	"github.com/Phixsura/attune/internal/service/semanticsearch"
@@ -303,6 +306,7 @@ func buildConsoleRouter(
 		workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
 	router.SetCustomerRequestHandler(customerRequestHandler)
+	router.SetPublicVisibilityHandler(buildPublicVisibilityHandler(pool, auditLogSvc))
 	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets), nil
 }
 
@@ -320,6 +324,10 @@ func buildCustomerRequestHandler(pool *pgxpool.Pool, idempotencyRepo idempotency
 	handler := console.NewCustomerRequestHandler(customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc))
 	handler.SetSavedViewService(customerrequestviewsvc.New(customerrequestviewrepo.New(settingsRepo)))
 	return handler
+}
+
+func buildPublicVisibilityHandler(pool *pgxpool.Pool, auditLogSvc *auditlogsvc.Service) *consolepublicvisibility.Handler {
+	return console.NewPublicVisibilityHandler(publicvisibilitysvc.New(publicvisibilityrepo.New(pool), auditLogSvc))
 }
 
 func buildBatchHandler(feedbackRepo *feedback.FeedbackRepo, idempotencyRepo idempotencyrepo.Store, jobRepo feedbackjobrepo.Store) (feedbackbatch.Service, *consolefeedback.BatchHandler) {

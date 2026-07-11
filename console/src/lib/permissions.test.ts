@@ -37,6 +37,14 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'nav:settings')).toBe(true)
       expect(hasPermission(role, 'nav:llm_config')).toBe(true)
     })
+
+    it('has public visibility governance permissions', () => {
+      expect(hasPermission(role, 'public_policy:view')).toBe(true)
+      expect(hasPermission(role, 'public_policy:edit')).toBe(true)
+      expect(hasPermission(role, 'moderation:view')).toBe(true)
+      expect(hasPermission(role, 'moderation:triage')).toBe(true)
+      expect(hasPermission(role, 'moderation:enforce')).toBe(true)
+    })
   })
 
   describe('delegated admin role', () => {
@@ -64,6 +72,14 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'settings:api_keys:view')).toBe(false)
       expect(hasPermission(role, 'llm_config:view')).toBe(false)
       expect(hasPermission(role, 'nav:llm_config')).toBe(false)
+    })
+
+    it('can manage public visibility policy and enforcement', () => {
+      expect(hasPermission(role, 'public_policy:view')).toBe(true)
+      expect(hasPermission(role, 'public_policy:edit')).toBe(true)
+      expect(hasPermission(role, 'moderation:view')).toBe(true)
+      expect(hasPermission(role, 'moderation:triage')).toBe(true)
+      expect(hasPermission(role, 'moderation:enforce')).toBe(true)
     })
   })
 
@@ -95,6 +111,14 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'nav:settings')).toBe(true)
       expect(hasPermission(role, 'nav:llm_config')).toBe(true)
     })
+
+    it('can triage moderation without changing public policy', () => {
+      expect(hasPermission(role, 'public_policy:view')).toBe(false)
+      expect(hasPermission(role, 'public_policy:edit')).toBe(false)
+      expect(hasPermission(role, 'moderation:view')).toBe(true)
+      expect(hasPermission(role, 'moderation:triage')).toBe(true)
+      expect(hasPermission(role, 'moderation:enforce')).toBe(false)
+    })
   })
 
   describe('viewer role', () => {
@@ -119,6 +143,14 @@ describe('hasPermission', () => {
 
     it('can view usage', () => {
       expect(hasPermission(role, 'usage:view')).toBe(true)
+    })
+
+    it('cannot access public visibility governance', () => {
+      expect(hasPermission(role, 'public_policy:view')).toBe(false)
+      expect(hasPermission(role, 'public_policy:edit')).toBe(false)
+      expect(hasPermission(role, 'moderation:view')).toBe(false)
+      expect(hasPermission(role, 'moderation:triage')).toBe(false)
+      expect(hasPermission(role, 'moderation:enforce')).toBe(false)
     })
   })
 })

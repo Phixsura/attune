@@ -47,8 +47,10 @@ import {
   consoleA11yMcpClientUpdate,
   consoleA11yMcpToolPolicyUpdate,
   consoleA11yMe,
+  consoleA11yModerationSubjects,
   consoleA11yOutboxDeliveries,
   consoleA11yOutboxRetry,
+  consoleA11yPublicVisibilityPolicy,
   consoleA11yReplyDraftWorkflow,
   consoleA11yReplySendHook,
   consoleA11yReplySendHookDeliveries,
@@ -173,6 +175,14 @@ async function handleRoute(
   }
   if (method === 'GET' && path === '/workflow/states') {
     await fulfillJson(route, consoleA11yWorkflowStatesResponse)
+    return true
+  }
+  if (method === 'GET' && path === '/public-visibility/policy') {
+    await fulfillJson(route, consoleA11yPublicVisibilityPolicy)
+    return true
+  }
+  if (method === 'GET' && path === '/public-visibility/moderation') {
+    await fulfillJson(route, consoleA11yModerationSubjects)
     return true
   }
 

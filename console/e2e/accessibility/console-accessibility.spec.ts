@@ -31,6 +31,7 @@ const zh = {
   outboxDead: '\u6b7b\u4fe1\u6295\u9012',
   outboxRetryQueued:
     '\u5df2\u91cd\u65b0\u6392\u961f\uff0c\u0077\u006f\u0072\u006b\u0065\u0072\u0020\u5c06\u5728\u4e0b\u6b21\u8f6e\u8be2\u65f6\u6295\u9012\u3002',
+  publicVisibility: '\u516c\u5f00\u53ef\u89c1\u6027',
   retry: '\u91cd\u8bd5',
   retryDelivery: '\u91cd\u8bd5\u6295\u9012',
   retryEnrichment: '\u91cd\u8bd5\u5bcc\u5316',
@@ -125,6 +126,11 @@ const routes = [
     path: '/integrations/reply-send-hook',
     title: zh.replySendHook,
     heading: zh.replySendHook,
+  },
+  {
+    path: '/integrations/public-visibility',
+    title: zh.publicVisibility,
+    heading: zh.publicVisibility,
   },
   { path: '/mcp-clients', title: zh.mcpClients, heading: zh.mcpClients },
   { path: '/administration/gdpr', title: zh.gdpr, heading: zh.gdpr },

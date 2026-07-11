@@ -72,7 +72,20 @@ export type ActionCategory = 'create' | 'update' | 'delete' | 'test' | 'neutral'
 export function getActionCategory(action: string): ActionCategory {
   const verb = action.split('.').pop() ?? ''
   if (['create', 'invite', 'upsert', 'resume'].includes(verb)) return 'create'
-  if (['delete', 'remove', 'revoke', 'expire', 'batch_delete', 'cancel', 'archive'].includes(verb))
+  if (
+    [
+      'delete',
+      'remove',
+      'revoke',
+      'expire',
+      'batch_delete',
+      'cancel',
+      'archive',
+      'reject',
+      'hide',
+      'mark_spam',
+    ].includes(verb)
+  )
     return 'delete'
   if (['test', 'test_connection', 'download'].includes(verb)) return 'test'
   if (
@@ -85,6 +98,8 @@ export function getActionCategory(action: string): ActionCategory {
       'pause',
       'replace',
       'run',
+      'approve',
+      'restore',
     ].includes(verb)
   )
     return 'update'
@@ -161,10 +176,17 @@ export const auditActionOptions = [
   'member.invite',
   'member.remove',
   'member.update_role',
+  'moderation.approve',
+  'moderation.hide',
+  'moderation.mark_spam',
+  'moderation.reject',
+  'moderation.restore',
   'notify_target.create',
   'notify_target.delete',
   'notify_target.test',
   'notify_target.update',
+  'public_policy.update',
+  'public_request_profile.upsert',
   'tag.archive',
   'tag.create',
   'tag.update',

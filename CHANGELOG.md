@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Public visibility policy and moderation foundation.**
+  Added tenant-scoped public visibility policy storage, moderation subject
+  state transitions, audit events, generated Console and public portal
+  contracts, a public-safe Customer Request read projection under `/v1/portal`,
+  anonymous portal rate limiting, Console request-profile publication APIs, and
+  a Console policy/moderation page for reviewing public-facing request
+  visibility through the shared contract. The Console policy page also exposes
+  vote write mode, comment default state, submitter identity, and count/display
+  controls, while public request projections enforce anonymous identity mode
+  before emitting submitter display names. Console public-visibility handlers
+  also reject unknown numeric enum values and unknown query-string enum filters
+  before they can be silently coerced into default policy or moderation filters.
+  Database constraints now also reject rejected, hidden, or spam policy default
+  states, so direct writes cannot bypass the runtime default-state contract.
+  Public portal APIs now include tenant-scoped request-list and roadmap-list
+  endpoints that share the same policy, moderation, live-record, field
+  allowlist, no-store cache, and noindex controls as public request details.
+  Public moderation subjects now enforce bounded non-empty subject identifiers
+  and are covered across request-comment and portal-submission surfaces, so the
+  shared queue contract is not request-only.
+  Moderation actions now carry stable
+  reason codes and optional bounded notes, the Console queue can switch between
+  pending, published, blocked, and all review states, and public request reads
+  emit a no-store cache policy on success, not-found, invalid-query, and
+  rate-limited responses so moderation hides and restores take effect in
+  browsers.
+  Console request-profile details now update their displayed moderation state
+  immediately after approve, hide, spam, reject, or restore actions.
+
 - **External sync framework foundation.**
   Added tenant-scoped external connection, object mapping, object link, cursor,
   sync-run, attempt, record-failure, and conflict tables; generated Console API
