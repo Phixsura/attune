@@ -56,7 +56,7 @@ export function SourcesTable({
       </TableHeader>
       <TableBody>
         {sources.map((src) => (
-          <TableRow key={src.id} className={src.enabled ? '' : 'opacity-50'}>
+          <TableRow key={src.id} className={src.enabled ? '' : 'bg-muted/20'}>
             <TableCell className="font-medium">{src.name}</TableCell>
             <TableCell>
               <ChannelPill channel={src.channel} />
@@ -173,7 +173,7 @@ function StateBadge({ source }: { source: InboundSource }) {
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-green-600/30 bg-green-600/10 px-1.5 py-0.5 text-xs text-green-700 dark:text-green-500">
+    <span className="inline-flex items-center gap-1 rounded-md border border-green-600/30 bg-green-600/10 px-1.5 py-0.5 text-xs text-green-800 dark:text-green-400">
       {t('inbound_sources.state.healthy')}
     </span>
   )

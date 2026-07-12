@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Paused inbound source rows now keep readable contrast.**
+  The Console inbound sources table now uses a muted background instead of
+  row-wide opacity for paused entries, so the registry stays accessible in
+  both desktop and mobile browser checks.
+
 - **Public portal submission form now sends protobuf enum values.**
   The portal page now submits the submission kind using the proto enum names
   expected by the JSON API, and the audit log allow-list now accepts the
