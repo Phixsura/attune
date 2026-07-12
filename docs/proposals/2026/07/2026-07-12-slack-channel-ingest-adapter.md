@@ -108,6 +108,59 @@ snapshot, keep credentials separate from runtime logic, and expose lifecycle
 hooks that make connectors testable before they are enabled. Slack should follow
 that model instead of becoming an ad hoc handler.
 
+### Gap Roadmap
+
+The 100-point industry gap audit collapses into three practical priority bands.
+P0 is the operator trust layer, P1 is the mature connector experience, and P2
+is the platform-expansion layer.
+
+| Priority | Themes | Why it matters |
+|---|---|---|
+| P0 | auth / discover / select / test, replay-safe sync, source-state visibility, browser + CI validation | Without this, operators cannot safely trust the connector. |
+| P1 | source detail view, sync timeline, retry vs permanent diagnosis, backfill / replay controls, adaptive polling | This turns a working connector into an operator-grade one. |
+| P2 | Events API transport, generated capability docs, richer compliance / audit views, scale controls, richer fixture matrices | This is how the connector reaches platform depth and longevity. |
+
+P0 is already covered by the current PR. The remaining bands are the natural
+next steps if we want to keep moving Slack toward the top tier.
+
+#### P0
+
+- Keep the Slack create flow aligned with `check` and `discover`.
+- Keep dedupe, watermark advancement, and thread hydration replay-safe.
+- Keep `last_event_at`, `last_uid`, and `last_error` visible in Console.
+- Keep permanent failures fail-closed and operator-readable.
+- Keep the browser smoke test and CI coverage green.
+
+#### P1
+
+- Add a source detail panel with lag, last sync, and latest error context.
+- Split retryable vs permanent failures in the UI and audit trail.
+- Add search, filter, and sort for Slack sources by state and lag.
+- Add replay/backfill controls with explicit cursor selection and guardrails.
+- Add adaptive polling and stale-source alerts for noisy or slow channels.
+
+#### P2
+
+- Add an Events API transport behind the same normalization core.
+- Generate connector docs and capability matrices from the registry.
+- Add richer fixture coverage for archived, shared, private, and edited messages.
+- Add compliance and retention views for tenants that need deeper governance.
+- Add scale controls for very large tenant/source fleets.
+
+### World-Class Definition
+
+Slack is world-class for Attune when these are all true:
+
+1. The connector behaves like a real source lifecycle, not a one-off handler.
+2. The operator can discover, test, enable, pause, and recover a source without guesswork.
+3. The ingest core is transport-agnostic and replay-safe by construction.
+4. The Console exposes health, lag, error class, and sync history in plain language.
+5. The state model is explicit, bounded, and observable across restarts.
+6. The test matrix covers both fixture-level correctness and browser-level operator flows.
+
+This definition is intentionally stricter than "feature complete". It gives us
+a durable bar for the next PRs without widening the current issue scope.
+
 ## Proposal
 
 ### 1. Treat Slack as a source connector, not a handler
