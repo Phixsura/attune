@@ -102,6 +102,19 @@ func (r *Repo) SetEnabled(ctx context.Context, id string, enabled bool, reason s
 	return err
 }
 
+// UpdateConfig writes back the encrypted config blob for adapters that
+// persist additional cursor state in inbound_sources.config.
+func (r *Repo) UpdateConfig(ctx context.Context, id string, config []byte) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE inbound_sources
+		    SET config = $2,
+		        updated_at = now()
+		  WHERE id = $1`,
+		id, config,
+	)
+	return err
+}
+
 func (r *Repo) scanOne(ctx context.Context, sql string, args ...any) (inbound.Source, error) {
 	row := r.pool.QueryRow(ctx, sql, args...)
 	s, err := scanRow(row)

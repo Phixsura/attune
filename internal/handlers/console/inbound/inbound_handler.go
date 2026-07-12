@@ -31,6 +31,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
+	"github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -44,6 +45,7 @@ import (
 const (
 	channelWebhook = webhook.Channel
 	channelEmail   = email.Channel
+	channelSlack   = slack.ChannelName
 )
 
 // rotator is the subset of webhook.RotateSecret the handler depends on,
@@ -60,15 +62,24 @@ type tenantLookup func(ctx context.Context, tenantID string) (string, error)
 // handler and the adapter framework share one interface (#66 review
 // M-5; the prior 3-method `sourceRepo` was a strict subset).
 type Handler struct {
-	sources    inbound.SourceStore
-	pool       *pgxpool.Pool
-	secrets    inbound.SecretStore
-	baseURL    string
-	rotate     rotator
-	testConn   testConnFn
-	tenantSlug tenantLookup
-	audit      auditRecorder
+	sources              inbound.SourceStore
+	pool                 *pgxpool.Pool
+	secrets              inbound.SecretStore
+	baseURL              string
+	rotate               rotator
+	testConn             testConnFn
+	slackAuthTest        slackAuthTestFn
+	slackDiscover        slackDiscoverFn
+	slackValidateChannel slackValidateChannelFn
+	tenantSlug           tenantLookup
+	audit                auditRecorder
 }
+
+type (
+	slackAuthTestFn        func(ctx context.Context, token string) (slack.AuthInfo, error)
+	slackDiscoverFn        func(ctx context.Context, token string) (slack.AuthInfo, []slack.Channel, error)
+	slackValidateChannelFn func(ctx context.Context, token, channelID string) (slack.AuthInfo, slack.Channel, error)
+)
 
 type auditRecorder interface {
 	Record(ctx context.Context, event auditlogsvc.Event) error
@@ -80,13 +91,16 @@ type auditRecorder interface {
 // pool; callers do not need to pass it explicitly.
 func NewHandler(sources *inboundsource.Repo, p *pgxpool.Pool, secrets inbound.SecretStore, baseURL string) *Handler {
 	return ptrext.Of(Handler{
-		sources:    sources,
-		pool:       p,
-		secrets:    secrets,
-		baseURL:    strings.TrimRight(baseURL, "/"),
-		rotate:     webhook.RotateSecret,
-		testConn:   imapDialAndProbe,
-		tenantSlug: tenantSlugFromPool(p),
+		sources:              sources,
+		pool:                 p,
+		secrets:              secrets,
+		baseURL:              strings.TrimRight(baseURL, "/"),
+		rotate:               webhook.RotateSecret,
+		testConn:             imapDialAndProbe,
+		slackAuthTest:        slack.AuthTest,
+		slackDiscover:        slack.Discover,
+		slackValidateChannel: slack.ValidateChannel,
+		tenantSlug:           tenantSlugFromPool(p),
 	})
 }
 

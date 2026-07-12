@@ -32,6 +32,7 @@ import (
 	// owns this entrypoint so the framework registry is populated before
 	// inbound.Manager.StartAll runs in server.go.
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/email"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 
 	// #34 outbound adapters self-register via init(). Same boundary rule

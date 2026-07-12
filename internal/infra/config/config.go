@@ -60,6 +60,7 @@ type Config struct {
 	AuditEvidence AuditEvidenceConfig
 	GDPR          GDPRConfig
 	Console       ConsoleConfig
+	Slack         SlackConfig
 	Shutdown      ShutdownConfig
 	Secrets       SecretsConfig
 	Observability ObservabilityConfig
@@ -82,6 +83,7 @@ type Config struct {
 	EnricherLLMBurst        int
 	ConsoleSessionKey       string
 	ConsoleBaseURL          string
+	SlackAPIBaseURL         string
 	RateLimitPerMinute      int
 	RateLimitBurst          int
 	RateLimitDisabled       bool
@@ -166,6 +168,12 @@ type ConsoleConfig struct {
 	BaseURL        string               `yaml:"base_url"`
 	SessionKey     string               `yaml:"session_key"`
 	BootstrapAdmin BootstrapAdminConfig `yaml:"bootstrap_admin"`
+}
+
+type SlackConfig struct {
+	// APIBaseURL points the Slack client at a mock or regional API base.
+	// Empty keeps the default slack.com API origin.
+	APIBaseURL string `yaml:"api_base_url"`
 }
 
 type ShutdownConfig struct {
@@ -263,6 +271,7 @@ type yamlConfig struct {
 	AuditEvidence  AuditEvidenceConfig `yaml:"audit_evidence"`
 	GDPR           GDPRConfig          `yaml:"gdpr"`
 	Console        ConsoleConfig       `yaml:"console"`
+	Slack          SlackConfig         `yaml:"slack"`
 	Shutdown       ShutdownConfig      `yaml:"shutdown"`
 	Secrets        SecretsConfig       `yaml:"secrets"`
 	Observability  ObservabilityConfig `yaml:"observability"`
@@ -335,6 +344,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		AuditEvidence:  yc.AuditEvidence,
 		GDPR:           yc.GDPR,
 		Console:        yc.Console,
+		Slack:          yc.Slack,
 		Shutdown:       yc.Shutdown,
 		Secrets:        yc.Secrets,
 		Observability:  yc.Observability,
@@ -522,6 +532,7 @@ func (c *Config) parseSimpleFields() {
 	c.DatabaseURL = strings.TrimSpace(c.Database.URL)
 	c.ConsoleSessionKey = strings.TrimSpace(c.Console.SessionKey)
 	c.ConsoleBaseURL = strings.TrimSpace(c.Console.BaseURL)
+	c.SlackAPIBaseURL = strings.TrimSpace(c.Slack.APIBaseURL)
 	c.RateLimitPerMinute = c.RateLimit.PerMinute
 	c.RateLimitBurst = c.RateLimit.Burst
 	c.RateLimitDisabled = c.RateLimit.Disabled
@@ -665,49 +676,35 @@ func normalizeProfile(profile string) string {
 }
 
 func (c *Config) validate() error {
+	for _, check := range []func() error{
+		c.validateDatabaseURL,
+		c.validateProfile,
+		c.validateSecretsConfig,
+		c.validateConsole,
+		c.validateSlackConfig,
+		c.validateSecurityConfig,
+		c.OIDC.Validate,
+		c.validateAuditConfig,
+		c.validateAuditEvidenceConfig,
+		c.validateGDPRConfig,
+		c.validateShutdownConfig,
+		c.validateEnricherConfig,
+		c.validateWorkerConfig,
+		c.validateMCPConfig,
+		c.validateIngestConfig,
+	} {
+		if err := check(); err != nil {
+			return err
+		}
+	}
+	return c.validateCustomWebhooks()
+}
+
+func (c *Config) validateDatabaseURL() error {
 	if c.DatabaseURL == "" {
 		return fmt.Errorf("config: database.url is required")
 	}
-	if err := c.validateProfile(); err != nil {
-		return err
-	}
-	if err := c.validateSecretsConfig(); err != nil {
-		return err
-	}
-	if err := c.validateConsole(); err != nil {
-		return err
-	}
-	if err := c.validateSecurityConfig(); err != nil {
-		return err
-	}
-	if err := c.OIDC.Validate(); err != nil {
-		return err
-	}
-	if err := c.validateAuditConfig(); err != nil {
-		return err
-	}
-	if err := c.validateAuditEvidenceConfig(); err != nil {
-		return err
-	}
-	if err := c.validateGDPRConfig(); err != nil {
-		return err
-	}
-	if err := c.validateShutdownConfig(); err != nil {
-		return err
-	}
-	if err := c.validateEnricherConfig(); err != nil {
-		return err
-	}
-	if err := c.validateWorkerConfig(); err != nil {
-		return err
-	}
-	if err := c.validateMCPConfig(); err != nil {
-		return err
-	}
-	if err := c.validateIngestConfig(); err != nil {
-		return err
-	}
-	return c.validateCustomWebhooks()
+	return nil
 }
 
 func (c *Config) validateSecretsConfig() error {
@@ -895,6 +892,23 @@ func (c *Config) validateConsole() error {
 	}
 	if c.Console.BootstrapAdmin.Password == "replace-this-after-first-login" {
 		return fmt.Errorf("config: console.bootstrap_admin.password must be replaced before startup")
+	}
+	return nil
+}
+
+func (c *Config) validateSlackConfig() error {
+	if c.SlackAPIBaseURL == "" {
+		return nil
+	}
+	parsed, err := url.ParseRequestURI(c.SlackAPIBaseURL)
+	if err != nil {
+		return fmt.Errorf("config: slack.api_base_url must be a valid URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("config: slack.api_base_url must use http or https")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("config: slack.api_base_url must include a host")
 	}
 	return nil
 }

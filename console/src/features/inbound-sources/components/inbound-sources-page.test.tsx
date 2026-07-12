@@ -28,6 +28,15 @@ describe('InboundSourcesPage', () => {
               lastEventAt: '',
               lastError: '',
             },
+            {
+              id: 'src-3',
+              name: 'Slack Feed',
+              channel: 'slack',
+              slug: 'slack-feed',
+              enabled: true,
+              lastEventAt: '2026-06-22T00:00:00Z',
+              lastError: '',
+            },
           ],
         }),
       ),
@@ -41,5 +50,7 @@ describe('InboundSourcesPage', () => {
     expect(screen.getByText('来源总数')).toBeInTheDocument()
     expect(screen.getByText('入口治理建议')).toBeInTheDocument()
     expect(screen.getByText('Support Mailbox')).toBeInTheDocument()
+    expect(screen.getByText('Slack Feed')).toBeInTheDocument()
+    expect(screen.getByText('Slack')).toBeInTheDocument()
   })
 })

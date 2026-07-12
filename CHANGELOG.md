@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Slack channel ingest adapter with Console discovery and test flows.**
+  Added a first-class Slack inbound source with Console token test,
+  readable-channel discovery, Slack-specific create payloads, registry wiring,
+  and polling-based message ingestion into the normalized feedback pipeline.
+  The adapter now also hydrates thread replies, preserves thread metadata,
+  and persists a bounded thread cache so reply updates stay deduplicated across
+  polls. Slack history and thread-reply fetches now follow cursor pagination,
+  and successful Slack poll cycles now refresh the source heartbeat even when
+  the root watermark does not advance, so sync health stays accurate for
+  reply-only updates.
+
+- **Slack API base URL can point at a local mock for browser and CI checks.**
+  Added a `slack.api_base_url` runtime config knob and server wiring so Slack
+  discovery and connection tests can run against a loopback mock API without
+  changing the production Slack origin.
+
 - **Portal submissions now can jump straight to Customer Requests.**
   Added a direct promotion action from portal submission details into the
   Customer Requests flow so operators can move from intake to follow-up without

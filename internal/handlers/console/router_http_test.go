@@ -545,6 +545,7 @@ func TestRouterHTTPDispatch_Inbound(t *testing.T) {
 		{"GET /inbound/sources/", http.MethodGet, "/inbound/sources/", ""},
 		{"POST /inbound/sources/", http.MethodPost, "/inbound/sources/", `{}`},
 		{"POST /inbound/sources/test-connection", http.MethodPost, "/inbound/sources/test-connection", `{}`},
+		{"POST /inbound/sources/slack/discover", http.MethodPost, "/inbound/sources/slack/discover", `{}`},
 		{"GET /inbound/sources/s1", http.MethodGet, "/inbound/sources/s1", ""},
 		{"DELETE /inbound/sources/s1", http.MethodDelete, "/inbound/sources/s1", ""},
 		{"POST /inbound/sources/s1/rotate-secret", http.MethodPost, "/inbound/sources/s1/rotate-secret", ""},

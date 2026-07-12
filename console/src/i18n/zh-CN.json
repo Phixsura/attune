@@ -2756,11 +2756,11 @@
     "empty_body": "投递失败或彻底放弃的反馈推送会出现在这里，可手动重新排队。"
   },
   "inbound_sources": {
-    "subtitle": "管理用户反馈的入口。webhook 接收应用内推送，email 通过 IMAP 拉取邮件反馈。",
+    "subtitle": "管理用户反馈的入口。webhook 接收应用内推送，email 通过 IMAP 拉取邮件反馈，Slack 频道可直接拉取消息。",
     "create_button": "+ 添加入站源",
     "summary": {
       "total": "来源总数",
-      "total_hint": "包含 webhook 与邮箱两类反馈入口。",
+      "total_hint": "包含 webhook、邮箱和 Slack 三类反馈入口。",
       "healthy": "正常接收",
       "healthy_hint": "启用中且最近没有错误的来源。",
       "paused": "已暂停",
@@ -2781,10 +2781,11 @@
       "pause_body": "当来源持续报错或明显发送脏数据时，优先暂停，避免把问题放大到分类与通知链路。"
     },
     "empty_title": "还没有入站源",
-    "empty_body": "添加 webhook 让你的应用直接推送反馈，或者接一个邮箱定期收取用户邮件。",
+    "empty_body": "添加 webhook 让你的应用直接推送反馈，接入 Slack 频道直接拉取消息，或者接一个邮箱定期收取用户邮件。",
     "channel": {
       "webhook": "Webhook",
-      "email": "邮箱"
+      "email": "邮箱",
+      "slack": "Slack"
     },
     "table": {
       "name": "名称",
@@ -2811,6 +2812,7 @@
       "channel_label": "通道",
       "webhook_help": "适合应用内反馈、机器人推送。",
       "email_help": "通过 IMAP 拉取用户邮件反馈。",
+      "slack_help": "通过 Slack Bot token 发现并接入频道消息。",
       "name_field": "名称",
       "name_placeholder": "如：App 反馈、Support 邮箱",
       "name_help": "名称会被规范化成 URL-safe slug，后续不可改。",
@@ -2824,6 +2826,21 @@
         "folder": "文件夹",
         "test_button": "测试连接",
         "test_ok": "连接成功 · {{ms}} ms"
+      },
+      "slack": {
+        "token": "Slack Bot Token",
+        "token_help": "填写 workspace bot token，我们会在服务端加密存储。",
+        "channel": "频道",
+        "channel_placeholder": "先发现可读频道",
+        "channel_help": "已发现 {{count}} 个可读频道。",
+        "channel_empty_help": "先点击“发现频道”加载可读频道，再选择目标频道。",
+        "discover_button": "发现频道",
+        "discover_ok": "已发现 {{count}} 个可读频道",
+        "discover_empty": "没有发现可读频道，请检查 token 和 scope。",
+        "test_button": "测试连接",
+        "test_ok": "连接成功 · {{ms}} ms",
+        "private_channel": "私有",
+        "shared_channel": "共享"
       }
     },
     "reveal": {

@@ -26,6 +26,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/inbound"
+	slackadapter "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -115,6 +116,7 @@ func runServer() error {
 		return err
 	}
 	applyRuntimeHardening(cfg)
+	slackadapter.SetAPIBaseURL(cfg.SlackAPIBaseURL)
 
 	// OpenTelemetry tracer. Empty endpoint = noop; configure
 	// observability.otlp_endpoint to ship spans to a real collector.

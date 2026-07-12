@@ -802,6 +802,30 @@ webhook current/previous secrets and email passwords.
   `409 rotation_in_grace_window` — wait for the grace to expire (the
   response's `next_eligible_at` tells you when) and try again.
 
+### Slack source discover or test fails
+
+**Symptoms:** Slack discovery returns no channels, test-connection fails, or a
+new Slack source never starts syncing anything useful.
+
+**Fix:**
+- Use the Console `Inbound Sources` page (`/console/inbound-sources`) and pick
+  the Slack branch. The intended flow is `Test connection` first, then
+  `Discover channels`, then create the source with the selected `channel_id`.
+- Use a workspace bot token. For readable public and private channels, Slack
+  expects `channels:read`, `groups:read`, `channels:history`, and
+  `groups:history`. Discovery runs through `conversations.list`; sync uses
+  `conversations.history` and `conversations.replies`; permalink generation
+  uses `chat.getPermalink` and does not require a separate scope.
+- For local browser or CI smoke tests, you can point the Slack client at a
+  mock API with `slack.api_base_url` in `config.yaml`. Keep it unset in real
+  deploys so attune talks to the public Slack API.
+- Slack only returns channels the token can actually read. Public channels need
+  `channels:read` and `channels:history`; private channels also need
+  `groups:read` and `groups:history`, and the app must be added to the
+  channel.
+- Fresh Slack sources start from now. Attune does not bulk backfill historical
+  channel history at source creation time.
+
 ### Tink keyset was lost
 
 **Symptoms:** startup rejects `secrets.tink_keyset`, or every encrypted runtime

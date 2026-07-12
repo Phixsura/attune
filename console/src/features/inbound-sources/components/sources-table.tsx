@@ -5,6 +5,7 @@ import {
   Key,
   Loader2,
   Mail,
+  MessageSquare,
   PauseCircle,
   PlayCircle,
   Trash2,
@@ -130,13 +131,15 @@ export function SourcesTable({
 
 function ChannelPill({ channel }: { channel: string }) {
   const { t } = useTranslation()
-  const isEmail = channel === 'email'
-  const Icon = isEmail ? Mail : Webhook
-  const label = isEmail
-    ? t('inbound_sources.channel.email')
-    : channel === 'webhook'
-      ? t('inbound_sources.channel.webhook')
-      : channel
+  const Icon = channel === 'email' ? Mail : channel === 'slack' ? MessageSquare : Webhook
+  const label =
+    channel === 'email'
+      ? t('inbound_sources.channel.email')
+      : channel === 'slack'
+        ? t('inbound_sources.channel.slack')
+        : channel === 'webhook'
+          ? t('inbound_sources.channel.webhook')
+          : channel
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-xs">
       <Icon className="h-3 w-3" />

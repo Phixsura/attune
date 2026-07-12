@@ -127,6 +127,7 @@ var defaultSourceSet = func() SourceSet {
 	}
 	m["webhook"] = "Webhook"
 	m["email"] = "Email"
+	m["slack"] = "Slack"
 	return NewSourceSet(m)
 }()
 

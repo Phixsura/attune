@@ -82,7 +82,7 @@ func TestIsReservedSource(t *testing.T) {
 			t.Errorf("IsReservedSource(%q) = false; want true (core source)", src)
 		}
 	}
-	for _, src := range []string{"webhook", "email", "rss", "bogus"} {
+	for _, src := range []string{"webhook", "email", "slack", "rss", "bogus"} {
 		if IsReservedSource(src) {
 			t.Errorf("IsReservedSource(%q) = true; want false (not a core source)", src)
 		}
@@ -105,6 +105,7 @@ func TestSourceVocabulary_AppendOnly(t *testing.T) {
 		"api":     "API client",
 		"webhook": "Webhook",
 		"email":   "Email",
+		"slack":   "Slack",
 		"web":     "Web Widget",
 		"mcp":     "MCP",
 		"other":   "Other",
@@ -112,7 +113,7 @@ func TestSourceVocabulary_AppendOnly(t *testing.T) {
 	}
 	set := DefaultSourceSet()
 
-	wantAll := []string{"api", "email", "mcp", "other", "portal", "web", "webhook"} // sorted
+	wantAll := []string{"api", "email", "mcp", "other", "portal", "slack", "web", "webhook"} // sorted
 	if got := set.All(); !reflect.DeepEqual(got, wantAll) {
 		t.Fatalf("DefaultSourceSet().All() = %v; want %v (a removal is a breaking change)", got, wantAll)
 	}

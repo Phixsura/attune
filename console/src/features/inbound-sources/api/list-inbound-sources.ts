@@ -7,8 +7,8 @@ import type { InboundSource, ListInboundSourcesResponse } from '@/proto/attune/v
 // churn.
 export type { InboundSource }
 
-// inboundSourcesQuery — list of webhook + email sources for the current
-// tenant. The console handler returns rows regardless of enabled, so
+// inboundSourcesQuery — list of webhook + email + slack sources for the
+// current tenant. The console handler returns rows regardless of enabled, so
 // paused sources show up in the table.
 export const inboundSourcesQuery = () =>
   queryOptions({

@@ -16,7 +16,7 @@ Listening is passive. Attunement is active alignment.
 [user signals]
      │
      ▼
-HTTP webhook · email IMAP · API client   ·   HMAC / cookie auth · rate-limited · deduped
+HTTP webhook · email IMAP · Slack channel ingest · API client   ·   HMAC / cookie auth · rate-limited · deduped
      │
      ▼
 ┌──────────────────────────────────────────────────────┐
