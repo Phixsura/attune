@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -47,6 +48,181 @@ func TestSlackHelpers(t *testing.T) {
 	require.Equal(t, "slack_T123_C123_1700000000123456", slackIdempotencyKey("T123", "C123", "1700000000.123456"))
 	require.True(t, isPermanentSlackError(errors.New("slack auth.test: invalid_auth")))
 	require.True(t, isSlackDuplicateError(errors.New("idempotency key used with different request")))
+}
+
+func TestPublicWrappers(t *testing.T) {
+	oldFactory := newAPIClient
+	t.Cleanup(func() { newAPIClient = oldFactory })
+
+	var seenToken string
+	newAPIClient = func(token string) apiClient {
+		seenToken = token
+		return ptrext.Of(slackThreadClient{})
+	}
+
+	info, err := AuthTest(context.Background(), "  xoxb-test-token  ")
+	require.NoError(t, err)
+	require.Equal(t, "xoxb-test-token", seenToken)
+	require.Empty(t, info.TeamID)
+	require.True(t, IsPermanentError(errors.New("slack auth.test: invalid_auth")))
+	require.False(t, IsPermanentError(errors.New("temporary network error")))
+}
+
+func TestThreadCacheHelpers(t *testing.T) {
+	t.Parallel()
+
+	t.Run("new cache trims roots and skips blanks", func(t *testing.T) {
+		cache := newSlackThreadCache([]slackThreadCacheEntry{
+			{RootTS: "  1700000000.000100  ", LatestReplyTS: " 1700000000.000300 "},
+			{RootTS: "   "},
+		})
+		require.Len(t, cache, 1)
+		require.Contains(t, cache, "1700000000.000100")
+		require.Equal(t, "1700000000.000300", cache["1700000000.000100"].LatestReplyTS)
+	})
+
+	t.Run("refresh candidates and freshness checks", func(t *testing.T) {
+		nowMicros := int64(1700000000000000)
+		cache := slackThreadCache{
+			"never": {
+				RootTS:               "never",
+				LastSeenAtMicros:     nowMicros,
+				ReplyCount:           2,
+				LastHydratedAtMicros: 0,
+			},
+			"old": {
+				RootTS:               "old",
+				LastSeenAtMicros:     nowMicros,
+				ReplyCount:           1,
+				LastHydratedAtMicros: nowMicros - int64(slackThreadRefreshInterval/time.Microsecond),
+			},
+			"fresh": {
+				RootTS:               "fresh",
+				LastSeenAtMicros:     nowMicros,
+				ReplyCount:           1,
+				LastHydratedAtMicros: nowMicros - int64(slackThreadRefreshInterval/time.Microsecond) + 1,
+			},
+		}
+		seen := map[string]struct{}{"fresh": {}}
+		require.Equal(t, []string{"never", "old"}, cache.refreshCandidates(seen, nowMicros, 10))
+
+		require.False(t, (slackThreadCacheEntry{}).shouldRefresh(nowMicros))
+		require.False(t, (slackThreadCacheEntry{RootTS: "gone", LastSeenAtMicros: nowMicros - int64(slackThreadCacheTTL/time.Microsecond) - 1}).shouldRefresh(nowMicros))
+		require.True(t, (slackThreadCacheEntry{RootTS: "new", LastSeenAtMicros: nowMicros}).shouldRefresh(nowMicros))
+		require.True(t, (slackThreadCacheEntry{RootTS: "stale", LastSeenAtMicros: nowMicros, LastHydratedAtMicros: nowMicros - int64(slackThreadRefreshInterval/time.Microsecond)}).shouldRefresh(nowMicros))
+	})
+
+	t.Run("compact evicts stale and excess entries", func(t *testing.T) {
+		nowMicros := int64(1700000000000000)
+		cache := slackThreadCache{
+			"stale": {
+				RootTS:           "stale",
+				LastSeenAtMicros: nowMicros - int64(slackThreadCacheTTL/time.Microsecond) - 1,
+			},
+			"keep": {
+				RootTS:           "keep",
+				LastSeenAtMicros: nowMicros,
+			},
+		}
+		require.True(t, cache.compact(nowMicros))
+		require.NotContains(t, cache, "stale")
+		require.Contains(t, cache, "keep")
+
+		bigCache := slackThreadCache{}
+		for i := 0; i < slackThreadCacheMaxEntries+1; i++ {
+			key := fmt.Sprintf("root-%03d", i)
+			bigCache[key] = slackThreadCacheEntry{
+				RootTS:           key,
+				LastSeenAtMicros: nowMicros + int64(i),
+			}
+		}
+		require.True(t, bigCache.compact(nowMicros))
+		require.Len(t, bigCache, slackThreadCacheMaxEntries)
+	})
+}
+
+func TestHandleSlackHistoryFailureAndHelpers(t *testing.T) {
+	t.Parallel()
+
+	source := inbound.Source{
+		ID:       "source-1",
+		TenantID: "tenant-1",
+		Slug:     "slack-feed",
+		Enabled:  true,
+		State: inbound.SourceState{
+			LastUID: 99,
+		},
+	}
+	store := inboundtest.NewFakeSources()
+	store.Put("tenant-slug", source)
+	metrics := ptrext.Of(inboundtest.FakeMetrics{})
+	a := adapter{
+		deps: inbound.Deps{
+			Sources: store,
+			Metrics: metrics,
+		},
+	}
+
+	a.handleSlackHistoryFailure(context.Background(), source, "poll", errors.New("slack auth.test: invalid_auth"))
+
+	updated, err := store.Get(context.Background(), source.ID)
+	require.NoError(t, err)
+	require.False(t, updated.Enabled)
+	require.Equal(t, int64(99), updated.State.LastUID)
+	require.Equal(t, []string{"slack|tenant-1|slack-feed|auth_err"}, metrics.Totals)
+	require.Equal(t, []string{"slack|tenant-1|slack-feed|enabled=off"}, metrics.StateCalls)
+
+	store.Put("tenant-slug", source)
+	metrics = ptrext.Of(inboundtest.FakeMetrics{})
+	a.deps.Metrics = metrics
+
+	a.handleSlackHistoryFailure(context.Background(), source, "poll", errors.New("temporary network error"))
+
+	updated, err = store.Get(context.Background(), source.ID)
+	require.NoError(t, err)
+	require.Equal(t, "history: transient", updated.State.LastError)
+	require.Equal(t, int64(99), updated.State.LastUID)
+	require.Equal(t, []string{"slack|tenant-1|slack-feed|transient_err"}, metrics.Totals)
+	require.Len(t, metrics.StateCalls, 0)
+
+	require.Equal(t, int64(1700000000123456), messageMicros(slackMessage{Ts: "1700000000.123456"}))
+	require.Equal(t, int64(7), maxInt64(7, 3))
+	require.Equal(t, int64(7), maxInt64(3, 7))
+}
+
+func TestSeedFirstPollCursor(t *testing.T) {
+	oldNow := nowFn
+	t.Cleanup(func() { nowFn = oldNow })
+	nowFn = func() time.Time { return time.Unix(1700000000, 0) }
+
+	source := inbound.Source{
+		ID:       "source-1",
+		TenantID: "tenant-1",
+		Slug:     "slack-feed",
+		State: inbound.SourceState{
+			LastEventAt: ptrext.Of(time.Unix(1700000000, 0)),
+		},
+	}
+	store := inboundtest.NewFakeSources()
+	store.Put("tenant-slug", source)
+	a := adapter{
+		deps: inbound.Deps{
+			Sources: store,
+		},
+	}
+
+	seeded := a.seedFirstPollCursor(context.Background(), source)
+	require.Equal(t, int64(1700000000_000000)+syncLookbackMicros, seeded.State.LastUID)
+
+	updated, err := store.Get(context.Background(), source.ID)
+	require.NoError(t, err)
+	require.Equal(t, seeded.State.LastUID, updated.State.LastUID)
+	require.NotNil(t, updated.State.LastEventAt)
+	require.True(t, updated.State.LastEventAt.Equal(time.Unix(1700000000, 0)))
+
+	source.State.LastUID = 123
+	unchanged := a.seedFirstPollCursor(context.Background(), source)
+	require.Equal(t, int64(123), unchanged.State.LastUID)
 }
 
 func TestDiscoverValidateAndHistory(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
+	"github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/inbound/adapter/webhook"
 	"github.com/Phixsura/attune/internal/inbound/inboundtest"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -487,6 +488,133 @@ func TestCreate_NameNonAlphanumericSlugEmpty(t *testing.T) {
 	require.True(t, errors.As(err, &de))
 	require.Equal(t, http.StatusBadRequest, de.Status)
 	require.Contains(t, de.Message, "alphanumeric")
+}
+
+func TestCreateSlack_NoPool_DirectCall(t *testing.T) {
+	t.Parallel()
+
+	var seenToken string
+	h := ptrext.Of(Handler{
+		sources: ptrext.Of(covSourceRepo{}),
+		secrets: inboundtest.FakeSecrets{},
+		slackValidateChannel: func(ctx context.Context, token, channelID string) (slack.AuthInfo, slack.Channel, error) {
+			_ = ctx
+			seenToken = token
+			require.Equal(t, "C123", channelID)
+			return slack.AuthInfo{
+					TeamID:       "T123",
+					TeamName:     "Acme",
+					WorkspaceURL: "https://acme.slack.com/",
+				}, slack.Channel{
+					ID:   "C123",
+					Name: "feedback",
+				}, nil
+		},
+	})
+
+	_, err := h.createSlack(covDirectCtx("tenant-1").Context, ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-cov"}), ptrext.Of(attunev1.CreateInboundSourceRequest{
+		Channel: "slack",
+		Name:    "Slack Feedback",
+		SlackConfig: ptrext.Of(attunev1.SlackConnConfig{
+			BotToken:  "  xoxb-test  ",
+			ChannelId: "C123",
+		}),
+	}), "Slack Feedback", "slack-feedback")
+	require.Error(t, err)
+	require.Equal(t, "xoxb-test", seenToken)
+}
+
+func TestEncryptSlackConfig_HappyPath(t *testing.T) {
+	t.Parallel()
+
+	h := ptrext.Of(Handler{secrets: inboundtest.FakeSecrets{}})
+	raw, err := h.encryptSlackConfig(
+		"xoxb-test-token",
+		slack.AuthInfo{
+			TeamID:       "T123",
+			TeamName:     "Acme",
+			WorkspaceURL: "https://acme.slack.com/",
+		},
+		slack.Channel{
+			ID:   "C123",
+			Name: "feedback",
+		},
+	)
+	require.NoError(t, err)
+
+	decOuter, err := inboundtest.FakeSecrets{}.Decrypt(raw)
+	require.NoError(t, err)
+
+	var cfg slack.Config
+	require.NoError(t, json.Unmarshal(decOuter, &cfg))
+	require.Equal(t, slack.ConfigVersion, cfg.Version)
+	require.Equal(t, "T123", cfg.TeamID)
+	require.Equal(t, "C123", cfg.ChannelID)
+	require.NotEmpty(t, cfg.TokenEncrypted)
+}
+
+func TestDiscoverSlackChannels_DirectCall(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		discover  slackDiscoverFn
+		wantError bool
+		status    int
+		code      attunev1.ErrorCode
+	}{
+		{
+			name: "success",
+			discover: func(ctx context.Context, token string) (slack.AuthInfo, []slack.Channel, error) {
+				_ = ctx
+				require.Equal(t, "xoxb-test-token", token)
+				return slack.AuthInfo{
+						TeamID:       "T123",
+						TeamName:     "Acme",
+						WorkspaceURL: "https://acme.slack.com/",
+					}, []slack.Channel{{
+						ID:         "C123",
+						Name:       "feedback",
+						IsPrivate:  true,
+						IsArchived: false,
+						IsShared:   false,
+					}}, nil
+			},
+		},
+		{
+			name: "permanent error",
+			discover: func(context.Context, string) (slack.AuthInfo, []slack.Channel, error) {
+				return slack.AuthInfo{}, nil, errors.New("slack auth.test: invalid_auth")
+			},
+			wantError: true,
+			status:    http.StatusUnauthorized,
+			code:      attunev1.ErrorCode_UNAUTHORIZED,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := ptrext.Of(Handler{slackDiscover: tc.discover})
+			result, err := h.DiscoverSlackChannels(covDirectCtx("tenant-1"), ptrext.Of(attunev1.DiscoverSlackChannelsRequest{
+				SlackConfig: ptrext.Of(attunev1.SlackConnConfig{
+					BotToken: "  xoxb-test-token  ",
+				}),
+			}))
+			if tc.wantError {
+				require.Error(t, err)
+				var de *dispatcher.Error
+				require.True(t, errors.As(err, &de))
+				require.Equal(t, tc.status, de.Status)
+				require.Equal(t, tc.code, de.Code)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result.Body)
+			require.Len(t, result.Body.GetChannels(), 1)
+			require.Equal(t, "C123", result.Body.GetChannels()[0].GetId())
+		})
+	}
 }
 
 // ====================== rowToProto =========================================

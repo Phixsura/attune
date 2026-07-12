@@ -8,9 +8,11 @@ import { Route as GDPRRoute } from '@/routes/_authed.administration.gdpr'
 import { Route as ReliabilityRoute } from '@/routes/_authed.administration.reliability'
 import { Route as SecurityRoute } from '@/routes/_authed.administration.security'
 import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
+import { Route as InboundSourcesRoute } from '@/routes/_authed.inbound-sources'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
 import { Route as ExternalSyncRoute } from '@/routes/_authed.integrations.external-sync'
+import { Route as IntegrationsInboundSourcesRoute } from '@/routes/_authed.integrations.inbound-sources'
 import { Route as PublicVisibilityRoute } from '@/routes/_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
 import { Route as SettingsRoute } from '@/routes/_authed.settings'
@@ -60,6 +62,12 @@ describe('route access guards', () => {
     const thrown = await callBeforeLoad(ApiKeysRoute.options.beforeLoad)
     expect(isRedirect(thrown)).toBe(true)
     expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+  })
+
+  it('redirects the legacy inbound sources entrypoint to the integrations page', async () => {
+    const thrown = await callBeforeLoad(InboundSourcesRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/integrations/inbound-sources')
   })
 
   it('allows members into integrations api keys', async () => {
@@ -123,6 +131,27 @@ describe('route access guards', () => {
     await expect(loader({ context: { queryClient } })).resolves.toBeUndefined()
     expect(PublicVisibilityRoute.options.component).toBeTypeOf('function')
     expect(seenPaths).toEqual(new Set(['/fb/v1/console/public-visibility/moderation?limit=50']))
+  })
+
+  it('preloads inbound sources for the integrations page and exposes a component', async () => {
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/inbound/sources', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ items: [] })
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const loader = IntegrationsInboundSourcesRoute.options.loader as (args: {
+      context: { queryClient: QueryClient }
+    }) => Promise<unknown>
+
+    await expect(loader({ context: { queryClient } })).resolves.toEqual([])
+    expect(IntegrationsInboundSourcesRoute.options.component).toBeTypeOf('function')
+    expect(seenPaths).toEqual(new Set(['/fb/v1/console/inbound/sources']))
   })
 
   it('redirects members away from GDPR administration pages', async () => {
