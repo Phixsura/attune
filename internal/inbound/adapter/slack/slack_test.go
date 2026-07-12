@@ -14,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/inboundtest"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -736,6 +738,111 @@ func TestPollSourcePreservesErrorWhenThreadHydrationFails(t *testing.T) {
 	require.Len(t, client.repliesCalls, 1)
 }
 
+func TestPollSourceDeduplicatesReplayMessagesAcrossRepeatedPolls(t *testing.T) {
+	oldNow := nowFn
+	t.Cleanup(func() { nowFn = oldNow })
+
+	current := time.Unix(1700000000, 0)
+	nowFn = func() time.Time { return current }
+
+	secrets := inboundtest.FakeSecrets{}
+	rootTS := "1700000000.000100"
+	replyTS := "1700000000.000200"
+	encConfig := encryptedSlackConfig(t, secrets, Config{
+		Version:        ConfigVersion,
+		TokenEncrypted: mustEncryptSlackToken(t, secrets, "xoxb-test-token"),
+		TeamID:         "T123",
+		TeamName:       "Acme",
+		WorkspaceURL:   "https://acme.slack.com/",
+		ChannelID:      "C123",
+		ChannelName:    "feedback",
+	})
+	source := inbound.Source{
+		ID:       "source-1",
+		TenantID: "tenant-1",
+		Channel:  ChannelName,
+		Name:     "Slack Feedback",
+		Slug:     "slack-feedback",
+		Config:   encConfig,
+		Enabled:  true,
+		State: inbound.SourceState{
+			LastUID: slackTimestampMicrosOrZero(rootTS),
+		},
+		CreatedAt: time.Unix(1700000000, 0),
+		UpdatedAt: time.Unix(1700000000, 0),
+	}
+
+	store := ptrext.Of(slackSourceStore{FakeSources: inboundtest.NewFakeSources(), tenantSlug: "tenant-x"})
+	store.Put("tenant-x", source)
+
+	ingest := ptrext.Of(slackReplayDedupeIngest{})
+	metrics := ptrext.Of(inboundtest.FakeMetrics{})
+	client := ptrext.Of(slackThreadClient{
+		auth: slackAuthInfo{
+			TeamID:       "T123",
+			TeamName:     "Acme",
+			WorkspaceURL: "https://acme.slack.com/",
+		},
+		history: []slackMessage{
+			{
+				Type:        "message",
+				User:        "U1",
+				Text:        "root message",
+				Ts:          rootTS,
+				ReplyCount:  1,
+				LatestReply: replyTS,
+			},
+		},
+		replies: map[string][]slackMessage{
+			rootTS: {
+				{
+					Type:     "message",
+					User:     "U2",
+					Text:     "reply message",
+					Ts:       replyTS,
+					ThreadTS: rootTS,
+					Subtype:  "",
+					BotID:    "",
+				},
+			},
+		},
+	})
+	a := ptrext.Of(adapter{
+		deps: inbound.Deps{
+			Ingest:  ingest,
+			Sources: store,
+			Secrets: secrets,
+			Metrics: metrics,
+		},
+		newClient: func(string) apiClient {
+			return client
+		},
+	})
+
+	a.pollSource(context.Background(), source)
+	current = current.Add(slackThreadRefreshInterval + time.Minute)
+	refreshed, err := store.Get(context.Background(), source.ID)
+	require.NoError(t, err)
+	a.pollSource(context.Background(), refreshed)
+
+	require.Len(t, ingest.uniqueCalls, 2)
+	require.Len(t, ingest.duplicateCalls, 2)
+	require.Len(t, client.repliesCalls, 2)
+	require.Equal(t, int64(1), ingest.uniqueCalls[0].Sequence)
+	require.Equal(t, int64(2), ingest.uniqueCalls[1].Sequence)
+	require.Equal(t, "root message", ingest.uniqueCalls[0].Content)
+	require.Equal(t, "reply message", ingest.uniqueCalls[1].Content)
+	require.Equal(t, int64(1), ingest.duplicateCalls[0].Sequence)
+	require.Equal(t, int64(2), ingest.duplicateCalls[1].Sequence)
+	require.Equal(t, "root message", ingest.duplicateCalls[0].Content)
+	require.Equal(t, "reply message", ingest.duplicateCalls[1].Content)
+
+	updated, err := store.Get(context.Background(), source.ID)
+	require.NoError(t, err)
+	require.Empty(t, updated.State.LastError)
+	require.Equal(t, slackTimestampMicrosOrZero(rootTS), updated.State.LastUID)
+}
+
 type slackThreadClient struct {
 	auth         slackAuthInfo
 	history      []slackMessage
@@ -774,6 +881,43 @@ func (c *slackThreadClient) Replies(_ context.Context, channelID, threadTS strin
 		return nil, c.repliesErr
 	}
 	return append([]slackMessage(nil), c.replies[threadTS]...), nil
+}
+
+type slackReplayDedupeIngest struct {
+	seen           map[string]int64
+	uniqueCalls    []slackReplayIngestCall
+	duplicateCalls []slackReplayIngestCall
+}
+
+type slackReplayIngestCall struct {
+	Sequence       int64
+	TenantID       string
+	IdempotencyKey string
+	Content        string
+}
+
+func (f *slackReplayDedupeIngest) Ingest(_ context.Context, tenant string, _ uuid.UUID, in domain.IngestInput) (int64, error) {
+	if f.seen == nil {
+		f.seen = map[string]int64{}
+	}
+	if seq, ok := f.seen[in.IdempotencyKey]; ok {
+		f.duplicateCalls = append(f.duplicateCalls, slackReplayIngestCall{
+			Sequence:       seq,
+			TenantID:       tenant,
+			IdempotencyKey: in.IdempotencyKey,
+			Content:        in.Content,
+		})
+		return 0, errors.New("idempotency key used with different request")
+	}
+	seq := int64(len(f.uniqueCalls) + 1)
+	f.seen[in.IdempotencyKey] = seq
+	f.uniqueCalls = append(f.uniqueCalls, slackReplayIngestCall{
+		Sequence:       seq,
+		TenantID:       tenant,
+		IdempotencyKey: in.IdempotencyKey,
+		Content:        in.Content,
+	})
+	return seq, nil
 }
 
 type slackSourceStore struct {
