@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   polls. Slack history and thread-reply fetches now follow cursor pagination,
   and successful Slack poll cycles now refresh the source heartbeat even when
   the root watermark does not advance, so sync health stays accurate for
-  reply-only updates.
+  reply-only updates. The Console inbound-sources page now also promotes the
+  selected source into a live detail panel with sync heartbeat, cursor, and
+  last-error visibility so operators can inspect the active source without
+  leaving the registry.
 
 - **Slack API base URL can point at a local mock for browser and CI checks.**
   Added a `slack.api_base_url` runtime config knob and server wiring so Slack

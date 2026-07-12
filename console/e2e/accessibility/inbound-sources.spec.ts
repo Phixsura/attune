@@ -17,6 +17,7 @@ const zh = {
   error: '异常',
   healthy: '正常',
   inboundSources: '入站源',
+  detail: '源详情',
   name: '名称',
   paused: '已暂停',
   rowSlack: 'Slack Mock Source',
@@ -39,9 +40,10 @@ test.describe('Inbound sources browser behavior', () => {
     await gotoConsoleRoute(page, '/integrations/inbound-sources')
 
     await expect(page.getByRole('heading', { level: 1, name: zh.inboundSources })).toBeVisible()
-    await expect(page.getByText(zh.rowWebhook)).toBeVisible()
-    await expect(page.getByText(zh.rowEmail)).toBeVisible()
-    await expect(page.getByText(zh.rowSlack)).toBeVisible()
+    await expect(page.getByRole('button', { name: zh.rowWebhook })).toBeVisible()
+    await expect(page.getByRole('button', { name: zh.rowEmail })).toBeVisible()
+    await expect(page.getByRole('button', { name: zh.rowSlack })).toBeVisible()
+    await expect(page.getByText(zh.detail, { exact: true })).toBeVisible()
 
     const webhookRow = page.getByRole('row').filter({ hasText: zh.rowWebhook })
     const emailRow = page.getByRole('row').filter({ hasText: zh.rowEmail })
@@ -52,6 +54,10 @@ test.describe('Inbound sources browser behavior', () => {
     await expect(emailRow).toContainText(zh.paused)
     await expect(slackRow).toContainText(zh.slack)
     await expect(slackRow).toContainText(zh.error)
+
+    await page.getByRole('button', { name: zh.rowSlack }).click()
+    await expect(page.getByText('src-slack-a11y')).toBeVisible()
+    await expect(page.getByText('slack auth.test: invalid_auth')).toBeVisible()
     await expectNoDocumentOverflow(page)
     await expectNoAxeViolations(page)
     expect(apiMocks.unhandledRequests).toEqual([])

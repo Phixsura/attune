@@ -2780,6 +2780,25 @@
       "pause_title": "异常来源先暂停再修复",
       "pause_body": "当来源持续报错或明显发送脏数据时，优先暂停，避免把问题放大到分类与通知链路。"
     },
+    "detail_title": "源详情",
+    "detail_description": "查看 {{name}} 的同步心跳、游标和最近错误。",
+    "detail_empty_title": "选择一个入站源",
+    "detail_empty_body": "点击目录中的名称，查看该来源的同步状态与操作上下文。",
+    "detail_refreshing": "刷新中",
+    "detail": {
+      "source_id": "源 ID",
+      "slug": "Slug",
+      "last_event": "最近事件",
+      "last_event_empty": "从未产生事件",
+      "cursor": "游标",
+      "cursor_empty": "尚未写入",
+      "cursor_hint": "同步器会在读取新数据时推进这个游标。",
+      "cursor_empty_hint": "当前还没有可展示的游标。",
+      "created_at": "创建时间",
+      "updated_at": "更新时间",
+      "last_error": "最近错误",
+      "no_error": "当前没有已知错误"
+    },
     "empty_title": "还没有入站源",
     "empty_body": "添加 webhook 让你的应用直接推送反馈，接入 Slack 频道直接拉取消息，或者接一个邮箱定期收取用户邮件。",
     "channel": {

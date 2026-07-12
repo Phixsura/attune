@@ -206,6 +206,16 @@ async function handleRoute(
     await fulfillJson(route, { items: sortInboundSources(state.inboundSources) })
     return true
   }
+  if (method === 'GET' && path.match(/^\/inbound\/sources\/[^/]+$/)) {
+    const id = path.split('/')[3]
+    const source = state.inboundSources.find((item) => item.id === id)
+    if (!source) {
+      await fulfillError(route, `Missing inbound source ${id}`, 404)
+      return true
+    }
+    await fulfillJson(route, clone(source))
+    return true
+  }
   if (method === 'POST' && path === '/inbound/sources/test-connection') {
     const body = readJsonBody(route) as {
       channel?: string

@@ -60,7 +60,9 @@ describe('SourcesTable', () => {
             updatedAt: '2026-07-11T12:00:00Z',
           },
         ]}
+        selectedID="src-slack"
         togglingId="src-email"
+        onSelect={vi.fn()}
         onRotate={vi.fn()}
         onPause={vi.fn()}
         onResume={vi.fn()}
