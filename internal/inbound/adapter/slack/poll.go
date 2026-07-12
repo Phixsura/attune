@@ -4,7 +4,6 @@ package slack
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -47,16 +46,21 @@ type slackConfigUpdater interface {
 	UpdateConfig(ctx context.Context, id string, config []byte) error
 }
 
+var newPollTicker = func(d time.Duration) (<-chan time.Time, func()) {
+	ticker := time.NewTicker(d)
+	return ticker.C, ticker.Stop
+}
+
 func (a *adapter) pollLoop(ctx context.Context) {
 	defer a.wg.Done()
 
-	ticker := time.NewTicker(defaultPollInterval)
-	defer ticker.Stop()
+	tickC, stop := newPollTicker(defaultPollInterval)
+	defer stop()
 
 	for {
 		a.pollAllSources(ctx)
 		select {
-		case <-ticker.C:
+		case <-tickC:
 		case <-ctx.Done():
 			return
 		}
@@ -239,9 +243,6 @@ func (a *adapter) applySlackHistoryMessage(ctx context.Context, cfg Config, msg 
 func (a *adapter) scheduleSlackThreadRefreshes(state slackPollState) slackPollState {
 	if remaining := slackThreadHydrationBatch - len(state.scheduled); remaining > 0 {
 		for _, rootTS := range state.cache.refreshCandidates(state.seenRoots, state.nowMicros, remaining) {
-			if _, ok := state.scheduled[rootTS]; ok {
-				continue
-			}
 			state.scheduled[rootTS] = struct{}{}
 		}
 	}
@@ -407,7 +408,7 @@ func (a *adapter) persistSlackConfig(ctx context.Context, sourceID string, token
 		return fmt.Errorf("encrypt slack token: %w", err)
 	}
 	cfg.TokenEncrypted = encToken
-	raw, err := json.Marshal(cfg)
+	raw, err := jsonMarshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal slack config: %w", err)
 	}

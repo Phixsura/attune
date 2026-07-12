@@ -255,9 +255,6 @@ func (c *client) do(ctx context.Context, method, path string, q url.Values, body
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}
-	if resp.StatusCode == http.StatusTooManyRequests {
-		return raw, resp.StatusCode, apiError{method: path, status: resp.StatusCode, code: "rate_limited"}
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return raw, resp.StatusCode, fmt.Errorf("slack %s status=%d body=%s", path, resp.StatusCode, strings.TrimSpace(string(raw)))
 	}

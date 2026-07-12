@@ -116,7 +116,6 @@ func runServer() error {
 		return err
 	}
 	applyRuntimeHardening(cfg)
-	slackadapter.SetAPIBaseURL(cfg.SlackAPIBaseURL)
 
 	// OpenTelemetry tracer. Empty endpoint = noop; configure
 	// observability.otlp_endpoint to ship spans to a real collector.
@@ -228,6 +227,7 @@ func applyRuntimeHardening(cfg *config.Config) {
 	// Default blocks loopback + private networks (always blocks cloud-metadata /
 	// link-local); config relaxes loopback/private for dev / on-prem.
 	egress := cfg.EgressPolicy()
+	slackadapter.SetAPIBaseURL(cfg.SlackAPIBaseURL)
 	notify.SetEgressPolicy(egress)
 	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)

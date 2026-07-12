@@ -4,7 +4,6 @@ package inbound
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -40,7 +39,11 @@ func (h *Handler) createSlack(ctx context.Context, auth *session.AuthCtx, req *a
 	}
 
 	id := uuid.NewString()
-	if err := secretlock.WithTx(ctx, h.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+	withTx := h.slackWithTx
+	if withTx == nil {
+		withTx = secretlock.WithTx
+	}
+	if err := withTx(ctx, h.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
 		if err := secretlock.EnsureWritableKey(ctx, tx, inboundcore.PrimaryKeyID(h.secrets)); err != nil {
 			return err
 		}
@@ -95,7 +98,7 @@ func (h *Handler) encryptSlackConfig(token string, authInfo slack.AuthInfo, chan
 		ChannelID:      channel.ID,
 		ChannelName:    channel.Name,
 	}
-	raw, err := json.Marshal(inner)
+	raw, err := jsonMarshal(inner)
 	if err != nil {
 		return nil, fmt.Errorf("marshal slack config: %w", err)
 	}

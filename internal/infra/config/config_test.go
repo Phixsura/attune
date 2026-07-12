@@ -96,6 +96,20 @@ func TestLoadPathRejectsInvalidSlackAPIBaseURL(t *testing.T) {
 	require.Contains(t, err.Error(), "config: slack.api_base_url must use http or https")
 }
 
+func TestLoadPathRejectsSlackAPIBaseURLWithoutHost(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nslack:\n  api_base_url: \"https:///api\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: slack.api_base_url must include a host")
+}
+
+func TestLoadPathRejectsMalformedSlackAPIBaseURL(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nslack:\n  api_base_url: \"://bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: slack.api_base_url must be a valid URL")
+}
+
 func TestLoadPathParsesSecurityBlock(t *testing.T) {
 	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nsecurity:\n  allow_loopback_egress: true\n  allow_private_egress: true\n  trusted_proxy_hops: 2\n"
 	cfg, err := LoadPath(writeConfig(t, raw))

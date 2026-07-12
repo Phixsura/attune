@@ -36,6 +36,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/inboundsource"
+	"github.com/Phixsura/attune/internal/repo/secretlock"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
@@ -67,6 +68,7 @@ type Handler struct {
 	secrets              inbound.SecretStore
 	baseURL              string
 	rotate               rotator
+	slackWithTx          secretlockWithTxFn
 	testConn             testConnFn
 	slackAuthTest        slackAuthTestFn
 	slackDiscover        slackDiscoverFn
@@ -79,6 +81,7 @@ type (
 	slackAuthTestFn        func(ctx context.Context, token string) (slack.AuthInfo, error)
 	slackDiscoverFn        func(ctx context.Context, token string) (slack.AuthInfo, []slack.Channel, error)
 	slackValidateChannelFn func(ctx context.Context, token, channelID string) (slack.AuthInfo, slack.Channel, error)
+	secretlockWithTxFn     func(ctx context.Context, pool *pgxpool.Pool, commit bool, fn func(context.Context, secretlock.Tx) error) error
 )
 
 type auditRecorder interface {
@@ -96,6 +99,7 @@ func NewHandler(sources *inboundsource.Repo, p *pgxpool.Pool, secrets inbound.Se
 		secrets:              secrets,
 		baseURL:              strings.TrimRight(baseURL, "/"),
 		rotate:               webhook.RotateSecret,
+		slackWithTx:          secretlock.WithTx,
 		testConn:             imapDialAndProbe,
 		slackAuthTest:        slack.AuthTest,
 		slackDiscover:        slack.Discover,

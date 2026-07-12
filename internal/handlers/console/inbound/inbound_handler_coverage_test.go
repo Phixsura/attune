@@ -35,24 +35,31 @@ import (
 // post-create reload paths, plus configurable List and SetEnabled
 // behaviour.
 type covSourceRepo struct {
-	listSrcs      []inbound.Source
-	listErr       error
-	getSrc        inbound.Source
-	getErr        error
-	getCalls      int
-	reloadSrc     inbound.Source
-	reloadErr     error
-	setEnabledID  string
-	setEnabledOn  bool
-	setEnabledErr error
+	listSrcs         []inbound.Source
+	listErr          error
+	getSrc           inbound.Source
+	getErr           error
+	getCalls         int
+	getHook          func(id string)
+	reloadSrc        inbound.Source
+	reloadErr        error
+	setEnabledID     string
+	setEnabledOn     bool
+	setEnabledErr    error
+	updateConfigID   string
+	updateConfigBlob []byte
+	updateConfigErr  error
 }
 
 func (f *covSourceRepo) List(_ context.Context, _ string) ([]inbound.Source, error) {
 	return f.listSrcs, f.listErr
 }
 
-func (f *covSourceRepo) Get(_ context.Context, _ string) (inbound.Source, error) {
+func (f *covSourceRepo) Get(_ context.Context, id string) (inbound.Source, error) {
 	f.getCalls++
+	if f.getHook != nil {
+		f.getHook(id)
+	}
 	if f.getCalls > 1 && f.reloadSrc.ID != "" {
 		return f.reloadSrc, f.reloadErr
 	}
@@ -71,6 +78,12 @@ func (f *covSourceRepo) GetBySlugs(_ context.Context, _, _, _ string) (inbound.S
 
 func (f *covSourceRepo) UpdateState(_ context.Context, _ string, _ inbound.SourceState) error {
 	return nil
+}
+
+func (f *covSourceRepo) UpdateConfig(_ context.Context, id string, blob []byte) error {
+	f.updateConfigID = id
+	f.updateConfigBlob = append(f.updateConfigBlob[:0], blob...)
+	return f.updateConfigErr
 }
 
 // covAuditRecorder records events and optionally returns an error.

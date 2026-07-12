@@ -923,8 +923,23 @@ func (f *slackReplayDedupeIngest) Ingest(_ context.Context, tenant string, _ uui
 type slackSourceStore struct {
 	*inboundtest.FakeSources
 	tenantSlug        string
+	listSrcs          []inbound.Source
+	listErr           error
 	updateConfigCalls int
+	updateConfigErr   error
 	lastConfig        []byte
+}
+
+func (s *slackSourceStore) List(ctx context.Context, channel string) ([]inbound.Source, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
+	if s.listSrcs != nil {
+		out := make([]inbound.Source, len(s.listSrcs))
+		copy(out, s.listSrcs)
+		return out, nil
+	}
+	return s.FakeSources.List(ctx, channel)
 }
 
 func (s *slackSourceStore) UpdateConfig(_ context.Context, id string, config []byte) error {
@@ -936,7 +951,7 @@ func (s *slackSourceStore) UpdateConfig(_ context.Context, id string, config []b
 	s.Put(s.tenantSlug, src)
 	s.lastConfig = append([]byte(nil), config...)
 	s.updateConfigCalls++
-	return nil
+	return s.updateConfigErr
 }
 
 func encryptedSlackConfig(t *testing.T, secrets inboundtest.FakeSecrets, cfg Config) []byte {
