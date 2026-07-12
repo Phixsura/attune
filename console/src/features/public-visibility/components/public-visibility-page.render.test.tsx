@@ -4,6 +4,7 @@ import { PublicVisibilityPage } from '@/features/public-visibility/components/pu
 import {
   ModerationState,
   type ModerationSubject,
+  PortalSubmissionFieldKind,
   PublicAccessMode,
   PublicIdentityMode,
   type PublicRequestPublication,
@@ -12,7 +13,7 @@ import {
   PublicWriteMode,
 } from '@/proto/attune/v1/public_visibility'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -20,6 +21,7 @@ vi.mock('sonner', () => ({
 
 describe('PublicVisibilityPage', () => {
   it('lets admins save public policy and request profile changes', async () => {
+    mockMe('admin')
     let savedPolicy: unknown
     let loadedProfilePath = ''
     let savedProfile: unknown
@@ -50,6 +52,12 @@ describe('PublicVisibilityPage', () => {
     await waitFor(() => expect(screen.getByText('公开策略')).toBeInTheDocument())
     expect(screen.getByText('审核队列')).toBeInTheDocument()
     expect(screen.getByText('公开需求资料')).toBeInTheDocument()
+    expect(screen.getByText('门户投稿表单')).toBeInTheDocument()
+    expect(screen.getByText('实时预览')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '打开公开门户' })).toHaveAttribute(
+      'href',
+      '/portal/tenant',
+    )
 
     await user.click(await screen.findByRole('combobox', { name: '入口访问' }))
     await user.click(await screen.findByRole('option', { name: '关闭' }))
@@ -83,6 +91,23 @@ describe('PublicVisibilityPage', () => {
         showVoteCount: false,
         showCommentCount: false,
         showSubmitterDisplay: false,
+        portalSubmissionForm: {
+          headline: 'Share feedback',
+          description: 'Tell us what is broken, missing, or worth improving.',
+          acknowledgement: 'Thanks. We will review your submission.',
+          submitButtonLabel: 'Submit feedback',
+          showPageUrl: true,
+          fields: [
+            {
+              key: 'severity',
+              label: 'Severity',
+              kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+              required: true,
+              options: ['low', 'medium', 'high'],
+              placeholder: 'Choose a severity',
+            },
+          ],
+        },
       })
     })
 
@@ -108,6 +133,72 @@ describe('PublicVisibilityPage', () => {
         includedInPortal: true,
         includedInRoadmap: false,
         submittedByDisplay: 'Jane Customer',
+      })
+    })
+  })
+
+  it('lets admins add, reorder, and normalize portal submission fields', async () => {
+    mockMe('admin')
+    let savedPolicy: unknown
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({ subjects: [] }),
+      ),
+      http.put('/fb/v1/console/public-visibility/policy', async ({ request }) => {
+        savedPolicy = await request.json()
+        return HttpResponse.json({
+          ...policyFixture(),
+          ...(savedPolicy as object),
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByText('自定义字段')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByLabelText('字段键')).toHaveValue('severity'))
+
+    await user.click(screen.getByRole('button', { name: '添加字段' }))
+
+    await waitFor(
+      () => {
+        expect(screen.getAllByLabelText('字段键')).toHaveLength(2)
+      },
+      { timeout: 5000 },
+    )
+    const fieldKeys = screen.getAllByLabelText('字段键')
+    const fieldLabels = screen.getAllByLabelText('字段名称')
+    const fieldPlaceholders = screen.getAllByLabelText('占位提示')
+    const fieldRequired = screen.getAllByRole('checkbox', { name: '必填' })
+
+    await user.type(fieldKeys[1], ' Extra_Field ')
+    await user.type(fieldLabels[1], ' Extra Severity ')
+    await user.type(fieldPlaceholders[1], ' Explain the issue ')
+    await user.click(fieldRequired[1])
+
+    fireEvent.change(screen.getByLabelText('可选项'), {
+      target: { value: ' alpha\n\n beta \n gamma ' },
+    })
+
+    await user.click(screen.getAllByRole('button', { name: '上移' })[1])
+    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
+
+    await user.click(screen.getByRole('button', { name: '保存策略' }))
+    await waitFor(() => {
+      expect(savedPolicy).toMatchObject({
+        portalSubmissionForm: {
+          fields: [
+            {
+              key: 'severity',
+              label: 'Severity',
+              kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+              required: true,
+              placeholder: 'Choose a severity',
+              options: ['alpha', 'beta', 'gamma'],
+            },
+          ],
+        },
       })
     })
   })
@@ -336,6 +427,23 @@ function policyFixture(overrides: Partial<PublicVisibilityPolicy> = {}): PublicV
     showCommentCount: true,
     showSubmitterDisplay: true,
     hidePublicTimestamps: false,
+    portalSubmissionForm: {
+      headline: 'Share feedback',
+      description: 'Tell us what is broken, missing, or worth improving.',
+      acknowledgement: 'Thanks. We will review your submission.',
+      submitButtonLabel: 'Submit feedback',
+      showPageUrl: true,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          options: ['low', 'medium', 'high'],
+          placeholder: 'Choose a severity',
+        },
+      ],
+    },
     updatedBy: 'admin-1',
     createdAt: '2026-07-10T00:00:00Z',
     updatedAt: '2026-07-10T00:00:00Z',

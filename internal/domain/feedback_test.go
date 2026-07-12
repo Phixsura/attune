@@ -21,6 +21,7 @@ func TestSourceDisplayName(t *testing.T) {
 		{"web", "Web Widget"},
 		{"mcp", "MCP"},
 		{"other", "Other"},
+		{"portal", "Portal"},
 		{"unknown", "unknown"},
 		{"custom-source", "custom-source"},
 	}
@@ -48,6 +49,7 @@ func TestIngestInput_Validate(t *testing.T) {
 		{"content too long", IngestInput{Content: strings.Repeat("a", MaxContentLen+1), Source: "api"}, true},
 		{"null byte", IngestInput{Content: "ab\x00cd", Source: "api"}, true},
 		{"unknown source", IngestInput{Content: "hi", Source: "bogus"}, true},
+		{"portal source", IngestInput{Content: "hi", Source: "portal", Type: "request"}, false},
 		{"content at cap", IngestInput{Content: strings.Repeat("a", MaxContentLen), Source: "api"}, false},
 	}
 	for _, c := range cases {

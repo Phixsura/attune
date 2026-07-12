@@ -3119,6 +3119,14 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: source
+                  in: query
+                  schema:
+                    type: string
+                - name: type
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -8613,6 +8621,130 @@ paths:
                             description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
                             schema:
                                 type: string
+    /v1/portal/{tenantSlug}/submission-config:
+        get:
+            tags:
+                - PortalService
+            operationId: PortalService_GetPublicSubmissionConfig
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PortalSubmissionConfig'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/portal/{tenantSlug}/submissions:
+        post:
+            tags:
+                - PortalService
+            operationId: PortalService_CreatePublicSubmission
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreatePublicSubmissionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreatePublicSubmissionResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
 components:
     schemas:
         AIAgentConfig:
@@ -9867,6 +9999,65 @@ components:
             properties:
                 project:
                     $ref: '#/components/schemas/Project'
+        CreatePublicSubmissionRequest:
+            required:
+                - tenantSlug
+                - kind
+                - title
+                - details
+            type: object
+            properties:
+                tenantSlug:
+                    type: string
+                kind:
+                    enum:
+                        - PORTAL_SUBMISSION_KIND_UNSPECIFIED
+                        - PORTAL_SUBMISSION_KIND_REQUEST
+                        - PORTAL_SUBMISSION_KIND_BUG
+                        - PORTAL_SUBMISSION_KIND_GENERAL
+                    type: string
+                    format: enum
+                title:
+                    type: string
+                details:
+                    type: string
+                pageUrl:
+                    type: string
+                displayName:
+                    type: string
+                organization:
+                    type: string
+                customFields:
+                    type: object
+                idempotencyKey:
+                    type: string
+                honeypot:
+                    type: string
+        CreatePublicSubmissionResponse:
+            type: object
+            properties:
+                submissionId:
+                    type: string
+                kind:
+                    enum:
+                        - PORTAL_SUBMISSION_KIND_UNSPECIFIED
+                        - PORTAL_SUBMISSION_KIND_REQUEST
+                        - PORTAL_SUBMISSION_KIND_BUG
+                        - PORTAL_SUBMISSION_KIND_GENERAL
+                    type: string
+                    format: enum
+                moderationState:
+                    enum:
+                        - MODERATION_STATE_UNSPECIFIED
+                        - MODERATION_STATE_PENDING
+                        - MODERATION_STATE_APPROVED
+                        - MODERATION_STATE_REJECTED
+                        - MODERATION_STATE_HIDDEN
+                        - MODERATION_STATE_SPAM
+                    type: string
+                    format: enum
+                acknowledgement:
+                    type: string
         CreateRotationScheduleRequest:
             type: object
             properties:
@@ -13546,6 +13737,86 @@ components:
                 usageCount:
                     type: string
             description: Permission usage / unused scope detection
+        PortalSubmissionConfig:
+            type: object
+            properties:
+                tenantId:
+                    type: string
+                tenantSlug:
+                    type: string
+                tenantName:
+                    type: string
+                portalAccessMode:
+                    enum:
+                        - PUBLIC_ACCESS_MODE_UNSPECIFIED
+                        - PUBLIC_ACCESS_MODE_DISABLED
+                        - PUBLIC_ACCESS_MODE_PUBLIC
+                        - PUBLIC_ACCESS_MODE_AUTHENTICATED
+                        - PUBLIC_ACCESS_MODE_INVITE_ONLY
+                    type: string
+                    format: enum
+                submissionWriteMode:
+                    enum:
+                        - PUBLIC_WRITE_MODE_UNSPECIFIED
+                        - PUBLIC_WRITE_MODE_DISABLED
+                        - PUBLIC_WRITE_MODE_ANONYMOUS
+                        - PUBLIC_WRITE_MODE_IDENTIFIED
+                    type: string
+                    format: enum
+                submitterIdentityMode:
+                    enum:
+                        - PUBLIC_IDENTITY_MODE_UNSPECIFIED
+                        - PUBLIC_IDENTITY_MODE_ANONYMOUS
+                        - PUBLIC_IDENTITY_MODE_DISPLAY_NAME
+                        - PUBLIC_IDENTITY_MODE_ORGANIZATION
+                    type: string
+                    format: enum
+                form:
+                    $ref: '#/components/schemas/PortalSubmissionFormConfig'
+                canSubmit:
+                    type: boolean
+        PortalSubmissionField:
+            type: object
+            properties:
+                key:
+                    type: string
+                label:
+                    type: string
+                kind:
+                    enum:
+                        - PORTAL_SUBMISSION_FIELD_KIND_UNSPECIFIED
+                        - PORTAL_SUBMISSION_FIELD_KIND_TEXT
+                        - PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA
+                        - PORTAL_SUBMISSION_FIELD_KIND_SELECT
+                        - PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT
+                        - PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN
+                    type: string
+                    format: enum
+                required:
+                    type: boolean
+                options:
+                    type: array
+                    items:
+                        type: string
+                placeholder:
+                    type: string
+        PortalSubmissionFormConfig:
+            type: object
+            properties:
+                headline:
+                    type: string
+                description:
+                    type: string
+                acknowledgement:
+                    type: string
+                submitButtonLabel:
+                    type: string
+                showPageUrl:
+                    type: boolean
+                fields:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PortalSubmissionField'
         PreflightCheckResult:
             type: object
             properties:
@@ -13870,6 +14141,8 @@ components:
                     type: string
                 updatedAt:
                     type: string
+                portalSubmissionForm:
+                    $ref: '#/components/schemas/PortalSubmissionFormConfig'
         QualifyExternalConnectionRequest:
             type: object
             properties:
@@ -15684,6 +15957,8 @@ components:
                     type: boolean
                 hidePublicTimestamps:
                     type: boolean
+                portalSubmissionForm:
+                    $ref: '#/components/schemas/PortalSubmissionFormConfig'
         UpdateQualityActionRequest:
             type: object
             properties:

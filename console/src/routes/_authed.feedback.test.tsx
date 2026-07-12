@@ -1,7 +1,11 @@
 import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
+import { Route as FeedbackShellRoute } from '@/routes/_authed.feedback'
+import { Route as FeedbackClustersRoute } from '@/routes/_authed.feedback.clusters'
 import { Route as FeedbackIndexRoute } from '@/routes/_authed.feedback.index'
+import { Route as PortalInboxRoute } from '@/routes/_authed.feedback.portal'
+import { Route as TerminalFailuresRoute } from '@/routes/_authed.feedback.terminal-failures'
 import { FeedbackRoutePage } from '@/routes/-feedback-route-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
@@ -141,6 +145,13 @@ describe('_authed.feedback route — user flow smoke', () => {
       confidence_lte: 0.55,
       quality_signal: 'low_confidence',
     })
+  })
+
+  it('wires the feedback route shells to the shared pages', () => {
+    expect(FeedbackShellRoute.options.component).toBeTypeOf('function')
+    expect(FeedbackClustersRoute.options.component).toBeTypeOf('function')
+    expect(PortalInboxRoute.options.component).toBeTypeOf('function')
+    expect(TerminalFailuresRoute.options.component).toBeTypeOf('function')
   })
 
   it('renders title + table row from the list query, opens sheet with detail on row click', async () => {
@@ -342,6 +353,107 @@ describe('_authed.feedback route — user flow smoke', () => {
       '/feedback/terminal-failures',
     )
   })
+
+  it('portal inbox defaults to portal submissions and surfaces the portal title', async () => {
+    const seen: URL[] = []
+    const portalItemFixture = {
+      ...itemFixture,
+      id: '301',
+      content: 'portal submission from a customer',
+      enrichedTitle: 'Portal submission',
+      enrichedDisplayTitle: '门户提交',
+      source: 'portal',
+      type: 'request',
+      isUrgent: false,
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        seen.push(new URL(request.url))
+        return HttpResponse.json({ items: [portalItemFixture], nextCursor: undefined })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackRoutePage
+        initialSourceFilter="portal"
+        titleKey="nav.portal_inbox"
+        subtitleKey="feedback.portal.subtitle"
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: '门户收件箱' })).toBeInTheDocument()
+    })
+    expect(await screen.findByText('门户投稿')).toBeInTheDocument()
+    expect(seen.some((url) => url.searchParams.get('source') === 'portal')).toBe(true)
+  }, 20_000)
+
+  it('portal inbox shows a portal-specific empty state when no submissions exist', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '0',
+          dims: [],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackRoutePage
+        initialSourceFilter="portal"
+        titleKey="nav.portal_inbox"
+        subtitleKey="feedback.portal.subtitle"
+      />,
+    )
+
+    expect(await screen.findByText('当前还没有收到门户投稿')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /打开实时门户/ })).toHaveAttribute(
+        'href',
+        '/portal/default',
+      )
+      expect(screen.getByRole('link', { name: /查看公开设置/ })).toHaveAttribute(
+        'href',
+        '/integrations/public-visibility',
+      )
+    })
+  }, 20_000)
 
   it('terminal workbench priority is reflected in the queue deck', async () => {
     server.use(
@@ -588,9 +700,9 @@ describe('_authed.feedback route — user flow smoke', () => {
 
     await user.type(screen.getByRole('searchbox'), 'unicode')
     await user.click(screen.getByRole('button', { name: '仅看紧急' }))
-    await user.click(screen.getAllByRole('combobox')[0])
+    await user.click(screen.getByLabelText('所有 Severity'))
     await user.click(screen.getByRole('option', { name: 'P0' }))
-    await user.click(screen.getAllByRole('combobox')[1])
+    await user.click(screen.getByLabelText('所有状态'))
     await user.click(screen.getByRole('option', { name: '待处理' }))
 
     await waitFor(() => {
@@ -1390,7 +1502,7 @@ describe('_authed.feedback route — user flow smoke', () => {
     })
 
     await user.click(screen.getByRole('button', { name: '仅看紧急' }))
-    await user.click(screen.getAllByRole('combobox')[0])
+    await user.click(screen.getByLabelText('所有 Severity'))
     await user.click(screen.getByRole('option', { name: 'P0' }))
     await user.click(screen.getByRole('button', { name: '语义' }))
     await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), 'billing checkout')

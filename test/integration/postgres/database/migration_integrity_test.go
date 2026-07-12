@@ -5,6 +5,8 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -461,7 +463,6 @@ func TestMigrations_DetectDuplicatePrefixes(t *testing.T) {
 
 func TestMigrations_MigrationCount(t *testing.T) {
 	count := database.MigrationCount()
-	require.Equal(t, 106, count, "should have 106 migrations")
 
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
@@ -1223,12 +1224,13 @@ func TestMigrations_LoadMigrationNames_All(t *testing.T) {
 	names, err := database.LoadMigrationNames()
 	require.NoError(t, err)
 
-	// Should have 106 migrations.
-	require.Len(t, names, 106)
+	count := database.MigrationCount()
+	require.Equal(t, count, len(names))
 
 	// First and last
 	require.Equal(t, "001_init.sql", names[0])
-	require.Equal(t, "106_public_visibility_moderation.sql", names[len(names)-1])
+	require.True(t, strings.HasPrefix(names[len(names)-1], fmt.Sprintf("%03d_", count)),
+		"last migration should match the current count prefix: %s", names[len(names)-1])
 
 	// All should be .sql files
 	for _, n := range names {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { setCsrfToken } from '@/lib/api-client'
 import {
   ModerationState,
+  PortalSubmissionFieldKind,
   PublicAccessMode,
   PublicIdentityMode,
   type PublicRequestPublication,
@@ -44,6 +45,23 @@ const policyFixture: PublicVisibilityPolicy = {
   showCommentCount: false,
   showSubmitterDisplay: true,
   hidePublicTimestamps: false,
+  portalSubmissionForm: {
+    headline: 'Share feedback',
+    description: 'Tell us what is broken, missing, or worth improving.',
+    acknowledgement: 'Thanks. We will review your submission.',
+    submitButtonLabel: 'Submit feedback',
+    showPageUrl: true,
+    fields: [
+      {
+        key: 'severity',
+        label: 'Severity',
+        kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+        required: true,
+        options: ['low', 'medium', 'high'],
+        placeholder: 'Choose a severity',
+      },
+    ],
+  },
   updatedBy: 'admin-1',
   createdAt: '2026-07-10T00:00:00Z',
   updatedAt: '2026-07-10T00:00:00Z',

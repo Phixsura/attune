@@ -234,6 +234,8 @@ export interface ListFeedbackRequest {
   enrichedFrom?: string | undefined;
   enrichedTo?: string | undefined;
   qualitySignal?: string | undefined;
+  source?: string | undefined;
+  type?: string | undefined;
 }
 
 export interface ListFeedbackResponse {

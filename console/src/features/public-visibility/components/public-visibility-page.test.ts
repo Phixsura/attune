@@ -7,6 +7,7 @@ import type {
 } from '@/proto/attune/v1/public_visibility'
 import {
   ModerationState,
+  PortalSubmissionFieldKind,
   PublicAccessMode,
   PublicIdentityMode,
   PublicSurface,
@@ -60,7 +61,8 @@ describe('publicVisibilityPageTestables', () => {
 
   it('maps policy and profile records into editable form payloads', () => {
     const policy = policyFixture()
-    expect(publicVisibilityPageTestables.formFromPolicy(policy)).toMatchObject({
+    const policyForm = publicVisibilityPageTestables.formFromPolicy(policy)
+    expect(policyForm).toMatchObject({
       portalAccessMode: PublicAccessMode.PUBLIC_ACCESS_MODE_PUBLIC,
       searchIndexingEnabled: true,
       requestsEnabled: true,
@@ -68,8 +70,43 @@ describe('publicVisibilityPageTestables', () => {
       defaultRequestState: ModerationState.MODERATION_STATE_PENDING,
       submitterIdentityMode: PublicIdentityMode.PUBLIC_IDENTITY_MODE_DISPLAY_NAME,
       showSubmitterDisplay: true,
+      portalSubmissionForm: {
+        headline: 'Share feedback',
+        description: 'Tell us what is broken, missing, or worth improving.',
+        acknowledgement: 'Thanks. We will review your submission.',
+        submitButtonLabel: 'Submit feedback',
+        showPageUrl: true,
+        fields: [
+          {
+            key: 'severity',
+            label: 'Severity',
+            kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+            required: true,
+            placeholder: 'Choose a severity',
+            options: ['low', 'medium', 'high'],
+          },
+        ],
+      },
     })
-    expect(publicVisibilityPageTestables.policyRequestFromForm({ ...policy })).toEqual(policy)
+    expect(publicVisibilityPageTestables.policyRequestFromForm(policyForm)).toMatchObject({
+      portalAccessMode: policy.portalAccessMode,
+      searchIndexingEnabled: policy.searchIndexingEnabled,
+      requestsEnabled: policy.requestsEnabled,
+      commentsEnabled: policy.commentsEnabled,
+      roadmapEnabled: policy.roadmapEnabled,
+      changelogEnabled: policy.changelogEnabled,
+      submissionWriteMode: policy.submissionWriteMode,
+      commentWriteMode: policy.commentWriteMode,
+      voteWriteMode: policy.voteWriteMode,
+      defaultRequestState: policy.defaultRequestState,
+      defaultCommentState: policy.defaultCommentState,
+      submitterIdentityMode: policy.submitterIdentityMode,
+      showVoteCount: policy.showVoteCount,
+      showCommentCount: policy.showCommentCount,
+      showSubmitterDisplay: policy.showSubmitterDisplay,
+      hidePublicTimestamps: policy.hidePublicTimestamps,
+      portalSubmissionForm: policyForm.portalSubmissionForm,
+    })
 
     const form = publicVisibilityPageTestables.profileFormFromPublication(
       publicationWithModeration(
@@ -90,6 +127,14 @@ describe('publicVisibilityPageTestables', () => {
         'r-2',
       ),
     ).toEqual({ ...publicVisibilityPageTestables.defaultProfileForm(), requestId: 'r-2' })
+    expect(publicVisibilityPageTestables.defaultPortalSubmissionForm()).toEqual({
+      headline: 'Send feedback',
+      description: 'Share bugs, ideas, or anything blocking your work.',
+      acknowledgement: 'Thanks. We will review your submission.',
+      submitButtonLabel: 'Submit feedback',
+      showPageUrl: true,
+      fields: [],
+    })
     expect(
       publicVisibilityPageTestables.profileRequestFromForm({
         ...publicVisibilityPageTestables.defaultProfileForm(),
@@ -150,6 +195,148 @@ describe('publicVisibilityPageTestables', () => {
       'failed request',
     )
     expect(publicVisibilityPageTestables.messageOf('unknown')).toBe('failed')
+  })
+
+  it('normalizes portal submission form configs and field kinds', () => {
+    const t = ((key: string) => key) as TFunction
+
+    expect(publicVisibilityPageTestables.defaultForm().portalSubmissionForm).toEqual(
+      publicVisibilityPageTestables.defaultPortalSubmissionForm(),
+    )
+    expect(publicVisibilityPageTestables.portalSubmissionFormFromPolicy(undefined)).toEqual(
+      publicVisibilityPageTestables.defaultPortalSubmissionForm(),
+    )
+
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT,
+      ),
+    ).toBe('text')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA,
+      ),
+    ).toBe('textarea')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+      ),
+    ).toBe('select')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+      ),
+    ).toBe('multiselect')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN,
+      ),
+    ).toBe('boolean')
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindName(
+        99 as unknown as PortalSubmissionFieldKind,
+      ),
+    ).toBe('text')
+
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFieldKindLabel(
+        PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+        t,
+      ),
+    ).toBe('public_visibility.portal.field.kind_values.select')
+    expect(publicVisibilityPageTestables.portalSubmissionFieldKindOptions(t)).toEqual([
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT,
+        label: 'public_visibility.portal.field.kind_values.text',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA,
+        label: 'public_visibility.portal.field.kind_values.textarea',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+        label: 'public_visibility.portal.field.kind_values.select',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+        label: 'public_visibility.portal.field.kind_values.multiselect',
+      },
+      {
+        value: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN,
+        label: 'public_visibility.portal.field.kind_values.boolean',
+      },
+    ])
+
+    const policyForm = publicVisibilityPageTestables.portalSubmissionFormFromPolicy({
+      headline: 'Portal title',
+      description: 'Portal description',
+      acknowledgement: 'Portal acknowledgement',
+      submitButtonLabel: 'Send it',
+      showPageUrl: false,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          placeholder: 'Choose a severity',
+          options: ['low', 'medium', 'high'],
+        },
+      ],
+    })
+    expect(policyForm).toEqual({
+      headline: 'Portal title',
+      description: 'Portal description',
+      acknowledgement: 'Portal acknowledgement',
+      submitButtonLabel: 'Send it',
+      showPageUrl: false,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          placeholder: 'Choose a severity',
+          options: ['low', 'medium', 'high'],
+        },
+      ],
+    })
+
+    expect(
+      publicVisibilityPageTestables.portalSubmissionFormRequestFromForm({
+        headline: ' Portal title ',
+        description: ' Portal description ',
+        acknowledgement: ' Thanks ',
+        submitButtonLabel: ' Send it ',
+        showPageUrl: true,
+        fields: [
+          {
+            key: ' Severity ',
+            label: ' Severity ',
+            kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+            required: true,
+            placeholder: ' Choose a severity ',
+            options: [' alpha ', ' ', ' beta '],
+          },
+        ],
+      }),
+    ).toEqual({
+      headline: 'Portal title',
+      description: 'Portal description',
+      acknowledgement: 'Thanks',
+      submitButtonLabel: 'Send it',
+      showPageUrl: true,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT,
+          required: true,
+          placeholder: 'Choose a severity',
+          options: ['alpha', 'beta'],
+        },
+      ],
+    })
   })
 })
 
@@ -213,6 +400,23 @@ function policyFixture(): PublicVisibilityPolicy {
     showCommentCount: false,
     showSubmitterDisplay: true,
     hidePublicTimestamps: false,
+    portalSubmissionForm: {
+      headline: 'Share feedback',
+      description: 'Tell us what is broken, missing, or worth improving.',
+      acknowledgement: 'Thanks. We will review your submission.',
+      submitButtonLabel: 'Submit feedback',
+      showPageUrl: true,
+      fields: [
+        {
+          key: 'severity',
+          label: 'Severity',
+          kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+          required: true,
+          options: ['low', 'medium', 'high'],
+          placeholder: 'Choose a severity',
+        },
+      ],
+    },
     updatedBy: 'admin-1',
     createdAt: '2026-07-10T00:00:00Z',
     updatedAt: '2026-07-10T00:00:00Z',

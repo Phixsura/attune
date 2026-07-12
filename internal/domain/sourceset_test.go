@@ -77,7 +77,7 @@ func TestNewSourceSet_DefensiveCopy(t *testing.T) {
 // guard relies on: an inbound adapter channel may never claim a core source.
 func TestIsReservedSource(t *testing.T) {
 	t.Parallel()
-	for _, src := range []string{"api", "web", "mcp", "other"} {
+	for _, src := range []string{"api", "web", "mcp", "other", "portal"} {
 		if !IsReservedSource(src) {
 			t.Errorf("IsReservedSource(%q) = false; want true (core source)", src)
 		}
@@ -108,10 +108,11 @@ func TestSourceVocabulary_AppendOnly(t *testing.T) {
 		"web":     "Web Widget",
 		"mcp":     "MCP",
 		"other":   "Other",
+		"portal":  "Portal",
 	}
 	set := DefaultSourceSet()
 
-	wantAll := []string{"api", "email", "mcp", "other", "web", "webhook"} // sorted
+	wantAll := []string{"api", "email", "mcp", "other", "portal", "web", "webhook"} // sorted
 	if got := set.All(); !reflect.DeepEqual(got, wantAll) {
 		t.Fatalf("DefaultSourceSet().All() = %v; want %v (a removal is a breaking change)", got, wantAll)
 	}

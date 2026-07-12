@@ -12,7 +12,11 @@ import { useDocumentTitle } from '@/hooks/use-document-title'
 
 type FeedbackRoutePageProps = {
   initialQueueMode?: 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
+  initialSourceFilter?: string
+  initialTypeFilter?: string
   showTerminalWorkbench?: boolean
+  titleKey?: string
+  subtitleKey?: string
   initialQualityFilters?: Pick<
     FeedbackListFilters,
     | 'ids'
@@ -27,11 +31,17 @@ type FeedbackRoutePageProps = {
 
 export function FeedbackRoutePage({
   initialQueueMode = 'all',
+  initialSourceFilter = '',
+  initialTypeFilter = '',
   showTerminalWorkbench = false,
+  titleKey,
+  subtitleKey,
   initialQualityFilters,
 }: FeedbackRoutePageProps = {}) {
   const { t } = useTranslation()
-  useDocumentTitle(t(initialQueueMode === 'terminal' ? 'nav.terminal_failures' : 'nav.feedback'))
+  const resolvedTitleKey =
+    titleKey ?? (initialQueueMode === 'terminal' ? 'nav.terminal_failures' : 'nav.feedback')
+  useDocumentTitle(t(resolvedTitleKey))
   const config = useQuery(enrichConfigQuery())
   const allTags = useQuery(tagsQuery())
   const allStates = useQuery(workflowStatesQuery())
@@ -44,8 +54,12 @@ export function FeedbackRoutePage({
       stateList={allStates.data ?? []}
       batchTransition={batchTransition}
       initialQueueMode={initialQueueMode}
+      initialSourceFilter={initialSourceFilter}
+      initialTypeFilter={initialTypeFilter}
       initialQualityFilters={initialQualityFilters}
       showTerminalWorkbench={showTerminalWorkbench}
+      titleKey={resolvedTitleKey}
+      subtitleKey={subtitleKey}
       renderWorkflowTransition={(data) => (
         <WorkflowTransitionSelect
           feedbackId={String(data.id)}

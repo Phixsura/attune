@@ -6,34 +6,47 @@ package portal
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
 
 const publicRequestCacheControl = "no-store"
 
-type service interface {
+var createPublicSubmissionUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
+
+type readService interface {
 	ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string) (pvsvc.PublicRequestList, error)
 	GetPublicRequest(ctx context.Context, tenantSlug string, publicSlug string) (pvsvc.PublicRequest, error)
 	ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string) (pvsvc.PublicRequestList, error)
 }
 
 type Handler struct {
-	service service
+	read       readService
+	submission submissionService
 }
 
-func NewHandler(service service) *Handler {
-	return ptrext.Of(Handler{service: service})
+type submissionService interface {
+	GetSubmissionConfig(ctx context.Context, tenantSlug string) (portalsvc.SubmissionConfig, error)
+	Submit(ctx context.Context, in portalsvc.SubmitInput) (portalsvc.SubmitResult, error)
+}
+
+func NewHandler(read readService, submission submissionService) *Handler {
+	return ptrext.Of(Handler{read: read, submission: submission})
 }
 
 func NoStore(next http.Handler) http.Handler {
@@ -48,10 +61,10 @@ func (h *Handler) ListPublicCustomerRequests(
 	req *attunev1.ListPublicCustomerRequestsRequest,
 ) (dispatcher.Result[*attunev1.ListPublicCustomerRequestsResponse], error) {
 	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
-	if h.service == nil {
+	if h.read == nil {
 		return dispatcher.Fail[*attunev1.ListPublicCustomerRequestsResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
 	}
-	result, err := h.service.ListPublicRequests(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor())
+	result, err := h.read.ListPublicRequests(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor())
 	if err != nil {
 		return portalError[*attunev1.ListPublicCustomerRequestsResponse](err)
 	}
@@ -66,10 +79,10 @@ func (h *Handler) GetPublicCustomerRequest(
 	req *attunev1.GetPublicCustomerRequestRequest,
 ) (dispatcher.Result[*attunev1.PublicCustomerRequestDetail], error) {
 	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
-	if h.service == nil {
+	if h.read == nil {
 		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
 	}
-	result, err := h.service.GetPublicRequest(ctx, req.GetTenantSlug(), req.GetPublicSlug())
+	result, err := h.read.GetPublicRequest(ctx, req.GetTenantSlug(), req.GetPublicSlug())
 	if err != nil {
 		return portalError[*attunev1.PublicCustomerRequestDetail](err)
 	}
@@ -84,10 +97,10 @@ func (h *Handler) ListPublicRoadmap(
 	req *attunev1.ListPublicRoadmapRequest,
 ) (dispatcher.Result[*attunev1.ListPublicRoadmapResponse], error) {
 	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
-	if h.service == nil {
+	if h.read == nil {
 		return dispatcher.Fail[*attunev1.ListPublicRoadmapResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
 	}
-	result, err := h.service.ListPublicRoadmap(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor())
+	result, err := h.read.ListPublicRoadmap(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor())
 	if err != nil {
 		return portalError[*attunev1.ListPublicRoadmapResponse](err)
 	}
@@ -95,6 +108,50 @@ func (h *Handler) ListPublicRoadmap(
 		ctx.SetHeader("X-Robots-Tag", "noindex")
 	}
 	return dispatcher.OK(publicRoadmapToProto(result))
+}
+
+func (h *Handler) GetPublicSubmissionConfig(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.GetPublicSubmissionConfigRequest,
+) (dispatcher.Result[*attunev1.PortalSubmissionConfig], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.submission == nil {
+		return dispatcher.Fail[*attunev1.PortalSubmissionConfig](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
+	}
+	result, err := h.submission.GetSubmissionConfig(ctx, req.GetTenantSlug())
+	if err != nil {
+		return portalSubmissionError[*attunev1.PortalSubmissionConfig](err)
+	}
+	return dispatcher.OK(portalSubmissionConfigToProto(result))
+}
+
+func (h *Handler) CreatePublicSubmission(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.CreatePublicSubmissionRequest,
+) (dispatcher.Result[*attunev1.CreatePublicSubmissionResponse], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.submission == nil {
+		return dispatcher.Fail[*attunev1.CreatePublicSubmissionResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
+	}
+	result, err := h.submission.Submit(ctx, portalsvc.SubmitInput{
+		TenantSlug:     req.GetTenantSlug(),
+		Kind:           submissionKindFromProto(req.GetKind()),
+		Title:          req.GetTitle(),
+		Details:        req.GetDetails(),
+		PageURL:        req.GetPageUrl(),
+		DisplayName:    req.GetDisplayName(),
+		Organization:   req.GetOrganization(),
+		CustomFields:   customFieldsFromProto(req.GetCustomFields()),
+		Honeypot:       req.GetHoneypot(),
+		IdempotencyKey: strings.TrimSpace(req.GetIdempotencyKey()),
+		UserAgent:      userAgentFromRequest(ctx.Request()),
+	})
+	if err != nil {
+		return portalSubmissionError[*attunev1.CreatePublicSubmissionResponse](err)
+	}
+	return dispatcher.OK(portalSubmissionResultToProto(result))
 }
 
 func portalError[Resp proto.Message](err error) (dispatcher.Result[Resp], error) {
@@ -105,6 +162,21 @@ func portalError[Resp proto.Message](err error) (dispatcher.Result[Resp], error)
 		return dispatcher.Fail[Resp](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid public request")
 	default:
 		return dispatcher.Fail[Resp](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "public request failed")
+	}
+}
+
+func portalSubmissionError[Resp proto.Message](err error) (dispatcher.Result[Resp], error) {
+	switch {
+	case errors.Is(err, portalsvc.ErrNotFound), errors.Is(err, pvrepo.ErrNotFound):
+		return dispatcher.Fail[Resp](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "portal submission not found")
+	case errors.Is(err, portalsvc.ErrValidation):
+		return dispatcher.Fail[Resp](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid portal submission")
+	case errors.Is(err, portalsvc.ErrDisabled):
+		return dispatcher.Fail[Resp](http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "portal submissions are disabled")
+	case errors.Is(err, portalsvc.ErrConflict):
+		return dispatcher.Fail[Resp](http.StatusConflict, attunev1.ErrorCode_IDEMPOTENCY_CONFLICT, "idempotency key used with different request parameters")
+	default:
+		return dispatcher.Fail[Resp](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal submission failed")
 	}
 }
 
@@ -145,6 +217,166 @@ func publicRoadmapToProto(result pvsvc.PublicRequestList) *attunev1.ListPublicRo
 		out.NextCursor = ptrext.Of(result.NextCursor)
 	}
 	return out
+}
+
+func portalSubmissionConfigToProto(result portalsvc.SubmissionConfig) *attunev1.PortalSubmissionConfig {
+	return ptrext.Of(attunev1.PortalSubmissionConfig{
+		TenantId:              result.TenantID,
+		TenantSlug:            result.TenantSlug,
+		TenantName:            result.TenantName,
+		PortalAccessMode:      submissionAccessModeToProto(result.PortalAccessMode),
+		SubmissionWriteMode:   submissionWriteModeToProto(result.SubmissionWriteMode),
+		SubmitterIdentityMode: submissionIdentityModeToProto(result.SubmitterIdentityMode),
+		Form:                  portalSubmissionFormToProto(result.Form),
+		CanSubmit:             result.CanSubmit,
+	})
+}
+
+func portalSubmissionResultToProto(result portalsvc.SubmitResult) *attunev1.CreatePublicSubmissionResponse {
+	return ptrext.Of(attunev1.CreatePublicSubmissionResponse{
+		SubmissionId:    result.SubmissionID,
+		Kind:            submissionKindToProto(result.Kind),
+		ModerationState: moderationStateToProto(result.ModerationState),
+		Acknowledgement: result.Acknowledgement,
+	})
+}
+
+func portalSubmissionFormToProto(form pvrepo.PortalSubmissionForm) *attunev1.PortalSubmissionFormConfig {
+	out := ptrext.Of(attunev1.PortalSubmissionFormConfig{
+		Headline:          form.Headline,
+		Description:       form.Description,
+		Acknowledgement:   form.Acknowledgement,
+		SubmitButtonLabel: form.SubmitButtonLabel,
+		ShowPageUrl:       form.ShowPageURL,
+	})
+	if len(form.Fields) > 0 {
+		out.Fields = make([]*attunev1.PortalSubmissionField, 0, len(form.Fields))
+		for _, field := range form.Fields {
+			out.Fields = append(out.Fields, portalSubmissionFieldToProto(field))
+		}
+	}
+	return out
+}
+
+func portalSubmissionFieldToProto(field pvrepo.PortalSubmissionField) *attunev1.PortalSubmissionField {
+	out := ptrext.Of(attunev1.PortalSubmissionField{
+		Key:         field.Key,
+		Label:       field.Label,
+		Kind:        portalSubmissionFieldKindToProto(field.Kind),
+		Required:    field.Required,
+		Placeholder: field.Placeholder,
+	})
+	if len(field.Options) > 0 {
+		out.Options = append([]string{}, field.Options...)
+	}
+	return out
+}
+
+func portalSubmissionFieldKindToProto(kind pvrepo.PortalSubmissionFieldKind) attunev1.PortalSubmissionFieldKind {
+	switch kind {
+	case pvrepo.PortalSubmissionFieldKindText:
+		return attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_TEXT
+	case pvrepo.PortalSubmissionFieldKindTextarea:
+		return attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA
+	case pvrepo.PortalSubmissionFieldKindSelect:
+		return attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_SELECT
+	case pvrepo.PortalSubmissionFieldKindMultiSelect:
+		return attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT
+	case pvrepo.PortalSubmissionFieldKindBoolean:
+		return attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN
+	default:
+		return attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_UNSPECIFIED
+	}
+}
+
+func submissionKindToProto(kind string) attunev1.PortalSubmissionKind {
+	switch kind {
+	case "request":
+		return attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_REQUEST
+	case "bug":
+		return attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_BUG
+	case "general":
+		return attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_GENERAL
+	default:
+		return attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_UNSPECIFIED
+	}
+}
+
+func submissionKindFromProto(kind attunev1.PortalSubmissionKind) string {
+	switch kind {
+	case attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_REQUEST:
+		return "request"
+	case attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_BUG:
+		return "bug"
+	case attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_GENERAL:
+		return "general"
+	default:
+		return ""
+	}
+}
+
+func submissionAccessModeToProto(mode pvrepo.AccessMode) attunev1.PublicAccessMode {
+	switch mode {
+	case pvrepo.AccessModePublic:
+		return attunev1.PublicAccessMode_PUBLIC_ACCESS_MODE_PUBLIC
+	case pvrepo.AccessModeAuthenticated:
+		return attunev1.PublicAccessMode_PUBLIC_ACCESS_MODE_AUTHENTICATED
+	case pvrepo.AccessModeInviteOnly:
+		return attunev1.PublicAccessMode_PUBLIC_ACCESS_MODE_INVITE_ONLY
+	default:
+		return attunev1.PublicAccessMode_PUBLIC_ACCESS_MODE_DISABLED
+	}
+}
+
+func submissionWriteModeToProto(mode pvrepo.WriteMode) attunev1.PublicWriteMode {
+	switch mode {
+	case pvrepo.WriteModeAnonymous:
+		return attunev1.PublicWriteMode_PUBLIC_WRITE_MODE_ANONYMOUS
+	case pvrepo.WriteModeIdentified:
+		return attunev1.PublicWriteMode_PUBLIC_WRITE_MODE_IDENTIFIED
+	default:
+		return attunev1.PublicWriteMode_PUBLIC_WRITE_MODE_DISABLED
+	}
+}
+
+func submissionIdentityModeToProto(mode pvrepo.IdentityMode) attunev1.PublicIdentityMode {
+	switch mode {
+	case pvrepo.IdentityModeDisplayName:
+		return attunev1.PublicIdentityMode_PUBLIC_IDENTITY_MODE_DISPLAY_NAME
+	case pvrepo.IdentityModeOrganization:
+		return attunev1.PublicIdentityMode_PUBLIC_IDENTITY_MODE_ORGANIZATION
+	default:
+		return attunev1.PublicIdentityMode_PUBLIC_IDENTITY_MODE_ANONYMOUS
+	}
+}
+
+func moderationStateToProto(state pvrepo.ModerationState) attunev1.ModerationState {
+	switch state {
+	case pvrepo.ModerationStateApproved:
+		return attunev1.ModerationState_MODERATION_STATE_APPROVED
+	case pvrepo.ModerationStateRejected:
+		return attunev1.ModerationState_MODERATION_STATE_REJECTED
+	case pvrepo.ModerationStateHidden:
+		return attunev1.ModerationState_MODERATION_STATE_HIDDEN
+	case pvrepo.ModerationStateSpam:
+		return attunev1.ModerationState_MODERATION_STATE_SPAM
+	default:
+		return attunev1.ModerationState_MODERATION_STATE_PENDING
+	}
+}
+
+func customFieldsFromProto(raw *structpb.Struct) map[string]any {
+	if raw == nil {
+		return nil
+	}
+	return raw.AsMap()
+}
+
+func userAgentFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	return strings.TrimSpace(r.UserAgent())
 }
 
 func publicRequestSummaryToProto(result pvsvc.PublicRequest) *attunev1.PublicCustomerRequestSummary {
@@ -196,6 +428,25 @@ func BindListRoadmap(r *http.Request, req *attunev1.ListPublicRoadmapRequest) er
 	}
 	req.Limit = limit
 	req.Cursor = cursor
+	return nil
+}
+
+func BindCreatePublicSubmissionRequest(r *http.Request, req *attunev1.CreatePublicSubmissionRequest) error {
+	const maxBody = 64 * 1024
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
+	}
+	if len(body) > maxBody {
+		return dispatcher.NewError(http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE, "request body too large")
+	}
+	if err := createPublicSubmissionUnmarshal.Unmarshal(body, req); err != nil {
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
+	}
+	req.TenantSlug = strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+	if headerKey := strings.TrimSpace(r.Header.Get("Idempotency-Key")); headerKey != "" && strings.TrimSpace(req.GetIdempotencyKey()) == "" {
+		req.IdempotencyKey = headerKey
+	}
 	return nil
 }
 

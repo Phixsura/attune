@@ -53,12 +53,14 @@ import (
 	inboundsourcerepo "github.com/Phixsura/attune/internal/repo/inboundsource"
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	publicvisibilityrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	tenantrepo "github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
 	"github.com/Phixsura/attune/internal/service/ingest"
+	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
@@ -114,7 +116,20 @@ func buildRouter(
 	perKeyRateLimiter := buildPerKeyRateLimiter(cfg)
 	versionMW := apiversion.Middleware(apiversion.DefaultConfig())
 	portalLimiter := newPortalAnonymousLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
-	portalHandler := portal.NewHandler(publicvisibilitysvc.New(publicvisibilityrepo.New(pool), nil))
+	portalSubmissionLimiter := newPortalSubmissionLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
+	publicVisibilityRepo := publicvisibilityrepo.New(pool)
+	portalHandler := portal.NewHandler(
+		publicvisibilitysvc.New(publicVisibilityRepo, nil),
+		portalsvc.New(
+			publicvisibilitysvc.New(publicVisibilityRepo, nil),
+			publicVisibilityRepo,
+			feedback.NewFeedback(pool),
+			tenantrepo.NewTenant(pool),
+			auditlogsvc.New(auditlogrepo.New(pool)),
+		),
+	)
+
+	r.Method(http.MethodGet, "/portal/{tenant_slug}", portal.NoStore(http.HandlerFunc(portalHandler.Page)))
 
 	r.Route("/v1", func(r chi.Router) {
 		// Inbound adapter mux. Adapters have already registered their
@@ -131,6 +146,21 @@ func buildRouter(
 			r.Use(versionMW)
 			r.Use(portal.NoStore)
 			r.Use(portalLimiter.Middleware)
+			r.Get("/portal/{tenant_slug}/submission-config", dispatcher.Bind(
+				"portal.Handler.GetPublicSubmissionConfig",
+				dispatcher.Path(
+					func() *attunev1.GetPublicSubmissionConfigRequest {
+						return ptrext.Of(attunev1.GetPublicSubmissionConfigRequest{})
+					},
+					dispatcher.Param("tenant_slug", func(req *attunev1.GetPublicSubmissionConfigRequest, slug string) {
+						req.TenantSlug = slug
+					}),
+				),
+				portalHandler.GetPublicSubmissionConfig,
+				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.GetPublicSubmissionConfigRequest) (struct{}, error) {
+					return struct{}{}, nil
+				}),
+			))
 			r.Get("/portal/{tenant_slug}/requests", dispatcher.Bind(
 				"portal.Handler.ListPublicCustomerRequests",
 				dispatcher.Query(
@@ -178,6 +208,22 @@ func buildRouter(
 				),
 				portalHandler.ListPublicRoadmap,
 				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.ListPublicRoadmapRequest) (struct{}, error) {
+					return struct{}{}, nil
+				}),
+			))
+			r.With(portalSubmissionLimiter.Middleware).Post("/portal/{tenant_slug}/submissions", dispatcher.Bind(
+				"portal.Handler.CreatePublicSubmission",
+				dispatcher.Path(
+					func() *attunev1.CreatePublicSubmissionRequest {
+						return ptrext.Of(attunev1.CreatePublicSubmissionRequest{})
+					},
+					dispatcher.Param("tenant_slug", func(req *attunev1.CreatePublicSubmissionRequest, slug string) {
+						req.TenantSlug = slug
+					}),
+					portal.BindCreatePublicSubmissionRequest,
+				),
+				portalHandler.CreatePublicSubmission,
+				dispatcher.WithAuth(func(_ *http.Request, _ *attunev1.CreatePublicSubmissionRequest) (struct{}, error) {
 					return struct{}{}, nil
 				}),
 			))

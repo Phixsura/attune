@@ -9,6 +9,52 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Portal submissions now can jump straight to Customer Requests.**
+  Added a direct promotion action from portal submission details into the
+  Customer Requests flow so operators can move from intake to follow-up without
+  returning to the queue.
+
+### Fixed
+
+- **Public portal submission form now sends protobuf enum values.**
+  The portal page now submits the submission kind using the proto enum names
+  expected by the JSON API, and the audit log allow-list now accepts the
+  resulting `portal_submission.create` event so real browser submissions can
+  commit successfully.
+
+- **Portal inbox empty state now guides operators to the live portal.**
+  When the dedicated portal queue has no submissions yet, the Console now
+  shows a portal-specific empty state with direct links to the live portal
+  preview and public visibility settings instead of a generic filtered empty
+  screen.
+
+- **Portal inbox view for public submissions.**
+  Added a dedicated `/feedback/portal` Console queue with a portal-scoped
+  default filter, a sidebar entry, and page chrome that makes public portal
+  submissions easier to triage without manual filtering.
+
+- **Public portal preview now opens the live submission page.**
+  Added a direct link from the public visibility portal preview to the tenant's
+  live `/portal/{tenant_slug}` page so operators can validate the current
+  submission form without hunting for the URL.
+
+- **Portal submissions now show structured evidence in feedback details.**
+  Added a dedicated portal submission evidence card in the feedback detail
+  sheet so operators can review submission kind, title, page URL, identity
+  fields, custom fields, and user-agent context without opening the raw JSON
+  meta block first.
+
+- **Portal feedback rows now use a clearer source label.**
+  Displayed portal-origin feedback rows with a dedicated "portal submission"
+  label in the console list so the inbox queue is easier to scan at a glance.
+
+- **Public end-user feedback submission portal.**
+  Added a tenant-branded submit-only portal at `/portal/{tenant_slug}` with
+  public submission-config and submission endpoints, configurable portal form
+  fields in the public visibility policy, raw feedback persistence with a
+  dedicated `portal` source and submission kind, moderation-subject creation,
+  and Console portal-form editing plus live preview support.
+
 - **Public visibility policy and moderation foundation.**
   Added tenant-scoped public visibility policy storage, moderation subject
   state transitions, audit events, generated Console and public portal
@@ -160,6 +206,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   actions now also emit audit events.
 
 ### Fixed
+
+- **Public portal submissions now honor idempotency keys.**
+  The public submission path now deduplicates browser retries with the
+  standard `Idempotency-Key` contract, skips duplicate moderation-subject
+  creation on replay, and rejects malformed keys before persistence.
 
 - **External sync browser E2E findings are closed.**
   External connection qualification and resume actions now satisfy the database

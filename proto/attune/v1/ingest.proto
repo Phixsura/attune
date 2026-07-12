@@ -329,6 +329,8 @@ message ListFeedbackRequest {
   optional string enriched_from = 15;
   optional string enriched_to = 16;
   optional string quality_signal = 17;
+  optional string source = 18;
+  optional string type = 19;
 }
 
 message ListFeedbackResponse {

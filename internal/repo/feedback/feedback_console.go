@@ -38,6 +38,8 @@ type ConsoleListOpts struct {
 	Q                  string       // ILIKE on content + native/display titles
 	Cursor             int64        // last id seen; 0 = first page
 	Limit              int
+	Source             *string
+	Type               *string
 	TagID              *string // UUID string; nil = no filter
 	WorkflowStateID    *string // UUID string; nil = no filter
 	WorkflowCategory   *string // "open"/"active"/"closed"; nil = no filter
@@ -128,6 +130,12 @@ func (qb *queryBuilder) applyIdentityFilters(opts ConsoleListOpts) error {
 }
 
 func (qb *queryBuilder) applyStateFilters(opts ConsoleListOpts) {
+	if opts.Source != nil {
+		qb.and("source = " + qb.addArg(ptrext.Indirect(opts.Source)))
+	}
+	if opts.Type != nil {
+		qb.and("type = " + qb.addArg(ptrext.Indirect(opts.Type)))
+	}
 	if opts.Urgent != nil {
 		qb.and("is_urgent = " + qb.addArg(ptrext.Indirect(opts.Urgent)))
 	}

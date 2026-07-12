@@ -53,6 +53,24 @@ export enum PublicWriteMode {
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
+export enum PortalSubmissionKind {
+  PORTAL_SUBMISSION_KIND_UNSPECIFIED = "PORTAL_SUBMISSION_KIND_UNSPECIFIED",
+  PORTAL_SUBMISSION_KIND_REQUEST = "PORTAL_SUBMISSION_KIND_REQUEST",
+  PORTAL_SUBMISSION_KIND_BUG = "PORTAL_SUBMISSION_KIND_BUG",
+  PORTAL_SUBMISSION_KIND_GENERAL = "PORTAL_SUBMISSION_KIND_GENERAL",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum PortalSubmissionFieldKind {
+  PORTAL_SUBMISSION_FIELD_KIND_UNSPECIFIED = "PORTAL_SUBMISSION_FIELD_KIND_UNSPECIFIED",
+  PORTAL_SUBMISSION_FIELD_KIND_TEXT = "PORTAL_SUBMISSION_FIELD_KIND_TEXT",
+  PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA = "PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA",
+  PORTAL_SUBMISSION_FIELD_KIND_SELECT = "PORTAL_SUBMISSION_FIELD_KIND_SELECT",
+  PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT = "PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT",
+  PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN = "PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
 export interface PublicVisibilityPolicy {
   tenantId: string;
   portalAccessMode: PublicAccessMode;
@@ -74,6 +92,7 @@ export interface PublicVisibilityPolicy {
   updatedBy: string;
   createdAt: string;
   updatedAt: string;
+  portalSubmissionForm?: PortalSubmissionFormConfig | undefined;
 }
 
 export interface GetPublicVisibilityPolicyRequest {
@@ -96,6 +115,60 @@ export interface UpdatePublicVisibilityPolicyRequest {
   showCommentCount: boolean;
   showSubmitterDisplay: boolean;
   hidePublicTimestamps: boolean;
+  portalSubmissionForm?: PortalSubmissionFormConfig | undefined;
+}
+
+export interface PortalSubmissionField {
+  key: string;
+  label: string;
+  kind: PortalSubmissionFieldKind;
+  required: boolean;
+  options: string[];
+  placeholder: string;
+}
+
+export interface PortalSubmissionFormConfig {
+  headline: string;
+  description: string;
+  acknowledgement: string;
+  submitButtonLabel: string;
+  showPageUrl: boolean;
+  fields: PortalSubmissionField[];
+}
+
+export interface PortalSubmissionConfig {
+  tenantId: string;
+  tenantSlug: string;
+  tenantName: string;
+  portalAccessMode: PublicAccessMode;
+  submissionWriteMode: PublicWriteMode;
+  submitterIdentityMode: PublicIdentityMode;
+  form?: PortalSubmissionFormConfig | undefined;
+  canSubmit: boolean;
+}
+
+export interface GetPublicSubmissionConfigRequest {
+  tenantSlug: string;
+}
+
+export interface CreatePublicSubmissionRequest {
+  tenantSlug: string;
+  kind: PortalSubmissionKind;
+  title: string;
+  details: string;
+  pageUrl: string;
+  displayName: string;
+  organization: string;
+  customFields?: { [key: string]: any } | undefined;
+  idempotencyKey: string;
+  honeypot: string;
+}
+
+export interface CreatePublicSubmissionResponse {
+  submissionId: string;
+  kind: PortalSubmissionKind;
+  moderationState: ModerationState;
+  acknowledgement: string;
 }
 
 export interface ListModerationSubjectsRequest {
@@ -258,6 +331,8 @@ export interface PublicVisibilityService {
 }
 
 export interface PortalService {
+  GetPublicSubmissionConfig(request: GetPublicSubmissionConfigRequest): Promise<PortalSubmissionConfig>;
+  CreatePublicSubmission(request: CreatePublicSubmissionRequest): Promise<CreatePublicSubmissionResponse>;
   ListPublicCustomerRequests(request: ListPublicCustomerRequestsRequest): Promise<ListPublicCustomerRequestsResponse>;
   GetPublicCustomerRequest(request: GetPublicCustomerRequestRequest): Promise<PublicCustomerRequestDetail>;
   ListPublicRoadmap(request: ListPublicRoadmapRequest): Promise<ListPublicRoadmapResponse>;

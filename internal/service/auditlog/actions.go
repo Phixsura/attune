@@ -36,6 +36,7 @@ var validActions = map[string]struct{}{
 	"customer_request.record_issue_sync":       {},
 	"customer_request.update_scoring_settings": {},
 	"public_policy.update":                     {},
+	"portal_submission.create":                 {},
 	"public_request_profile.upsert":            {},
 	"moderation.approve":                       {},
 	"moderation.reject":                        {},

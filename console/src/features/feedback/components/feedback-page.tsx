@@ -7,6 +7,7 @@ import {
   ArrowRight,
   ChevronDown,
   Clock3,
+  ExternalLink,
   Inbox,
   Loader2,
   RotateCcw,
@@ -75,6 +76,7 @@ import {
   selectTerminalFailurePriority,
   type TerminalFailureWorkbenchSectionLike,
 } from '@/features/feedback/lib/terminal-failure-workbench'
+import { meQuery } from '@/features/session/api/get-me'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { FeedbackFilter } from '@/proto/attune/v1/batch'
@@ -121,7 +123,11 @@ interface FeedbackPageProps {
   renderWorkflowTransition?: (data: FeedbackDetail) => ReactNode
   renderAuditLog?: (data: FeedbackDetail) => ReactNode
   initialQueueMode?: FeedbackQueueMode
+  initialSourceFilter?: string
+  initialTypeFilter?: string
   showTerminalWorkbench?: boolean
+  titleKey?: string
+  subtitleKey?: string
   initialQualityFilters?: Pick<
     FeedbackListFilters,
     | 'ids'
@@ -142,22 +148,34 @@ export function FeedbackPage({
   renderWorkflowTransition,
   renderAuditLog,
   initialQueueMode = 'all',
+  initialSourceFilter = '',
+  initialTypeFilter = '',
   showTerminalWorkbench = false,
+  titleKey = 'nav.feedback',
+  subtitleKey = 'feedback.subtitle',
   initialQualityFilters,
 }: FeedbackPageProps) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const displayOf = useDisplayName()
   const { can } = usePermissions()
+  const me = useQuery(meQuery())
   const canViewLLMConfig = can('llm_config:view')
   const canViewRuntimeConfig = can('settings:enrichment_runtime:view')
+  const portalHref = me.data?.tenant?.slug
+    ? `/portal/${encodeURIComponent(me.data.tenant.slug)}`
+    : null
   const initialQualityFilterKey = qualityFilterSyncKey(initialQualityFilters)
   const syncedQualityFilterKeyRef = useRef(initialQualityFilterKey)
+  const initialScopeFilterKey = scopeFilterSyncKey(initialSourceFilter, initialTypeFilter)
+  const syncedScopeFilterKeyRef = useRef(initialScopeFilterKey)
 
   const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [tagFilter, setTagFilter] = useState<string>('')
   const [workflowFilter, setWorkflowFilter] = useState<string>('')
   const [enrichmentFilter, setEnrichmentFilter] = useState<string>('')
+  const [sourceFilter, setSourceFilter] = useState<string>(initialSourceFilter)
+  const [typeFilter, setTypeFilter] = useState<string>(initialTypeFilter)
   const [urgentOnly, setUrgentOnly] = useState(false)
   const [qInput, setQInput] = useState('')
   const [searchMode, setSearchMode] = useState<FeedbackSearchMode>('keyword')
@@ -179,6 +197,12 @@ export function FeedbackPage({
     syncedQualityFilterKeyRef.current = initialQualityFilterKey
     setQualityFilters(initialQualityFilters ?? {})
   }, [initialQualityFilterKey, initialQualityFilters])
+  useEffect(() => {
+    if (syncedScopeFilterKeyRef.current === initialScopeFilterKey) return
+    syncedScopeFilterKeyRef.current = initialScopeFilterKey
+    setSourceFilter(initialSourceFilter)
+    setTypeFilter(initialTypeFilter)
+  }, [initialScopeFilterKey, initialSourceFilter, initialTypeFilter])
   const terminalWorkbench = useQuery({
     ...terminalFailureWorkbenchQuery(),
     enabled: showTerminalWorkbench,
@@ -230,6 +254,8 @@ export function FeedbackPage({
     return {
       attrs,
       urgent: urgentOnly ? true : undefined,
+      source: sourceFilter || undefined,
+      type: typeFilter || undefined,
       tag: tagFilter || undefined,
       workflowState: workflowFilter || undefined,
       enrichmentStatus: effectiveEnrichmentStatus || undefined,
@@ -248,6 +274,8 @@ export function FeedbackPage({
     urgentOnly,
     workflowFilter,
     enrichmentFilter,
+    sourceFilter,
+    typeFilter,
     queueMode,
     qualityFilters,
   ])
@@ -338,6 +366,8 @@ export function FeedbackPage({
     (tagFilter ? 1 : 0) +
     (workflowFilter ? 1 : 0) +
     (enrichmentFilter ? 1 : 0) +
+    (sourceFilter !== initialSourceFilter ? 1 : 0) +
+    (typeFilter !== initialTypeFilter ? 1 : 0) +
     (qualityFilters.ids?.length ? 1 : 0) +
     (qualityFilters.confidenceLte != null ? 1 : 0) +
     (qualityFilters.createdFrom || qualityFilters.createdTo ? 1 : 0) +
@@ -347,6 +377,24 @@ export function FeedbackPage({
     (queueMode !== initialQueueMode ? 1 : 0) +
     (qInput.trim() ? 1 : 0)
   const hasActiveFilters = activeFilterCount > 0
+  const hasScopedFilters = Boolean(
+    Object.values(attrFilters).some((value) => value && value !== '__all') ||
+      tagFilter ||
+      workflowFilter ||
+      enrichmentFilter ||
+      sourceFilter ||
+      typeFilter ||
+      qualityFilters.ids?.length ||
+      qualityFilters.confidenceLte != null ||
+      qualityFilters.createdFrom ||
+      qualityFilters.createdTo ||
+      qualityFilters.enrichedFrom ||
+      qualityFilters.enrichedTo ||
+      qualityFilters.qualitySignal ||
+      urgentOnly ||
+      queueMode !== 'all' ||
+      qInput.trim(),
+  )
   const workflowLabel = workflowFilter
     ? (displayOf(stateList.find((state) => state.id === workflowFilter)?.displayName) ??
       stateList.find((state) => state.id === workflowFilter)?.name ??
@@ -372,6 +420,8 @@ export function FeedbackPage({
   const displayedPendingAiCount = displayedItems.filter(
     (item) => item.enrichmentStatus === 'pending' || item.enrichmentStatus === 'enriching',
   ).length
+  const isPortalInboxEmpty =
+    initialSourceFilter === 'portal' && activeFilterCount === 0 && items.length === 0
   const uniqueSources = new Set(displayedItems.map((item) => item.source).filter(Boolean)).size
   const oldestVisibleAt = displayedItems.reduce<string | null>((oldest, item) => {
     if (!oldest) return item.createdAt
@@ -511,6 +561,26 @@ export function FeedbackPage({
       })
     }
 
+    if (sourceFilter !== initialSourceFilter) {
+      chips.push({
+        key: 'source',
+        label: t('feedback.filter.source'),
+        value: feedbackSourceLabel(sourceFilter, t),
+        tone: 'active',
+        onRemove: () => setSourceFilter(initialSourceFilter),
+      })
+    }
+
+    if (typeFilter !== initialTypeFilter) {
+      chips.push({
+        key: 'type',
+        label: t('feedback.filter.type'),
+        value: feedbackTypeLabel(typeFilter, t),
+        tone: 'active',
+        onRemove: () => setTypeFilter(initialTypeFilter),
+      })
+    }
+
     if (qualityFilters.ids?.length) {
       chips.push({
         key: 'quality-ids',
@@ -602,7 +672,10 @@ export function FeedbackPage({
     handleQueryChange,
     handleSearchModeChange,
     initialQueueMode,
+    initialSourceFilter,
+    initialTypeFilter,
     qualityFilters,
+    sourceFilter,
     queueMode,
     qInput,
     searchMode,
@@ -610,6 +683,7 @@ export function FeedbackPage({
     tagFilter,
     tagList,
     t,
+    typeFilter,
     urgentOnly,
     workflowLabel,
   ])
@@ -712,6 +786,8 @@ export function FeedbackPage({
     setTagFilter('')
     setWorkflowFilter('')
     setEnrichmentFilter('')
+    setSourceFilter(initialSourceFilter)
+    setTypeFilter(initialTypeFilter)
     setQualityFilters({})
     setUrgentOnly(false)
     setQueueMode(initialQueueMode)
@@ -736,10 +812,10 @@ export function FeedbackPage({
             <div className="mt-2 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
               <div className="min-w-0">
                 <h1 className="text-[2rem] font-semibold tracking-tight text-foreground text-balance sm:text-[2.25rem]">
-                  {t('nav.feedback')}
+                  {t(titleKey)}
                 </h1>
                 <p className="mt-2.5 max-w-2xl text-[13.5px] leading-[1.6rem] text-muted-foreground text-pretty">
-                  {t('feedback.subtitle')}
+                  {t(subtitleKey)}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 lg:justify-end">
@@ -807,7 +883,7 @@ export function FeedbackPage({
               <div className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
                 {t('feedback.filter_title')}
               </div>
-              {!hasActiveFilters && selected.size === 0 ? (
+              {!hasScopedFilters && selected.size === 0 ? (
                 <div className="text-sm text-muted-foreground">
                   {t('feedback.summary.filters_idle')}
                 </div>
@@ -820,6 +896,8 @@ export function FeedbackPage({
                 tagFilter={tagFilter}
                 workflowFilter={workflowFilter}
                 enrichmentFilter={enrichmentFilter}
+                sourceFilter={sourceFilter}
+                typeFilter={typeFilter}
                 tags={tagList}
                 workflowStates={stateList}
                 urgentOnly={urgentOnly}
@@ -830,6 +908,8 @@ export function FeedbackPage({
                 onTagChange={setTagFilter}
                 onWorkflowChange={setWorkflowFilter}
                 onEnrichmentChange={setEnrichmentFilter}
+                onSourceChange={setSourceFilter}
+                onTypeChange={setTypeFilter}
                 onUrgentToggle={() => setUrgentOnly((value) => !value)}
                 onQ={handleQueryChange}
                 onSearchModeChange={handleSearchModeChange}
@@ -1098,7 +1178,9 @@ export function FeedbackPage({
               </div>
             ) : isSemanticResponseCurrent ? (
               <SemanticSearchEmptyState onSearch={handleSemanticSearch} onReset={clearFilters} />
-            ) : hasActiveFilters ? (
+            ) : isPortalInboxEmpty ? (
+              <FeedbackPortalEmptyWorkspace portalHref={portalHref} />
+            ) : hasScopedFilters ? (
               <FeedbackFilteredEmptyState onReset={clearFilters} />
             ) : (
               <FeedbackEmptyWorkspace
@@ -1188,12 +1270,18 @@ function qualityFilterSyncKey(filters: FeedbackPageProps['initialQualityFilters'
   ].join('\x1f')
 }
 
+function scopeFilterSyncKey(sourceFilter: string, typeFilter: string) {
+  return [sourceFilter, typeFilter].join('\x1f')
+}
+
 function FilterBar({
   dims,
   attrFilters,
   tagFilter,
   workflowFilter,
   enrichmentFilter,
+  sourceFilter,
+  typeFilter,
   tags,
   workflowStates,
   urgentOnly,
@@ -1204,6 +1292,8 @@ function FilterBar({
   onTagChange,
   onWorkflowChange,
   onEnrichmentChange,
+  onSourceChange,
+  onTypeChange,
   onUrgentToggle,
   onQ,
   onSearchModeChange,
@@ -1214,6 +1304,8 @@ function FilterBar({
   tagFilter: string
   workflowFilter: string
   enrichmentFilter: string
+  sourceFilter: string
+  typeFilter: string
   tags: Tag[]
   workflowStates: WorkflowState[]
   urgentOnly: boolean
@@ -1224,6 +1316,8 @@ function FilterBar({
   onTagChange: (tagId: string) => void
   onWorkflowChange: (stateId: string) => void
   onEnrichmentChange: (status: string) => void
+  onSourceChange: (source: string) => void
+  onTypeChange: (type: string) => void
   onUrgentToggle: () => void
   onQ: (v: string) => void
   onSearchModeChange: (mode: FeedbackSearchMode) => void
@@ -1304,7 +1398,45 @@ function FilterBar({
           label={t('feedback.filter.quick.urgent')}
         />
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
+        <Select
+          value={sourceFilter || '__all'}
+          onValueChange={(v) => onSourceChange(v === '__all' ? '' : v)}
+        >
+          <SelectTrigger
+            className="h-10 w-full bg-background"
+            aria-label={t('feedback.filter.source')}
+          >
+            <SelectValue placeholder={t('feedback.filter.all_sources')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t('feedback.filter.all_sources')}</SelectItem>
+            {feedbackSourceOptions(t).map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={typeFilter || '__all'}
+          onValueChange={(v) => onTypeChange(v === '__all' ? '' : v)}
+        >
+          <SelectTrigger
+            className="h-10 w-full bg-background"
+            aria-label={t('feedback.filter.type')}
+          >
+            <SelectValue placeholder={t('feedback.filter.all_types')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t('feedback.filter.all_types')}</SelectItem>
+            {feedbackTypeOptions(t).map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {dims
           .filter((d) => d.kind === 'single' && d.taxonomy.length > 0)
           .map((d) => (
@@ -1738,7 +1870,8 @@ function FeedbackTable({
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                  {f.source ? <StatusMetaChip value={f.source} /> : null}
+                  {f.source ? <StatusMetaChip value={feedbackSourceRowLabel(f.source, t)} /> : null}
+                  {f.type ? <StatusMetaChip value={feedbackTypeLabel(f.type, t)} /> : null}
                   <StatusMetaChip valueNode={<LanguageBadge language={f.language} />} />
                   {filledDims.length === 0 ? (
                     <StatusMetaChip value={t('feedback.row.unclassified_short')} />
@@ -3205,6 +3338,63 @@ function FeedbackEmptyWorkspace({ title, description }: { title: string; descrip
   )
 }
 
+function FeedbackPortalEmptyWorkspace({ portalHref }: { portalHref: string | null }) {
+  const { t } = useTranslation()
+  return (
+    <div className="grid gap-5 px-5 py-8 sm:px-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.9fr)] lg:py-10">
+      <div className="rounded-[1.1rem] border border-border/55 bg-[radial-gradient(circle_at_top_left,rgba(239,246,255,0.9),rgba(255,255,255,0.98)_52%)] p-5 shadow-[0_24px_80px_-64px_rgba(37,99,235,0.32)]">
+        <div className="flex items-start gap-4">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-primary/15 bg-background/85 text-primary shadow-[0_18px_38px_-30px_rgba(37,99,235,0.45)]">
+            <ExternalLink className="size-5" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-lg font-semibold tracking-tight text-foreground">
+              {t('feedback.portal.empty_title')}
+            </h3>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground text-pretty">
+              {t('feedback.portal.empty_body')}
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <ExternalActionLink
+            href={portalHref ?? '/integrations/public-visibility'}
+            title={t('feedback.portal.empty_open_portal_title')}
+            body={t('feedback.portal.empty_open_portal_body')}
+          />
+          <ActionLink
+            to="/integrations/public-visibility"
+            title={t('feedback.portal.empty_settings_title')}
+            body={t('feedback.portal.empty_settings_body')}
+          />
+        </div>
+      </div>
+      <div className="rounded-[1.1rem] border border-border/55 bg-background p-5">
+        <div className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+          {t('feedback.portal.empty_checklist_eyebrow')}
+        </div>
+        <div className="mt-3 space-y-3">
+          <ChecklistRow
+            index="01"
+            title={t('feedback.portal.empty_step_access_title')}
+            body={t('feedback.portal.empty_step_access_body')}
+          />
+          <ChecklistRow
+            index="02"
+            title={t('feedback.portal.empty_step_preview_title')}
+            body={t('feedback.portal.empty_step_preview_body')}
+          />
+          <ChecklistRow
+            index="03"
+            title={t('feedback.portal.empty_step_review_title')}
+            body={t('feedback.portal.empty_step_review_body')}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FeedbackFilteredEmptyState({ onReset }: { onReset: () => void }) {
   const { t } = useTranslation()
   return (
@@ -3326,7 +3516,7 @@ function ActionLink({
   title,
   body,
 }: {
-  to: '/integrations/api-keys' | '/configuration/classification'
+  to: '/integrations/api-keys' | '/configuration/classification' | '/integrations/public-visibility'
   title: string
   body: string
 }) {
@@ -3343,6 +3533,25 @@ function ActionLink({
         <ArrowRight className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
       </div>
     </Link>
+  )
+}
+
+function ExternalActionLink({ href, title, body }: { href: string; title: string; body: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="group rounded-xl border border-border/60 bg-background/92 p-4 transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-[0_22px_40px_-34px_rgba(194,65,12,0.38)]"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-foreground">{title}</div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground text-pretty">{body}</p>
+        </div>
+        <ArrowRight className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+      </div>
+    </a>
   )
 }
 
@@ -3485,6 +3694,46 @@ function enrichmentStatusLabel(status: string, t: (key: string) => string) {
   if (status === 'done') return t('feedback.status.done')
   if (status === 'failed') return t('feedback.status.failed')
   return status
+}
+
+function feedbackSourceLabel(
+  source: string,
+  t: (key: string, options?: { defaultValue?: string }) => string,
+) {
+  return t(`feedback.source.${source}`, { defaultValue: source })
+}
+
+function feedbackSourceRowLabel(
+  source: string,
+  t: (key: string, options?: { defaultValue?: string }) => string,
+) {
+  if (source === 'portal') {
+    return t('feedback.row.portal_submission', {
+      defaultValue: feedbackSourceLabel(source, t),
+    })
+  }
+  return feedbackSourceLabel(source, t)
+}
+
+function feedbackTypeLabel(
+  type: string,
+  t: (key: string, options?: { defaultValue?: string }) => string,
+) {
+  return t(`feedback.type.${type}`, { defaultValue: type })
+}
+
+function feedbackSourceOptions(t: (key: string) => string) {
+  return ['api', 'web', 'mcp', 'portal', 'other'].map((value) => ({
+    value,
+    label: feedbackSourceLabel(value, t),
+  }))
+}
+
+function feedbackTypeOptions(t: (key: string) => string) {
+  return ['request', 'bug', 'general'].map((value) => ({
+    value,
+    label: feedbackTypeLabel(value, t),
+  }))
 }
 
 function qualitySignalLabel(signal: string, t: (key: string) => string) {

@@ -22,8 +22,19 @@ import (
 )
 
 var (
-	publicSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,159}$`)
-	reasonCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,79}$`)
+	publicSlugPattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,159}$`)
+	reasonCodePattern       = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,79}$`)
+	portalFieldKeyPattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+	portalFieldReservedKeys = map[string]struct{}{
+		"title":           {},
+		"details":         {},
+		"page_url":        {},
+		"display_name":    {},
+		"organization":    {},
+		"kind":            {},
+		"honeypot":        {},
+		"idempotency_key": {},
+	}
 	reasonRequiredFor = map[ModerationAction]struct{}{
 		ActionReject:   {},
 		ActionHide:     {},
@@ -90,6 +101,7 @@ type UpdatePolicyInput struct {
 	DefaultRequestState   repo.ModerationState
 	DefaultCommentState   repo.ModerationState
 	SubmitterIdentityMode repo.IdentityMode
+	PortalSubmissionForm  repo.PortalSubmissionForm
 	ShowVoteCount         bool
 	ShowCommentCount      bool
 	ShowSubmitterDisplay  bool
@@ -383,6 +395,7 @@ func defaultPolicy(tenantID string) repo.Policy {
 		DefaultRequestState:   repo.ModerationStatePending,
 		DefaultCommentState:   repo.ModerationStatePending,
 		SubmitterIdentityMode: repo.IdentityModeAnonymous,
+		PortalSubmissionForm:  defaultPortalSubmissionForm(),
 		ShowVoteCount:         true,
 		ShowCommentCount:      true,
 	}
@@ -410,6 +423,7 @@ func normalizePolicyInput(in UpdatePolicyInput) (repo.Policy, error) {
 		DefaultRequestState:   in.DefaultRequestState,
 		DefaultCommentState:   in.DefaultCommentState,
 		SubmitterIdentityMode: in.SubmitterIdentityMode,
+		PortalSubmissionForm:  in.PortalSubmissionForm,
 		ShowVoteCount:         in.ShowVoteCount,
 		ShowCommentCount:      in.ShowCommentCount,
 		ShowSubmitterDisplay:  in.ShowSubmitterDisplay,
@@ -422,6 +436,11 @@ func normalizePolicyInput(in UpdatePolicyInput) (repo.Policy, error) {
 		!validIdentityMode(policy.SubmitterIdentityMode) {
 		return repo.Policy{}, ErrValidation
 	}
+	form, err := normalizePortalSubmissionForm(policy.PortalSubmissionForm)
+	if err != nil {
+		return repo.Policy{}, err
+	}
+	policy.PortalSubmissionForm = form
 	return policy, nil
 }
 
@@ -658,22 +677,25 @@ func (s *Service) recordModerationAuditTx(
 
 func policyAuditFields(policy repo.Policy) map[string]any {
 	return map[string]any{
-		"portal_access_mode":      policy.PortalAccessMode,
-		"search_indexing_enabled": policy.SearchIndexingEnabled,
-		"requests_enabled":        policy.RequestsEnabled,
-		"comments_enabled":        policy.CommentsEnabled,
-		"roadmap_enabled":         policy.RoadmapEnabled,
-		"changelog_enabled":       policy.ChangelogEnabled,
-		"submission_write_mode":   policy.SubmissionWriteMode,
-		"comment_write_mode":      policy.CommentWriteMode,
-		"vote_write_mode":         policy.VoteWriteMode,
-		"default_request_state":   policy.DefaultRequestState,
-		"default_comment_state":   policy.DefaultCommentState,
-		"submitter_identity_mode": policy.SubmitterIdentityMode,
-		"show_vote_count":         policy.ShowVoteCount,
-		"show_comment_count":      policy.ShowCommentCount,
-		"show_submitter_display":  policy.ShowSubmitterDisplay,
-		"hide_public_timestamps":  policy.HidePublicTimestamps,
+		"portal_access_mode":              policy.PortalAccessMode,
+		"search_indexing_enabled":         policy.SearchIndexingEnabled,
+		"requests_enabled":                policy.RequestsEnabled,
+		"comments_enabled":                policy.CommentsEnabled,
+		"roadmap_enabled":                 policy.RoadmapEnabled,
+		"changelog_enabled":               policy.ChangelogEnabled,
+		"submission_write_mode":           policy.SubmissionWriteMode,
+		"comment_write_mode":              policy.CommentWriteMode,
+		"vote_write_mode":                 policy.VoteWriteMode,
+		"default_request_state":           policy.DefaultRequestState,
+		"default_comment_state":           policy.DefaultCommentState,
+		"submitter_identity_mode":         policy.SubmitterIdentityMode,
+		"show_vote_count":                 policy.ShowVoteCount,
+		"show_comment_count":              policy.ShowCommentCount,
+		"show_submitter_display":          policy.ShowSubmitterDisplay,
+		"hide_public_timestamps":          policy.HidePublicTimestamps,
+		"portal_submission_headline":      policy.PortalSubmissionForm.Headline,
+		"portal_submission_field_count":   len(policy.PortalSubmissionForm.Fields),
+		"portal_submission_show_page_url": policy.PortalSubmissionForm.ShowPageURL,
 	}
 }
 
@@ -696,5 +718,112 @@ func requestProfileAuditFields(profile repo.RequestProfile) map[string]any {
 		"roadmap_column":        profile.RoadmapColumn,
 		"included_in_portal":    profile.IncludedInPortal,
 		"included_in_roadmap":   profile.IncludedInRoadmap,
+	}
+}
+
+func defaultPortalSubmissionForm() repo.PortalSubmissionForm {
+	return repo.PortalSubmissionForm{
+		Headline:          "Send feedback",
+		Description:       "Share bugs, ideas, or anything blocking your work.",
+		Acknowledgement:   "Thanks. We will review your submission.",
+		SubmitButtonLabel: "Submit feedback",
+		ShowPageURL:       true,
+	}
+}
+
+func normalizePortalSubmissionForm(form repo.PortalSubmissionForm) (repo.PortalSubmissionForm, error) {
+	form = normalizePortalSubmissionFormText(form)
+	if len(form.Fields) == 0 {
+		form.Fields = nil
+		return form, nil
+	}
+	if len(form.Fields) > 8 {
+		return repo.PortalSubmissionForm{}, ErrValidation
+	}
+	fields, err := normalizePortalSubmissionFormFields(form.Fields)
+	if err != nil {
+		return repo.PortalSubmissionForm{}, err
+	}
+	form.Fields = fields
+	return form, nil
+}
+
+func normalizePortalSubmissionFormText(form repo.PortalSubmissionForm) repo.PortalSubmissionForm {
+	form.Headline = bounded(strings.TrimSpace(form.Headline), 120)
+	form.Description = bounded(strings.TrimSpace(form.Description), 1000)
+	form.Acknowledgement = bounded(strings.TrimSpace(form.Acknowledgement), 500)
+	form.SubmitButtonLabel = bounded(strings.TrimSpace(form.SubmitButtonLabel), 80)
+	return form
+}
+
+func normalizePortalSubmissionFormFields(fields []repo.PortalSubmissionField) ([]repo.PortalSubmissionField, error) {
+	seen := make(map[string]struct{}, len(fields))
+	out := make([]repo.PortalSubmissionField, 0, len(fields))
+	for i := range fields {
+		field, err := normalizePortalSubmissionFormField(fields[i], seen)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, field)
+	}
+	return out, nil
+}
+
+func normalizePortalSubmissionFormField(field repo.PortalSubmissionField, seen map[string]struct{}) (repo.PortalSubmissionField, error) {
+	field.Key = strings.ToLower(strings.TrimSpace(field.Key))
+	field.Label = bounded(strings.TrimSpace(field.Label), 120)
+	field.Placeholder = bounded(strings.TrimSpace(field.Placeholder), 160)
+	if field.Key == "" || !portalFieldKeyPattern.MatchString(field.Key) || field.Label == "" {
+		return repo.PortalSubmissionField{}, ErrValidation
+	}
+	if _, reserved := portalFieldReservedKeys[field.Key]; reserved {
+		return repo.PortalSubmissionField{}, ErrValidation
+	}
+	if _, dup := seen[field.Key]; dup {
+		return repo.PortalSubmissionField{}, ErrValidation
+	}
+	seen[field.Key] = struct{}{}
+	if !portalSubmissionFieldKindValid(field.Kind) {
+		return repo.PortalSubmissionField{}, ErrValidation
+	}
+	if err := normalizePortalSubmissionFormFieldOptions(ptrext.Of(field)); err != nil {
+		return repo.PortalSubmissionField{}, err
+	}
+	return field, nil
+}
+
+func normalizePortalSubmissionFormFieldOptions(field *repo.PortalSubmissionField) error {
+	if field.Kind == repo.PortalSubmissionFieldKindBoolean {
+		field.Options = nil
+		return nil
+	}
+	if field.Kind != repo.PortalSubmissionFieldKindSelect && field.Kind != repo.PortalSubmissionFieldKindMultiSelect {
+		if len(field.Options) > 0 {
+			return ErrValidation
+		}
+		return nil
+	}
+	if len(field.Options) == 0 || len(field.Options) > 12 {
+		return ErrValidation
+	}
+	for i := range field.Options {
+		field.Options[i] = bounded(strings.TrimSpace(field.Options[i]), 80)
+		if field.Options[i] == "" {
+			return ErrValidation
+		}
+	}
+	return nil
+}
+
+func portalSubmissionFieldKindValid(kind repo.PortalSubmissionFieldKind) bool {
+	switch kind {
+	case repo.PortalSubmissionFieldKindText,
+		repo.PortalSubmissionFieldKindTextarea,
+		repo.PortalSubmissionFieldKindSelect,
+		repo.PortalSubmissionFieldKindMultiSelect,
+		repo.PortalSubmissionFieldKindBoolean:
+		return true
+	default:
+		return false
 	}
 }

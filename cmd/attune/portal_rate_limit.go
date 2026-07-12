@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/go-chi/chi/v5"
 	"golang.org/x/time/rate"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
@@ -22,17 +24,41 @@ type portalAnonymousLimiter struct {
 	burst      int
 	disabled   bool
 	trustedHop int
+	keyFunc    func(*http.Request) string
 
 	mu      sync.RWMutex
 	clients map[string]*rate.Limiter
 }
 
 func newPortalAnonymousLimiter(perMinute, burst int, disabled bool, trustedHop int) *portalAnonymousLimiter {
+	return newPortalLimiter(perMinute, burst, disabled, trustedHop, func(r *http.Request) string {
+		return nethardening.ClientIP(r, trustedHop)
+	})
+}
+
+func newPortalSubmissionLimiter(perMinute, burst int, disabled bool, trustedHop int) *portalAnonymousLimiter {
+	return newPortalLimiter(perMinute, burst, disabled, trustedHop, func(r *http.Request) string {
+		tenantSlug := strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+		clientIP := nethardening.ClientIP(r, trustedHop)
+		if tenantSlug == "" {
+			return clientIP
+		}
+		return tenantSlug + "|" + clientIP
+	})
+}
+
+func newPortalLimiter(
+	perMinute, burst int,
+	disabled bool,
+	trustedHop int,
+	keyFunc func(*http.Request) string,
+) *portalAnonymousLimiter {
 	return ptrext.Of(portalAnonymousLimiter{
 		perMinute:  perMinute,
 		burst:      burst,
 		disabled:   disabled,
 		trustedHop: trustedHop,
+		keyFunc:    keyFunc,
 		clients:    make(map[string]*rate.Limiter),
 	})
 }
@@ -43,7 +69,7 @@ func (l *portalAnonymousLimiter) Middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		key := nethardening.ClientIP(r, l.trustedHop)
+		key := l.key(r)
 		limiter := l.limiterFor(key)
 		if limiter.Allow() {
 			next.ServeHTTP(w, r)
@@ -55,6 +81,16 @@ func (l *portalAnonymousLimiter) Middleware(next http.Handler) http.Handler {
 		dispatcher.Reject(r.Context(), w, http.StatusTooManyRequests,
 			attunev1.ErrorCode_RATE_LIMITED, fmt.Sprintf("request too frequent, retry in %d seconds", retryAfter))
 	})
+}
+
+func (l *portalAnonymousLimiter) key(r *http.Request) string {
+	if l == nil {
+		return ""
+	}
+	if l.keyFunc != nil {
+		return l.keyFunc(r)
+	}
+	return nethardening.ClientIP(r, l.trustedHop)
 }
 
 func (l *portalAnonymousLimiter) limiterFor(key string) *rate.Limiter {

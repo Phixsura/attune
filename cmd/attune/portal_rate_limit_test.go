@@ -3,10 +3,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Phixsura/attune/internal/handlers/portal"
 )
@@ -92,6 +95,30 @@ func TestPortalNoStoreWrapsRateLimitRejections(t *testing.T) {
 	}
 }
 
+func TestPortalSubmissionLimiter_LimitsPerTenantAndIP(t *testing.T) {
+	t.Parallel()
+
+	limiter := newPortalSubmissionLimiter(60, 1, false, 0)
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	first := portalSubmissionLimiterRequest(limiter, next, "203.0.113.10:1234", "acme")
+	if first.Code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d", first.Code, http.StatusOK)
+	}
+
+	sameTenant := portalSubmissionLimiterRequest(limiter, next, "203.0.113.10:5678", "acme")
+	if sameTenant.Code != http.StatusTooManyRequests {
+		t.Fatalf("same tenant status = %d, want %d", sameTenant.Code, http.StatusTooManyRequests)
+	}
+
+	otherTenant := portalSubmissionLimiterRequest(limiter, next, "203.0.113.10:1234", "globex")
+	if otherTenant.Code != http.StatusOK {
+		t.Fatalf("other tenant status = %d, want %d", otherTenant.Code, http.StatusOK)
+	}
+}
+
 func portalLimiterRequest(
 	limiter *portalAnonymousLimiter,
 	next http.Handler,
@@ -109,5 +136,21 @@ func portalNoStoreLimiterRequest(handler http.Handler, remoteAddr string) *httpt
 	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/requests/pricing", nil)
 	req.RemoteAddr = remoteAddr
 	handler.ServeHTTP(w, req)
+	return w
+}
+
+func portalSubmissionLimiterRequest(
+	limiter *portalAnonymousLimiter,
+	next http.Handler,
+	remoteAddr string,
+	tenantSlug string,
+) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/portal/"+tenantSlug+"/submissions", nil)
+	req.RemoteAddr = remoteAddr
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("tenant_slug", tenantSlug)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	limiter.Middleware(next).ServeHTTP(w, req)
 	return w
 }

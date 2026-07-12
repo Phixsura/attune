@@ -18,6 +18,7 @@ const zh = {
   feedback: '\u53cd\u9988',
   feedbackRetryFailed: '\u91cd\u8bd5\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5',
   feedbackRetryQueued: '\u5df2\u52a0\u5165\u91cd\u8bd5\u961f\u5217',
+  portalInbox: '\u95e8\u6237\u6536\u4ef6\u7bb1',
   gdpr: '\u0047\u0044\u0050\u0052\u0020\u6570\u636e\u8bf7\u6c42',
   gdprSubjectRequired:
     '\u8bf7\u8f93\u5165\u0020\u0073\u0075\u0062\u006a\u0065\u0063\u0074\u0020\u006b\u0065\u0079',
@@ -119,7 +120,11 @@ const serverErrorResourceConsole =
 
 const routes = [
   { path: '/feedback', title: zh.feedback, heading: zh.feedback },
-  { path: '/feedback/terminal-failures', title: zh.terminalFailures, heading: zh.feedback },
+  {
+    path: '/feedback/terminal-failures',
+    title: zh.terminalFailures,
+    heading: zh.terminalFailures,
+  },
   { path: '/integrations/api-keys', title: zh.apiKeys, heading: zh.apiKeys },
   { path: '/integrations/external-sync', title: zh.externalSync, heading: zh.externalSync },
   {
@@ -391,6 +396,59 @@ test.describe('Console accessibility browser gate', () => {
     const feedbackOpeners = page.getByRole('button', { name: /#feedback-101/ })
     expect(await feedbackOpeners.count()).toBeGreaterThan(0)
     await cycleSheet(page, feedbackOpeners.nth(0), sheetCycles)
+
+    expect(apiMocks.unhandledRequests).toEqual([])
+    await expectNoConsoleDiagnostics(diagnostics)
+  })
+
+  test('portal inbox renders escaped HTML-like submission text in the detail sheet', async ({
+    page,
+  }) => {
+    const diagnostics = collectConsoleDiagnostics(page)
+    const apiMocks = await installConsoleApiMocks(page)
+
+    await page.setViewportSize({ width: 1365, height: 768 })
+    await gotoConsoleRoute(page, '/feedback/portal')
+
+    await expect(page.getByRole('heading', { level: 1, name: zh.portalInbox })).toBeVisible()
+    await expect(page.getByText('门户提交')).toBeVisible()
+
+    await page
+      .getByRole('button', { name: /#feedback-301/ })
+      .first()
+      .click()
+
+    const portalHeading = page.getByRole('heading', { name: '门户投稿' })
+    await expect(portalHeading).toBeVisible()
+    const portalSection = portalHeading.locator('xpath=ancestor::section[1]')
+    await expect(portalSection).toBeVisible()
+
+    const portalHTML = await portalSection.evaluate((element) => element.innerHTML)
+    expect(portalHTML).toContain('&lt;img src=x onerror="window.__portalXssTitle=1"&gt;')
+    expect(portalHTML).toContain('&lt;svg onload="window.__portalXssDetails=1"&gt;&lt;/svg&gt;')
+    expect(portalHTML).toContain('&lt;b&gt;Ada&lt;/b&gt;')
+    expect(portalHTML).toContain('&lt;em&gt;xss&lt;/em&gt;')
+    expect(portalHTML).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+    expect(portalHTML).toContain('PortalTest/1.0')
+
+    await expect(portalSection.getByText('<b>Ada</b>')).toBeVisible()
+    await expect(portalSection.getByText('<em>xss</em>')).toBeVisible()
+    await expect(portalSection.getByText(/<script>alert\(1\)<\/script>/)).toBeVisible()
+    await expect(portalSection.locator('img')).toHaveCount(0)
+    const readPortalXssMarker = (marker: 'title' | 'details') =>
+      page.evaluate((key) => {
+        const portalWindow = window as Window & {
+          __portalXssDetails?: unknown
+          __portalXssTitle?: unknown
+        }
+        if (key === 'title') return portalWindow.__portalXssTitle ?? null
+        return portalWindow.__portalXssDetails ?? null
+      }, marker)
+
+    await expect.poll(() => readPortalXssMarker('title')).toBeNull()
+    await expect.poll(() => readPortalXssMarker('details')).toBeNull()
+    await expectNoDocumentOverflow(page)
+    await expectNoAxeViolations(page)
 
     expect(apiMocks.unhandledRequests).toEqual([])
     await expectNoConsoleDiagnostics(diagnostics)

@@ -43,6 +43,23 @@ describe('console IA', () => {
     expect(canAccessConsoleItem('viewer', item)).toBe(true)
   })
 
+  it('exposes the portal inbox as a visible feedback destination', () => {
+    const item = consoleNavItems.find((candidate) => candidate.path === '/feedback/portal')
+
+    expect(item).toBeDefined()
+    if (!item) {
+      throw new Error('portal inbox nav item missing')
+    }
+    expect(item).toMatchObject({
+      group: 'feedback',
+      labelKey: 'nav.portal_inbox',
+      path: '/feedback/portal',
+    })
+    expect(canAccessConsoleItem('admin', item)).toBe(true)
+    expect(canAccessConsoleItem('member', item)).toBe(true)
+    expect(canAccessConsoleItem('viewer', item)).toBe(true)
+  })
+
   it('exposes customer requests to every feedback viewer', () => {
     const item = consoleNavItems.find(
       (candidate) => candidate.path === '/feedback/customer-requests',

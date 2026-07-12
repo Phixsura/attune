@@ -143,6 +143,9 @@ func TestScanHelpers(t *testing.T) {
 	if policy.TenantID != "tenant-a" || policy.PortalAccessMode != AccessModePublic {
 		t.Fatalf("scanPolicy() = %#v, want policy", policy)
 	}
+	if policy.PortalSubmissionForm.Headline != "Share feedback" || len(policy.PortalSubmissionForm.Fields) != 1 {
+		t.Fatalf("scanPolicy() portal form = %#v, want normalized portal form", policy.PortalSubmissionForm)
+	}
 
 	subjectID := uuid.New()
 	subject, err := scanSubject(fakeRow{values: subjectValues(subjectID, now)})
@@ -299,8 +302,28 @@ func policyValues(now time.Time) []any {
 		"tenant-a", AccessModePublic, true, true, true, true, false,
 		WriteModeIdentified, WriteModeDisabled, WriteModeAnonymous,
 		ModerationStateApproved, ModerationStatePending, IdentityModeDisplayName,
-		true, false, true, false, "admin-1", now, now.Add(time.Minute),
+		true, false, true, false, portalSubmissionFormJSON(), "admin-1", now, now.Add(time.Minute),
 	}
+}
+
+func portalSubmissionFormJSON() []byte {
+	return []byte(`{
+		"headline":"Share feedback",
+		"description":"Tell us what is broken, missing, or worth improving.",
+		"acknowledgement":"Thanks. We will review your submission.",
+		"submit_button_label":"Submit feedback",
+		"show_page_url":true,
+		"fields":[
+			{
+				"key":"severity",
+				"label":"Severity",
+				"kind":"select",
+				"required":true,
+				"options":["low","medium","high"],
+				"placeholder":"Choose a severity"
+			}
+		]
+	}`)
 }
 
 func subjectValues(id uuid.UUID, now time.Time) []any {
