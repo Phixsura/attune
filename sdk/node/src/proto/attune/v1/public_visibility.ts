@@ -271,6 +271,22 @@ export interface GetPublicCustomerRequestRequest {
   publicSlug: string;
 }
 
+export interface VotePublicCustomerRequest {
+  tenantSlug: string;
+  publicSlug: string;
+}
+
+export interface UnvotePublicCustomerRequest {
+  tenantSlug: string;
+  publicSlug: string;
+}
+
+export interface CreatePublicCustomerCommentRequest {
+  tenantSlug: string;
+  publicSlug: string;
+  body: string;
+}
+
 export interface ListPublicCustomerRequestsRequest {
   tenantSlug: string;
   limit: number;
@@ -310,11 +326,22 @@ export interface PublicCustomerRequestSummary {
   submittedByDisplay?: string | undefined;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
+  viewerHasVoted?: boolean | undefined;
 }
 
 export interface PublicCustomerRequestDetail {
   request?: PublicCustomerRequestSummary | undefined;
   links: string[];
+  comments: PublicCustomerRequestComment[];
+  canComment?: boolean | undefined;
+}
+
+export interface PublicCustomerRequestComment {
+  id: string;
+  body: string;
+  state: ModerationState;
+  submittedByDisplay?: string | undefined;
+  createdAt?: string | undefined;
 }
 
 export interface PublicVisibilityService {
@@ -336,4 +363,7 @@ export interface PortalService {
   ListPublicCustomerRequests(request: ListPublicCustomerRequestsRequest): Promise<ListPublicCustomerRequestsResponse>;
   GetPublicCustomerRequest(request: GetPublicCustomerRequestRequest): Promise<PublicCustomerRequestDetail>;
   ListPublicRoadmap(request: ListPublicRoadmapRequest): Promise<ListPublicRoadmapResponse>;
+  VotePublicCustomer(request: VotePublicCustomerRequest): Promise<PublicCustomerRequestDetail>;
+  UnvotePublicCustomer(request: UnvotePublicCustomerRequest): Promise<PublicCustomerRequestDetail>;
+  CreatePublicCustomerComment(request: CreatePublicCustomerCommentRequest): Promise<PublicCustomerRequestDetail>;
 }

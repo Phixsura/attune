@@ -21,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
@@ -30,14 +31,18 @@ const publicRequestCacheControl = "no-store"
 var createPublicSubmissionUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 type readService interface {
-	ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string) (pvsvc.PublicRequestList, error)
-	GetPublicRequest(ctx context.Context, tenantSlug string, publicSlug string) (pvsvc.PublicRequest, error)
-	ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string) (pvsvc.PublicRequestList, error)
+	ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (pvsvc.PublicRequestList, error)
+	GetPublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string) (pvsvc.PublicRequest, error)
+	ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (pvsvc.PublicRequestList, error)
+	VotePublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, actor auditlogsvc.Actor) (pvsvc.PublicRequest, error)
+	UnvotePublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, actor auditlogsvc.Actor) (pvsvc.PublicRequest, error)
+	CreatePublicRequestComment(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, body string, actor auditlogsvc.Actor) (pvsvc.PublicRequest, error)
 }
 
 type Handler struct {
 	read       readService
 	submission submissionService
+	secrets    visitorSecretStore
 }
 
 type submissionService interface {
@@ -45,8 +50,8 @@ type submissionService interface {
 	Submit(ctx context.Context, in portalsvc.SubmitInput) (portalsvc.SubmitResult, error)
 }
 
-func NewHandler(read readService, submission submissionService) *Handler {
-	return ptrext.Of(Handler{read: read, submission: submission})
+func NewHandler(read readService, submission submissionService, secrets visitorSecretStore) *Handler {
+	return ptrext.Of(Handler{read: read, submission: submission, secrets: secrets})
 }
 
 func NoStore(next http.Handler) http.Handler {
@@ -64,7 +69,11 @@ func (h *Handler) ListPublicCustomerRequests(
 	if h.read == nil {
 		return dispatcher.Fail[*attunev1.ListPublicCustomerRequestsResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
 	}
-	result, err := h.read.ListPublicRequests(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor())
+	visitorID, err := ensurePortalVisitor(ctx.Request(), ctx.SetCookie, h.secrets, req.GetTenantSlug(), false)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.ListPublicCustomerRequestsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
+	}
+	result, err := h.read.ListPublicRequests(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor(), visitorID)
 	if err != nil {
 		return portalError[*attunev1.ListPublicCustomerRequestsResponse](err)
 	}
@@ -82,7 +91,11 @@ func (h *Handler) GetPublicCustomerRequest(
 	if h.read == nil {
 		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
 	}
-	result, err := h.read.GetPublicRequest(ctx, req.GetTenantSlug(), req.GetPublicSlug())
+	visitorID, err := ensurePortalVisitor(ctx.Request(), ctx.SetCookie, h.secrets, req.GetTenantSlug(), false)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
+	}
+	result, err := h.read.GetPublicRequest(ctx, req.GetTenantSlug(), req.GetPublicSlug(), visitorID)
 	if err != nil {
 		return portalError[*attunev1.PublicCustomerRequestDetail](err)
 	}
@@ -100,7 +113,11 @@ func (h *Handler) ListPublicRoadmap(
 	if h.read == nil {
 		return dispatcher.Fail[*attunev1.ListPublicRoadmapResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
 	}
-	result, err := h.read.ListPublicRoadmap(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor())
+	visitorID, err := ensurePortalVisitor(ctx.Request(), ctx.SetCookie, h.secrets, req.GetTenantSlug(), false)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.ListPublicRoadmapResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
+	}
+	result, err := h.read.ListPublicRoadmap(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor(), visitorID)
 	if err != nil {
 		return portalError[*attunev1.ListPublicRoadmapResponse](err)
 	}
@@ -154,14 +171,103 @@ func (h *Handler) CreatePublicSubmission(
 	return dispatcher.OK(portalSubmissionResultToProto(result))
 }
 
+func (h *Handler) VotePublicCustomerRequest(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.VotePublicCustomerRequest,
+) (dispatcher.Result[*attunev1.PublicCustomerRequestDetail], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.read == nil {
+		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
+	}
+	visitorID, err := ensurePortalVisitor(ctx.Request(), ctx.SetCookie, h.secrets, req.GetTenantSlug(), true)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
+	}
+	result, err := h.read.VotePublicRequest(ctx, req.GetTenantSlug(), req.GetPublicSlug(), visitorID, portalVisitorActor(ctx.Request(), visitorID))
+	if err != nil {
+		return portalVoteError[*attunev1.PublicCustomerRequestDetail](err)
+	}
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	return dispatcher.OK(publicRequestToProto(result))
+}
+
+func (h *Handler) UnvotePublicCustomerRequest(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.UnvotePublicCustomerRequest,
+) (dispatcher.Result[*attunev1.PublicCustomerRequestDetail], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.read == nil {
+		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
+	}
+	visitorID, err := ensurePortalVisitor(ctx.Request(), ctx.SetCookie, h.secrets, req.GetTenantSlug(), true)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
+	}
+	result, err := h.read.UnvotePublicRequest(ctx, req.GetTenantSlug(), req.GetPublicSlug(), visitorID, portalVisitorActor(ctx.Request(), visitorID))
+	if err != nil {
+		return portalVoteError[*attunev1.PublicCustomerRequestDetail](err)
+	}
+	return dispatcher.OK(publicRequestToProto(result))
+}
+
+func (h *Handler) CreatePublicCustomerComment(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.CreatePublicCustomerCommentRequest,
+) (dispatcher.Result[*attunev1.PublicCustomerRequestDetail], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.read == nil {
+		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "portal not configured")
+	}
+	visitorID, err := ensurePortalVisitor(ctx.Request(), ctx.SetCookie, h.secrets, req.GetTenantSlug(), true)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.PublicCustomerRequestDetail](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
+	}
+	result, err := h.read.CreatePublicRequestComment(ctx, req.GetTenantSlug(), req.GetPublicSlug(), visitorID, req.GetBody(), portalVisitorActor(ctx.Request(), visitorID))
+	if err != nil {
+		return portalCommentError[*attunev1.PublicCustomerRequestDetail](err)
+	}
+	return dispatcher.OK(publicRequestToProto(result))
+}
+
 func portalError[Resp proto.Message](err error) (dispatcher.Result[Resp], error) {
 	switch {
 	case errors.Is(err, pvsvc.ErrNotFound), errors.Is(err, pvrepo.ErrNotFound):
 		return dispatcher.Fail[Resp](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "public request not found")
 	case errors.Is(err, pvsvc.ErrValidation):
 		return dispatcher.Fail[Resp](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid public request")
+	case errors.Is(err, pvsvc.ErrDisabled):
+		return dispatcher.Fail[Resp](http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "public requests are disabled")
 	default:
 		return dispatcher.Fail[Resp](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "public request failed")
+	}
+}
+
+func portalVoteError[Resp proto.Message](err error) (dispatcher.Result[Resp], error) {
+	switch {
+	case errors.Is(err, pvsvc.ErrNotFound), errors.Is(err, pvrepo.ErrNotFound):
+		return dispatcher.Fail[Resp](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "public request not found")
+	case errors.Is(err, pvsvc.ErrValidation):
+		return dispatcher.Fail[Resp](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid public request vote")
+	case errors.Is(err, pvsvc.ErrDisabled):
+		return dispatcher.Fail[Resp](http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "public votes are disabled")
+	default:
+		return dispatcher.Fail[Resp](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "public request vote failed")
+	}
+}
+
+func portalCommentError[Resp proto.Message](err error) (dispatcher.Result[Resp], error) {
+	switch {
+	case errors.Is(err, pvsvc.ErrNotFound), errors.Is(err, pvrepo.ErrNotFound):
+		return dispatcher.Fail[Resp](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "public request not found")
+	case errors.Is(err, pvsvc.ErrValidation):
+		return dispatcher.Fail[Resp](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid public request comment")
+	case errors.Is(err, pvsvc.ErrDisabled):
+		return dispatcher.Fail[Resp](http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "public comments are disabled")
+	default:
+		return dispatcher.Fail[Resp](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "public request comment failed")
 	}
 }
 
@@ -181,10 +287,20 @@ func portalSubmissionError[Resp proto.Message](err error) (dispatcher.Result[Res
 }
 
 func publicRequestToProto(result pvsvc.PublicRequest) *attunev1.PublicCustomerRequestDetail {
-	return ptrext.Of(attunev1.PublicCustomerRequestDetail{
-		Request: publicRequestSummaryToProto(result),
-		Links:   []string{},
+	out := ptrext.Of(attunev1.PublicCustomerRequestDetail{
+		Request:  publicRequestSummaryToProto(result),
+		Links:    []string{},
+		Comments: make([]*attunev1.PublicCustomerRequestComment, 0, len(result.CommentItems)),
 	})
+	if result.Policy.CommentsEnabled {
+		for _, comment := range result.CommentItems {
+			out.Comments = append(out.Comments, publicRequestCommentToProto(result.Policy, comment))
+		}
+	}
+	if result.CanComment {
+		out.CanComment = ptrext.Of(true)
+	}
+	return out
 }
 
 func publicRequestListToProto(result pvsvc.PublicRequestList) *attunev1.ListPublicCustomerRequestsResponse {
@@ -379,6 +495,36 @@ func userAgentFromRequest(r *http.Request) string {
 	return strings.TrimSpace(r.UserAgent())
 }
 
+func portalVisitorActor(r *http.Request, visitorID string) auditlogsvc.Actor {
+	return auditlogsvc.Actor{
+		Type:      "portal",
+		ID:        strings.TrimSpace(visitorID),
+		UserAgent: userAgentFromRequest(r),
+	}
+}
+
+func publicSubmitterDisplay(policy pvrepo.Policy, display string) string {
+	if !policy.ShowSubmitterDisplay || policy.SubmitterIdentityMode == pvrepo.IdentityModeAnonymous {
+		return ""
+	}
+	return display
+}
+
+func publicRequestCommentToProto(policy pvrepo.Policy, comment pvrepo.PublicRequestComment) *attunev1.PublicCustomerRequestComment {
+	out := ptrext.Of(attunev1.PublicCustomerRequestComment{
+		Id:    comment.ID.String(),
+		Body:  comment.Body,
+		State: moderationStateToProto(comment.State),
+	})
+	if display := publicSubmitterDisplay(policy, comment.SubmittedByDisplay); display != "" {
+		out.SubmittedByDisplay = ptrext.Of(display)
+	}
+	if !policy.HidePublicTimestamps {
+		out.CreatedAt = optionalTime(comment.CreatedAt)
+	}
+	return out
+}
+
 func publicRequestSummaryToProto(result pvsvc.PublicRequest) *attunev1.PublicCustomerRequestSummary {
 	summary := ptrext.Of(attunev1.PublicCustomerRequestSummary{
 		Id:            result.Summary.ID.String(),
@@ -391,12 +537,13 @@ func publicRequestSummaryToProto(result pvsvc.PublicRequest) *attunev1.PublicCus
 	if result.Policy.ShowVoteCount {
 		summary.VoteCount = ptrext.Of(uint32(nonNegative(result.Votes)))
 	}
-	if result.Policy.ShowCommentCount {
+	if result.Policy.CommentsEnabled && result.Policy.ShowCommentCount {
 		summary.CommentCount = ptrext.Of(uint32(nonNegative(result.Comments)))
 	}
 	if result.Policy.ShowSubmitterDisplay && result.SubmitterDisplay != "" {
 		summary.SubmittedByDisplay = ptrext.Of(result.SubmitterDisplay)
 	}
+	summary.ViewerHasVoted = ptrext.Of(result.ViewerHasVoted)
 	if !result.Policy.HidePublicTimestamps {
 		summary.CreatedAt = optionalTime(result.Summary.CreatedAt)
 		summary.UpdatedAt = optionalTime(result.Summary.UpdatedAt)

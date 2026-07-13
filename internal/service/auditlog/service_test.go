@@ -114,6 +114,29 @@ func TestRecordAcceptsRetryEnrichment(t *testing.T) {
 	}
 }
 
+// TestRecordAcceptsCustomerRequestAddComment guards the public comment audit
+// action emitted by the portal comment write path.
+func TestRecordAcceptsCustomerRequestAddComment(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(stubRepo{})
+	svc := New(repo)
+
+	err := svc.Record(context.Background(), Event{
+		TenantID:   "tenant-1",
+		Actor:      Actor{Type: "portal", ID: "visitor-1"},
+		Action:     "customer_request.add_comment",
+		TargetType: "customer_request",
+		TargetID:   "request-1",
+	})
+	if err != nil {
+		t.Fatalf("Record(customer_request.add_comment) err = %v, want nil (action must be registered)", err)
+	}
+	if !repo.insertCalled {
+		t.Fatal("Record did not persist customer_request.add_comment")
+	}
+}
+
 // TestRecordTxAcceptsOutboxRetry covers the transactional audit path used by
 // the dead-queue retry (#33): it validates the action and persists via InsertTx.
 func TestRecordTxAcceptsOutboxRetry(t *testing.T) {

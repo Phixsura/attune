@@ -19,9 +19,11 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
@@ -82,6 +84,7 @@ func TestPublicRequestToProtoIncludesPolicyAllowedFields(t *testing.T) {
 		},
 		Policy: pvrepo.Policy{
 			ShowVoteCount:        true,
+			CommentsEnabled:      true,
 			ShowCommentCount:     true,
 			ShowSubmitterDisplay: true,
 		},
@@ -96,6 +99,52 @@ func TestPublicRequestToProtoIncludesPolicyAllowedFields(t *testing.T) {
 	}
 	if request.GetSubmittedByDisplay() != "Acme" || request.GetCreatedAt() == "" || request.GetUpdatedAt() == "" {
 		t.Fatalf("allowed fields missing from public request: %#v", request)
+	}
+}
+
+func TestPublicRequestToProtoIncludesCommentsAndCanComment(t *testing.T) {
+	t.Parallel()
+
+	result := pvsvc.PublicRequest{
+		Summary: pvrepo.RequestProfile{
+			ID:            uuid.New(),
+			PublicSlug:    "mobile-app",
+			PublicTitle:   "Mobile App",
+			PublicSummary: "Public summary",
+			PublicState:   "planned",
+			RoadmapColumn: "done",
+		},
+		Policy: pvrepo.Policy{
+			ShowVoteCount:        true,
+			CommentsEnabled:      true,
+			ShowCommentCount:     true,
+			ShowSubmitterDisplay: true,
+		},
+		Comments:   1,
+		CanComment: true,
+		CommentItems: []pvrepo.PublicRequestComment{{
+			ID:                 uuid.New(),
+			Body:               "Visible comment",
+			SubmittedByDisplay: "Portal visitor",
+			State:              pvrepo.ModerationStateApproved,
+			CreatedAt:          time.Date(2026, 7, 10, 14, 0, 0, 0, time.UTC),
+		}},
+	}
+
+	body, err := protojson.Marshal(publicRequestToProto(result))
+	if err != nil {
+		t.Fatalf("marshal public detail: %v", err)
+	}
+	if !strings.Contains(string(body), "canComment") || !strings.Contains(string(body), "Visible comment") {
+		t.Fatalf("public detail = %s, want comment payload", body)
+	}
+
+	response := ptrext.Of(attunev1.PublicCustomerRequestDetail{})
+	if err := protojson.Unmarshal(body, response); err != nil {
+		t.Fatalf("unmarshal public detail: %v", err)
+	}
+	if !response.GetCanComment() || len(response.GetComments()) != 1 || response.GetComments()[0].GetBody() != "Visible comment" {
+		t.Fatalf("public detail response = %#v, want comment thread", response)
 	}
 }
 
@@ -176,7 +225,7 @@ func TestGetPublicCustomerRequestSetsRobotsAndNoStoreHeader(t *testing.T) {
 			},
 			NoIndex: true,
 		},
-	}, nil)
+	}, nil, testVisitorSecrets())
 	bound := dispatcher.Bind(
 		"portal.Handler.GetPublicCustomerRequest",
 		dispatcher.Empty(func() *attunev1.GetPublicCustomerRequestRequest {
@@ -231,7 +280,7 @@ func TestListPublicCustomerRequestsSetsRobotsAndNoStoreHeader(t *testing.T) {
 			Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
 			NoIndex:  true,
 		},
-	}, nil)
+	}, nil, testVisitorSecrets())
 	bound := dispatcher.Bind(
 		"portal.Handler.ListPublicCustomerRequests",
 		dispatcher.Query(
@@ -271,7 +320,7 @@ func TestListPublicRoadmapSetsNoStoreHeader(t *testing.T) {
 		roadmapResult: pvsvc.PublicRequestList{
 			Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
 		},
-	}, nil)
+	}, nil, testVisitorSecrets())
 	bound := dispatcher.Bind(
 		"portal.Handler.ListPublicRoadmap",
 		dispatcher.Query(
@@ -301,10 +350,50 @@ func TestListPublicRoadmapSetsNoStoreHeader(t *testing.T) {
 	}
 }
 
+func TestRequestsPageRendersBoardAndSetsVisitorCookie(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			listResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Values("Set-Cookie"); len(got) == 0 {
+		t.Fatal("Set-Cookie = none, want visitor cookie")
+	}
+	if got := rec.Header().Get("Cache-Control"); got != publicRequestCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Public board", "pricing-api", `data-vote-action`, "Vote"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("board body missing %q: %s", want, body)
+		}
+	}
+}
+
 func TestGetPublicCustomerRequestSetsNoStoreHeaderOnNotFound(t *testing.T) {
 	t.Parallel()
 
-	handler := NewHandler(fakePublicRequestService{err: pvsvc.ErrNotFound}, nil)
+	handler := NewHandler(fakePublicRequestService{err: pvsvc.ErrNotFound}, nil, testVisitorSecrets())
 	bound := dispatcher.Bind(
 		"portal.Handler.GetPublicCustomerRequest",
 		dispatcher.Empty(func() *attunev1.GetPublicCustomerRequestRequest {
@@ -341,17 +430,17 @@ func TestGetPublicCustomerRequestSetsNoStoreHeaderOnErrors(t *testing.T) {
 	}{
 		{
 			name:    "validation",
-			handler: NewHandler(fakePublicRequestService{err: pvsvc.ErrValidation}, nil),
+			handler: NewHandler(fakePublicRequestService{err: pvsvc.ErrValidation}, nil, testVisitorSecrets()),
 			status:  http.StatusBadRequest,
 		},
 		{
 			name:    "internal",
-			handler: NewHandler(fakePublicRequestService{err: errors.New("repo down")}, nil),
+			handler: NewHandler(fakePublicRequestService{err: errors.New("repo down")}, nil, testVisitorSecrets()),
 			status:  http.StatusInternalServerError,
 		},
 		{
 			name:    "not configured",
-			handler: NewHandler(nil, nil),
+			handler: NewHandler(nil, nil, testVisitorSecrets()),
 			status:  http.StatusNotImplemented,
 		},
 	}
@@ -386,6 +475,218 @@ func TestGetPublicCustomerRequestSetsNoStoreHeaderOnErrors(t *testing.T) {
 	}
 }
 
+func TestVotePublicCustomerRequestSetsVisitorCookie(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{
+		voteResult: pvsvc.PublicRequest{
+			Summary: pvrepo.RequestProfile{
+				ID:            uuid.New(),
+				PublicSlug:    "pricing-api",
+				PublicTitle:   "Pricing API",
+				PublicSummary: "Public-safe summary",
+				PublicState:   "planned",
+				RoadmapColumn: "next",
+			},
+			Policy: pvrepo.Policy{
+				ShowVoteCount:        true,
+				ShowCommentCount:     true,
+				ShowSubmitterDisplay: true,
+				VoteWriteMode:        pvrepo.WriteModeAnonymous,
+			},
+			Votes:            8,
+			ViewerHasVoted:   true,
+			SubmitterDisplay: "Ada",
+		},
+	}, nil, testVisitorSecrets())
+	bound := dispatcher.Bind(
+		"portal.Handler.VotePublicCustomerRequest",
+		dispatcher.Path(
+			func() *attunev1.VotePublicCustomerRequest {
+				return ptrext.Of(attunev1.VotePublicCustomerRequest{})
+			},
+			dispatcher.Param("tenant_slug", func(req *attunev1.VotePublicCustomerRequest, slug string) {
+				req.TenantSlug = slug
+			}),
+			dispatcher.Param("public_slug", func(req *attunev1.VotePublicCustomerRequest, slug string) {
+				req.PublicSlug = slug
+			}),
+		),
+		handler.VotePublicCustomerRequest,
+		dispatcher.WithAuth(func(*http.Request, *attunev1.VotePublicCustomerRequest) (struct{}, error) {
+			return struct{}{}, nil
+		}),
+	)
+
+	rec := httptest.NewRecorder()
+	req := requestWithPortalSlug(http.MethodPost, "/v1/portal/acme/requests/pricing-api/votes", "acme", "pricing-api", nil)
+	bound(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Values("Set-Cookie"); len(got) == 0 {
+		t.Fatal("Set-Cookie = none, want refreshed visitor cookie")
+	}
+	response := ptrext.Of(attunev1.PublicCustomerRequestDetail{})
+	if err := protojson.Unmarshal(rec.Body.Bytes(), response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !response.GetRequest().GetViewerHasVoted() || response.GetRequest().GetVoteCount() != 8 {
+		t.Fatalf("vote response = %#v, want viewer voted detail", response)
+	}
+}
+
+func TestUnvotePublicCustomerRequestSetsVisitorCookie(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{
+		unvoteResult: pvsvc.PublicRequest{
+			Summary: pvrepo.RequestProfile{
+				ID:            uuid.New(),
+				PublicSlug:    "pricing-api",
+				PublicTitle:   "Pricing API",
+				PublicSummary: "Public-safe summary",
+				PublicState:   "planned",
+				RoadmapColumn: "next",
+			},
+			Policy: pvrepo.Policy{
+				ShowVoteCount:        true,
+				ShowCommentCount:     true,
+				ShowSubmitterDisplay: true,
+				VoteWriteMode:        pvrepo.WriteModeAnonymous,
+			},
+			Votes:          7,
+			ViewerHasVoted: false,
+		},
+	}, nil, testVisitorSecrets())
+	bound := dispatcher.Bind(
+		"portal.Handler.UnvotePublicCustomerRequest",
+		dispatcher.Path(
+			func() *attunev1.UnvotePublicCustomerRequest {
+				return ptrext.Of(attunev1.UnvotePublicCustomerRequest{})
+			},
+			dispatcher.Param("tenant_slug", func(req *attunev1.UnvotePublicCustomerRequest, slug string) {
+				req.TenantSlug = slug
+			}),
+			dispatcher.Param("public_slug", func(req *attunev1.UnvotePublicCustomerRequest, slug string) {
+				req.PublicSlug = slug
+			}),
+		),
+		handler.UnvotePublicCustomerRequest,
+		dispatcher.WithAuth(func(*http.Request, *attunev1.UnvotePublicCustomerRequest) (struct{}, error) {
+			return struct{}{}, nil
+		}),
+	)
+
+	rec := httptest.NewRecorder()
+	req := requestWithPortalSlug(http.MethodDelete, "/v1/portal/acme/requests/pricing-api/votes", "acme", "pricing-api", nil)
+	bound(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Values("Set-Cookie"); len(got) == 0 {
+		t.Fatal("Set-Cookie = none, want refreshed visitor cookie")
+	}
+	response := ptrext.Of(attunev1.PublicCustomerRequestDetail{})
+	if err := protojson.Unmarshal(rec.Body.Bytes(), response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if response.GetRequest().GetViewerHasVoted() {
+		t.Fatalf("unvote response = %#v, want viewer vote removed", response)
+	}
+}
+
+func TestCreatePublicCustomerCommentSetsVisitorCookie(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{
+		commentResult: pvsvc.PublicRequest{
+			Summary: pvrepo.RequestProfile{
+				ID:            uuid.New(),
+				PublicSlug:    "pricing-api",
+				PublicTitle:   "Pricing API",
+				PublicSummary: "Public-safe summary",
+				PublicState:   "planned",
+				RoadmapColumn: "next",
+			},
+			Policy: pvrepo.Policy{
+				ShowVoteCount:        true,
+				ShowCommentCount:     true,
+				ShowSubmitterDisplay: true,
+				CommentWriteMode:     pvrepo.WriteModeIdentified,
+				CommentsEnabled:      true,
+			},
+			Comments:   1,
+			CanComment: true,
+			CommentItems: []pvrepo.PublicRequestComment{{
+				ID:                 uuid.New(),
+				Body:               "Great idea",
+				SubmittedByDisplay: "Portal visitor",
+				State:              pvrepo.ModerationStatePending,
+				CreatedAt:          time.Date(2026, 7, 10, 15, 0, 0, 0, time.UTC),
+			}},
+		},
+		wantCommentBody:       "Great idea",
+		wantCommentTenantSlug: "acme",
+		wantCommentPublicSlug: "pricing-api",
+	}, nil, testVisitorSecrets())
+	bound := dispatcher.Bind(
+		"portal.Handler.CreatePublicCustomerComment",
+		dispatcher.Path(
+			func() *attunev1.CreatePublicCustomerCommentRequest {
+				return ptrext.Of(attunev1.CreatePublicCustomerCommentRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.CreatePublicCustomerCommentRequest],
+			dispatcher.Param("tenant_slug", func(req *attunev1.CreatePublicCustomerCommentRequest, slug string) {
+				req.TenantSlug = slug
+			}),
+			dispatcher.Param("public_slug", func(req *attunev1.CreatePublicCustomerCommentRequest, slug string) {
+				req.PublicSlug = slug
+			}),
+		),
+		handler.CreatePublicCustomerComment,
+		dispatcher.WithAuth(func(*http.Request, *attunev1.CreatePublicCustomerCommentRequest) (struct{}, error) {
+			return struct{}{}, nil
+		}),
+	)
+
+	body, err := protojson.Marshal(ptrext.Of(attunev1.CreatePublicCustomerCommentRequest{
+		TenantSlug: "wrong-tenant",
+		PublicSlug: "wrong-slug",
+		Body:       "Great idea",
+	}))
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := requestWithPortalSlug(http.MethodPost, "/v1/portal/acme/requests/pricing-api/comments", "acme", "pricing-api", bytes.NewReader(body))
+	bound(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Values("Set-Cookie"); len(got) == 0 {
+		t.Fatal("Set-Cookie = none, want refreshed visitor cookie")
+	}
+
+	response := ptrext.Of(attunev1.PublicCustomerRequestDetail{})
+	if err := protojson.Unmarshal(rec.Body.Bytes(), response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if !response.GetCanComment() || len(response.GetComments()) != 1 {
+		t.Fatalf("comment response = %#v, want comment thread", response)
+	}
+	if response.GetComments()[0].GetBody() != "Great idea" || response.GetComments()[0].GetState() != attunev1.ModerationState_MODERATION_STATE_PENDING {
+		t.Fatalf("comment response = %#v, want pending comment", response)
+	}
+	if response.GetRequest().GetSlug() != "pricing-api" {
+		t.Fatalf("comment response request = %#v, want pricing-api", response.GetRequest())
+	}
+}
+
 func TestGetPublicSubmissionConfigReturnsPortalConfig(t *testing.T) {
 	t.Parallel()
 
@@ -407,7 +708,7 @@ func TestGetPublicSubmissionConfigReturnsPortalConfig(t *testing.T) {
 			},
 		},
 	})
-	handler := NewHandler(nil, service)
+	handler := NewHandler(nil, service, testVisitorSecrets())
 	bound := dispatcher.Bind(
 		"portal.Handler.GetPublicSubmissionConfig",
 		dispatcher.Empty(func() *attunev1.GetPublicSubmissionConfigRequest {
@@ -463,7 +764,7 @@ func TestCreatePublicSubmissionMapsRequestAndResponse(t *testing.T) {
 			Acknowledgement: "Thanks. We will review your submission.",
 		},
 	})
-	handler := NewHandler(nil, service)
+	handler := NewHandler(nil, service, testVisitorSecrets())
 	bodyMsg := ptrext.Of(attunev1.CreatePublicSubmissionRequest{
 		TenantSlug:     "ignored",
 		Kind:           attunev1.PortalSubmissionKind_PORTAL_SUBMISSION_KIND_BUG,
@@ -546,7 +847,7 @@ func TestCreatePublicSubmissionMapsErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := NewHandler(nil, ptrext.Of(fakeSubmissionService{submitErr: tt.err}))
+			handler := NewHandler(nil, ptrext.Of(fakeSubmissionService{submitErr: tt.err}), testVisitorSecrets())
 			bound := dispatcher.Bind(
 				"portal.Handler.CreatePublicSubmission",
 				dispatcher.Custom(func() *attunev1.CreatePublicSubmissionRequest {
@@ -627,22 +928,58 @@ func TestBindCreatePublicSubmissionRequest(t *testing.T) {
 }
 
 type fakePublicRequestService struct {
-	result        pvsvc.PublicRequest
-	listResult    pvsvc.PublicRequestList
-	roadmapResult pvsvc.PublicRequestList
-	err           error
+	result                pvsvc.PublicRequest
+	listResult            pvsvc.PublicRequestList
+	roadmapResult         pvsvc.PublicRequestList
+	voteResult            pvsvc.PublicRequest
+	unvoteResult          pvsvc.PublicRequest
+	commentResult         pvsvc.PublicRequest
+	wantCommentBody       string
+	wantCommentTenantSlug string
+	wantCommentPublicSlug string
+	err                   error
 }
 
-func (f fakePublicRequestService) ListPublicRequests(context.Context, string, int, string) (pvsvc.PublicRequestList, error) {
+func (f fakePublicRequestService) ListPublicRequests(context.Context, string, int, string, string) (pvsvc.PublicRequestList, error) {
 	return f.listResult, f.err
 }
 
-func (f fakePublicRequestService) GetPublicRequest(context.Context, string, string) (pvsvc.PublicRequest, error) {
+func (f fakePublicRequestService) GetPublicRequest(context.Context, string, string, string) (pvsvc.PublicRequest, error) {
 	return f.result, f.err
 }
 
-func (f fakePublicRequestService) ListPublicRoadmap(context.Context, string, int, string) (pvsvc.PublicRequestList, error) {
+func (f fakePublicRequestService) ListPublicRoadmap(context.Context, string, int, string, string) (pvsvc.PublicRequestList, error) {
 	return f.roadmapResult, f.err
+}
+
+func (f fakePublicRequestService) VotePublicRequest(context.Context, string, string, string, auditlogsvc.Actor) (pvsvc.PublicRequest, error) {
+	if f.voteResult.Summary.ID != uuid.Nil {
+		return f.voteResult, f.err
+	}
+	return f.result, f.err
+}
+
+func (f fakePublicRequestService) UnvotePublicRequest(context.Context, string, string, string, auditlogsvc.Actor) (pvsvc.PublicRequest, error) {
+	if f.unvoteResult.Summary.ID != uuid.Nil {
+		return f.unvoteResult, f.err
+	}
+	return f.result, f.err
+}
+
+func (f fakePublicRequestService) CreatePublicRequestComment(_ context.Context, tenantSlug string, publicSlug string, _ string, body string, _ auditlogsvc.Actor) (pvsvc.PublicRequest, error) {
+	if f.wantCommentTenantSlug != "" && tenantSlug != f.wantCommentTenantSlug {
+		return pvsvc.PublicRequest{}, errors.New("unexpected comment tenant slug")
+	}
+	if f.wantCommentPublicSlug != "" && publicSlug != f.wantCommentPublicSlug {
+		return pvsvc.PublicRequest{}, errors.New("unexpected comment public slug")
+	}
+	if f.wantCommentBody != "" && body != f.wantCommentBody {
+		return pvsvc.PublicRequest{}, errors.New("unexpected comment body")
+	}
+	if f.commentResult.Summary.ID != uuid.Nil {
+		return f.commentResult, f.err
+	}
+	return f.result, f.err
 }
 
 func publicRequestForPortalTest(slug string, column string) pvsvc.PublicRequest {
@@ -657,6 +994,7 @@ func publicRequestForPortalTest(slug string, column string) pvsvc.PublicRequest 
 		},
 		Policy: pvrepo.Policy{
 			ShowVoteCount:        true,
+			CommentsEnabled:      true,
 			ShowCommentCount:     true,
 			ShowSubmitterDisplay: true,
 		},
@@ -672,6 +1010,13 @@ func requestWithTenantSlug(method, target, tenantSlug string, body io.Reader) *h
 	}
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("tenant_slug", tenantSlug)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+}
+
+func requestWithPortalSlug(method, target, tenantSlug, publicSlug string, body io.Reader) *http.Request {
+	req := requestWithTenantSlug(method, target, tenantSlug, body)
+	routeCtx := chi.RouteContext(req.Context())
+	routeCtx.URLParams.Add("public_slug", publicSlug)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
 }
 
@@ -692,4 +1037,26 @@ func (f *fakeSubmissionService) GetSubmissionConfig(_ context.Context, tenantSlu
 func (f *fakeSubmissionService) Submit(_ context.Context, input portalsvc.SubmitInput) (portalsvc.SubmitResult, error) {
 	f.gotSubmitInput = input
 	return f.submitResult, f.submitErr
+}
+
+func testVisitorSecrets() visitorSecretStore {
+	return fakeVisitorSecretStore{}
+}
+
+type fakeVisitorSecretStore struct{}
+
+func (fakeVisitorSecretStore) EncryptValue(plaintext, aad []byte) (secretstore.EncryptedValue, error) {
+	ciphertext := append([]byte("test:"), aad...)
+	ciphertext = append(ciphertext, 0)
+	ciphertext = append(ciphertext, plaintext...)
+	return secretstore.EncryptedValue{Ciphertext: ciphertext}, nil
+}
+
+func (fakeVisitorSecretStore) DecryptValue(value secretstore.EncryptedValue, aad []byte) ([]byte, error) {
+	prefix := append([]byte("test:"), aad...)
+	prefix = append(prefix, 0)
+	if !bytes.HasPrefix(value.Ciphertext, prefix) {
+		return nil, errors.New("aad mismatch")
+	}
+	return append([]byte(nil), value.Ciphertext[len(prefix):]...), nil
 }

@@ -95,7 +95,7 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 108, count, "should match current migration count")
+	require.Equal(t, 109, count, "should match current migration count")
 }
 
 func TestPublicVisibilityMigrationAllowsPublicModerationAuditActions(t *testing.T) {

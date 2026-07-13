@@ -79,6 +79,18 @@ service PortalService {
   rpc ListPublicRoadmap(ListPublicRoadmapRequest) returns (ListPublicRoadmapResponse) {
     option (google.api.http) = {get: "/v1/portal/{tenant_slug}/roadmap"};
   }
+  rpc VotePublicCustomer(VotePublicCustomerRequest) returns (PublicCustomerRequestDetail) {
+    option (google.api.http) = {post: "/v1/portal/{tenant_slug}/requests/{public_slug}/votes"};
+  }
+  rpc UnvotePublicCustomer(UnvotePublicCustomerRequest) returns (PublicCustomerRequestDetail) {
+    option (google.api.http) = {delete: "/v1/portal/{tenant_slug}/requests/{public_slug}/votes"};
+  }
+  rpc CreatePublicCustomerComment(CreatePublicCustomerCommentRequest) returns (PublicCustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/v1/portal/{tenant_slug}/requests/{public_slug}/comments"
+      body: "*"
+    };
+  }
 }
 
 enum PublicSurface {
@@ -336,6 +348,22 @@ message GetPublicCustomerRequestRequest {
   string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
 }
 
+message VotePublicCustomerRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message UnvotePublicCustomerRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message CreatePublicCustomerCommentRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+  string body = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
 message ListPublicCustomerRequestsRequest {
   string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
   uint32 limit = 2;
@@ -375,9 +403,20 @@ message PublicCustomerRequestSummary {
   optional string submitted_by_display = 9;
   optional string created_at = 10;
   optional string updated_at = 11;
+  optional bool viewer_has_voted = 12;
 }
 
 message PublicCustomerRequestDetail {
   PublicCustomerRequestSummary request = 1;
   repeated string links = 2;
+  repeated PublicCustomerRequestComment comments = 3;
+  optional bool can_comment = 4;
+}
+
+message PublicCustomerRequestComment {
+  string id = 1;
+  string body = 2;
+  ModerationState state = 3;
+  optional string submitted_by_display = 4;
+  optional string created_at = 5;
 }

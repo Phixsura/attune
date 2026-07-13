@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Public voting board with visitor identity, vote toggles, and comments.**
+  Added public request list and detail board views at `/portal/{tenant_slug}/requests`,
+  plus `POST`/`DELETE` vote actions and public comment writes under
+  `/v1/portal/{tenant_slug}/requests/{public_slug}`. The board now mints a signed
+  portal visitor cookie, tracks viewer vote state on public request summaries,
+  keeps public vote counts scoped to portal-issued votes, and renders comment
+  threads with public-safe moderation state for the current visitor.
+
 - **Slack channel ingest adapter with Console discovery and test flows.**
   Added a first-class Slack inbound source with Console token test,
   readable-channel discovery, Slack-specific create payloads, registry wiring,

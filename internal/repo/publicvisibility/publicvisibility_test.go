@@ -242,7 +242,7 @@ func TestScanPublicRequestListCandidates(t *testing.T) {
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	requestID := uuid.New()
 	row := append(profileValues(requestID, now), subjectValues(uuid.New(), now)...)
-	row = append(row, int64(4), int64(2), requestID)
+	row = append(row, int64(4), true, int64(2), requestID)
 	rows := ptrext.Of(fakeRows{rows: []fakeRow{{values: row}}})
 
 	items, err := scanPublicRequestListCandidates(rows)
@@ -253,7 +253,7 @@ func TestScanPublicRequestListCandidates(t *testing.T) {
 		t.Fatalf("scanPublicRequestListCandidates() = %#v closed=%v, want one closed row", items, rows.closed)
 	}
 	if items[0].Profile.RequestID != requestID || items[0].VoteCount != 4 ||
-		items[0].CommentCount != 2 || items[0].SubmitterDisplay != "Ada" {
+		!items[0].ViewerHasVoted || items[0].CommentCount != 2 || items[0].SubmitterDisplay != "Ada" {
 		t.Fatalf("scanPublicRequestListCandidates() = %#v, want public request list candidate", items[0])
 	}
 

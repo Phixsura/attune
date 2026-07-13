@@ -58,41 +58,17 @@ func TestPGPublicVisibilityRequestPublicationLifecycle(t *testing.T) {
 	request := e.createRequest(t, "Pricing API")
 	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
 	publication := e.upsertRequestPublication(t, request.ID, "pricing-api")
+	assertPublishedRequestPublication(t, publication)
 
-	if publication.Profile.PublicSlug != "pricing-api" || publication.Profile.PublishedAt == nil {
-		t.Fatalf("publication profile = %+v, want published pricing-api profile", publication.Profile)
-	}
-	if publication.Moderation.State != pvrepo.ModerationStatePending ||
-		publication.Moderation.SubjectID != publication.Profile.ID.String() {
-		t.Fatalf("moderation subject = %+v, want pending subject for profile", publication.Moderation)
-	}
+	loaded := mustGetRequestPublication(t, e, request.ID)
+	assertLoadedRequestPublication(t, loaded, publication)
 
-	loaded, err := e.publicRepo.GetRequestPublication(e.ctx, e.tenantID, request.ID)
-	if err != nil {
-		t.Fatalf("GetRequestPublication: %v", err)
-	}
-	if loaded.Profile.ID != publication.Profile.ID || loaded.Moderation.ID != publication.Moderation.ID {
-		t.Fatalf("loaded publication = %+v, want %+v", loaded, publication)
-	}
-
-	e.addVote(t, request.ID, "user:ada")
+	e.addVote(t, request.ID, "portal:visitor-ada")
 	e.approve(t, publication.Moderation.ID)
-	candidate, err := e.publicRepo.GetPublicRequestCandidate(e.ctx, e.tenantSlug, "pricing-api")
-	if err != nil {
-		t.Fatalf("GetPublicRequestCandidate: %v", err)
-	}
-	if candidate.Policy.PortalAccessMode != pvrepo.AccessModePublic ||
-		candidate.Policy.RequestsEnabled != true ||
-		candidate.Moderation.State != pvrepo.ModerationStateApproved ||
-		candidate.VoteCount != 1 ||
-		candidate.SubmitterDisplay != "Ada" {
-		t.Fatalf("candidate = %+v, want approved public request with one vote", candidate)
-	}
+	candidate := mustGetPublicRequestCandidate(t, e, "pricing-api", "portal:visitor-ada")
+	assertApprovedPublicRequestCandidate(t, candidate)
 
-	otherTenantID := e.createTenant(t, "publicvisibility-other")
-	if _, err := e.publicRepo.GetRequestPublication(e.ctx, otherTenantID, request.ID); !errors.Is(err, pvrepo.ErrNotFound) {
-		t.Fatalf("cross-tenant GetRequestPublication error = %v, want ErrNotFound", err)
-	}
+	assertRequestPublicationCrossTenantNotFound(t, e, request.ID)
 }
 
 func TestPGPublicVisibilityRejectsDuplicateSlug(t *testing.T) {
@@ -167,7 +143,7 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	portalRoadmapRequest := e.createRequest(t, "Portal roadmap request")
 	portalRoadmap := e.upsertRequestPublicationCustom(t, portalRoadmapRequest.ID,
 		"portal-roadmap", "Portal roadmap", "Now", true, true)
-	e.addVote(t, portalRoadmapRequest.ID, "user:portal-roadmap")
+	e.addVote(t, portalRoadmapRequest.ID, "portal:portal-roadmap")
 	e.approve(t, portalRoadmap.Moderation.ID)
 
 	portalOnlyRequest := e.createRequest(t, "Portal only request")
@@ -220,16 +196,237 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	assertPublicListSlugs(t, roadmapList.Items, []string{"portal-roadmap", "roadmap-only"})
 
 	service := pvsvc.New(e.publicRepo, nil)
-	publicRequests, err := service.ListPublicRequests(e.ctx, e.tenantSlug, 10, "")
+	publicRequests, err := service.ListPublicRequests(e.ctx, e.tenantSlug, 10, "", "")
 	if err != nil {
 		t.Fatalf("ListPublicRequests: %v", err)
 	}
 	assertPublicRequestSlugs(t, publicRequests.Requests, []string{"portal-roadmap", "portal-only"})
-	publicRoadmap, err := service.ListPublicRoadmap(e.ctx, e.tenantSlug, 10, "")
+	publicRoadmap, err := service.ListPublicRoadmap(e.ctx, e.tenantSlug, 10, "", "")
 	if err != nil {
 		t.Fatalf("ListPublicRoadmap: %v", err)
 	}
 	assertPublicRequestSlugs(t, publicRoadmap.Requests, []string{"portal-roadmap", "roadmap-only"})
+}
+
+func TestPGPublicVisibilityPortalVoteLifecycle(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, "Vote lifecycle request")
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+	publication := e.upsertRequestPublication(t, request.ID, "vote-lifecycle")
+	e.approve(t, publication.Moderation.ID)
+
+	service := pvsvc.New(e.publicRepo, nil)
+	actor := auditlogsvc.Actor{Type: "portal", ID: "visitor-1", UserAgent: "integration-test"}
+
+	voted, err := service.VotePublicRequest(e.ctx, e.tenantSlug, "vote-lifecycle", "visitor-1", actor)
+	if err != nil {
+		t.Fatalf("VotePublicRequest: %v", err)
+	}
+	if voted.Votes != 1 || !voted.ViewerHasVoted {
+		t.Fatalf("voted request = %+v, want one portal vote", voted)
+	}
+
+	candidate, err := e.publicRepo.GetPublicRequestCandidate(e.ctx, e.tenantSlug, "vote-lifecycle", "portal:visitor-1")
+	if err != nil {
+		t.Fatalf("GetPublicRequestCandidate(after vote): %v", err)
+	}
+	if candidate.VoteCount != 1 || !candidate.ViewerHasVoted {
+		t.Fatalf("candidate after vote = %+v, want voted state", candidate)
+	}
+
+	unvoted, err := service.UnvotePublicRequest(e.ctx, e.tenantSlug, "vote-lifecycle", "visitor-1", actor)
+	if err != nil {
+		t.Fatalf("UnvotePublicRequest: %v", err)
+	}
+	if unvoted.Votes != 0 || unvoted.ViewerHasVoted {
+		t.Fatalf("unvoted request = %+v, want no portal vote", unvoted)
+	}
+}
+
+func TestPGPublicVisibilityPortalCommentLifecycle(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, "Comment lifecycle request")
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+	publication := e.upsertRequestPublication(t, request.ID, "comment-thread")
+	e.approve(t, publication.Moderation.ID)
+
+	auditRepo := auditlogrepo.New(e.pool)
+	service := pvsvc.New(e.publicRepo, auditlogsvc.New(auditRepo))
+	actor := auditlogsvc.Actor{Type: "portal", ID: "visitor-1", UserAgent: "integration-test"}
+
+	detail := mustCreatePublicRequestComment(t, service, e, actor)
+	assertPendingPublicRequestComment(t, detail)
+
+	pending := mustListCommentModeration(t, service, e)
+	assertPendingCommentModeration(t, pending, detail)
+
+	approved := mustApproveCommentModeration(t, service, e, pending.Items[0].ID, actor)
+	assertApprovedCommentModeration(t, approved)
+
+	final := mustGetPublicRequest(t, service, e)
+	assertFinalPublicRequestComment(t, final)
+
+	assertPortalCommentCrossTenantNotFound(t, e)
+}
+
+func assertPublishedRequestPublication(t *testing.T, publication pvrepo.RequestPublication) {
+	t.Helper()
+
+	if publication.Profile.PublicSlug != "pricing-api" || publication.Profile.PublishedAt == nil {
+		t.Fatalf("publication profile = %+v, want published pricing-api profile", publication.Profile)
+	}
+	if publication.Moderation.State != pvrepo.ModerationStatePending ||
+		publication.Moderation.SubjectID != publication.Profile.ID.String() {
+		t.Fatalf("moderation subject = %+v, want pending subject for profile", publication.Moderation)
+	}
+}
+
+func assertLoadedRequestPublication(t *testing.T, loaded pvrepo.RequestPublication, publication pvrepo.RequestPublication) {
+	t.Helper()
+
+	if loaded.Profile.ID != publication.Profile.ID || loaded.Moderation.ID != publication.Moderation.ID {
+		t.Fatalf("loaded publication = %+v, want %+v", loaded, publication)
+	}
+}
+
+func mustGetRequestPublication(t *testing.T, e env, requestID uuid.UUID) pvrepo.RequestPublication {
+	t.Helper()
+
+	loaded, err := e.publicRepo.GetRequestPublication(e.ctx, e.tenantID, requestID)
+	if err != nil {
+		t.Fatalf("GetRequestPublication: %v", err)
+	}
+	return ptrext.Indirect(loaded)
+}
+
+func mustGetPublicRequestCandidate(t *testing.T, e env, slug, viewerSubjectKey string) pvrepo.PublicRequestCandidate {
+	t.Helper()
+
+	candidate, err := e.publicRepo.GetPublicRequestCandidate(e.ctx, e.tenantSlug, slug, viewerSubjectKey)
+	if err != nil {
+		t.Fatalf("GetPublicRequestCandidate: %v", err)
+	}
+	return ptrext.Indirect(candidate)
+}
+
+func assertApprovedPublicRequestCandidate(t *testing.T, candidate pvrepo.PublicRequestCandidate) {
+	t.Helper()
+
+	if candidate.Policy.PortalAccessMode != pvrepo.AccessModePublic ||
+		candidate.Policy.RequestsEnabled != true ||
+		candidate.Moderation.State != pvrepo.ModerationStateApproved ||
+		candidate.VoteCount != 1 ||
+		!candidate.ViewerHasVoted ||
+		candidate.SubmitterDisplay != "Ada" {
+		t.Fatalf("candidate = %+v, want approved public request with one vote", candidate)
+	}
+}
+
+func assertRequestPublicationCrossTenantNotFound(t *testing.T, e env, requestID uuid.UUID) {
+	t.Helper()
+
+	otherTenantID := e.createTenant(t, "publicvisibility-other")
+	if _, err := e.publicRepo.GetRequestPublication(e.ctx, otherTenantID, requestID); !errors.Is(err, pvrepo.ErrNotFound) {
+		t.Fatalf("cross-tenant GetRequestPublication error = %v, want ErrNotFound", err)
+	}
+}
+
+func mustCreatePublicRequestComment(t *testing.T, service *pvsvc.Service, e env, actor auditlogsvc.Actor) pvsvc.PublicRequest {
+	t.Helper()
+
+	detail, err := service.CreatePublicRequestComment(e.ctx, e.tenantSlug, "comment-thread", "visitor-1", " Great idea ", actor)
+	if err != nil {
+		t.Fatalf("CreatePublicRequestComment: %v", err)
+	}
+	return detail
+}
+
+func assertPendingPublicRequestComment(t *testing.T, detail pvsvc.PublicRequest) {
+	t.Helper()
+
+	if detail.Comments != 0 || !detail.CanComment {
+		t.Fatalf("comment detail = %+v, want pending comment not counted yet", detail)
+	}
+	if len(detail.CommentItems) != 1 || detail.CommentItems[0].Body != "Great idea" ||
+		detail.CommentItems[0].State != pvrepo.ModerationStatePending ||
+		detail.CommentItems[0].SubmittedByDisplay != "Portal visitor" {
+		t.Fatalf("comment detail = %+v, want trimmed pending comment", detail)
+	}
+}
+
+func mustListCommentModeration(t *testing.T, service *pvsvc.Service, e env) pvrepo.ListResult {
+	t.Helper()
+
+	pending, err := service.ListModeration(e.ctx, pvsvc.ListModerationInput{
+		TenantID: e.tenantID,
+		Surfaces: []pvrepo.Surface{pvrepo.SurfaceRequestComment},
+		States:   []pvrepo.ModerationState{pvrepo.ModerationStatePending},
+	})
+	if err != nil {
+		t.Fatalf("ListModeration(comment pending): %v", err)
+	}
+	return pending
+}
+
+func assertPendingCommentModeration(t *testing.T, pending pvrepo.ListResult, detail pvsvc.PublicRequest) {
+	t.Helper()
+
+	if len(pending.Items) != 1 || pending.Items[0].SubjectID != detail.CommentItems[0].ID.String() {
+		t.Fatalf("pending moderation = %+v, want created request_comment subject", pending)
+	}
+}
+
+func mustApproveCommentModeration(t *testing.T, service *pvsvc.Service, e env, moderationID uuid.UUID, actor auditlogsvc.Actor) pvrepo.ModerationSubject {
+	t.Helper()
+
+	approved, err := service.Moderate(e.ctx, pvsvc.ModerateInput{
+		TenantID:   e.tenantID,
+		ID:         moderationID,
+		Action:     pvsvc.ActionApprove,
+		ReasonCode: "safe",
+		ReasonNote: "reviewed for public portal",
+		Actor:      actor,
+	})
+	if err != nil {
+		t.Fatalf("Moderate approve comment: %v", err)
+	}
+	return approved
+}
+
+func assertApprovedCommentModeration(t *testing.T, approved pvrepo.ModerationSubject) {
+	t.Helper()
+
+	if approved.Surface != pvrepo.SurfaceRequestComment || approved.State != pvrepo.ModerationStateApproved {
+		t.Fatalf("approved comment = %+v, want approved request_comment", approved)
+	}
+}
+
+func mustGetPublicRequest(t *testing.T, service *pvsvc.Service, e env) pvsvc.PublicRequest {
+	t.Helper()
+
+	final, err := service.GetPublicRequest(e.ctx, e.tenantSlug, "comment-thread", "visitor-1")
+	if err != nil {
+		t.Fatalf("GetPublicRequest(after comment approve): %v", err)
+	}
+	return final
+}
+
+func assertFinalPublicRequestComment(t *testing.T, final pvsvc.PublicRequest) {
+	t.Helper()
+
+	if final.Comments != 1 || len(final.CommentItems) != 1 || final.CommentItems[0].State != pvrepo.ModerationStateApproved {
+		t.Fatalf("final public request = %+v, want approved comment counted", final)
+	}
+}
+
+func assertPortalCommentCrossTenantNotFound(t *testing.T, e env) {
+	t.Helper()
+
+	otherTenantSlug := "publicvisibility-other"
+	e.createTenant(t, otherTenantSlug)
+	if _, err := e.publicRepo.GetPublicRequestCandidate(e.ctx, otherTenantSlug, "comment-thread", "portal:visitor-1"); !errors.Is(err, pvrepo.ErrNotFound) {
+		t.Fatalf("cross-tenant GetPublicRequestCandidate error = %v, want ErrNotFound", err)
+	}
 }
 
 func TestPGPublicVisibilityModeratesCommentAndSubmissionSubjects(t *testing.T) {

@@ -165,13 +165,15 @@ type PublicRequestCandidate struct {
 	SubmitterDisplay    string
 	CustomerRequestID   uuid.UUID
 	CustomerRequestLive bool
+	ViewerHasVoted      bool
 }
 
 type PublicRequestListFilter struct {
-	TenantSlug string
-	Roadmap    bool
-	Limit      int
-	Cursor     string
+	TenantSlug       string
+	Roadmap          bool
+	Limit            int
+	Cursor           string
+	ViewerSubjectKey string
 }
 
 type PublicRequestListCandidate struct {
@@ -181,6 +183,15 @@ type PublicRequestListCandidate struct {
 	CommentCount      int
 	SubmitterDisplay  string
 	CustomerRequestID uuid.UUID
+	ViewerHasVoted    bool
+}
+
+type PublicRequestComment struct {
+	ID                 uuid.UUID
+	Body               string
+	SubmittedByDisplay string
+	State              ModerationState
+	CreatedAt          time.Time
 }
 
 type PublicRequestListResult struct {
@@ -523,14 +534,24 @@ func (r *Repo) UpsertRequestPublicationTx(
 	}), nil
 }
 
-func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string, publicSlug string) (*PublicRequestCandidate, error) {
+func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string, publicSlug string, viewerSubjectKey string) (*PublicRequestCandidate, error) {
 	q := `
 		SELECT
 			` + prefixedPolicyColumns("pol") + `,
 			` + prefixedProfileColumns("prp") + `,
 			` + prefixedSubjectColumns("pms") + `,
 			COALESCE(votes.vote_count, 0),
-			0::bigint AS comment_count,
+			CASE
+			  WHEN $3 <> '' THEN EXISTS(
+			    SELECT 1
+			    FROM customer_request_votes vv
+			    WHERE vv.tenant_id = prp.tenant_id
+			      AND vv.request_id = prp.request_id
+			      AND vv.subject_key = $3
+			  )
+			  ELSE FALSE
+			END,
+			COALESCE(comments.comment_count, 0),
 			cr.id,
 			(cr.archived_at IS NULL AND cr.merged_into_request_id IS NULL) AS request_live
 		FROM tenants t
@@ -548,22 +569,35 @@ func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string,
 			FROM customer_request_votes v
 			WHERE v.tenant_id = prp.tenant_id
 			  AND v.request_id = prp.request_id
+			  AND v.subject_key LIKE 'portal:%'
 		) votes ON true
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS comment_count
+			FROM customer_request_comments c
+			JOIN public_moderation_subjects cps
+			  ON cps.tenant_id = c.tenant_id
+			 AND cps.surface = 'request_comment'
+			 AND cps.subject_id = c.id::text
+			 AND cps.state = 'approved'
+			WHERE c.tenant_id = prp.tenant_id
+			  AND c.request_id = prp.request_id
+		) comments ON true
 		WHERE t.slug = $1
 		  AND t.is_active = TRUE
 		  AND prp.public_slug = $2
 		LIMIT 1`
 	var out PublicRequestCandidate
 	var votes int64
+	var viewerHasVoted bool
 	var comments int64
 	var formJSON []byte
 	targets := policyScanTargets(&out.Policy, &formJSON)              // ptrext:allow scan-target
 	targets = append(targets, profileScanTargets(&out.Profile)...)    // ptrext:allow scan-target
 	targets = append(targets, subjectScanTargets(&out.Moderation)...) // ptrext:allow scan-target
 	targets = append(targets,
-		&votes, &comments, &out.CustomerRequestID, &out.CustomerRequestLive, // ptrext:allow scan-target
+		&votes, &viewerHasVoted, &comments, &out.CustomerRequestID, &out.CustomerRequestLive, // ptrext:allow scan-target
 	)
-	err := r.pool.QueryRow(ctx, q, tenantSlug, publicSlug).Scan(targets...)
+	err := r.pool.QueryRow(ctx, q, tenantSlug, publicSlug, viewerSubjectKey).Scan(targets...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -572,6 +606,7 @@ func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string,
 	}
 	out.VoteCount = int(votes)
 	out.CommentCount = int(comments)
+	out.ViewerHasVoted = viewerHasVoted
 	out.SubmitterDisplay = out.Moderation.SubmittedByDisplay
 	return ptrext.Of(out), nil
 }
@@ -592,17 +627,27 @@ func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicReq
 	}
 
 	includedClause := "prp.included_in_portal = TRUE"
-	orderBy := "prp.updated_at DESC, prp.id DESC"
+	orderBy := "COALESCE(votes.vote_count, 0) DESC, prp.updated_at DESC, prp.id DESC"
 	if filter.Roadmap {
 		includedClause = "prp.included_in_roadmap = TRUE"
-		orderBy = "LOWER(NULLIF(prp.roadmap_column, '')) ASC NULLS LAST, prp.updated_at DESC, prp.id DESC"
+		orderBy = "LOWER(NULLIF(prp.roadmap_column, '')) ASC NULLS LAST, COALESCE(votes.vote_count, 0) DESC, prp.updated_at DESC, prp.id DESC"
 	}
 	q := `
 		SELECT
 			` + prefixedProfileColumns("prp") + `,
 			` + prefixedSubjectColumns("pms") + `,
 			COALESCE(votes.vote_count, 0),
-			0::bigint AS comment_count,
+			CASE
+			  WHEN $4 <> '' THEN EXISTS(
+			    SELECT 1
+			    FROM customer_request_votes vv
+			    WHERE vv.tenant_id = prp.tenant_id
+			      AND vv.request_id = prp.request_id
+			      AND vv.subject_key = $4
+			  )
+			  ELSE FALSE
+			END,
+			COALESCE(comments.comment_count, 0),
 			cr.id
 		FROM public_request_profiles prp
 		JOIN public_moderation_subjects pms
@@ -620,12 +665,24 @@ func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicReq
 			FROM customer_request_votes v
 			WHERE v.tenant_id = prp.tenant_id
 			  AND v.request_id = prp.request_id
+			  AND v.subject_key LIKE 'portal:%'
 		) votes ON true
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*)::bigint AS comment_count
+			FROM customer_request_comments c
+			JOIN public_moderation_subjects cps
+			  ON cps.tenant_id = c.tenant_id
+			 AND cps.surface = 'request_comment'
+			 AND cps.subject_id = c.id::text
+			 AND cps.state = 'approved'
+			WHERE c.tenant_id = prp.tenant_id
+			  AND c.request_id = prp.request_id
+		) comments ON true
 		WHERE prp.tenant_id = $1
 		  AND ` + includedClause + `
 		ORDER BY ` + orderBy + `
 		LIMIT $2 OFFSET $3`
-	rows, err := r.pool.Query(ctx, q, tenantID, limit+1, offset)
+	rows, err := r.pool.Query(ctx, q, tenantID, limit+1, offset, filter.ViewerSubjectKey)
 	if err != nil {
 		return PublicRequestListResult{}, err
 	}
@@ -644,6 +701,161 @@ func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicReq
 		Items:      items,
 		NextCursor: next,
 	}, nil
+}
+
+func (r *Repo) AddPublicRequestVoteTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	subjectKey string,
+	subjectHash string,
+	subjectDisplay string,
+	createdBy string,
+) error {
+	var id uuid.UUID
+	err := tx.QueryRow(
+		ctx, `
+		INSERT INTO customer_request_votes (
+			tenant_id, request_id, subject_key, subject_hash, subject_display,
+			account_key, account_display, weight, note, created_by
+		)
+		SELECT $1, cr.id, $3, $4, $5, '', '', 1, '', $6
+		FROM customer_requests cr
+		WHERE cr.tenant_id = $1
+		  AND cr.id = $2
+		  AND cr.archived_at IS NULL
+		ON CONFLICT (tenant_id, request_id, subject_hash, subject_key, account_key)
+		DO UPDATE SET
+		  subject_display = EXCLUDED.subject_display,
+		  weight = EXCLUDED.weight,
+		  note = EXCLUDED.note,
+		  created_by = EXCLUDED.created_by,
+		  created_at = NOW()
+		RETURNING id`,
+		tenantID, requestID, subjectKey, subjectHash, subjectDisplay, createdBy,
+	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return mapWriteError(err)
+	}
+	return nil
+}
+
+func (r *Repo) RemovePublicRequestVoteTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	subjectKey string,
+) error {
+	_, err := tx.Exec(
+		ctx, `
+		DELETE FROM customer_request_votes
+		WHERE tenant_id = $1
+		  AND request_id = $2
+		  AND subject_key = $3`,
+		tenantID, requestID, subjectKey,
+	)
+	if err != nil {
+		return fmt.Errorf("remove public vote: %w", err)
+	}
+	return nil
+}
+
+func (r *Repo) AddPublicRequestCommentTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	subjectKey string,
+	subjectHash string,
+	subjectDisplay string,
+	body string,
+	createdBy string,
+) (*PublicRequestComment, error) {
+	var comment PublicRequestComment
+	err := tx.QueryRow(
+		ctx, `
+		INSERT INTO customer_request_comments (
+			tenant_id, request_id, body, subject_key, subject_hash, subject_display, created_by
+		)
+		SELECT $1, cr.id, $3, $4, $5, $6, $7
+		FROM customer_requests cr
+		WHERE cr.tenant_id = $1
+		  AND cr.id = $2
+		  AND cr.archived_at IS NULL
+		  AND cr.merged_into_request_id IS NULL
+		RETURNING id, body, subject_display, created_at`,
+		tenantID, requestID, body, subjectKey, subjectHash, subjectDisplay, createdBy,
+	).Scan(&comment.ID, &comment.Body, &comment.SubmittedByDisplay, &comment.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, mapWriteError(err)
+	}
+	return ptrext.Of(comment), nil
+}
+
+func (r *Repo) ListPublicRequestComments(
+	ctx context.Context,
+	tenantSlug string,
+	publicSlug string,
+	viewerSubjectKey string,
+) ([]PublicRequestComment, error) {
+	tenantID, err := r.ResolveTenantIDBySlug(ctx, tenantSlug)
+	if err != nil {
+		return nil, err
+	}
+	q := `
+		SELECT
+			c.id,
+			c.body,
+			c.subject_display,
+			pms.state,
+			c.created_at
+		FROM public_request_profiles prp
+		JOIN public_moderation_subjects pms_req
+		  ON pms_req.tenant_id = prp.tenant_id
+		 AND pms_req.surface = 'request'
+		 AND pms_req.subject_id = prp.id::text
+		 AND pms_req.state = 'approved'
+		JOIN customer_requests cr
+		  ON cr.tenant_id = prp.tenant_id
+		 AND cr.id = prp.request_id
+		 AND cr.archived_at IS NULL
+		 AND cr.merged_into_request_id IS NULL
+		JOIN customer_request_comments c
+		  ON c.tenant_id = prp.tenant_id
+		 AND c.request_id = prp.request_id
+		JOIN public_moderation_subjects pms
+		  ON pms.tenant_id = c.tenant_id
+		 AND pms.surface = 'request_comment'
+		 AND pms.subject_id = c.id::text
+		WHERE prp.tenant_id = $1
+		  AND prp.public_slug = $2
+		  AND (
+		    pms.state = 'approved'
+		    OR ($3 <> '' AND c.subject_key = $3)
+		  )
+		ORDER BY c.created_at ASC, c.id ASC`
+	rows, err := r.pool.Query(ctx, q, tenantID, publicSlug, viewerSubjectKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PublicRequestComment
+	for rows.Next() {
+		var comment PublicRequestComment
+		if err := rows.Scan(&comment.ID, &comment.Body, &comment.SubmittedByDisplay, &comment.State, &comment.CreatedAt); err != nil { // ptrext:allow scan-target
+			return nil, err
+		}
+		out = append(out, comment)
+	}
+	return out, rows.Err()
 }
 
 type queryer interface {
@@ -841,15 +1053,17 @@ func scanPublicRequestListCandidates(rows pgx.Rows) ([]PublicRequestListCandidat
 	for rows.Next() {
 		var candidate PublicRequestListCandidate
 		var votes int64
+		var viewerHasVoted bool
 		var comments int64
-		targets := profileScanTargets(&candidate.Profile)                          // ptrext:allow scan-target
-		targets = append(targets, subjectScanTargets(&candidate.Moderation)...)    // ptrext:allow scan-target
-		targets = append(targets, &votes, &comments, &candidate.CustomerRequestID) // ptrext:allow scan-target
+		targets := profileScanTargets(&candidate.Profile)                                           // ptrext:allow scan-target
+		targets = append(targets, subjectScanTargets(&candidate.Moderation)...)                     // ptrext:allow scan-target
+		targets = append(targets, &votes, &viewerHasVoted, &comments, &candidate.CustomerRequestID) // ptrext:allow scan-target
 		if err := rows.Scan(targets...); err != nil {
 			return nil, err
 		}
 		candidate.VoteCount = int(votes)
 		candidate.CommentCount = int(comments)
+		candidate.ViewerHasVoted = viewerHasVoted
 		candidate.SubmitterDisplay = candidate.Moderation.SubmittedByDisplay
 		out = append(out, candidate)
 	}

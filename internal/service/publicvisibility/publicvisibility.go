@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/pkg/subjectkey"
 	repo "github.com/Phixsura/attune/internal/repo/publicvisibility"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
@@ -45,6 +46,7 @@ var (
 var (
 	ErrValidation        = errors.New("public visibility validation failed")
 	ErrNotFound          = errors.New("public visibility not found")
+	ErrDisabled          = errors.New("public visibility disabled")
 	ErrInvalidTransition = errors.New("public visibility moderation transition invalid")
 )
 
@@ -62,6 +64,7 @@ type repository interface {
 	GetPolicy(ctx context.Context, tenantID string) (*repo.Policy, error)
 	ListSubjects(ctx context.Context, filter repo.ListFilter) (repo.ListResult, error)
 	GetRequestPublication(ctx context.Context, tenantID string, requestID uuid.UUID) (*repo.RequestPublication, error)
+	ListPublicRequestComments(ctx context.Context, tenantSlug string, publicSlug string, viewerSubjectKey string) ([]repo.PublicRequestComment, error)
 	UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy repo.Policy) (*repo.Policy, error)
 	UpsertRequestPublicationTx(
 		ctx context.Context,
@@ -83,8 +86,12 @@ type repository interface {
 		reviewedBy string,
 		reviewedAt time.Time,
 	) (*repo.ModerationSubject, error)
-	GetPublicRequestCandidate(ctx context.Context, tenantSlug string, publicSlug string) (*repo.PublicRequestCandidate, error)
+	CreateModerationSubjectTx(ctx context.Context, tx pgx.Tx, subject repo.ModerationSubject) (*repo.ModerationSubject, error)
+	GetPublicRequestCandidate(ctx context.Context, tenantSlug string, publicSlug string, viewerSubjectKey string) (*repo.PublicRequestCandidate, error)
 	ListPublicRequestCandidates(ctx context.Context, filter repo.PublicRequestListFilter) (repo.PublicRequestListResult, error)
+	AddPublicRequestVoteTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID, subjectKey string, subjectHash string, subjectDisplay string, createdBy string) error
+	RemovePublicRequestVoteTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID, subjectKey string) error
+	AddPublicRequestCommentTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID, subjectKey string, subjectHash string, subjectDisplay string, body string, createdBy string) (*repo.PublicRequestComment, error)
 }
 
 type UpdatePolicyInput struct {
@@ -156,7 +163,10 @@ type PublicRequest struct {
 	Policy           repo.Policy
 	Votes            int
 	Comments         int
+	CommentItems     []repo.PublicRequestComment
 	SubmitterDisplay string
+	ViewerHasVoted   bool
+	CanComment       bool
 	NoIndex          bool
 }
 
@@ -318,13 +328,13 @@ func (s *Service) Moderate(ctx context.Context, in ModerateInput) (repo.Moderati
 	return ptrext.Indirect(after), nil
 }
 
-func (s *Service) GetPublicRequest(ctx context.Context, tenantSlug string, publicSlug string) (PublicRequest, error) {
+func (s *Service) GetPublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string) (PublicRequest, error) {
 	tenantSlug = strings.TrimSpace(tenantSlug)
 	publicSlug = strings.TrimSpace(publicSlug)
 	if tenantSlug == "" || publicSlug == "" {
 		return PublicRequest{}, ErrNotFound
 	}
-	candidate, err := s.repo.GetPublicRequestCandidate(ctx, tenantSlug, publicSlug)
+	candidate, err := s.repo.GetPublicRequestCandidate(ctx, tenantSlug, publicSlug, portalVisitorSubjectKey(visitorID))
 	if errors.Is(err, repo.ErrNotFound) {
 		return PublicRequest{}, ErrNotFound
 	}
@@ -334,15 +344,27 @@ func (s *Service) GetPublicRequest(ctx context.Context, tenantSlug string, publi
 	if !publicRequestVisible(ptrext.Indirect(candidate)) {
 		return PublicRequest{}, ErrNotFound
 	}
-	return publicRequestFromCandidate(ptrext.Indirect(candidate)), nil
+	request := publicRequestFromCandidate(ptrext.Indirect(candidate))
+	if publicCommentsVisible(request.Policy) {
+		comments, err := s.repo.ListPublicRequestComments(ctx, tenantSlug, publicSlug, portalVisitorSubjectKey(visitorID))
+		if errors.Is(err, repo.ErrNotFound) {
+			return PublicRequest{}, ErrNotFound
+		}
+		if err != nil {
+			return PublicRequest{}, err
+		}
+		request.CommentItems = comments
+	}
+	request.CanComment = publicCommentWriteEnabled(request.Policy)
+	return request, nil
 }
 
-func (s *Service) ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string) (PublicRequestList, error) {
-	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, false)
+func (s *Service) ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (PublicRequestList, error) {
+	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, false, visitorID)
 }
 
-func (s *Service) ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string) (PublicRequestList, error) {
-	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, true)
+func (s *Service) ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (PublicRequestList, error) {
+	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, true, visitorID)
 }
 
 func (s *Service) listPublicRequests(
@@ -351,16 +373,18 @@ func (s *Service) listPublicRequests(
 	limit int,
 	cursor string,
 	roadmap bool,
+	visitorID string,
 ) (PublicRequestList, error) {
 	tenantSlug = strings.TrimSpace(tenantSlug)
 	if tenantSlug == "" {
 		return PublicRequestList{}, ErrNotFound
 	}
 	result, err := s.repo.ListPublicRequestCandidates(ctx, repo.PublicRequestListFilter{
-		TenantSlug: tenantSlug,
-		Roadmap:    roadmap,
-		Limit:      limit,
-		Cursor:     strings.TrimSpace(cursor),
+		TenantSlug:       tenantSlug,
+		Roadmap:          roadmap,
+		Limit:            limit,
+		Cursor:           strings.TrimSpace(cursor),
+		ViewerSubjectKey: portalVisitorSubjectKey(visitorID),
 	})
 	if errors.Is(err, repo.ErrNotFound) {
 		return PublicRequestList{}, ErrNotFound
@@ -383,6 +407,148 @@ func (s *Service) listPublicRequests(
 		NoIndex:    !result.Policy.SearchIndexingEnabled,
 		NextCursor: result.NextCursor,
 	}, nil
+}
+
+func (s *Service) VotePublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, actor auditlogsvc.Actor) (PublicRequest, error) {
+	target, subjectKey, subjectHash, err := s.resolvePublicVoteTarget(ctx, tenantSlug, publicSlug, visitorID)
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.repo.AddPublicRequestVoteTx(ctx, tx, target.Policy.TenantID, target.CustomerRequestID, subjectKey, subjectHash, portalVisitorSubjectDisplay(), actorID(actor)); err != nil {
+		if errors.Is(err, repo.ErrNotFound) {
+			return PublicRequest{}, ErrNotFound
+		}
+		return PublicRequest{}, err
+	}
+	if err := s.recordPortalVoteAuditTx(ctx, tx, actor, "customer_request.add_vote", target, subjectKey, subjectHash); err != nil {
+		return PublicRequest{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PublicRequest{}, err
+	}
+	return s.GetPublicRequest(ctx, tenantSlug, publicSlug, visitorID)
+}
+
+func (s *Service) CreatePublicRequestComment(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, body string, actor auditlogsvc.Actor) (PublicRequest, error) {
+	target, subjectKey, subjectHash, trimmedBody, err := s.resolvePublicCommentTarget(ctx, tenantSlug, publicSlug, visitorID, body)
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	comment, err := s.repo.AddPublicRequestCommentTx(
+		ctx,
+		tx,
+		target.Policy.TenantID,
+		target.CustomerRequestID,
+		subjectKey,
+		subjectHash,
+		portalVisitorSubjectDisplay(),
+		trimmedBody,
+		actorID(actor),
+	)
+	if errors.Is(err, repo.ErrNotFound) {
+		return PublicRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	subject, err := s.repo.CreateModerationSubjectTx(ctx, tx, repo.ModerationSubject{
+		TenantID:               target.Policy.TenantID,
+		Surface:                repo.SurfaceRequestComment,
+		SubjectID:              comment.ID.String(),
+		State:                  target.Policy.DefaultCommentState,
+		SubmittedByDisplay:     comment.SubmittedByDisplay,
+		SubmittedByFingerprint: subjectHash,
+	})
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	if err := s.recordPortalCommentAuditTx(ctx, tx, actor, target, subjectKey, subjectHash, comment, ptrext.Indirect(subject)); err != nil {
+		return PublicRequest{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PublicRequest{}, err
+	}
+	return s.GetPublicRequest(ctx, tenantSlug, publicSlug, visitorID)
+}
+
+func (s *Service) UnvotePublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, actor auditlogsvc.Actor) (PublicRequest, error) {
+	target, subjectKey, subjectHash, err := s.resolvePublicVoteTarget(ctx, tenantSlug, publicSlug, visitorID)
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	tx, err := s.repo.Begin(ctx)
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := s.repo.RemovePublicRequestVoteTx(ctx, tx, target.Policy.TenantID, target.CustomerRequestID, subjectKey); err != nil {
+		return PublicRequest{}, err
+	}
+	if err := s.recordPortalVoteAuditTx(ctx, tx, actor, "customer_request.remove_vote", target, subjectKey, subjectHash); err != nil {
+		return PublicRequest{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PublicRequest{}, err
+	}
+	return s.GetPublicRequest(ctx, tenantSlug, publicSlug, visitorID)
+}
+
+func (s *Service) resolvePublicVoteTarget(ctx context.Context, tenantSlug string, publicSlug string, visitorID string) (repo.PublicRequestCandidate, string, string, error) {
+	visitorSubjectKey := portalVisitorSubjectKey(visitorID)
+	if visitorSubjectKey == "" {
+		return repo.PublicRequestCandidate{}, "", "", ErrValidation
+	}
+	candidate, err := s.repo.GetPublicRequestCandidate(ctx, tenantSlug, publicSlug, visitorSubjectKey)
+	if errors.Is(err, repo.ErrNotFound) {
+		return repo.PublicRequestCandidate{}, "", "", ErrNotFound
+	}
+	if err != nil {
+		return repo.PublicRequestCandidate{}, "", "", err
+	}
+	if !publicRequestVisible(ptrext.Indirect(candidate)) {
+		return repo.PublicRequestCandidate{}, "", "", ErrNotFound
+	}
+	if candidate.Policy.VoteWriteMode == repo.WriteModeDisabled {
+		return repo.PublicRequestCandidate{}, "", "", ErrDisabled
+	}
+	subjectHash := subjectkey.Hash(candidate.Policy.TenantID, visitorSubjectKey)
+	return ptrext.Indirect(candidate), visitorSubjectKey, subjectHash, nil
+}
+
+func (s *Service) resolvePublicCommentTarget(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, body string) (repo.PublicRequestCandidate, string, string, string, error) {
+	visitorSubjectKey := portalVisitorSubjectKey(visitorID)
+	if visitorSubjectKey == "" {
+		return repo.PublicRequestCandidate{}, "", "", "", ErrValidation
+	}
+	body = strings.TrimSpace(body)
+	if body == "" || tooLong(body, 5000) {
+		return repo.PublicRequestCandidate{}, "", "", "", ErrValidation
+	}
+	candidate, err := s.repo.GetPublicRequestCandidate(ctx, tenantSlug, publicSlug, visitorSubjectKey)
+	if errors.Is(err, repo.ErrNotFound) {
+		return repo.PublicRequestCandidate{}, "", "", "", ErrNotFound
+	}
+	if err != nil {
+		return repo.PublicRequestCandidate{}, "", "", "", err
+	}
+	if !publicRequestVisible(ptrext.Indirect(candidate)) {
+		return repo.PublicRequestCandidate{}, "", "", "", ErrNotFound
+	}
+	if !publicCommentWriteEnabled(candidate.Policy) {
+		return repo.PublicRequestCandidate{}, "", "", "", ErrDisabled
+	}
+	subjectHash := subjectkey.Hash(candidate.Policy.TenantID, visitorSubjectKey)
+	return ptrext.Indirect(candidate), visitorSubjectKey, subjectHash, body, nil
 }
 
 func defaultPolicy(tenantID string) repo.Policy {
@@ -547,6 +713,8 @@ func publicRequestFromCandidate(candidate repo.PublicRequestCandidate) PublicReq
 		Votes:            candidate.VoteCount,
 		Comments:         candidate.CommentCount,
 		SubmitterDisplay: publicSubmitterDisplay(candidate.Policy, candidate.SubmitterDisplay),
+		ViewerHasVoted:   candidate.ViewerHasVoted,
+		CanComment:       publicCommentWriteEnabled(candidate.Policy),
 		NoIndex:          !candidate.Policy.SearchIndexingEnabled,
 	}
 }
@@ -558,8 +726,22 @@ func publicRequestFromListCandidate(policy repo.Policy, candidate repo.PublicReq
 		Votes:            candidate.VoteCount,
 		Comments:         candidate.CommentCount,
 		SubmitterDisplay: publicSubmitterDisplay(policy, candidate.SubmitterDisplay),
+		ViewerHasVoted:   candidate.ViewerHasVoted,
+		CanComment:       publicCommentWriteEnabled(policy),
 		NoIndex:          !policy.SearchIndexingEnabled,
 	}
+}
+
+func portalVisitorSubjectKey(visitorID string) string {
+	visitorID = strings.TrimSpace(visitorID)
+	if visitorID == "" {
+		return ""
+	}
+	return "portal:" + visitorID
+}
+
+func portalVisitorSubjectDisplay() string {
+	return "Portal visitor"
 }
 
 func publicSubmitterDisplay(policy repo.Policy, display string) string {
@@ -567,6 +749,14 @@ func publicSubmitterDisplay(policy repo.Policy, display string) string {
 		return ""
 	}
 	return display
+}
+
+func publicCommentWriteEnabled(policy repo.Policy) bool {
+	return policy.CommentsEnabled && policy.CommentWriteMode != repo.WriteModeDisabled
+}
+
+func publicCommentsVisible(policy repo.Policy) bool {
+	return policy.CommentsEnabled
 }
 
 func validAccessMode(mode repo.AccessMode) bool {
@@ -649,6 +839,76 @@ func (s *Service) recordRequestProfileAuditTx(
 		Summary:    "Updated public request profile",
 		Before:     beforeFields,
 		After:      requestProfileAuditFields(after.Profile),
+	})
+}
+
+func (s *Service) recordPortalVoteAuditTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	actor auditlogsvc.Actor,
+	action string,
+	candidate repo.PublicRequestCandidate,
+	subjectKey string,
+	subjectHash string,
+) error {
+	if s.audit == nil {
+		return nil
+	}
+	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
+		TenantID:   candidate.Policy.TenantID,
+		Actor:      actorForAudit(actor),
+		Action:     action,
+		TargetType: "customer_request",
+		TargetID:   candidate.CustomerRequestID.String(),
+		Summary:    strings.TrimSpace(strings.ReplaceAll(action, "_", " ")),
+		Before: map[string]any{
+			"request_id": candidate.Profile.RequestID.String(),
+		},
+		After: map[string]any{
+			"request_id":    candidate.Profile.RequestID.String(),
+			"subject_key":   subjectKey,
+			"subject_hash":  subjectHash,
+			"vote_source":   "portal",
+			"vote_count":    candidate.VoteCount,
+			"viewer_voted":  candidate.ViewerHasVoted,
+			"public_slug":   candidate.Profile.PublicSlug,
+			"moderation_id": candidate.Moderation.ID.String(),
+		},
+	})
+}
+
+func (s *Service) recordPortalCommentAuditTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	actor auditlogsvc.Actor,
+	candidate repo.PublicRequestCandidate,
+	subjectKey string,
+	subjectHash string,
+	comment *repo.PublicRequestComment,
+	moderation repo.ModerationSubject,
+) error {
+	if s.audit == nil {
+		return nil
+	}
+	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
+		TenantID:   candidate.Policy.TenantID,
+		Actor:      actorForAudit(actor),
+		Action:     "customer_request.add_comment",
+		TargetType: "customer_request_comment",
+		TargetID:   comment.ID.String(),
+		Summary:    "Added public request comment",
+		Before: map[string]any{
+			"request_id": candidate.Profile.RequestID.String(),
+		},
+		After: map[string]any{
+			"request_id":     candidate.Profile.RequestID.String(),
+			"subject_key":    subjectKey,
+			"subject_hash":   subjectHash,
+			"comment_length": utf8.RuneCountInString(comment.Body),
+			"public_slug":    candidate.Profile.PublicSlug,
+			"moderation_id":  moderation.ID.String(),
+			"state":          moderation.State,
+		},
 	})
 }
 
