@@ -232,20 +232,24 @@ describe('PublicVisibilityPage', () => {
 
   it('loads, updates, and deletes an existing saved moderation view', async () => {
     mockMe('admin')
+    type SavedViewState = {
+      queueView: string
+      surfaces: PublicSurface[]
+    }
     type SavedViewRecord = {
       id: string
       name: string
-      state?: { queueView?: string; surfaces?: string[] }
+      state: SavedViewState
       createdAt: string
       updatedAt: string
     }
     type SavedViewBody = {
       name?: string
-      state?: { queueView?: string; surfaces?: string[] }
+      state?: SavedViewState
     }
     let savedViewBody: SavedViewBody | null = null
     let deletedViewID = ''
-    let savedViews = {
+    let savedViews: { views: SavedViewRecord[] } = {
       views: [
         {
           id: 'view-1',
@@ -256,7 +260,7 @@ describe('PublicVisibilityPage', () => {
           },
           createdAt: '2026-07-10T00:00:00Z',
           updatedAt: '2026-07-10T00:00:00Z',
-        } satisfies SavedViewRecord,
+        },
       ],
     }
 
@@ -268,13 +272,16 @@ describe('PublicVisibilityPage', () => {
       ),
       http.put('/fb/v1/console/public-visibility/views/:id', async ({ request, params }) => {
         savedViewBody = (await request.json()) as SavedViewBody
-        const updated = {
+        const updated: SavedViewRecord = {
           id: params.id as string,
           name: savedViewBody?.name ?? 'Updated portal requests',
-          state: savedViewBody?.state,
+          state: savedViewBody?.state ?? {
+            queueView: 'pending',
+            surfaces: [],
+          },
           createdAt: '2026-07-10T00:00:00Z',
           updatedAt: '2026-07-11T00:00:00Z',
-        } satisfies SavedViewRecord
+        }
         savedViews = { views: [updated] }
         return HttpResponse.json({ view: updated })
       }),
