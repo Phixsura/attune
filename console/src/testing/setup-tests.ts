@@ -62,6 +62,7 @@ beforeEach(() => {
     )
   }
   Element.prototype.scrollIntoView = vi.fn()
+  window.scrollTo = vi.fn()
   if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = vi.fn(() => false)
   if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = vi.fn()
   if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = vi.fn()

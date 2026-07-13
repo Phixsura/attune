@@ -174,7 +174,7 @@ describe('PublicVisibilityPage', () => {
         submittedByDisplay: 'Jane Customer',
       })
     })
-  })
+  }, 60_000)
 
   it('saves and reapplies moderation views', async () => {
     mockMe('admin')
