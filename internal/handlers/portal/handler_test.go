@@ -148,6 +148,62 @@ func TestPublicRequestToProtoIncludesCommentsAndCanComment(t *testing.T) {
 	}
 }
 
+func TestPublicRequestToProtoIncludesSimilarRequests(t *testing.T) {
+	t.Parallel()
+
+	result := pvsvc.PublicRequest{
+		Summary: pvrepo.RequestProfile{
+			ID:            uuid.New(),
+			PublicSlug:    "pricing-api",
+			PublicTitle:   "Pricing API",
+			PublicSummary: "Public summary",
+			PublicState:   "planned",
+			RoadmapColumn: "next",
+		},
+		Policy: pvrepo.Policy{
+			ShowVoteCount:        true,
+			CommentsEnabled:      true,
+			ShowCommentCount:     true,
+			ShowSubmitterDisplay: true,
+		},
+		SimilarRequests: []pvsvc.PublicRequest{{
+			Summary: pvrepo.RequestProfile{
+				ID:            uuid.New(),
+				PublicSlug:    "pricing-dashboard",
+				PublicTitle:   "Pricing Dashboard",
+				PublicSummary: "Dashboard for pricing requests",
+				PublicState:   "planned",
+				RoadmapColumn: "next",
+			},
+			Policy: pvrepo.Policy{
+				ShowVoteCount:        true,
+				CommentsEnabled:      true,
+				ShowCommentCount:     true,
+				ShowSubmitterDisplay: true,
+			},
+			Votes:            4,
+			Comments:         1,
+			SubmitterDisplay: "Ada",
+		}},
+	}
+
+	body, err := protojson.Marshal(publicRequestToProto(result))
+	if err != nil {
+		t.Fatalf("marshal public detail: %v", err)
+	}
+	response := ptrext.Of(attunev1.PublicCustomerRequestDetail{})
+	if err := protojson.Unmarshal(body, response); err != nil {
+		t.Fatalf("unmarshal public detail: %v", err)
+	}
+	if len(response.GetSimilarRequests()) != 1 {
+		t.Fatalf("public detail similar requests = %#v, want one result", response.GetSimilarRequests())
+	}
+	similar := response.GetSimilarRequests()[0]
+	if similar.GetSlug() != "pricing-dashboard" || similar.GetTitle() != "Pricing Dashboard" {
+		t.Fatalf("public detail similar request = %#v, want dashboard suggestion", similar)
+	}
+}
+
 func TestPublicRequestListToProtoStripsPolicyHiddenFields(t *testing.T) {
 	t.Parallel()
 
@@ -276,6 +332,11 @@ func TestListPublicCustomerRequestsSetsRobotsAndNoStoreHeader(t *testing.T) {
 	t.Parallel()
 
 	handler := NewHandler(fakePublicRequestService{
+		wantListQuery:   "pricing",
+		wantListSort:    "recent",
+		wantListState:   "planned",
+		wantListRoadmap: "next",
+		wantListCursor:  "page-2",
 		listResult: pvsvc.PublicRequestList{
 			Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
 			NoIndex:  true,
@@ -296,7 +357,7 @@ func TestListPublicCustomerRequestsSetsRobotsAndNoStoreHeader(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/requests?limit=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/requests?limit=10&q=pricing&sort=recent&state=planned&roadmap=next&cursor=page-2", nil)
 	bound(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -317,6 +378,11 @@ func TestListPublicRoadmapSetsNoStoreHeader(t *testing.T) {
 	t.Parallel()
 
 	handler := NewHandler(fakePublicRequestService{
+		wantRoadmapQuery:   "pricing",
+		wantRoadmapSort:    "recent",
+		wantRoadmapState:   "planned",
+		wantRoadmapRoadmap: "next",
+		wantRoadmapCursor:  "page-2",
 		roadmapResult: pvsvc.PublicRequestList{
 			Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
 		},
@@ -336,7 +402,7 @@ func TestListPublicRoadmapSetsNoStoreHeader(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/roadmap?limit=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/roadmap?limit=10&q=pricing&sort=recent&state=planned&roadmap=next&cursor=page-2", nil)
 	bound(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -355,8 +421,16 @@ func TestRequestsPageRendersBoardAndSetsVisitorCookie(t *testing.T) {
 
 	handler := NewHandler(
 		fakePublicRequestService{
+			wantListQuery:    "pricing",
+			wantListSort:     "recent",
+			wantListState:    "planned",
+			wantListRoadmap:  "next",
+			wantListVoted:    true,
+			wantListComments: true,
+			wantListCursor:   "page-2",
 			listResult: pvsvc.PublicRequestList{
-				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+				Requests:   []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+				NextCursor: "page-3",
 			},
 		},
 		ptrext.Of(fakeSubmissionService{
@@ -370,7 +444,7 @@ func TestRequestsPageRendersBoardAndSetsVisitorCookie(t *testing.T) {
 	)
 
 	rec := httptest.NewRecorder()
-	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests?q=pricing&sort=recent&state=planned&roadmap=next&voted=mine&comments=with&cursor=page-2", "acme", nil)
 	handler.RequestsPage(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -383,10 +457,127 @@ func TestRequestsPageRendersBoardAndSetsVisitorCookie(t *testing.T) {
 		t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Public board", "pricing-api", `data-vote-action`, "Vote"} {
+	for _, want := range []string{"Public board", "pricing-api", `data-vote-action`, "Vote", `value="pricing"`, `value="planned"`, `value="next"`, `name="voted" value="mine" checked`, `name="comments" value="with" checked`, `selected>Recent`, `/portal/acme/requests/pricing-api?comments=with&amp;cursor=page-2&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`, `Load more requests`, `/portal/acme/requests?comments=with&amp;cursor=page-3&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("board body missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestRequestsPageShowsMatchedFiltersEmptyStateForQuickFilters(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			wantListVoted:    true,
+			wantListComments: true,
+			listResult:       pvsvc.PublicRequestList{},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests?voted=mine&comments=with", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"No public requests matched the current filters.", "Clear filters"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("board body missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "No public requests are visible yet.") {
+		t.Fatalf("board body used generic empty state for quick filters: %s", body)
+	}
+}
+
+func TestRequestPageRendersSimilarRequests(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			listResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+			},
+			result: pvsvc.PublicRequest{
+				Summary: pvrepo.RequestProfile{
+					ID:            uuid.New(),
+					PublicSlug:    "pricing-api",
+					PublicTitle:   "Pricing API",
+					PublicSummary: "Public-safe summary",
+					PublicState:   "planned",
+					RoadmapColumn: "next",
+				},
+				Policy: pvrepo.Policy{
+					ShowVoteCount:        true,
+					CommentsEnabled:      false,
+					ShowCommentCount:     false,
+					ShowSubmitterDisplay: true,
+					VoteWriteMode:        pvrepo.WriteModeAnonymous,
+				},
+				Votes:           8,
+				SimilarRequests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-dashboard", "Next")},
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+
+	rec := httptest.NewRecorder()
+	req := requestWithPortalSlug(http.MethodGet, "/portal/acme/requests/pricing-api", "acme", "pricing-api", nil)
+	handler.RequestPage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{"Possible duplicates", "Similar requests", "pricing-dashboard", "/portal/acme/requests/pricing-dashboard"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("request page missing %q: %s", want, body)
+		}
+	}
+}
+
+func TestRequestsPageRejectsInvalidCursor(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			wantListCursor: "bad",
+			err:            pvrepo.ErrInvalidInput,
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests?cursor=bad", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
 }
 
@@ -937,10 +1128,45 @@ type fakePublicRequestService struct {
 	wantCommentBody       string
 	wantCommentTenantSlug string
 	wantCommentPublicSlug string
+	wantListQuery         string
+	wantListSort          string
+	wantListState         string
+	wantListRoadmap       string
+	wantListVoted         bool
+	wantListComments      bool
+	wantListCursor        string
+	wantRoadmapQuery      string
+	wantRoadmapSort       string
+	wantRoadmapState      string
+	wantRoadmapRoadmap    string
+	wantRoadmapVoted      bool
+	wantRoadmapComments   bool
+	wantRoadmapCursor     string
 	err                   error
 }
 
-func (f fakePublicRequestService) ListPublicRequests(context.Context, string, int, string, string) (pvsvc.PublicRequestList, error) {
+func (f fakePublicRequestService) ListPublicRequests(_ context.Context, _ string, _ int, cursor string, query string, sort string, state string, roadmap string, votedOnly bool, commentsOnly bool, _ string) (pvsvc.PublicRequestList, error) {
+	if f.wantListQuery != "" && query != f.wantListQuery {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected list query")
+	}
+	if f.wantListSort != "" && sort != f.wantListSort {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected list sort")
+	}
+	if f.wantListState != "" && state != f.wantListState {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected list state")
+	}
+	if f.wantListRoadmap != "" && roadmap != f.wantListRoadmap {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected list roadmap")
+	}
+	if f.wantListVoted != votedOnly {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected list voted filter")
+	}
+	if f.wantListComments != commentsOnly {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected list comments filter")
+	}
+	if f.wantListCursor != "" && cursor != f.wantListCursor {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected list cursor")
+	}
 	return f.listResult, f.err
 }
 
@@ -948,7 +1174,28 @@ func (f fakePublicRequestService) GetPublicRequest(context.Context, string, stri
 	return f.result, f.err
 }
 
-func (f fakePublicRequestService) ListPublicRoadmap(context.Context, string, int, string, string) (pvsvc.PublicRequestList, error) {
+func (f fakePublicRequestService) ListPublicRoadmap(_ context.Context, _ string, _ int, cursor string, query string, sort string, state string, roadmap string, votedOnly bool, commentsOnly bool, _ string) (pvsvc.PublicRequestList, error) {
+	if f.wantRoadmapQuery != "" && query != f.wantRoadmapQuery {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected roadmap query")
+	}
+	if f.wantRoadmapSort != "" && sort != f.wantRoadmapSort {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected roadmap sort")
+	}
+	if f.wantRoadmapState != "" && state != f.wantRoadmapState {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected roadmap state")
+	}
+	if f.wantRoadmapRoadmap != "" && roadmap != f.wantRoadmapRoadmap {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected roadmap roadmap")
+	}
+	if f.wantRoadmapVoted != votedOnly {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected roadmap voted filter")
+	}
+	if f.wantRoadmapComments != commentsOnly {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected roadmap comments filter")
+	}
+	if f.wantRoadmapCursor != "" && cursor != f.wantRoadmapCursor {
+		return pvsvc.PublicRequestList{}, errors.New("unexpected roadmap cursor")
+	}
 	return f.roadmapResult, f.err
 }
 

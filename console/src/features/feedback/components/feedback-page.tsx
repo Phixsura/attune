@@ -447,7 +447,12 @@ export function FeedbackPage({
     if (feedbackIDs.length === 0) return
     void navigate({
       to: '/feedback/customer-requests',
-      search: { promote_feedback_ids: feedbackIDs.join(','), feedback_id: undefined },
+      search: {
+        request_id: undefined,
+        merge_target_id: undefined,
+        promote_feedback_ids: feedbackIDs.join(','),
+        feedback_id: undefined,
+      },
     })
   }, [navigate, selected])
 

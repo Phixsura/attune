@@ -40,12 +40,12 @@ func mountV1Routes(
 	perKeyRateLimiter *ratelimit.PerKeyLimiter,
 	portalHandler *portal.Handler,
 	portalLimiter middlewareProvider,
-	portalSubmissionLimiter middlewareProvider,
+	portalWriteLimiter middlewareProvider,
 	adminRepo *admin.Repo,
 ) {
 	r.Route("/v1", func(r chi.Router) {
 		mountV1AdapterRoutes(r, pool, inboundMux, inboundSecrets)
-		mountV1PortalRoutes(r, portalHandler, versionMW, portalLimiter, portalSubmissionLimiter)
+		mountV1PortalRoutes(r, portalHandler, versionMW, portalLimiter, portalWriteLimiter)
 		mountV1ApiKeyRoutes(r, cfg, pool, ingestHandler, apiKeys, versionMW, rateLimiter, perKeyRateLimiter, adminRepo)
 	})
 }
@@ -65,14 +65,19 @@ func mountV1PortalRoutes(
 	portalHandler *portal.Handler,
 	versionMW func(http.Handler) http.Handler,
 	portalLimiter middlewareProvider,
-	portalSubmissionLimiter middlewareProvider,
+	portalWriteLimiter middlewareProvider,
 ) {
 	r.Group(func(r chi.Router) {
 		r.Use(versionMW)
 		r.Use(portal.NoStore)
 		r.Use(portalLimiter.Middleware)
 		mountPortalReadRoutes(r, portalHandler)
-		mountPortalWriteRoutes(r, portalHandler, portalSubmissionLimiter)
+	})
+	r.Group(func(r chi.Router) {
+		r.Use(versionMW)
+		r.Use(portal.NoStore)
+		r.Use(portalWriteLimiter.Middleware)
+		mountPortalWriteRoutes(r, portalHandler)
 	})
 }
 
@@ -139,7 +144,6 @@ func mountPortalReadRoutes(r chi.Router, portalHandler *portal.Handler) {
 func mountPortalWriteRoutes(
 	r chi.Router,
 	portalHandler *portal.Handler,
-	portalSubmissionLimiter middlewareProvider,
 ) {
 	r.Post("/portal/{tenant_slug}/requests/{public_slug}/votes", dispatcher.Bind(
 		"portal.Handler.VotePublicCustomerRequest",
@@ -190,7 +194,7 @@ func mountPortalWriteRoutes(
 		portalHandler.CreatePublicCustomerComment,
 		dispatcher.WithAuth(okAuth[attunev1.CreatePublicCustomerCommentRequest]),
 	))
-	r.With(portalSubmissionLimiter.Middleware).Post("/portal/{tenant_slug}/submissions", dispatcher.Bind(
+	r.Post("/portal/{tenant_slug}/submissions", dispatcher.Bind(
 		"portal.Handler.CreatePublicSubmission",
 		dispatcher.Custom(
 			func() *attunev1.CreatePublicSubmissionRequest {

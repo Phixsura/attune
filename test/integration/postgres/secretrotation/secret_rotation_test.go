@@ -3,18 +3,13 @@
 package secretrotation_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	tinkaead "github.com/tink-crypto/tink-go/v2/aead"
-	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
-	"github.com/tink-crypto/tink-go/v2/keyset"
 
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
 	"github.com/Phixsura/attune/internal/inbound/adapter/webhook"
@@ -159,40 +154,17 @@ func assertPrimaryKeyID(t *testing.T, store *secretstore.TinkStore, want string)
 
 func rotationKeysets(t *testing.T) (oldRaw, combinedRaw, oldID, newID string) {
 	t.Helper()
-	km := keyset.NewManager()
-	oldUint, err := km.Add(tinkaead.AES256GCMKeyTemplate())
+	oldRaw, err := secretstore.GenerateAES256GCMKeysetJSON()
 	if err != nil {
-		t.Fatalf("add old key: %v", err)
+		t.Fatalf("generate old keyset: %v", err)
 	}
-	if err := km.SetPrimary(oldUint); err != nil {
-		t.Fatalf("set old primary: %v", err)
-	}
-	oldHandle, err := km.Handle()
-	if err != nil {
-		t.Fatalf("old handle: %v", err)
-	}
-	newUint, err := km.Add(tinkaead.AES256GCMKeyTemplate())
+	oldStore := mustTinkStore(t, oldRaw)
+	oldID = oldStore.PrimaryKeyID()
+	combinedRaw, newID, err = secretstore.AddAES256GCMKeyToKeysetJSON(oldRaw, true)
 	if err != nil {
 		t.Fatalf("add new key: %v", err)
 	}
-	if err := km.SetPrimary(newUint); err != nil {
-		t.Fatalf("set new primary: %v", err)
-	}
-	combinedHandle, err := km.Handle()
-	if err != nil {
-		t.Fatalf("combined handle: %v", err)
-	}
-	return writeKeyset(t, oldHandle), writeKeyset(t, combinedHandle),
-		fmt.Sprintf("%d", oldUint), fmt.Sprintf("%d", newUint)
-}
-
-func writeKeyset(t *testing.T, handle *keyset.Handle) string {
-	t.Helper()
-	var buf bytes.Buffer
-	if err := insecurecleartextkeyset.Write(handle, keyset.NewJSONWriter(&buf)); err != nil {
-		t.Fatalf("write keyset: %v", err)
-	}
-	return buf.String()
+	return oldRaw, combinedRaw, oldID, newID
 }
 
 func mustTinkStore(t *testing.T, raw string) *secretstore.TinkStore {

@@ -9,7 +9,7 @@
 # falls back to fixed-version local plugins. To change a proto dependency, run
 # `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality maturity-contract demo-seed demo-reset demo-bootstrap test fast-check adversarial-check test-live test-live-list test-integration runtime-smoke release-smoke ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality maturity-contract demo-seed demo-reset demo-bootstrap test fast-check adversarial-check test-live test-live-list test-integration public-board-smoke runtime-smoke release-smoke ci-check
 
 PNPM ?= corepack pnpm
 FUZZTIME ?= 10s
@@ -111,6 +111,9 @@ test-live-list: ## Show which live backends would run given current env.
 test-integration: ## IO tier — real Postgres. Needs Docker or ATTUNE_TEST_DATABASE_URL + PostgreSQL 17 client tools (pg_dump/psql/pg_basebackup/pg_verifybackup) for the restore-drill tests.
 	go test -tags=integration -count=1 -p 1 -timeout=10m ./test/integration/postgres/...
 
+public-board-smoke: ## Browser runtime smoke — temporary local stack, Console bundle build, and portal + Console Chromium coverage.
+	cd console && $(PNPM) --ignore-workspace test:e2e:public-board
+
 runtime-smoke: ## Build the production image and boot it against throwaway pgvector Postgres.
 	docker build -t attune:runtime-smoke .
 	ATTUNE_RUNTIME_SMOKE_IMAGE=attune:runtime-smoke bash scripts/runtime-smoke.sh
@@ -118,6 +121,7 @@ runtime-smoke: ## Build the production image and boot it against throwaway pgvec
 release-smoke: ## Heavy pre-release sweep: CI checks, contracts, integration, deploy, observability, image runtime.
 	$(MAKE) ci-check
 	$(MAKE) test-integration
+	$(MAKE) public-board-smoke
 	$(MAKE) proto-lint
 	$(MAKE) proto-breaking
 	$(MAKE) observability-dashboards

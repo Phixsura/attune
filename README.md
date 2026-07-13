@@ -2,7 +2,7 @@
 
 > **The open-source signal layer between your users and your team.**
 >
-> Apache-2.0 · Go 1.25 · self-hosted · OpenAI-compatible
+> Apache-2.0 · Go 1.26.5 · self-hosted · OpenAI-compatible
 
 Most products bury their best feedback under noise — bug reports stuck in support email, feature requests scattered across Slack DMs, sentiment lost in app store reviews. The gap between *what users say* and *what your team hears* is a lossy channel.
 
@@ -173,7 +173,7 @@ distributed deployments with `attune secrets add-key`, `set-primary`,
 
 | Layer | Tech | Notes |
 |---|---|---|
-| HTTP server | Go 1.25, chi router, structured slog | Single static binary |
+| HTTP server | Go 1.26.5, chi router, structured slog | Single static binary |
 | Storage | PostgreSQL 14+ | pgvector for clustering (v0.5+) |
 | LLM enrichment | DB-managed OpenAI Chat / OpenAI Responses / Anthropic / Gemini channels | Multi-protocol with structured output + [guardrails](docs/guardrails.md) |
 | Outbound | customer HTTPS webhooks · GitHub Issues | Slack / Discord / email in v0.6 (#34) |

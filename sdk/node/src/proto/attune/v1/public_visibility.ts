@@ -183,6 +183,49 @@ export interface ListModerationSubjectsResponse {
   nextCursor?: string | undefined;
 }
 
+export interface PublicVisibilityViewState {
+  /** Supported values: pending, approved, blocked, all. */
+  queueView: string;
+  surfaces: PublicSurface[];
+}
+
+export interface SavedPublicVisibilityView {
+  id: string;
+  name: string;
+  state?: PublicVisibilityViewState | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ListSavedPublicVisibilityViewsRequest {
+}
+
+export interface ListSavedPublicVisibilityViewsResponse {
+  views: SavedPublicVisibilityView[];
+}
+
+export interface CreateSavedPublicVisibilityViewRequest {
+  name: string;
+  state?: PublicVisibilityViewState | undefined;
+}
+
+export interface UpdateSavedPublicVisibilityViewRequest {
+  id: string;
+  name: string;
+  state?: PublicVisibilityViewState | undefined;
+}
+
+export interface SavedPublicVisibilityViewResponse {
+  view?: SavedPublicVisibilityView | undefined;
+}
+
+export interface DeleteSavedPublicVisibilityViewRequest {
+  id: string;
+}
+
+export interface DeleteSavedPublicVisibilityViewResponse {
+}
+
 export interface ModerationSubject {
   id: string;
   tenantId: string;
@@ -291,6 +334,14 @@ export interface ListPublicCustomerRequestsRequest {
   tenantSlug: string;
   limit: number;
   cursor: string;
+  /** Free-text search over public titles, summaries, and approved comments. */
+  q: string;
+  /** Board sort order. Supported values: top, recent. */
+  sort: string;
+  /** Filter by public state label, such as planned or shipped. */
+  state: string;
+  /** Filter by roadmap column label, such as Now or Next. */
+  roadmap: string;
 }
 
 export interface ListPublicCustomerRequestsResponse {
@@ -302,6 +353,14 @@ export interface ListPublicRoadmapRequest {
   tenantSlug: string;
   limit: number;
   cursor: string;
+  /** Free-text search over public titles, summaries, and approved comments. */
+  q: string;
+  /** Roadmap list sort order. Supported values: top, recent. */
+  sort: string;
+  /** Filter by public state label, such as planned or shipped. */
+  state: string;
+  /** Filter by roadmap column label, such as Now or Next. */
+  roadmap: string;
 }
 
 export interface PublicRoadmapColumn {
@@ -334,6 +393,7 @@ export interface PublicCustomerRequestDetail {
   links: string[];
   comments: PublicCustomerRequestComment[];
   canComment?: boolean | undefined;
+  similarRequests: PublicCustomerRequestSummary[];
 }
 
 export interface PublicCustomerRequestComment {
@@ -348,6 +408,18 @@ export interface PublicVisibilityService {
   GetPublicVisibilityPolicy(request: GetPublicVisibilityPolicyRequest): Promise<PublicVisibilityPolicy>;
   UpdatePublicVisibilityPolicy(request: UpdatePublicVisibilityPolicyRequest): Promise<PublicVisibilityPolicy>;
   ListModerationSubjects(request: ListModerationSubjectsRequest): Promise<ListModerationSubjectsResponse>;
+  ListSavedPublicVisibilityViews(
+    request: ListSavedPublicVisibilityViewsRequest,
+  ): Promise<ListSavedPublicVisibilityViewsResponse>;
+  CreateSavedPublicVisibilityView(
+    request: CreateSavedPublicVisibilityViewRequest,
+  ): Promise<SavedPublicVisibilityViewResponse>;
+  UpdateSavedPublicVisibilityView(
+    request: UpdateSavedPublicVisibilityViewRequest,
+  ): Promise<SavedPublicVisibilityViewResponse>;
+  DeleteSavedPublicVisibilityView(
+    request: DeleteSavedPublicVisibilityViewRequest,
+  ): Promise<DeleteSavedPublicVisibilityViewResponse>;
   GetPublicRequestProfile(request: GetPublicRequestProfileRequest): Promise<PublicRequestPublication>;
   UpsertPublicRequestProfile(request: UpsertPublicRequestProfileRequest): Promise<PublicRequestPublication>;
   ApproveModerationSubject(request: ApproveModerationSubjectRequest): Promise<ModerationSubject>;

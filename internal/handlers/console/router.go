@@ -433,151 +433,218 @@ func (r *Router) mountPublicVisibility(m chi.Router) {
 		return
 	}
 	m.Route("/public-visibility", func(pv chi.Router) {
-		pv.With(r.requireDelegatedAdmin).Get("/policy", dispatcher.Bind(
-			"console.PublicVisibilityHandler.GetPolicy",
-			dispatcher.Empty(func() *attunev1.GetPublicVisibilityPolicyRequest {
-				return ptrext.Of(attunev1.GetPublicVisibilityPolicyRequest{})
-			}),
-			r.publicVisibility.GetPolicy,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetPublicVisibilityPolicyRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireDelegatedAdminStrict).Put("/policy", dispatcher.Bind(
-			"console.PublicVisibilityHandler.UpdatePolicy",
-			dispatcher.JSON(func() *attunev1.UpdatePublicVisibilityPolicyRequest {
-				return ptrext.Of(attunev1.UpdatePublicVisibilityPolicyRequest{})
-			}),
-			r.publicVisibility.UpdatePolicy,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdatePublicVisibilityPolicyRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireMember).Get("/moderation", dispatcher.Bind(
-			"console.PublicVisibilityHandler.ListModeration",
-			dispatcher.Query(
-				func() *attunev1.ListModerationSubjectsRequest {
-					return ptrext.Of(attunev1.ListModerationSubjectsRequest{})
-				},
-				consolepublicvisibility.BindListRequest,
-			),
-			r.publicVisibility.ListModeration,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListModerationSubjectsRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireMember).Get("/requests/{request_id}/profile", dispatcher.Bind(
-			"console.PublicVisibilityHandler.GetRequestProfile",
-			dispatcher.Combine(
-				func() *attunev1.GetPublicRequestProfileRequest {
-					return ptrext.Of(attunev1.GetPublicRequestProfileRequest{})
-				},
-				dispatcher.Param("request_id", func(req *attunev1.GetPublicRequestProfileRequest, id string) {
-					req.RequestId = id
-				}),
-			),
-			r.publicVisibility.GetRequestProfile,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetPublicRequestProfileRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireDelegatedAdminStrict).Put("/requests/{request_id}/profile", dispatcher.Bind(
-			"console.PublicVisibilityHandler.UpsertRequestProfile",
-			dispatcher.Combine(
-				func() *attunev1.UpsertPublicRequestProfileRequest {
-					return ptrext.Of(attunev1.UpsertPublicRequestProfileRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.UpsertPublicRequestProfileRequest],
-				dispatcher.Param("request_id", func(req *attunev1.UpsertPublicRequestProfileRequest, id string) {
-					req.RequestId = id
-				}),
-			),
-			r.publicVisibility.UpsertRequestProfile,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertPublicRequestProfileRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireMember).Post("/moderation/{id}:approve", dispatcher.Bind(
-			"console.PublicVisibilityHandler.Approve",
-			dispatcher.Combine(
-				func() *attunev1.ApproveModerationSubjectRequest {
-					return ptrext.Of(attunev1.ApproveModerationSubjectRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.ApproveModerationSubjectRequest],
-				dispatcher.Param("id", func(req *attunev1.ApproveModerationSubjectRequest, id string) {
-					req.Id = id
-				}),
-			),
-			r.publicVisibility.Approve,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ApproveModerationSubjectRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireMember).Post("/moderation/{id}:reject", dispatcher.Bind(
-			"console.PublicVisibilityHandler.Reject",
-			dispatcher.Combine(
-				func() *attunev1.RejectModerationSubjectRequest {
-					return ptrext.Of(attunev1.RejectModerationSubjectRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.RejectModerationSubjectRequest],
-				dispatcher.Param("id", func(req *attunev1.RejectModerationSubjectRequest, id string) {
-					req.Id = id
-				}),
-			),
-			r.publicVisibility.Reject,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RejectModerationSubjectRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireDelegatedAdminStrict).Post("/moderation/{id}:hide", dispatcher.Bind(
-			"console.PublicVisibilityHandler.Hide",
-			dispatcher.Combine(
-				func() *attunev1.HideModerationSubjectRequest {
-					return ptrext.Of(attunev1.HideModerationSubjectRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.HideModerationSubjectRequest],
-				dispatcher.Param("id", func(req *attunev1.HideModerationSubjectRequest, id string) {
-					req.Id = id
-				}),
-			),
-			r.publicVisibility.Hide,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.HideModerationSubjectRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireDelegatedAdminStrict).Post("/moderation/{id}:mark-spam", dispatcher.Bind(
-			"console.PublicVisibilityHandler.MarkSpam",
-			dispatcher.Combine(
-				func() *attunev1.MarkModerationSubjectSpamRequest {
-					return ptrext.Of(attunev1.MarkModerationSubjectSpamRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.MarkModerationSubjectSpamRequest],
-				dispatcher.Param("id", func(req *attunev1.MarkModerationSubjectSpamRequest, id string) {
-					req.Id = id
-				}),
-			),
-			r.publicVisibility.MarkSpam,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.MarkModerationSubjectSpamRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
-		pv.With(r.requireDelegatedAdminStrict).Post("/moderation/{id}:restore", dispatcher.Bind(
-			"console.PublicVisibilityHandler.Restore",
-			dispatcher.Combine(
-				func() *attunev1.RestoreModerationSubjectRequest {
-					return ptrext.Of(attunev1.RestoreModerationSubjectRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.RestoreModerationSubjectRequest],
-				dispatcher.Param("id", func(req *attunev1.RestoreModerationSubjectRequest, id string) {
-					req.Id = id
-				}),
-			),
-			r.publicVisibility.Restore,
-			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RestoreModerationSubjectRequest) (*session.AuthCtx, error) {
-				return session.FromContext(r.Context()), nil
-			}),
-		))
+		r.mountPublicVisibilityPolicy(pv)
+		r.mountPublicVisibilitySavedViews(pv)
+		r.mountPublicVisibilityRequests(pv)
+		r.mountPublicVisibilityModeration(pv)
 	})
+}
+
+func (r *Router) mountPublicVisibilityPolicy(pv chi.Router) {
+	pv.With(r.requireDelegatedAdmin).Get("/policy", dispatcher.Bind(
+		"console.PublicVisibilityHandler.GetPolicy",
+		dispatcher.Empty(func() *attunev1.GetPublicVisibilityPolicyRequest {
+			return ptrext.Of(attunev1.GetPublicVisibilityPolicyRequest{})
+		}),
+		r.publicVisibility.GetPolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetPublicVisibilityPolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireDelegatedAdminStrict).Put("/policy", dispatcher.Bind(
+		"console.PublicVisibilityHandler.UpdatePolicy",
+		dispatcher.JSON(func() *attunev1.UpdatePublicVisibilityPolicyRequest {
+			return ptrext.Of(attunev1.UpdatePublicVisibilityPolicyRequest{})
+		}),
+		r.publicVisibility.UpdatePolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdatePublicVisibilityPolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireMember).Get("/moderation", dispatcher.Bind(
+		"console.PublicVisibilityHandler.ListModeration",
+		dispatcher.Query(
+			func() *attunev1.ListModerationSubjectsRequest {
+				return ptrext.Of(attunev1.ListModerationSubjectsRequest{})
+			},
+			consolepublicvisibility.BindListRequest,
+		),
+		r.publicVisibility.ListModeration,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListModerationSubjectsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountPublicVisibilitySavedViews(pv chi.Router) {
+	pv.With(r.requireMember).Get("/views", dispatcher.Bind(
+		"console.PublicVisibilityHandler.ListSavedViews",
+		dispatcher.Empty(func() *attunev1.ListSavedPublicVisibilityViewsRequest {
+			return ptrext.Of(attunev1.ListSavedPublicVisibilityViewsRequest{})
+		}),
+		r.publicVisibility.ListSavedViews,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSavedPublicVisibilityViewsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireMember).Post("/views", dispatcher.Bind(
+		"console.PublicVisibilityHandler.CreateSavedView",
+		dispatcher.JSON(func() *attunev1.CreateSavedPublicVisibilityViewRequest {
+			return ptrext.Of(attunev1.CreateSavedPublicVisibilityViewRequest{})
+		}),
+		r.publicVisibility.CreateSavedView,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateSavedPublicVisibilityViewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireMember).Put("/views/{id}", dispatcher.Bind(
+		"console.PublicVisibilityHandler.UpdateSavedView",
+		dispatcher.Combine(
+			func() *attunev1.UpdateSavedPublicVisibilityViewRequest {
+				return ptrext.Of(attunev1.UpdateSavedPublicVisibilityViewRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateSavedPublicVisibilityViewRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateSavedPublicVisibilityViewRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.publicVisibility.UpdateSavedView,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateSavedPublicVisibilityViewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireMember).Delete("/views/{id}", dispatcher.Bind(
+		"console.PublicVisibilityHandler.DeleteSavedView",
+		dispatcher.Path(
+			func() *attunev1.DeleteSavedPublicVisibilityViewRequest {
+				return ptrext.Of(attunev1.DeleteSavedPublicVisibilityViewRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.DeleteSavedPublicVisibilityViewRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.publicVisibility.DeleteSavedView,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteSavedPublicVisibilityViewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountPublicVisibilityRequests(pv chi.Router) {
+	pv.With(r.requireMember).Get("/requests/{request_id}/profile", dispatcher.Bind(
+		"console.PublicVisibilityHandler.GetRequestProfile",
+		dispatcher.Combine(
+			func() *attunev1.GetPublicRequestProfileRequest {
+				return ptrext.Of(attunev1.GetPublicRequestProfileRequest{})
+			},
+			dispatcher.Param("request_id", func(req *attunev1.GetPublicRequestProfileRequest, id string) {
+				req.RequestId = id
+			}),
+		),
+		r.publicVisibility.GetRequestProfile,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetPublicRequestProfileRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireDelegatedAdminStrict).Put("/requests/{request_id}/profile", dispatcher.Bind(
+		"console.PublicVisibilityHandler.UpsertRequestProfile",
+		dispatcher.Combine(
+			func() *attunev1.UpsertPublicRequestProfileRequest {
+				return ptrext.Of(attunev1.UpsertPublicRequestProfileRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpsertPublicRequestProfileRequest],
+			dispatcher.Param("request_id", func(req *attunev1.UpsertPublicRequestProfileRequest, id string) {
+				req.RequestId = id
+			}),
+		),
+		r.publicVisibility.UpsertRequestProfile,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertPublicRequestProfileRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountPublicVisibilityModeration(pv chi.Router) {
+	pv.With(r.requireMember).Post("/moderation/{id}:approve", dispatcher.Bind(
+		"console.PublicVisibilityHandler.Approve",
+		dispatcher.Combine(
+			func() *attunev1.ApproveModerationSubjectRequest {
+				return ptrext.Of(attunev1.ApproveModerationSubjectRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.ApproveModerationSubjectRequest],
+			dispatcher.Param("id", func(req *attunev1.ApproveModerationSubjectRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.publicVisibility.Approve,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ApproveModerationSubjectRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireMember).Post("/moderation/{id}:reject", dispatcher.Bind(
+		"console.PublicVisibilityHandler.Reject",
+		dispatcher.Combine(
+			func() *attunev1.RejectModerationSubjectRequest {
+				return ptrext.Of(attunev1.RejectModerationSubjectRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.RejectModerationSubjectRequest],
+			dispatcher.Param("id", func(req *attunev1.RejectModerationSubjectRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.publicVisibility.Reject,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RejectModerationSubjectRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireDelegatedAdminStrict).Post("/moderation/{id}:hide", dispatcher.Bind(
+		"console.PublicVisibilityHandler.Hide",
+		dispatcher.Combine(
+			func() *attunev1.HideModerationSubjectRequest {
+				return ptrext.Of(attunev1.HideModerationSubjectRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.HideModerationSubjectRequest],
+			dispatcher.Param("id", func(req *attunev1.HideModerationSubjectRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.publicVisibility.Hide,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.HideModerationSubjectRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireDelegatedAdminStrict).Post("/moderation/{id}:mark-spam", dispatcher.Bind(
+		"console.PublicVisibilityHandler.MarkSpam",
+		dispatcher.Combine(
+			func() *attunev1.MarkModerationSubjectSpamRequest {
+				return ptrext.Of(attunev1.MarkModerationSubjectSpamRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.MarkModerationSubjectSpamRequest],
+			dispatcher.Param("id", func(req *attunev1.MarkModerationSubjectSpamRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.publicVisibility.MarkSpam,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.MarkModerationSubjectSpamRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	pv.With(r.requireDelegatedAdminStrict).Post("/moderation/{id}:restore", dispatcher.Bind(
+		"console.PublicVisibilityHandler.Restore",
+		dispatcher.Combine(
+			func() *attunev1.RestoreModerationSubjectRequest {
+				return ptrext.Of(attunev1.RestoreModerationSubjectRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.RestoreModerationSubjectRequest],
+			dispatcher.Param("id", func(req *attunev1.RestoreModerationSubjectRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.publicVisibility.Restore,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RestoreModerationSubjectRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountCustomerRequests(m chi.Router) {

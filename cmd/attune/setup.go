@@ -57,6 +57,7 @@ import (
 	oidcuserrepo "github.com/Phixsura/attune/internal/repo/oidcuser"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	publicvisibilityrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	publicvisibilityviewrepo "github.com/Phixsura/attune/internal/repo/publicvisibilityview"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	systemsettingsrepo "github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenant"
@@ -81,6 +82,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/oidcauth"
 	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
+	publicvisibilityviewsvc "github.com/Phixsura/attune/internal/service/publicvisibilityview"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 	"github.com/Phixsura/attune/internal/service/securityalert"
 	"github.com/Phixsura/attune/internal/service/semanticsearch"
@@ -327,7 +329,9 @@ func buildCustomerRequestHandler(pool *pgxpool.Pool, idempotencyRepo idempotency
 }
 
 func buildPublicVisibilityHandler(pool *pgxpool.Pool, auditLogSvc *auditlogsvc.Service) *consolepublicvisibility.Handler {
-	return console.NewPublicVisibilityHandler(publicvisibilitysvc.New(publicvisibilityrepo.New(pool), auditLogSvc))
+	handler := console.NewPublicVisibilityHandler(publicvisibilitysvc.New(publicvisibilityrepo.New(pool), auditLogSvc))
+	handler.SetSavedViewService(publicvisibilityviewsvc.New(publicvisibilityviewrepo.New(systemsettingsrepo.NewRepo(pool))))
+	return handler
 }
 
 func buildBatchHandler(feedbackRepo *feedback.FeedbackRepo, idempotencyRepo idempotencyrepo.Store, jobRepo feedbackjobrepo.Store) (feedbackbatch.Service, *consolefeedback.BatchHandler) {

@@ -19,6 +19,7 @@ import {
   hideModerationSubject,
   markModerationSubjectSpam,
   moderationSubjectsQuery,
+  publicRequestDetailQuery,
   publicVisibilityPolicyQuery,
   publicVisibilityQueryKeys,
   rejectModerationSubject,
@@ -100,6 +101,42 @@ const publicationFixture: PublicRequestPublication = {
   moderation: subjectFixture,
 }
 
+const publicRequestDetailFixture = {
+  request: {
+    id: 'request-1',
+    slug: 'billing-export',
+    title: 'Billing export',
+    summary: 'Customers can export billing data.',
+    state: 'planned',
+    roadmapColumn: 'Next',
+    voteCount: 12,
+    commentCount: 3,
+    submittedByDisplay: 'Jane Customer',
+    createdAt: '2026-07-10T00:00:00Z',
+    updatedAt: '2026-07-10T00:00:00Z',
+    viewerHasVoted: false,
+  },
+  links: ['/portal/tenant/requests/billing-export'],
+  comments: [],
+  canComment: false,
+  similarRequests: [
+    {
+      id: 'request-2',
+      slug: 'pricing-dashboard',
+      title: 'Pricing dashboard',
+      summary: 'Show pricing comparisons in one place.',
+      state: 'planned',
+      roadmapColumn: 'Next',
+      voteCount: 18,
+      commentCount: 4,
+      submittedByDisplay: 'Portal visitor',
+      createdAt: '2026-07-09T00:00:00Z',
+      updatedAt: '2026-07-10T00:00:00Z',
+      viewerHasVoted: true,
+    },
+  ],
+}
+
 function makeQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -136,12 +173,34 @@ describe('public visibility API client', () => {
     const qc = makeQueryClient()
 
     await expect(qc.fetchQuery(publicVisibilityPolicyQuery())).resolves.toEqual(policyFixture)
-    await expect(qc.fetchQuery(moderationSubjectsQuery())).resolves.toEqual([subjectFixture])
+    await expect(
+      qc.fetchQuery(
+        moderationSubjectsQuery({
+          surfaces: [
+            PublicSurface.PUBLIC_SURFACE_REQUEST,
+            PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION,
+          ],
+        }),
+      ),
+    ).resolves.toEqual([subjectFixture])
     expect(publicVisibilityQueryKeys.policy()).toEqual(['console', 'public-visibility', 'policy'])
     expect(publicVisibilityQueryKeys.moderation()).toEqual([
       'console',
       'public-visibility',
       'moderation',
+    ])
+    expect(
+      publicVisibilityQueryKeys.moderation({
+        surfaces: [
+          PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION,
+          PublicSurface.PUBLIC_SURFACE_REQUEST,
+        ],
+      }),
+    ).toEqual([
+      'console',
+      'public-visibility',
+      'moderation',
+      'PUBLIC_SURFACE_PORTAL_SUBMISSION,PUBLIC_SURFACE_REQUEST',
     ])
     expect(publicVisibilityQueryKeys.requestProfile('request-1')).toEqual([
       'console',
@@ -149,9 +208,19 @@ describe('public visibility API client', () => {
       'request-profile',
       'request-1',
     ])
+    expect(publicVisibilityQueryKeys.publicRequestDetail('tenant-1', 'billing-export')).toEqual([
+      'console',
+      'public-visibility',
+      'public-request-detail',
+      'tenant-1',
+      'billing-export',
+    ])
     expect(seen).toEqual([
       { path: '/fb/v1/console/public-visibility/policy', query: '' },
-      { path: '/fb/v1/console/public-visibility/moderation', query: '?limit=50' },
+      {
+        path: '/fb/v1/console/public-visibility/moderation',
+        query: '?limit=50&surface=PUBLIC_SURFACE_PORTAL_SUBMISSION&surface=PUBLIC_SURFACE_REQUEST',
+      },
     ])
   })
 
@@ -162,6 +231,7 @@ describe('public visibility API client', () => {
       body?: unknown
       csrf: string | null
     }> = []
+    const qc = makeQueryClient()
     server.use(
       http.put('/fb/v1/console/public-visibility/policy', async ({ request }) => {
         requests.push({
@@ -180,6 +250,14 @@ describe('public visibility API client', () => {
         })
         return HttpResponse.json(publicationFixture)
       }),
+      http.get('/fb/v1/portal/:tenantSlug/requests/:publicSlug', ({ request }) => {
+        requests.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          csrf: request.headers.get('x-csrf-token'),
+        })
+        return HttpResponse.json(publicRequestDetailFixture)
+      }),
       http.put(
         '/fb/v1/console/public-visibility/requests/:requestId/profile',
         async ({ request }) => {
@@ -196,6 +274,9 @@ describe('public visibility API client', () => {
 
     await expect(updatePublicVisibilityPolicy(policyFixture)).resolves.toEqual(policyFixture)
     await expect(getPublicRequestProfile('request / one')).resolves.toEqual(publicationFixture)
+    await expect(
+      qc.fetchQuery(publicRequestDetailQuery('tenant', 'billing-export')),
+    ).resolves.toEqual(publicRequestDetailFixture)
     await expect(
       upsertPublicRequestProfile({
         requestId: 'request / one',
@@ -220,6 +301,11 @@ describe('public visibility API client', () => {
       {
         method: 'GET',
         path: '/fb/v1/console/public-visibility/requests/request%20%2F%20one/profile',
+        csrf: null,
+      },
+      {
+        method: 'GET',
+        path: '/fb/v1/portal/tenant/requests/billing-export',
         csrf: null,
       },
       {

@@ -19,6 +19,28 @@ service PublicVisibilityService {
   rpc ListModerationSubjects(ListModerationSubjectsRequest) returns (ListModerationSubjectsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/public-visibility/moderation"};
   }
+  rpc ListSavedPublicVisibilityViews(ListSavedPublicVisibilityViewsRequest)
+      returns (ListSavedPublicVisibilityViewsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/public-visibility/views"};
+  }
+  rpc CreateSavedPublicVisibilityView(CreateSavedPublicVisibilityViewRequest)
+      returns (SavedPublicVisibilityViewResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/public-visibility/views"
+      body: "*"
+    };
+  }
+  rpc UpdateSavedPublicVisibilityView(UpdateSavedPublicVisibilityViewRequest)
+      returns (SavedPublicVisibilityViewResponse) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/public-visibility/views/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteSavedPublicVisibilityView(DeleteSavedPublicVisibilityViewRequest)
+      returns (DeleteSavedPublicVisibilityViewResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/public-visibility/views/{id}"};
+  }
   rpc GetPublicRequestProfile(GetPublicRequestProfileRequest) returns (PublicRequestPublication) {
     option (google.api.http) = {get: "/fb/v1/console/public-visibility/requests/{request_id}/profile"};
   }
@@ -260,6 +282,47 @@ message ListModerationSubjectsResponse {
   optional string next_cursor = 2;
 }
 
+message PublicVisibilityViewState {
+  // Supported values: pending, approved, blocked, all.
+  string queue_view = 1;
+  repeated PublicSurface surfaces = 2;
+}
+
+message SavedPublicVisibilityView {
+  string id = 1;
+  string name = 2;
+  PublicVisibilityViewState state = 3;
+  string created_at = 4;
+  string updated_at = 5;
+}
+
+message ListSavedPublicVisibilityViewsRequest {}
+
+message ListSavedPublicVisibilityViewsResponse {
+  repeated SavedPublicVisibilityView views = 1;
+}
+
+message CreateSavedPublicVisibilityViewRequest {
+  string name = 1;
+  PublicVisibilityViewState state = 2;
+}
+
+message UpdateSavedPublicVisibilityViewRequest {
+  string id = 1;
+  string name = 2;
+  PublicVisibilityViewState state = 3;
+}
+
+message SavedPublicVisibilityViewResponse {
+  SavedPublicVisibilityView view = 1;
+}
+
+message DeleteSavedPublicVisibilityViewRequest {
+  string id = 1;
+}
+
+message DeleteSavedPublicVisibilityViewResponse {}
+
 message ModerationSubject {
   string id = 1;
   string tenant_id = 2;
@@ -368,6 +431,14 @@ message ListPublicCustomerRequestsRequest {
   string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
   uint32 limit = 2;
   string cursor = 3;
+  // Free-text search over public titles, summaries, and approved comments.
+  string q = 4;
+  // Board sort order. Supported values: top, recent.
+  string sort = 5;
+  // Filter by public state label, such as planned or shipped.
+  string state = 6;
+  // Filter by roadmap column label, such as Now or Next.
+  string roadmap = 7;
 }
 
 message ListPublicCustomerRequestsResponse {
@@ -379,6 +450,14 @@ message ListPublicRoadmapRequest {
   string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
   uint32 limit = 2;
   string cursor = 3;
+  // Free-text search over public titles, summaries, and approved comments.
+  string q = 4;
+  // Roadmap list sort order. Supported values: top, recent.
+  string sort = 5;
+  // Filter by public state label, such as planned or shipped.
+  string state = 6;
+  // Filter by roadmap column label, such as Now or Next.
+  string roadmap = 7;
 }
 
 message PublicRoadmapColumn {
@@ -411,6 +490,7 @@ message PublicCustomerRequestDetail {
   repeated string links = 2;
   repeated PublicCustomerRequestComment comments = 3;
   optional bool can_comment = 4;
+  repeated PublicCustomerRequestSummary similar_requests = 5;
 }
 
 message PublicCustomerRequestComment {

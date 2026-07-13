@@ -114,7 +114,7 @@ func buildRouter(
 	perKeyRateLimiter := buildPerKeyRateLimiter(cfg)
 	versionMW := apiversion.Middleware(apiversion.DefaultConfig())
 	portalLimiter := newPortalAnonymousLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
-	portalSubmissionLimiter := newPortalSubmissionLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
+	portalWriteLimiter := newPortalSubmissionLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
 	publicVisibilityRepo := publicvisibilityrepo.New(pool)
 	portalHandler := portal.NewHandler(
 		publicvisibilitysvc.New(publicVisibilityRepo, nil),
@@ -145,7 +145,7 @@ func buildRouter(
 		perKeyRateLimiter,
 		portalHandler,
 		portalLimiter,
-		portalSubmissionLimiter,
+		portalWriteLimiter,
 		adminRepo,
 	)
 

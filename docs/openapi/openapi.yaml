@@ -5793,6 +5793,100 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/views:
+        get:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_ListSavedPublicVisibilityViews
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListSavedPublicVisibilityViewsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_CreateSavedPublicVisibilityView
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateSavedPublicVisibilityViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SavedPublicVisibilityViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/public-visibility/views/{id}:
+        put:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_UpdateSavedPublicVisibilityView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateSavedPublicVisibilityViewRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SavedPublicVisibilityViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        delete:
+            tags:
+                - PublicVisibilityService
+            operationId: PublicVisibilityService_DeleteSavedPublicVisibilityView
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteSavedPublicVisibilityViewResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/quality-actions:
         get:
             tags:
@@ -8469,6 +8563,26 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: q
+                  in: query
+                  description: Free-text search over public titles, summaries, and approved comments.
+                  schema:
+                    type: string
+                - name: sort
+                  in: query
+                  description: 'Board sort order. Supported values: top, recent.'
+                  schema:
+                    type: string
+                - name: state
+                  in: query
+                  description: Filter by public state label, such as planned or shipped.
+                  schema:
+                    type: string
+                - name: roadmap
+                  in: query
+                  description: Filter by roadmap column label, such as Now or Next.
+                  schema:
+                    type: string
                 - name: X-Attune-Api-Version
                   in: header
                   required: false
@@ -8796,6 +8910,26 @@ paths:
                     format: uint32
                 - name: cursor
                   in: query
+                  schema:
+                    type: string
+                - name: q
+                  in: query
+                  description: Free-text search over public titles, summaries, and approved comments.
+                  schema:
+                    type: string
+                - name: sort
+                  in: query
+                  description: 'Roadmap list sort order. Supported values: top, recent.'
+                  schema:
+                    type: string
+                - name: state
+                  in: query
+                  description: Filter by public state label, such as planned or shipped.
+                  schema:
+                    type: string
+                - name: roadmap
+                  in: query
+                  description: Filter by roadmap column label, such as Now or Next.
                   schema:
                     type: string
                 - name: X-Attune-Api-Version
@@ -10360,6 +10494,13 @@ components:
                     type: string
                 state:
                     $ref: '#/components/schemas/AuditLogViewState'
+        CreateSavedPublicVisibilityViewRequest:
+            type: object
+            properties:
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/PublicVisibilityViewState'
         CreateSecretManagerRequest:
             required:
                 - managerType
@@ -11032,6 +11173,9 @@ components:
             type: object
             properties: {}
         DeleteSavedAuditLogViewResponse:
+            type: object
+            properties: {}
+        DeleteSavedPublicVisibilityViewResponse:
             type: object
             properties: {}
         DeleteServiceAccountResponse:
@@ -13475,6 +13619,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/SavedAuditLogView'
+        ListSavedPublicVisibilityViewsResponse:
+            type: object
+            properties:
+                views:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SavedPublicVisibilityView'
         ListScopePresetsResponse:
             type: object
             properties:
@@ -14258,6 +14409,10 @@ components:
                         $ref: '#/components/schemas/PublicCustomerRequestComment'
                 canComment:
                     type: boolean
+                similarRequests:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/PublicCustomerRequestSummary'
         PublicCustomerRequestSummary:
             type: object
             properties:
@@ -14426,6 +14581,24 @@ components:
                     type: string
                 portalSubmissionForm:
                     $ref: '#/components/schemas/PortalSubmissionFormConfig'
+        PublicVisibilityViewState:
+            type: object
+            properties:
+                queueView:
+                    type: string
+                    description: 'Supported values: pending, approved, blocked, all.'
+                surfaces:
+                    type: array
+                    items:
+                        enum:
+                            - PUBLIC_SURFACE_UNSPECIFIED
+                            - PUBLIC_SURFACE_REQUEST
+                            - PUBLIC_SURFACE_REQUEST_COMMENT
+                            - PUBLIC_SURFACE_ROADMAP_ITEM
+                            - PUBLIC_SURFACE_CHANGELOG_POST
+                            - PUBLIC_SURFACE_PORTAL_SUBMISSION
+                        type: string
+                        format: enum
         QualifyExternalConnectionRequest:
             type: object
             properties:
@@ -15239,6 +15412,24 @@ components:
             properties:
                 view:
                     $ref: '#/components/schemas/SavedAuditLogView'
+        SavedPublicVisibilityView:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/PublicVisibilityViewState'
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        SavedPublicVisibilityViewResponse:
+            type: object
+            properties:
+                view:
+                    $ref: '#/components/schemas/SavedPublicVisibilityView'
         ScopeInfo:
             type: object
             properties:
@@ -16308,6 +16499,15 @@ components:
                     type: string
                 state:
                     $ref: '#/components/schemas/AuditLogViewState'
+        UpdateSavedPublicVisibilityViewRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                state:
+                    $ref: '#/components/schemas/PublicVisibilityViewState'
         UpdateServiceAccountRequest:
             required:
                 - id

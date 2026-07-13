@@ -15,7 +15,7 @@
 // text.format json_schema.
 // - anthropic.go — github.com/anthropics/anthropic-sdk-go
 // /v1/messages with forced tool_use for structured output.
-// - gemini.go — google.golang.org/genai generateContent with
+// - gemini.go — direct REST to Gemini generateContent with
 // responseSchema + responseMimeType="application/json".
 //
 // Backend selection is wired by the DB-managed LLM router.

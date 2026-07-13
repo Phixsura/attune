@@ -19,6 +19,7 @@
     "test:e2e:a11y:supplemental": "ATTUNE_CONSOLE_E2E_SUPPLEMENTAL=1 playwright test --config playwright.config.ts --project=edge-desktop --project=firefox-desktop --project=webkit-desktop",
     "test:e2e:a11y:supplemental:ci": "ATTUNE_CONSOLE_E2E_SUPPLEMENTAL=1 ATTUNE_CONSOLE_E2E_SUPPLEMENTAL_PROJECTS=firefox,webkit playwright test --config playwright.config.ts --project=firefox-desktop --project=webkit-desktop",
     "test:e2e:a11y:supplemental:headed": "ATTUNE_CONSOLE_E2E_SUPPLEMENTAL=1 playwright test --config playwright.config.ts --project=edge-desktop --project=firefox-desktop --project=webkit-desktop --headed",
+    "test:e2e:public-board": "node scripts/public-board-smoke.mjs",
     "gen:proto": "cd .. && make proto",
     "arch": "depcruise --config .dependency-cruiser.cjs src"
   },

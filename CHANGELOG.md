@@ -7,15 +7,59 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Security
+
+- Removed `golang.org/x/crypto` from the root dependency graph and raised the
+  Go floor to `1.26.5`. Console password hashing plus break-glass token and
+  recovery-code hashing now use `github.com/ProtonMail/bcrypt`, which keeps
+  bcrypt-compatible stored hashes while dropping the vulnerable `openpgp`
+  package from the module graph.
+
 ### Added
 
-- **Public voting board with visitor identity, vote toggles, and comments.**
-  Added public request list and detail board views at `/portal/{tenant_slug}/requests`,
-  plus `POST`/`DELETE` vote actions and public comment writes under
-  `/v1/portal/{tenant_slug}/requests/{public_slug}`. The board now mints a signed
-  portal visitor cookie, tracks viewer vote state on public request summaries,
-  keeps public vote counts scoped to portal-issued votes, and renders comment
-  threads with public-safe moderation state for the current visitor.
+- **Public visibility moderation saved views and surface filters.**
+  Operators can now save, reapply, update, and delete common public-visibility
+  moderation views, with queue-state and surface filters wired into the Console
+  moderation workspace so common triage states are one click away.
+
+- **Public portal reads and writes now use separate tenant-scoped buckets.**
+  Browsing the public board no longer burns the same rate-limit quota as vote,
+  comment, and submission writes, so high read traffic does not block
+  moderation or engagement actions for the same tenant and visitor network.
+
+- **Public board browser smoke coverage.**
+  Added a local browser smoke for the public board that boots attune against a
+  temporary PostgreSQL cluster, seeds two demo tenants, rebuilds the Console
+  bundle, logs into Console, and exercises list/detail navigation, voting,
+  commenting, tenant-scoped visitor cookies, the public-visibility preview
+  links, Console moderation approval, mobile layout, and roadmap semantics in
+  a real Chromium session.
+
+- **Public board discovery controls.**
+  Added server-rendered search, cursor pagination, top/recent sorting, and
+  state/roadmap filters on the public request board plus matching
+  query-aware public request and roadmap list endpoints, with quick filters
+  for `My votes` and `With comments`, query-preserving detail links,
+  clear-filter empty states, and canonical/next links so visitors can find
+  requests without scanning the full board.
+
+- **Public voting board for portal requests.**
+  Added the public `/portal/{tenant_slug}/requests` board and request detail
+  pages, plus vote/unvote actions and public comment writes under
+  `/v1/portal/{tenant_slug}/requests/{public_slug}`. The board now mints a
+  signed visitor cookie, tracks viewer vote state on public request summaries,
+  keeps public vote counts scoped to portal-issued votes, renders comment
+  threads with public-safe moderation state, surfaces similar requests on the
+  detail page to flag likely duplicates, and ties the Console preview/edit
+  flow to the public visibility policy and request profile. The Console
+  request profile panel now reuses the live public detail projection to show
+  similar requests for operators once the request is actually public, and the
+  Console request profile panel now deep-links back into the matching Customer
+  Requests detail drawer so operators can continue the merge flow without
+  re-searching, with similar-request actions that can prefill the merge target
+  directly from the public board. The Console preview now links directly to
+  both the live public board and the submission page so operators can validate
+  the visitor experience end to end.
 
 - **Slack channel ingest adapter with Console discovery and test flows.**
   Added a first-class Slack inbound source with Console token test,
@@ -42,6 +86,27 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   returning to the queue.
 
 ### Fixed
+
+- **Public board empty states now respect quick filters.**
+  The public board now treats `My votes` and `With comments` as active filters
+  when the result set is empty, so the empty state explains that filters need
+  clearing instead of falling back to the generic "no requests yet" copy.
+
+- **Portal visitor cookies are now tenant-scoped.**
+  Browsers can keep independent public-board identities for multiple tenants on
+  the same origin instead of having the latest visited tenant overwrite the
+  previous visitor cookie.
+
+- **Public portal rate limits are now tenant-scoped.**
+  Reads, votes, comments, and submissions on the public portal now bucket by
+  tenant plus client IP, so one busy board cannot throttle another on the same
+  origin or from the same visitor network.
+
+- **PostgreSQL integration tests now work without a Docker daemon.**
+  The reusable integration harness now falls back to local PostgreSQL
+  binaries when Docker is unavailable, so `make test-integration` still runs a
+  real temporary cluster on developer machines that only have `initdb` and
+  `pg_ctl` installed.
 
 - **Paused inbound source rows now keep readable contrast.**
   The Console inbound sources table now uses a muted background instead of

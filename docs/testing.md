@@ -10,15 +10,15 @@ that cheap tests cannot see.
 | **L0 fast local** | `make fast-check` | local opt-in | $0 | Fast Go unit sweep plus Console typecheck and Vitest. |
 | **L1 CI preflight** | `make ci-check` | PR / before push | $0 | Go race unit tests, lint, complexity, duplication, Console type/build/test/arch checks, and local secret scan when installed. |
 | **L2 contract** | `make proto-lint`, `make proto-breaking`, `make proto` | CI on proto changes | network for Buf remote plugins | Protobuf/OpenAPI/SDK contract shape and generation consistency. |
-| **L3 integration** | `make test-integration` | CI on Go changes; local opt-in | Docker only | Real pgvector PostgreSQL migrations, repos, service/repo transaction paths, restore drills, and queue/outbox smoke tests. |
+| **L3 integration** | `make test-integration` | CI on Go changes; local opt-in | Docker preferred; local PostgreSQL binaries fallback | Real pgvector PostgreSQL migrations, repos, service/repo transaction paths, restore drills, and queue/outbox smoke tests. |
 | **L4 browser** | `cd console && pnpm test:e2e:a11y` | CI on Console changes | browser install | Critical Console routes in real Chromium with API mocks, accessibility, overflow, console-error, and interaction coverage. |
 | **L5 release runtime** | `make runtime-smoke` | pre-release opt-in | Docker only | Built image boots against throwaway pgvector Postgres; health/readiness, Console assets, metrics, migrations, Control Tower routing, and quality schemas are verified. |
 | **L6 live** | `make test-live` | manual only | real API calls | LLM provider round-trips and outbound provider smoke deliveries, all env-gated. |
 
 Use `make release-smoke` before release candidates or large production-facing
 changes. It runs `ci-check`, PostgreSQL integration, proto lint/breaking checks,
-observability rule/dashboard validation, Compose parsing, whitespace checks, and
-the runtime image smoke.
+observability rule/dashboard validation, Compose parsing, whitespace checks,
+the public board + Console browser smoke, and the runtime image smoke.
 
 ## Unit and fast local tier
 
@@ -62,8 +62,8 @@ The integration tier is gated with `//go:build integration`, so the
 default unit sweep stays offline. PostgreSQL suites live under
 `test/integration/postgres/<area>` and use `internal/testdb` to open a
 real `pgxpool`, run every embedded migration before each smoke test,
-and isolate test data with one temporary database or container per
-test.
+and isolate test data with one temporary database, Docker container,
+or local PostgreSQL cluster per test.
 
 ```bash
 make test-integration
@@ -71,10 +71,13 @@ make test-integration
 
 Requirements:
 
-- Docker daemon running locally.
-- By default, local runs start `pgvector/pgvector:pg17` with
-  testcontainers-go, matching the CI service-container image and the private
-  deploy Compose stack.
+- Docker daemon running locally is the preferred path.
+- When Docker is available, local runs start `pgvector/pgvector:pg17` with
+  a short-lived Docker container, matching the CI service-container image and
+  the private deploy Compose stack.
+- When Docker is unavailable, the harness falls back to installed PostgreSQL
+  binaries (`initdb` and `pg_ctl`) and still runs against a real temporary
+  cluster on `127.0.0.1`.
 - To reuse an already-running Postgres instance, set
   `ATTUNE_TEST_DATABASE_URL`; the harness connects to that admin
   database, creates a temporary database per test, runs migrations
@@ -86,9 +89,9 @@ service container and exports `ATTUNE_TEST_DATABASE_URL` for
 `make test-integration`.
 
 `make test-integration` runs packages with `-p 1`. That keeps local
-testcontainers fallback runs from starting many Postgres containers at
-once; test isolation still comes from a fresh container locally or a
-fresh temporary database in CI.
+fallback runs from starting many Postgres containers at once; test
+isolation still comes from a fresh container locally or a fresh
+temporary database in CI.
 
 Layout:
 
@@ -134,6 +137,31 @@ Guidelines:
 - Keep API calls mocked unless the test is explicitly a runtime smoke.
 - Add browser coverage only for workflows that cannot be trusted to lower-level
   tests, or for regressions found in a real browser.
+
+## Public board browser smoke — `make public-board-smoke`
+
+Use this when changing the public portal board, the Console public-visibility
+preview, quick filters, or roadmap semantics. It boots a temporary local
+PostgreSQL cluster, starts attune with a throwaway config, seeds two demo
+tenants, builds the Console bundle, logs into Console in Chromium, and runs
+the public board plus the public-visibility page with real requests.
+
+```bash
+make public-board-smoke
+cd console && pnpm test:e2e:public-board
+```
+
+This smoke verifies Console login, the public-visibility preview links back to
+the live board and portal, list/detail navigation, vote and comment actions,
+Console moderation approval, mobile layout, quick-filter empty states,
+tenant-scoped visitor cookies, and the intentional split between
+`/portal/{tenant}/requests` and `/portal/{tenant}/roadmap`. It also seeds
+private and pending requests to confirm they stay out of the public board and
+search results, checks that a pending comment is only visible to the visitor
+who created it before moderation, and switches between two tenants in one
+browser context to catch cookie leakage.
+
+CI runs the same smoke on changes that touch the Go or Console surfaces.
 
 ## Release runtime smoke — `make runtime-smoke`
 

@@ -15,8 +15,8 @@ import (
 )
 
 // mockGeminiServer mirrors the minimal generateContent response the
-// SDK can deserialise. Path is /v1beta/models/{model}:generateContent
-// — the SDK appends it itself, so we don't pin it; we just respond
+// REST client can decode. Path is /v1beta/models/{model}:generateContent
+// — the backend appends it itself, so we don't pin it; we just respond
 // regardless of path.
 func mockGeminiServer(t *testing.T, capture *[]byte, text string) *httptest.Server {
 	t.Helper()
@@ -87,13 +87,14 @@ func TestGemini_Complete_HappyPath(t *testing.T) {
 			t.Errorf("body missing %s\nbody=%s", want, bodyStr)
 		}
 	}
-	if strings.Contains(bodyStr, `"responseJsonSchema"`) ||
+	if strings.Contains(bodyStr, `"responseSchema"`) ||
+		strings.Contains(bodyStr, `"responseJsonSchema"`) ||
 		strings.Contains(bodyStr, `"responseMimeType"`) {
 		t.Errorf("free-form call leaked structured-output fields: %s", bodyStr)
 	}
 }
 
-// TestGemini_Complete_StructuredOutput verifies responseJsonSchema and
+// TestGemini_Complete_StructuredOutput verifies responseSchema and
 // responseMimeType are emitted together when Schema is set.
 func TestGemini_Complete_StructuredOutput(t *testing.T) {
 	var gotBody []byte
@@ -121,7 +122,7 @@ func TestGemini_Complete_StructuredOutput(t *testing.T) {
 	bodyStr := string(gotBody)
 	for _, want := range []string{
 		`"responseMimeType":"application/json"`,
-		`"responseJsonSchema"`,
+		`"responseSchema"`,
 		`"modules"`,
 	} {
 		if !strings.Contains(bodyStr, want) {

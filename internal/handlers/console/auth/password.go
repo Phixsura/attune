@@ -12,7 +12,7 @@
 package auth
 
 import (
-	"golang.org/x/crypto/bcrypt"
+	"github.com/ProtonMail/bcrypt"
 )
 
 // stubHash — pre-computed bcrypt(cost=12) of a fixed string. Used to
@@ -22,25 +22,20 @@ import (
 // its CPU cost.
 const stubHash = "$2a$12$fWWdBD5VvBT.GzI5enkEAeQbQKWOmrEUfmTKn23hx1lAohLc.f36O"
 
-// VerifyOrDummy returns true iff bcrypt.CompareHashAndPassword succeeds
-// against the supplied real hash. When realHash is empty (i.e., the
-// email was not found in admins), the function runs bcrypt against the
-// stubHash and discards the result so the response time matches the
-// real-hash path.
+// VerifyOrDummy returns true iff bcrypt.Match succeeds against the
+// supplied real hash. When realHash is empty (i.e., the email was not
+// found in admins), the function runs bcrypt against the stubHash and
+// discards the result so the response time matches the real-hash path.
 func VerifyOrDummy(realHash, password string) bool {
 	if realHash == "" {
-		_ = bcrypt.CompareHashAndPassword([]byte(stubHash), []byte(password))
+		_ = bcrypt.Match(password, stubHash)
 		return false
 	}
-	return bcrypt.CompareHashAndPassword([]byte(realHash), []byte(password)) == nil
+	return bcrypt.Match(password, realHash)
 }
 
-// HashPassword wraps bcrypt.GenerateFromPassword at cost 12 (the 2024
-// OWASP baseline). Returns the encoded hash ready for storage.
+// HashPassword wraps bcrypt.Hash at the module default cost 12. Returns
+// the encoded hash ready for storage.
 func HashPassword(plain string) (string, error) {
-	b, err := bcrypt.GenerateFromPassword([]byte(plain), 12)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
+	return bcrypt.Hash(plain)
 }

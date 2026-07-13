@@ -1,14 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import {
+  ArrowRight,
+  Bookmark,
   Check,
   ExternalLink,
   EyeOff,
+  GitMerge,
   Loader2,
   RotateCcw,
+  Save,
   Search,
   ShieldCheck,
   ShieldX,
+  Trash2,
   Undo2,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -49,10 +54,13 @@ import {
   PortalSubmissionFieldKind,
   type PortalSubmissionFormConfig,
   PublicAccessMode,
+  type PublicCustomerRequestSummary,
   PublicIdentityMode,
   type PublicRequestPublication,
+  PublicSurface,
   type PublicVisibilityPolicy,
   PublicWriteMode,
+  publicRequestDetailQuery,
   publicVisibilityPolicyQuery,
   publicVisibilityQueryKeys,
   rejectModerationSubject,
@@ -61,9 +69,17 @@ import {
   updatePublicVisibilityPolicy,
   upsertPublicRequestProfile,
 } from '@/features/public-visibility/api/public-visibility'
+import {
+  createPublicVisibilitySavedView,
+  deletePublicVisibilitySavedView,
+  publicVisibilitySavedViewsQuery,
+  publicVisibilitySavedViewsQueryKey,
+  updatePublicVisibilitySavedView,
+} from '@/features/public-visibility/api/saved-views'
 import { meQuery } from '@/features/session/api/get-me'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
+import type { PublicVisibilityViewState } from '@/proto/attune/v1/public_visibility'
 
 type PolicyForm = {
   portalAccessMode: PublicAccessMode
@@ -118,6 +134,11 @@ type RequestProfileForm = {
 type QueueView = 'pending' | 'approved' | 'blocked' | 'all'
 type ModerateAction = 'approve' | 'reject' | 'hide' | 'spam' | 'restore'
 
+type PublicVisibilityModerationFilters = {
+  queueView: QueueView
+  surfaces: PublicSurface[]
+}
+
 type ModerationDialogState = {
   subject: ModerationSubject
   action: ModerateAction
@@ -137,23 +158,26 @@ export function PublicVisibilityPage() {
   const canViewModeration = permissions.can('moderation:view')
   const canTriage = permissions.can('moderation:triage')
   const canEnforce = permissions.can('moderation:enforce')
+  const canViewCustomerRequests = permissions.can('customer_request:view')
+  const canMergeCustomerRequests = permissions.can('customer_request:merge')
 
   const policyQuery = useQuery({
     ...publicVisibilityPolicyQuery(),
     enabled: canViewPolicy,
   })
-  const moderationQuery = useQuery({
-    ...moderationSubjectsQuery(),
-    enabled: canViewModeration,
-  })
   const [form, setForm] = useState<PolicyForm>(() => defaultForm())
   const [profileForm, setProfileForm] = useState<RequestProfileForm>(() => defaultProfileForm())
   const [loadedPublication, setLoadedPublication] = useState<PublicRequestPublication | null>(null)
   const [queueView, setQueueView] = useState<QueueView>('pending')
+  const [surfaceFilters, setSurfaceFilters] = useState<PublicSurface[]>([])
   const [moderationDialog, setModerationDialog] = useState<ModerationDialogState | null>(null)
-  const portalHref = me.data?.tenant?.slug
-    ? `/portal/${encodeURIComponent(me.data.tenant.slug)}`
-    : null
+  const moderationQuery = useQuery({
+    ...moderationSubjectsQuery({ surfaces: surfaceFilters }),
+    enabled: canViewModeration,
+  })
+  const tenantSlug = me.data?.tenant?.slug ?? null
+  const portalHref = tenantSlug ? `/portal/${encodeURIComponent(tenantSlug)}` : null
+  const boardHref = tenantSlug ? `/portal/${encodeURIComponent(tenantSlug)}/requests` : null
 
   useEffect(() => {
     if (policyQuery.data) {
@@ -220,6 +244,14 @@ export function PublicVisibilityPage() {
       setLoadedPublication(publication)
       setProfileForm(profileFormFromPublication(publication, profileForm.requestId))
       toast.success(t('public_visibility.profile_saved'))
+      if (tenantSlug && publication.profile?.publicSlug) {
+        await queryClient.invalidateQueries({
+          queryKey: publicVisibilityQueryKeys.publicRequestDetail(
+            tenantSlug,
+            publication.profile.publicSlug,
+          ),
+        })
+      }
       await queryClient.invalidateQueries({ queryKey: publicVisibilityQueryKeys.moderation() })
     },
     onError: (err) => toast.error(messageOf(err)),
@@ -228,6 +260,26 @@ export function PublicVisibilityPage() {
   const subjects = moderationQuery.data ?? []
   const counts = useMemo(() => countStates(subjects), [subjects])
   const visibleSubjects = useMemo(() => filterSubjects(subjects, queueView), [subjects, queueView])
+  const loadedPublicSlug = loadedPublication?.profile?.publicSlug ?? ''
+  const customerRequestsHref =
+    canViewCustomerRequests && loadedPublication?.profile?.requestId
+      ? `/feedback/customer-requests?request_id=${encodeURIComponent(
+          loadedPublication.profile.requestId,
+        )}`
+      : null
+  const similarRequestsReady = Boolean(
+    canEditPolicy &&
+      tenantSlug &&
+      loadedPublicSlug &&
+      loadedPublication?.profile?.includedInPortal &&
+      loadedPublication?.moderation?.state === ModerationState.MODERATION_STATE_APPROVED &&
+      policyQuery.data?.portalAccessMode === PublicAccessMode.PUBLIC_ACCESS_MODE_PUBLIC &&
+      policyQuery.data?.requestsEnabled,
+  )
+  const similarRequestsQuery = useQuery({
+    ...publicRequestDetailQuery(tenantSlug ?? '', loadedPublicSlug),
+    enabled: similarRequestsReady,
+  })
   const policySaving = updatePolicy.isPending
   const openModerationDialog = (subject: ModerationSubject, action: ModerateAction) => {
     setModerationDialog({
@@ -524,6 +576,7 @@ export function PublicVisibilityPage() {
               canEdit={canEditPolicy}
               saving={policySaving}
               portalHref={portalHref}
+              boardHref={boardHref}
               onChange={(next) =>
                 setForm((prev) => ({
                   ...prev,
@@ -544,134 +597,161 @@ export function PublicVisibilityPage() {
               onSave={() => saveProfile.mutate(profileRequestFromForm(profileForm))}
             />
           )}
+
+          {canEditPolicy && loadedPublication ? (
+            <SimilarRequestsCard
+              boardHref={boardHref}
+              customerRequestsHref={customerRequestsHref}
+              canMergeCustomerRequests={canMergeCustomerRequests}
+              publication={loadedPublication}
+              loading={similarRequestsQuery.isPending}
+              requests={similarRequestsQuery.data?.similarRequests ?? []}
+              error={similarRequestsQuery.isError}
+              ready={similarRequestsReady}
+            />
+          ) : null}
         </div>
 
-        <Card className="border-border/60 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-base">{t('public_visibility.queue_title')}</CardTitle>
-            <CardDescription>{t('public_visibility.queue_help')}</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="mb-4 flex flex-wrap gap-2">
-              <QueueViewButton
-                active={queueView === 'pending'}
-                onClick={() => setQueueView('pending')}
-              >
-                {t('public_visibility.queue_views.pending')} ({counts.pending})
-              </QueueViewButton>
-              <QueueViewButton
-                active={queueView === 'approved'}
-                onClick={() => setQueueView('approved')}
-              >
-                {t('public_visibility.queue_views.approved')} ({counts.approved})
-              </QueueViewButton>
-              <QueueViewButton
-                active={queueView === 'blocked'}
-                onClick={() => setQueueView('blocked')}
-              >
-                {t('public_visibility.queue_views.blocked')} ({counts.hidden})
-              </QueueViewButton>
-              <QueueViewButton active={queueView === 'all'} onClick={() => setQueueView('all')}>
-                {t('public_visibility.queue_views.all')} ({subjects.length})
-              </QueueViewButton>
-            </div>
-            {moderationQuery.isLoading ? (
-              <Loading />
-            ) : visibleSubjects.length === 0 ? (
-              <EmptyState
-                title={t('public_visibility.empty_title')}
-                description={t('public_visibility.empty_description')}
-              />
-            ) : (
-              <ul className="space-y-3">
-                {visibleSubjects.map((subject) => (
-                  <li
-                    key={subject.id}
-                    className="grid min-w-0 gap-3 rounded-md border border-border/70 p-3 text-sm lg:grid-cols-[minmax(0,0.75fr)_minmax(0,0.75fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,0.9fr)_auto]"
-                  >
-                    <ModerationField
-                      label={t('public_visibility.table.surface')}
-                      value={formatSurface(t, subject.surface)}
-                    />
-                    <ModerationField
-                      label={t('public_visibility.table.state')}
-                      value={formatState(t, subject.state)}
-                    />
-                    <ModerationField
-                      label={t('public_visibility.table.subject')}
-                      value={subject.subjectId}
-                      mono
-                    />
-                    <ModerationField
-                      label={t('public_visibility.table.updated')}
-                      value={formatDate(subject.updatedAt)}
-                    />
-                    <ModerationField
-                      label={t('public_visibility.table.reason')}
-                      value={subject.reasonCode || t('public_visibility.reason_none')}
-                    />
-                    <div className="min-w-0">
-                      <div className="mb-1 text-xs font-medium text-muted-foreground">
-                        {t('public_visibility.table.actions')}
-                      </div>
-                      <div className="flex flex-wrap gap-2 lg:justify-end">
-                        {canTriage &&
-                          subject.state === ModerationState.MODERATION_STATE_PENDING && (
-                            <>
+        <div className="space-y-4">
+          {canViewModeration ? (
+            <PublicVisibilitySavedViewsBar
+              filters={{ queueView, surfaces: surfaceFilters }}
+              onApply={(next) => {
+                setQueueView(next.queueView)
+                setSurfaceFilters(next.surfaces)
+              }}
+            />
+          ) : null}
+
+          <Card className="border-border/60 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-base">{t('public_visibility.queue_title')}</CardTitle>
+              <CardDescription>{t('public_visibility.queue_help')}</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <ModerationSurfaceFilterRow value={surfaceFilters} onChange={setSurfaceFilters} />
+              <div className="mb-4 flex flex-wrap gap-2">
+                <QueueViewButton
+                  active={queueView === 'pending'}
+                  onClick={() => setQueueView('pending')}
+                >
+                  {t('public_visibility.queue_views.pending')} ({counts.pending})
+                </QueueViewButton>
+                <QueueViewButton
+                  active={queueView === 'approved'}
+                  onClick={() => setQueueView('approved')}
+                >
+                  {t('public_visibility.queue_views.approved')} ({counts.approved})
+                </QueueViewButton>
+                <QueueViewButton
+                  active={queueView === 'blocked'}
+                  onClick={() => setQueueView('blocked')}
+                >
+                  {t('public_visibility.queue_views.blocked')} ({counts.hidden})
+                </QueueViewButton>
+                <QueueViewButton active={queueView === 'all'} onClick={() => setQueueView('all')}>
+                  {t('public_visibility.queue_views.all')} ({subjects.length})
+                </QueueViewButton>
+              </div>
+              {moderationQuery.isLoading ? (
+                <Loading />
+              ) : visibleSubjects.length === 0 ? (
+                <EmptyState
+                  title={t('public_visibility.empty_title')}
+                  description={t('public_visibility.empty_description')}
+                />
+              ) : (
+                <ul className="space-y-3">
+                  {visibleSubjects.map((subject) => (
+                    <li
+                      key={subject.id}
+                      className="grid min-w-0 gap-3 rounded-md border border-border/70 p-3 text-sm lg:grid-cols-[minmax(0,0.75fr)_minmax(0,0.75fr)_minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,0.9fr)_auto]"
+                    >
+                      <ModerationField
+                        label={t('public_visibility.table.surface')}
+                        value={formatSurface(t, subject.surface)}
+                      />
+                      <ModerationField
+                        label={t('public_visibility.table.state')}
+                        value={formatState(t, subject.state)}
+                      />
+                      <ModerationField
+                        label={t('public_visibility.table.subject')}
+                        value={subject.subjectId}
+                        mono
+                      />
+                      <ModerationField
+                        label={t('public_visibility.table.updated')}
+                        value={formatDate(subject.updatedAt)}
+                      />
+                      <ModerationField
+                        label={t('public_visibility.table.reason')}
+                        value={subject.reasonCode || t('public_visibility.reason_none')}
+                      />
+                      <div className="min-w-0">
+                        <div className="mb-1 text-xs font-medium text-muted-foreground">
+                          {t('public_visibility.table.actions')}
+                        </div>
+                        <div className="flex flex-wrap gap-2 lg:justify-end">
+                          {canTriage &&
+                            subject.state === ModerationState.MODERATION_STATE_PENDING && (
+                              <>
+                                <IconAction
+                                  label={t('public_visibility.actions.approve')}
+                                  disabled={moderate.isPending}
+                                  onClick={() => openModerationDialog(subject, 'approve')}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </IconAction>
+                                <IconAction
+                                  label={t('public_visibility.actions.reject')}
+                                  disabled={moderate.isPending}
+                                  onClick={() => openModerationDialog(subject, 'reject')}
+                                >
+                                  <ShieldX className="h-4 w-4" />
+                                </IconAction>
+                              </>
+                            )}
+                          {canEnforce &&
+                            subject.state === ModerationState.MODERATION_STATE_APPROVED && (
                               <IconAction
-                                label={t('public_visibility.actions.approve')}
+                                label={t('public_visibility.actions.hide')}
                                 disabled={moderate.isPending}
-                                onClick={() => openModerationDialog(subject, 'approve')}
+                                onClick={() => openModerationDialog(subject, 'hide')}
                               >
-                                <Check className="h-4 w-4" />
+                                <EyeOff className="h-4 w-4" />
                               </IconAction>
+                            )}
+                          {canEnforce &&
+                            subject.state !== ModerationState.MODERATION_STATE_SPAM && (
                               <IconAction
-                                label={t('public_visibility.actions.reject')}
+                                label={t('public_visibility.actions.spam')}
                                 disabled={moderate.isPending}
-                                onClick={() => openModerationDialog(subject, 'reject')}
+                                onClick={() => openModerationDialog(subject, 'spam')}
                               >
                                 <ShieldX className="h-4 w-4" />
                               </IconAction>
-                            </>
-                          )}
-                        {canEnforce &&
-                          subject.state === ModerationState.MODERATION_STATE_APPROVED && (
-                            <IconAction
-                              label={t('public_visibility.actions.hide')}
-                              disabled={moderate.isPending}
-                              onClick={() => openModerationDialog(subject, 'hide')}
-                            >
-                              <EyeOff className="h-4 w-4" />
-                            </IconAction>
-                          )}
-                        {canEnforce && subject.state !== ModerationState.MODERATION_STATE_SPAM && (
-                          <IconAction
-                            label={t('public_visibility.actions.spam')}
-                            disabled={moderate.isPending}
-                            onClick={() => openModerationDialog(subject, 'spam')}
-                          >
-                            <ShieldX className="h-4 w-4" />
-                          </IconAction>
-                        )}
-                        {canEnforce &&
-                          subject.state !== ModerationState.MODERATION_STATE_PENDING &&
-                          subject.state !== ModerationState.MODERATION_STATE_APPROVED && (
-                            <IconAction
-                              label={t('public_visibility.actions.restore')}
-                              disabled={moderate.isPending}
-                              onClick={() => openModerationDialog(subject, 'restore')}
-                            >
-                              <Undo2 className="h-4 w-4" />
-                            </IconAction>
-                          )}
+                            )}
+                          {canEnforce &&
+                            subject.state !== ModerationState.MODERATION_STATE_PENDING &&
+                            subject.state !== ModerationState.MODERATION_STATE_APPROVED && (
+                              <IconAction
+                                label={t('public_visibility.actions.restore')}
+                                disabled={moderate.isPending}
+                                onClick={() => openModerationDialog(subject, 'restore')}
+                              >
+                                <Undo2 className="h-4 w-4" />
+                              </IconAction>
+                            )}
+                        </div>
                       </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
       <ModerationDecisionDialog
         value={moderationDialog}
@@ -689,6 +769,341 @@ export function PublicVisibilityPage() {
       />
     </div>
   )
+}
+
+function PublicVisibilitySavedViewsBar({
+  filters,
+  onApply,
+}: {
+  filters: PublicVisibilityModerationFilters
+  onApply: (filters: PublicVisibilityModerationFilters) => void
+}) {
+  const { t } = useTranslation()
+  const inputID = useId()
+  const queryClient = useQueryClient()
+  const viewsQuery = useQuery(publicVisibilitySavedViewsQuery())
+  const create = useMutation({
+    mutationFn: createPublicVisibilitySavedView,
+    onSuccess: async (response) => {
+      if (response.view?.id) {
+        setSelectedID(response.view.id)
+      }
+      setSaveOpen(false)
+      await queryClient.invalidateQueries({ queryKey: publicVisibilitySavedViewsQueryKey })
+    },
+    onError: (err) => toast.error(messageOf(err)),
+  })
+  const update = useMutation({
+    mutationFn: updatePublicVisibilitySavedView,
+    onSuccess: async (response) => {
+      if (response.view?.id) {
+        setSelectedID(response.view.id)
+      }
+      setSaveOpen(false)
+      await queryClient.invalidateQueries({ queryKey: publicVisibilitySavedViewsQueryKey })
+    },
+    onError: (err) => toast.error(messageOf(err)),
+  })
+  const remove = useMutation({
+    mutationFn: deletePublicVisibilitySavedView,
+    onSuccess: async () => {
+      setSelectedID('')
+      await queryClient.invalidateQueries({ queryKey: publicVisibilitySavedViewsQueryKey })
+    },
+    onError: (err) => toast.error(messageOf(err)),
+  })
+  const [selectedID, setSelectedID] = useState('')
+  const [saveOpen, setSaveOpen] = useState(false)
+  const [name, setName] = useState('')
+  const views = viewsQuery.data?.views ?? []
+  const selected = views.find((view) => view.id === selectedID) ?? null
+  const selectedMatchesCurrent = selected
+    ? savedViewStateSignature(selected.state) === moderationFiltersSignature(filters)
+    : false
+  const isSaving = create.isPending || update.isPending
+
+  const openSaveDialog = () => {
+    setName(selected?.name ?? suggestSavedViewName(filters, t))
+    setSaveOpen(true)
+  }
+
+  const saveCurrent = () => {
+    const trimmedName = name.trim()
+    if (!trimmedName) return
+    const state = savedViewStateFromFilters(filters)
+    if (selected) {
+      update.mutate({ id: selected.id, name: trimmedName, state })
+      return
+    }
+    create.mutate({ name: trimmedName, state })
+  }
+
+  return (
+    <Card className="border-border/60 shadow-none">
+      <CardHeader className="pb-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Bookmark className="size-4 text-primary" />
+              {t('public_visibility.saved_views_title')}
+            </CardTitle>
+            <CardDescription>{t('public_visibility.saved_views_help')}</CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={openSaveDialog}>
+              <Save className="size-4" />
+              {t('public_visibility.saved_views_save')}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-9"
+              disabled={!selected || remove.isPending}
+              aria-label={t('public_visibility.saved_views_delete')}
+              onClick={() => {
+                if (!selected) return
+                remove.mutate(selected.id)
+              }}
+            >
+              {remove.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-0">
+        <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
+          <div className="font-medium">
+            {selected
+              ? t('public_visibility.saved_views.current_bound', { name: selected.name })
+              : t('public_visibility.saved_views.current_unbound')}
+          </div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            {selected
+              ? selectedMatchesCurrent
+                ? t('public_visibility.saved_views.current_in_sync')
+                : t('public_visibility.saved_views.current_dirty')
+              : t('public_visibility.saved_views.current_unbound_hint')}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <Select
+            value={selectedID || SAVED_VIEW_NONE}
+            disabled={viewsQuery.isPending}
+            onValueChange={(value) => {
+              if (value === SAVED_VIEW_NONE) {
+                setSelectedID('')
+                return
+              }
+              const view = views.find((item) => item.id === value)
+              if (!view) return
+              setSelectedID(view.id)
+              onApply(savedViewStateToFilters(view.state))
+            }}
+          >
+            <SelectTrigger
+              className="min-w-0 md:w-72"
+              aria-label={t('public_visibility.saved_views_label')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SAVED_VIEW_NONE}>
+                {t('public_visibility.saved_views_current')}
+              </SelectItem>
+              {views.length === 0 ? (
+                <SelectItem value="__empty__" disabled>
+                  {t('public_visibility.saved_views_empty')}
+                </SelectItem>
+              ) : null}
+              {views.map((view) => (
+                <SelectItem key={view.id} value={view.id}>
+                  {view.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="min-w-0 flex-1 text-xs leading-5 text-muted-foreground">
+            {describeSavedViewState(filters, t)}
+          </div>
+        </div>
+
+        <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('public_visibility.saved_views_save_title')}</DialogTitle>
+              <DialogDescription className="sr-only">
+                {t('public_visibility.saved_views_save')}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor={inputID}>{t('public_visibility.saved_views_name')}</Label>
+              <Input
+                id={inputID}
+                value={name}
+                maxLength={80}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSaveOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button disabled={isSaving || name.trim().length === 0} onClick={saveCurrent}>
+                {isSaving ? <Loader2 className="size-4 animate-spin" /> : null}
+                {t('common.save')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ModerationSurfaceFilterRow({
+  value,
+  onChange,
+}: {
+  value: PublicSurface[]
+  onChange: (surfaces: PublicSurface[]) => void
+}) {
+  const { t } = useTranslation()
+  const selected = normalizeSurfaceSelection(value)
+
+  return (
+    <div className="mb-4 rounded-md border border-border/70 bg-background p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          {t('public_visibility.surface_filters_title')}
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2"
+          disabled={selected.length === 0}
+          onClick={() => onChange([])}
+        >
+          {t('public_visibility.surface_filters_clear')}
+        </Button>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {surfaceFilterOptions.map((surface) => {
+          const active = selected.includes(surface)
+          return (
+            <Button
+              key={surface}
+              type="button"
+              size="sm"
+              variant={active ? 'default' : 'outline'}
+              className="h-8 rounded-full px-3"
+              onClick={() =>
+                onChange(
+                  active
+                    ? selected.filter((item) => item !== surface)
+                    : normalizeSurfaceSelection([...selected, surface]),
+                )
+              }
+            >
+              {formatSurface(t, surface)}
+            </Button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const SAVED_VIEW_NONE = '__current__'
+
+const surfaceFilterOptions: PublicSurface[] = [
+  PublicSurface.PUBLIC_SURFACE_REQUEST,
+  PublicSurface.PUBLIC_SURFACE_REQUEST_COMMENT,
+  PublicSurface.PUBLIC_SURFACE_ROADMAP_ITEM,
+  PublicSurface.PUBLIC_SURFACE_CHANGELOG_POST,
+  PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION,
+]
+
+function savedViewStateFromFilters(
+  filters: PublicVisibilityModerationFilters,
+): PublicVisibilityViewState {
+  return {
+    queueView: normalizeQueueView(filters.queueView),
+    surfaces: normalizeSurfaceSelection(filters.surfaces),
+  }
+}
+
+function savedViewStateToFilters(
+  state?: PublicVisibilityViewState,
+): PublicVisibilityModerationFilters {
+  if (!state) {
+    return { queueView: 'pending', surfaces: [] }
+  }
+  return {
+    queueView: normalizeQueueView(state.queueView),
+    surfaces: normalizeSurfaceSelection(state.surfaces ?? []),
+  }
+}
+
+function moderationFiltersSignature(filters: PublicVisibilityModerationFilters) {
+  return `${normalizeQueueView(filters.queueView)}|${normalizeSurfaceSelection(filters.surfaces).join(',')}`
+}
+
+function savedViewStateSignature(state?: PublicVisibilityViewState) {
+  if (!state) return moderationFiltersSignature({ queueView: 'pending', surfaces: [] })
+  return `${normalizeQueueView(state.queueView)}|${normalizeSurfaceSelection(state.surfaces ?? []).join(',')}`
+}
+
+function normalizeQueueView(value: string) {
+  switch (value.trim().toLowerCase()) {
+    case 'approved':
+      return 'approved'
+    case 'blocked':
+      return 'blocked'
+    case 'all':
+      return 'all'
+    default:
+      return 'pending'
+  }
+}
+
+function normalizeSurfaceSelection(values: PublicSurface[]) {
+  if (values.length === 0) return []
+  const selected = new Set<PublicSurface>(
+    values.filter((surface) => surface !== PublicSurface.UNRECOGNIZED),
+  )
+  return surfaceFilterOptions.filter((surface) => selected.has(surface))
+}
+
+function describeSavedViewState(filters: PublicVisibilityModerationFilters, t: TFunction) {
+  const queueLabel = t(`public_visibility.queue_views.${normalizeQueueView(filters.queueView)}`)
+  const surfaces = normalizeSurfaceSelection(filters.surfaces).map((surface) =>
+    formatSurface(t, surface),
+  )
+  if (surfaces.length === 0) {
+    return t('public_visibility.saved_views.summary_queue_only', { queue: queueLabel })
+  }
+  return t('public_visibility.saved_views.summary', {
+    queue: queueLabel,
+    surfaces: surfaces.join(' · '),
+  })
+}
+
+function suggestSavedViewName(filters: PublicVisibilityModerationFilters, t: TFunction) {
+  const queueLabel = t(`public_visibility.queue_views.${normalizeQueueView(filters.queueView)}`)
+  const surfaces = normalizeSurfaceSelection(filters.surfaces).map((surface) =>
+    formatSurface(t, surface),
+  )
+  if (surfaces.length === 0) {
+    return queueLabel
+  }
+  return `${queueLabel} · ${surfaces.slice(0, 2).join(' · ')}`
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -1079,6 +1494,158 @@ function RequestProfileCard({
   )
 }
 
+function SimilarRequestsCard({
+  boardHref,
+  customerRequestsHref,
+  canMergeCustomerRequests,
+  publication,
+  loading,
+  requests,
+  error,
+  ready,
+}: {
+  boardHref: string | null
+  customerRequestsHref: string | null
+  canMergeCustomerRequests: boolean
+  publication: PublicRequestPublication
+  loading: boolean
+  requests: PublicCustomerRequestSummary[]
+  error: boolean
+  ready: boolean
+}) {
+  const { t } = useTranslation()
+  const title =
+    publication.profile?.publicTitle || publication.profile?.publicSlug || t('common.untitled')
+
+  return (
+    <Card className="border-amber-200/70 bg-amber-50/30 shadow-none">
+      <CardHeader>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Search className="h-4 w-4 text-amber-600" />
+              {t('public_visibility.profile.similar_title')}
+            </CardTitle>
+            <CardDescription>
+              {t('public_visibility.profile.similar_help', { title })}
+            </CardDescription>
+          </div>
+          {customerRequestsHref ? (
+            <Button asChild size="sm" variant="outline" className="shrink-0">
+              <a href={customerRequestsHref}>
+                <ArrowRight className="size-4" />
+                {t('public_visibility.profile.open_customer_request')}
+              </a>
+            </Button>
+          ) : null}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-6">
+        {!ready ? (
+          <div className="rounded-md border border-dashed border-amber-200 bg-white px-4 py-5 text-sm text-muted-foreground">
+            {t('public_visibility.profile.similar_locked')}
+          </div>
+        ) : loading && requests.length === 0 ? (
+          <Loading />
+        ) : error && requests.length === 0 ? (
+          <div className="rounded-md border border-dashed border-amber-200 bg-white px-4 py-5 text-sm text-muted-foreground">
+            {t('public_visibility.profile.similar_error')}
+          </div>
+        ) : requests.length === 0 ? (
+          <div className="rounded-md border border-dashed border-amber-200 bg-white px-4 py-5 text-sm text-muted-foreground">
+            {t('public_visibility.profile.similar_empty')}
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {requests.map((request) => {
+              const href = boardHref ? `${boardHref}/${encodeURIComponent(request.slug)}` : null
+              const mergeHref =
+                customerRequestsHref && canMergeCustomerRequests
+                  ? `${customerRequestsHref}&merge_target_id=${encodeURIComponent(request.id)}`
+                  : null
+              const mergeLabel = t('public_visibility.profile.merge_target_action')
+              return (
+                <li
+                  key={request.id}
+                  className="rounded-2xl border border-amber-200/70 bg-white px-4 py-4 shadow-[0_12px_24px_-22px_rgba(217,119,6,0.28)]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="text-sm font-semibold text-foreground">
+                        {href ? (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 hover:underline"
+                          >
+                            <span className="break-words">
+                              {request.title || request.slug || t('common.untitled')}
+                            </span>
+                            <ExternalLink className="size-3.5 shrink-0" />
+                          </a>
+                        ) : (
+                          <span className="break-words">
+                            {request.title || request.slug || t('common.untitled')}
+                          </span>
+                        )}
+                      </div>
+                      {request.summary ? (
+                        <div className="break-words text-sm leading-6 text-muted-foreground">
+                          {request.summary}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-2 text-xs">
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-medium text-amber-800">
+                        {request.state || t('public_visibility.profile.similar_state_unknown')}
+                      </span>
+                      {request.roadmapColumn ? (
+                        <span className="rounded-full border border-border/70 bg-muted/30 px-2.5 py-1 text-muted-foreground">
+                          {request.roadmapColumn}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    {typeof request.voteCount === 'number' ? (
+                      <span className="rounded-full bg-muted/50 px-2.5 py-1">
+                        {t('public_visibility.profile.similar_votes', { count: request.voteCount })}
+                      </span>
+                    ) : null}
+                    {typeof request.commentCount === 'number' ? (
+                      <span className="rounded-full bg-muted/50 px-2.5 py-1">
+                        {t('public_visibility.profile.similar_comments', {
+                          count: request.commentCount,
+                        })}
+                      </span>
+                    ) : null}
+                    {request.submittedByDisplay ? (
+                      <span className="rounded-full bg-muted/50 px-2.5 py-1">
+                        {t('public_visibility.profile.similar_submitter', {
+                          display: request.submittedByDisplay,
+                        })}
+                      </span>
+                    ) : null}
+                    {mergeHref ? (
+                      <Button asChild size="sm" variant="outline" className="h-7 shrink-0">
+                        <a href={mergeHref}>
+                          <GitMerge className="size-3.5" />
+                          {mergeLabel}
+                        </a>
+                      </Button>
+                    ) : null}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function PortalSubmissionFormCard({
   form,
   writeMode,
@@ -1086,6 +1653,7 @@ function PortalSubmissionFormCard({
   canEdit,
   saving,
   portalHref,
+  boardHref,
   onChange,
 }: {
   form: PortalSubmissionFormState
@@ -1094,6 +1662,7 @@ function PortalSubmissionFormCard({
   canEdit: boolean
   saving: boolean
   portalHref: string | null
+  boardHref: string | null
   onChange: (next: PortalSubmissionFormState) => void
 }) {
   const { t } = useTranslation()
@@ -1245,6 +1814,7 @@ function PortalSubmissionFormCard({
             identityMode={identityMode}
             fieldCount={form.fields.length}
             portalHref={portalHref}
+            boardHref={boardHref}
           />
         </div>
       </CardContent>
@@ -1423,12 +1993,14 @@ function PortalSubmissionPreview({
   identityMode,
   fieldCount,
   portalHref,
+  boardHref,
 }: {
   form: PortalSubmissionFormState
   writeMode: PublicWriteMode
   identityMode: PublicIdentityMode
   fieldCount: number
   portalHref: string | null
+  boardHref: string | null
 }) {
   const { t } = useTranslation()
 
@@ -1448,14 +2020,24 @@ function PortalSubmissionPreview({
         </div>
       </div>
 
-      {portalHref ? (
-        <div className="mt-3 flex justify-end">
-          <Button asChild variant="outline" size="sm" className="h-8 gap-1.5">
-            <a href={portalHref} target="_blank" rel="noreferrer">
-              <ExternalLink className="size-4" />
-              {t('public_visibility.portal.preview.open_portal')}
-            </a>
-          </Button>
+      {boardHref || portalHref ? (
+        <div className="mt-3 flex flex-wrap justify-end gap-2">
+          {boardHref ? (
+            <Button asChild variant="secondary" size="sm" className="h-8 gap-1.5">
+              <a href={boardHref} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" />
+                {t('public_visibility.portal.preview.open_board')}
+              </a>
+            </Button>
+          ) : null}
+          {portalHref ? (
+            <Button asChild variant="outline" size="sm" className="h-8 gap-1.5">
+              <a href={portalHref} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" />
+                {t('public_visibility.portal.preview.open_portal')}
+              </a>
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
@@ -1980,11 +2562,18 @@ export const publicVisibilityPageTestables = {
   policyRequestFromForm,
   profileFormFromPublication,
   profileRequestFromForm,
+  describeSavedViewState,
   portalSubmissionFieldKindLabel,
   portalSubmissionFieldKindName,
   portalSubmissionFieldKindOptions,
   portalSubmissionFormFromPolicy,
   portalSubmissionFormRequestFromForm,
+  savedViewStateFromFilters,
+  savedViewStateSignature,
+  savedViewStateToFilters,
   reasonCodeForAction,
   reasonOptionsForAction,
+  suggestSavedViewName,
+  normalizeQueueView,
+  normalizeSurfaceSelection,
 }
