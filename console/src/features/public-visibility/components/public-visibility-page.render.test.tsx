@@ -230,6 +230,108 @@ describe('PublicVisibilityPage', () => {
     ).toBeInTheDocument()
   })
 
+  it('loads, updates, and deletes an existing saved moderation view', async () => {
+    mockMe('admin')
+    type SavedViewRecord = {
+      id: string
+      name: string
+      state?: { queueView?: string; surfaces?: string[] }
+      createdAt: string
+      updatedAt: string
+    }
+    type SavedViewBody = {
+      name?: string
+      state?: { queueView?: string; surfaces?: string[] }
+    }
+    let savedViewBody: SavedViewBody | null = null
+    let deletedViewID = ''
+    let savedViews = {
+      views: [
+        {
+          id: 'view-1',
+          name: 'Approved portal requests',
+          state: {
+            queueView: 'approved',
+            surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+          },
+          createdAt: '2026-07-10T00:00:00Z',
+          updatedAt: '2026-07-10T00:00:00Z',
+        } satisfies SavedViewRecord,
+      ],
+    }
+
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json(savedViews)),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({ subjects: moderationSubjects() }),
+      ),
+      http.put('/fb/v1/console/public-visibility/views/:id', async ({ request, params }) => {
+        savedViewBody = (await request.json()) as SavedViewBody
+        const updated = {
+          id: params.id as string,
+          name: savedViewBody?.name ?? 'Updated portal requests',
+          state: savedViewBody?.state,
+          createdAt: '2026-07-10T00:00:00Z',
+          updatedAt: '2026-07-11T00:00:00Z',
+        } satisfies SavedViewRecord
+        savedViews = { views: [updated] }
+        return HttpResponse.json({ view: updated })
+      }),
+      http.delete('/fb/v1/console/public-visibility/views/:id', ({ params }) => {
+        deletedViewID = params.id as string
+        savedViews = { views: [] }
+        return HttpResponse.json({})
+      }),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByText('保存的视图')).toBeInTheDocument())
+    expect(screen.getByText('当前筛选未绑定保存视图')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '保存的视图' })).toBeEnabled())
+
+    await user.click(screen.getByRole('combobox', { name: '保存的视图' }))
+    await user.click(await screen.findByRole('option', { name: 'Approved portal requests' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('已绑定为 Approved portal requests')).toBeInTheDocument()
+      expect(screen.getByText('当前筛选与该保存视图一致。')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '待审 (1)' }))
+    expect(screen.getByText('当前筛选已修改，尚未保存到该视图。')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    expect(screen.getByLabelText('视图名称')).toHaveValue('Approved portal requests')
+
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), 'Updated portal requests')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => {
+      expect(savedViewBody).toMatchObject({
+        name: 'Updated portal requests',
+        state: {
+          queueView: 'pending',
+          surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText('已绑定为 Updated portal requests')).toBeInTheDocument()
+      expect(screen.getByText('当前筛选与该保存视图一致。')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '删除保存视图' }))
+
+    await waitFor(() => {
+      expect(deletedViewID).toBe('view-1')
+      expect(screen.getByText('当前筛选未绑定保存视图')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: '删除保存视图' })).toBeDisabled()
+  })
+
   it('keeps similar requests locked until the publication is public', async () => {
     mockMe('admin')
     server.use(
