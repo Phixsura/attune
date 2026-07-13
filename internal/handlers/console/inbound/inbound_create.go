@@ -25,9 +25,6 @@ func (h *Handler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 	auth := ctx.Auth
 	channel := strings.TrimSpace(strings.ToLower(req.GetChannel()))
 	name := strings.TrimSpace(req.GetName())
-	if channel != channelWebhook && channel != channelEmail {
-		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "channel must be webhook or email")
-	}
 	if name == "" || len(name) > 200 {
 		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "name must be non-empty and ≤ 200 characters")
 	}
@@ -43,8 +40,11 @@ func (h *Handler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 		return h.createWebhook(ctx, auth, name, slug)
 	case channelEmail:
 		return h.createEmail(ctx, auth, req, name, slug)
+	case channelSlack:
+		return h.createSlack(ctx, auth, req, name, slug)
+	default:
+		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "channel must be webhook, email, or slack")
 	}
-	return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "channel must be webhook or email")
 }
 
 // slugify — keep only [a-z0-9], collapse runs of separators to '-'.

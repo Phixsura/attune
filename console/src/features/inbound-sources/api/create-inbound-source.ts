@@ -8,10 +8,10 @@ import type {
 // Feature-stable alias for the create payload.
 export type InboundSourceCreate = CreateInboundSourceRequest
 
-// useCreateInboundSource posts a webhook or email source. On success the
-// response carries a fresh InboundSource row and, for webhook channels,
-// a webhookSecretReveal with the one-shot secret. Callers must surface
-// the reveal immediately (the secret is unrecoverable).
+// useCreateInboundSource posts a webhook, email, or slack source. On success
+// the response carries a fresh InboundSource row and, for webhook channels,
+// a webhookSecretReveal with the one-shot secret. Callers must surface the
+// reveal immediately (the secret is unrecoverable).
 export function useCreateInboundSource() {
   const qc = useQueryClient()
   return useMutation({

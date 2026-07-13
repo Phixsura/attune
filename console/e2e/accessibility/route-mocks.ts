@@ -15,6 +15,13 @@ import {
   ExternalSyncRunTrigger,
 } from '../../src/proto/attune/v1/external_sync'
 import type {
+  CreateInboundSourceResponse,
+  DiscoverSlackChannelsResponse,
+  InboundSource,
+  SlackChannel,
+  TestInboundConnectionResponse,
+} from '../../src/proto/attune/v1/inbound_source'
+import type {
   FeedbackDetail,
   ReplyDraftWorkflow,
   ReplySendHook,
@@ -68,6 +75,11 @@ import {
 const apiPrefix = '/fb/v1/console'
 
 export type ApiMockDiagnostics = {
+  inboundSourceRequests: Array<{
+    body: unknown
+    method: string
+    path: string
+  }>
   replyDraftRequests: Array<{
     body: unknown
     idempotencyKey?: string
@@ -101,6 +113,7 @@ export async function installConsoleApiMocks(
   options: ApiMockOptions = {},
 ): Promise<ApiMockDiagnostics> {
   const diagnostics: ApiMockDiagnostics = {
+    inboundSourceRequests: [],
     replyDraftRequests: [],
     replySendHookRequests: [],
     unhandledRequests: [],
@@ -116,6 +129,8 @@ export async function installConsoleApiMocks(
       'feedback-201': clone(consoleA11yTerminalFeedbackDetail),
       'feedback-301': clone(consoleA11yPortalFeedbackDetail),
     },
+    inboundSources: createInboundSourcesState(),
+    slackChannels: createSlackChannelsState(),
     replyDraftWorkflow: clone(consoleA11yReplyDraftWorkflow),
     replySendHook: clone(consoleA11yReplySendHook),
     replySendHookDeliveries: clone(consoleA11yReplySendHookDeliveries),
@@ -185,6 +200,86 @@ async function handleRoute(
   }
   if (method === 'GET' && path === '/public-visibility/moderation') {
     await fulfillJson(route, consoleA11yModerationSubjects)
+    return true
+  }
+  if (method === 'GET' && path === '/inbound/sources') {
+    await fulfillJson(route, { items: sortInboundSources(state.inboundSources) })
+    return true
+  }
+  if (method === 'GET' && path.match(/^\/inbound\/sources\/[^/]+$/)) {
+    const id = path.split('/')[3]
+    const source = state.inboundSources.find((item) => item.id === id)
+    if (!source) {
+      await fulfillError(route, `Missing inbound source ${id}`, 404)
+      return true
+    }
+    await fulfillJson(route, clone(source))
+    return true
+  }
+  if (method === 'POST' && path === '/inbound/sources/test-connection') {
+    const body = readJsonBody(route) as {
+      channel?: string
+      emailConfig?: { host?: string }
+      slackConfig?: { botToken?: string; channelId?: string }
+    } | null
+    diagnostics.inboundSourceRequests.push({ method, path, body })
+    await fulfillJson(route, buildTestInboundSourceConnectionResponse(state, body))
+    return true
+  }
+  if (method === 'POST' && path === '/inbound/sources/slack/discover') {
+    const body = readJsonBody(route) as {
+      slackConfig?: { botToken?: string; channelId?: string }
+    } | null
+    diagnostics.inboundSourceRequests.push({ method, path, body })
+    await fulfillJson(route, buildDiscoverSlackChannelsResponse(state, body))
+    return true
+  }
+  if (method === 'POST' && path === '/inbound/sources') {
+    const body = readJsonBody(route) as {
+      channel?: string
+      emailConfig?: Record<string, unknown>
+      name?: string
+      slackConfig?: { botToken?: string; channelId?: string }
+      webhookConfig?: Record<string, never>
+    } | null
+    diagnostics.inboundSourceRequests.push({ method, path, body })
+    const created = buildCreateInboundSourceResponse(state, body)
+    if (!created) {
+      await fulfillError(route, 'Unsupported inbound source payload', 400)
+      return true
+    }
+    await fulfillJson(route, created, 201)
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/inbound\/sources\/[^/]+\/pause$/)) {
+    const id = path.split('/')[3]
+    const source = updateInboundSource(state, id, { enabled: false })
+    await fulfillJson(route, source)
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/inbound\/sources\/[^/]+\/resume$/)) {
+    const id = path.split('/')[3]
+    const source = updateInboundSource(state, id, { enabled: true })
+    await fulfillJson(route, source)
+    return true
+  }
+  if (method === 'DELETE' && path.match(/^\/inbound\/sources\/[^/]+$/)) {
+    const id = path.split('/')[3]
+    state.inboundSources = state.inboundSources.filter((source) => source.id !== id)
+    await route.fulfill({ status: 204 })
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/inbound\/sources\/[^/]+\/rotate-secret$/)) {
+    const id = path.split('/')[3]
+    const source = state.inboundSources.find((item) => item.id === id)
+    if (!source || source.channel !== 'webhook') {
+      await fulfillError(route, 'rotation only supports webhook sources', 400)
+      return true
+    }
+    await fulfillJson(route, {
+      secretHex: 'deadbeefcafebabefeedface0000000000000000000000000000000000000000',
+      nextEligibleAt: '2026-07-13T00:00:00Z',
+    })
     return true
   }
 
@@ -679,6 +774,8 @@ async function handleRoute(
 type ApiMockState = {
   auditLogViews: SavedAuditLogView[]
   feedbackDetails: Record<string, FeedbackDetail>
+  inboundSources: InboundSource[]
+  slackChannels: SlackChannel[]
   replyDraftWorkflow: ReplyDraftWorkflow
   replySendHook: ReplySendHook
   replySendHookDeliveries: ReplySendHookDelivery[]
@@ -694,6 +791,244 @@ type ExternalSyncMockState = {
   mappings: ExternalObjectMapping[]
   runs: ExternalSyncRun[]
   schemasByConnection: Record<string, ExternalObjectSchema[]>
+}
+
+function createInboundSourcesState(): InboundSource[] {
+  const tenantId = consoleA11yMe.tenant.id
+  return [
+    {
+      id: 'src-webhook-a11y',
+      tenantId,
+      channel: 'webhook',
+      name: 'Website Feedback',
+      slug: 'website-feedback',
+      enabled: true,
+      lastEventAt: '2026-07-11T12:00:00Z',
+      lastUid: '0',
+      lastError: '',
+      createdAt: '2026-07-10T12:00:00Z',
+      updatedAt: '2026-07-11T12:00:00Z',
+    },
+    {
+      id: 'src-email-a11y',
+      tenantId,
+      channel: 'email',
+      name: 'Support Mailbox',
+      slug: 'support-mailbox',
+      enabled: false,
+      lastEventAt: '',
+      lastUid: '0',
+      lastError: '',
+      createdAt: '2026-07-10T13:00:00Z',
+      updatedAt: '2026-07-11T12:00:00Z',
+    },
+    {
+      id: 'src-slack-a11y',
+      tenantId,
+      channel: 'slack',
+      name: 'Slack Mock Source',
+      slug: 'slack-mock-source',
+      enabled: true,
+      lastEventAt: '2026-07-11T15:00:00Z',
+      lastUid: '1783852321068324',
+      lastError: 'slack auth.test: invalid_auth',
+      createdAt: '2026-07-10T14:00:00Z',
+      updatedAt: '2026-07-11T15:00:00Z',
+    },
+  ]
+}
+
+function createSlackChannelsState(): SlackChannel[] {
+  return [
+    { id: 'C-GENERAL', name: 'general', isPrivate: false, isArchived: false, isShared: false },
+    {
+      id: 'C-PRODUCT',
+      name: 'product-feedback',
+      isPrivate: false,
+      isArchived: false,
+      isShared: true,
+    },
+    { id: 'C-SUPPORT', name: 'support', isPrivate: true, isArchived: false, isShared: false },
+  ]
+}
+
+function sortInboundSources(sources: InboundSource[]): InboundSource[] {
+  return clone(sources).sort((left, right) => {
+    if (left.channel !== right.channel) {
+      return left.channel.localeCompare(right.channel)
+    }
+    return left.name.localeCompare(right.name)
+  })
+}
+
+function buildTestInboundSourceConnectionResponse(
+  state: ApiMockState,
+  body: {
+    channel?: string
+    emailConfig?: { host?: string }
+    slackConfig?: { botToken?: string; channelId?: string }
+  } | null,
+): TestInboundConnectionResponse {
+  if (body?.channel === 'slack') {
+    const token = body.slackConfig?.botToken?.trim() ?? ''
+    if (!token) {
+      return { ok: false, error: 'slack_config.bot_token must not be empty' }
+    }
+    const channelID = body.slackConfig?.channelId?.trim() ?? ''
+    if (channelID && !state.slackChannels.some((channel) => channel.id === channelID)) {
+      return { ok: false, error: `unknown slack channel ${channelID}` }
+    }
+    return { ok: true, latencyMs: '2' }
+  }
+  if (body?.channel === 'email') {
+    const host = body.emailConfig?.host?.trim() ?? ''
+    if (!host) {
+      return { ok: false, error: 'email_config.host must not be empty' }
+    }
+    return { ok: true, latencyMs: '5' }
+  }
+  return { ok: false, error: 'unsupported channel' }
+}
+
+function buildDiscoverSlackChannelsResponse(
+  state: ApiMockState,
+  body: {
+    slackConfig?: { botToken?: string; channelId?: string }
+  } | null,
+): DiscoverSlackChannelsResponse {
+  const token = body?.slackConfig?.botToken?.trim() ?? ''
+  if (!token) {
+    return { channels: [] }
+  }
+  return { channels: clone(state.slackChannels) }
+}
+
+function buildCreateInboundSourceResponse(
+  state: ApiMockState,
+  body: {
+    channel?: string
+    emailConfig?: Record<string, unknown>
+    name?: string
+    slackConfig?: { botToken?: string; channelId?: string }
+    webhookConfig?: Record<string, never>
+  } | null,
+): CreateInboundSourceResponse | null {
+  const channel = body?.channel?.trim() ?? ''
+  const name = body?.name?.trim() ?? ''
+  if (!channel || !name) return null
+  if (channel === 'slack') {
+    const token = body.slackConfig?.botToken?.trim() ?? ''
+    const channelID = body.slackConfig?.channelId?.trim() ?? ''
+    if (!token || !channelID) return null
+    const selected =
+      state.slackChannels.find((item) => item.id === channelID) ?? state.slackChannels[0]
+    if (!selected) return null
+    const source = createInboundSourceRow(state, {
+      channel,
+      name,
+      lastError: '',
+      lastEventAt: '',
+      lastUid: '0',
+      slug: slugifyInboundSourceName(name),
+    })
+    state.inboundSources = upsertInboundSource(state.inboundSources, source)
+    return { source: clone(source) }
+  }
+  if (channel === 'webhook') {
+    const source = createInboundSourceRow(state, {
+      channel,
+      name,
+      lastError: '',
+      lastEventAt: '',
+      lastUid: '0',
+      slug: slugifyInboundSourceName(name),
+    })
+    state.inboundSources = upsertInboundSource(state.inboundSources, source)
+    return {
+      source: clone(source),
+      webhookSecretReveal: {
+        url: `https://hooks.example.com/inbound/${source.slug}`,
+        secretHex: 'deadbeefcafebabefeedface0000000000000000000000000000000000000000',
+        curlExample: `curl -X POST https://hooks.example.com/inbound/${source.slug}`,
+      },
+    }
+  }
+  if (channel === 'email') {
+    const source = createInboundSourceRow(state, {
+      channel,
+      name,
+      lastError: '',
+      lastEventAt: '',
+      lastUid: '0',
+      slug: slugifyInboundSourceName(name),
+      enabled: true,
+    })
+    state.inboundSources = upsertInboundSource(state.inboundSources, source)
+    return { source: clone(source) }
+  }
+  return null
+}
+
+function createInboundSourceRow(
+  state: ApiMockState,
+  input: {
+    channel: string
+    enabled?: boolean
+    lastError: string
+    lastEventAt: string
+    lastUid: string
+    name: string
+    slug: string
+  },
+): InboundSource {
+  const now = '2026-07-12T10:00:00Z'
+  return {
+    id: `src-${state.inboundSources.length + 1}-a11y`,
+    tenantId: consoleA11yMe.tenant.id,
+    channel: input.channel,
+    name: input.name,
+    slug: input.slug,
+    enabled: input.enabled ?? true,
+    lastEventAt: input.lastEventAt,
+    lastUid: input.lastUid,
+    lastError: input.lastError,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+function upsertInboundSource(items: InboundSource[], source: InboundSource): InboundSource[] {
+  return [...items.filter((item) => item.id !== source.id), source]
+}
+
+function updateInboundSource(
+  state: ApiMockState,
+  id: string,
+  patch: Partial<Pick<InboundSource, 'enabled' | 'lastError' | 'lastEventAt' | 'lastUid'>>,
+) {
+  const current = state.inboundSources.find((source) => source.id === id)
+  if (!current) {
+    throw new Error(`missing inbound source ${id}`)
+  }
+  const updated: InboundSource = {
+    ...current,
+    ...patch,
+    updatedAt: '2026-07-12T10:01:00Z',
+  }
+  state.inboundSources = upsertInboundSource(
+    state.inboundSources.filter((source) => source.id !== id),
+    updated,
+  )
+  return clone(updated)
+}
+
+function slugifyInboundSourceName(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 200)
 }
 
 function feedbackDetailWithReplyDraft(

@@ -26,6 +26,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers"
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/inbound"
+	slackadapter "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -226,6 +227,7 @@ func applyRuntimeHardening(cfg *config.Config) {
 	// Default blocks loopback + private networks (always blocks cloud-metadata /
 	// link-local); config relaxes loopback/private for dev / on-prem.
 	egress := cfg.EgressPolicy()
+	slackadapter.SetAPIBaseURL(cfg.SlackAPIBaseURL)
 	notify.SetEgressPolicy(egress)
 	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)

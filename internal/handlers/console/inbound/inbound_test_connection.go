@@ -17,6 +17,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
+	"github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -30,105 +31,153 @@ const testConnTimeout = 8 * time.Second
 type testConnFn func(ctx context.Context, cfg testConnInputs) error
 
 // TestConnection handles POST /fb/v1/console/inbound/sources/test-connection.
-// Email-only IMAP probe: dial + login + select(folder) + logout.
+// Email probes dial + login + select(folder) + logout. Slack probes auth.test
+// and, when a channel is provided, verifies that the selected channel is
+// actually readable from the token.
 // Response: TestInboundConnectionResponse{ok=true} or {ok=false,error=...}
 // for a decoded request. Malformed JSON is rejected by dispatcher before this
 // handler runs.
 func (h *Handler) TestConnection(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.TestInboundConnectionRequest) (dispatcher.Result[*attunev1.TestInboundConnectionResponse], error) {
 	const where = "console.inbound.TestConnection"
 	auth := ctx.Auth
-	if strings.TrimSpace(strings.ToLower(req.GetChannel())) != channelEmail {
+	channel := strings.TrimSpace(strings.ToLower(req.GetChannel()))
+	if channel != channelEmail && channel != channelSlack {
 		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
 			Ok:    false,
-			Error: ptrext.Of("test-connection only supports the email channel"),
-		}))
-	}
-	cfg := req.GetEmailConfig()
-	if cfg == nil {
-		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
-			Ok:    false,
-			Error: ptrext.Of("email_config is required"),
-		}))
-	}
-	inputs, err := validateEmailConnConfig(cfg)
-	if err != nil {
-		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
-			Ok:    false,
-			Error: ptrext.Of(err.Error()),
+			Error: ptrext.Of("test-connection only supports the email or slack channel"),
 		}))
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, testConnTimeout)
 	defer cancel()
 	start := time.Now()
-	if err := h.testConn(probeCtx, inputs); err != nil {
-		if auditErr := h.recordAudit(
-			ctx,
-			auth.UserType,
-			auth.UserID,
-			auth.TenantID,
-			"inbound_source.test_connection",
-			inputs.Host,
-			"Tested inbound email connection",
-			ctx.Request(),
-			nil,
-			map[string]any{
-				"channel":    channelEmail,
-				"host":       inputs.Host,
-				"port":       inputs.Port,
-				"tls":        inputs.TLS,
-				"folder":     inputs.Folder,
-				"ok":         false,
-				"latency_ms": time.Since(start).Milliseconds(),
-				"error":      err.Error(),
-			},
-		); auditErr != nil {
-			logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,host:%s,err:%+v",
-				where, auth.TenantID, inputs.Host, auditErr.Error())
-			return dispatcher.Fail[*attunev1.TestInboundConnectionResponse](
-				http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log",
-			)
-		}
-		logext.Warnf(ctx, "[%s] probe failed,tenant_id:%s,host:%s,err:%s",
-			where, auth.TenantID, inputs.Host, err.Error())
+	targetID, auditTitle, auditFields, err := h.resolveTestConnection(probeCtx, req, channel)
+	if auditFields == nil {
 		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
 			Ok:    false,
 			Error: ptrext.Of(err.Error()),
 		}))
 	}
+
 	latency := time.Since(start).Milliseconds()
-	resp := ptrext.Of(attunev1.TestInboundConnectionResponse{
-		Ok:        true,
-		LatencyMs: ptrext.Of(latency),
-	})
-	if err := h.recordAudit(
+	auditFields["ok"] = err == nil
+	auditFields["latency_ms"] = latency
+	if err != nil {
+		auditFields["error"] = err.Error()
+	}
+	if auditErr := h.recordAudit(
 		ctx,
 		auth.UserType,
 		auth.UserID,
 		auth.TenantID,
 		"inbound_source.test_connection",
-		inputs.Host,
-		"Tested inbound email connection",
+		targetID,
+		auditTitle,
 		ctx.Request(),
 		nil,
-		map[string]any{
-			"channel":    channelEmail,
-			"host":       inputs.Host,
-			"port":       inputs.Port,
-			"tls":        inputs.TLS,
-			"folder":     inputs.Folder,
-			"ok":         true,
-			"latency_ms": latency,
-		},
-	); err != nil {
-		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,host:%s,err:%+v",
-			where, auth.TenantID, inputs.Host, err.Error())
+		auditFields,
+	); auditErr != nil {
+		logext.Errorf(ctx, "[%s] audit write failed,tenant_id:%s,target_id:%s,err:%+v",
+			where, auth.TenantID, targetID, auditErr.Error())
 		return dispatcher.Fail[*attunev1.TestInboundConnectionResponse](
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to write audit log",
 		)
 	}
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,host:%s,latency_ms:%d",
-		where, auth.TenantID, inputs.Host, latency)
-	return dispatcher.OK(resp)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] probe failed,tenant_id:%s,target_id:%s,err:%s",
+			where, auth.TenantID, targetID, err.Error())
+		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
+			Ok:    false,
+			Error: ptrext.Of(err.Error()),
+		}))
+	}
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,target_id:%s,latency_ms:%d",
+		where, auth.TenantID, targetID, latency)
+	return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
+		Ok:        true,
+		LatencyMs: ptrext.Of(latency),
+	}))
+}
+
+func (h *Handler) resolveTestConnection(ctx context.Context, req *attunev1.TestInboundConnectionRequest, channel string) (string, string, map[string]any, error) {
+	switch channel {
+	case channelEmail:
+		return h.testEmailConnection(ctx, req.GetEmailConfig())
+	case channelSlack:
+		return h.testSlackConnection(ctx, req.GetSlackConfig())
+	default:
+		return "", "", nil, fmt.Errorf("unsupported channel %q", channel)
+	}
+}
+
+func (h *Handler) testEmailConnection(ctx context.Context, cfg *attunev1.EmailConnConfig) (string, string, map[string]any, error) {
+	if cfg == nil {
+		return "", "", nil, errors.New("email_config is required")
+	}
+	inputs, validateErr := validateEmailConnConfig(cfg)
+	if validateErr != nil {
+		return "", "", nil, validateErr
+	}
+	auditFields := map[string]any{
+		"channel": channelEmail,
+		"host":    inputs.Host,
+		"port":    inputs.Port,
+		"tls":     inputs.TLS,
+		"folder":  inputs.Folder,
+	}
+	return inputs.Host, "Tested inbound email connection", auditFields, h.testConn(ctx, inputs)
+}
+
+func (h *Handler) testSlackConnection(ctx context.Context, cfg *attunev1.SlackConnConfig) (string, string, map[string]any, error) {
+	if cfg == nil {
+		return "", "", nil, errors.New("slack_config is required")
+	}
+	inputs, validateErr := slack.ValidateConnConfig(cfg, false)
+	if validateErr != nil {
+		return "", "", nil, validateErr
+	}
+	auditFields := map[string]any{
+		"channel":     channelSlack,
+		"channel_id":  inputs.ChannelID,
+		"has_channel": inputs.ChannelID != "",
+	}
+	if inputs.ChannelID == "" {
+		targetID, err := h.testSlackAuth(ctx, inputs, auditFields)
+		return targetID, "Tested inbound slack connection", auditFields, err
+	}
+	targetID, err := h.testSlackChannel(ctx, inputs, auditFields)
+	return targetID, "Tested inbound slack connection", auditFields, err
+}
+
+func (h *Handler) testSlackAuth(ctx context.Context, inputs slack.ConnInputs, auditFields map[string]any) (string, error) {
+	authTest := h.slackAuthTest
+	if authTest == nil {
+		authTest = slack.AuthTest
+	}
+	authInfo, err := authTest(ctx, inputs.BotToken)
+	if err != nil {
+		return "slack-auth", err
+	}
+	auditFields["slack_team_id"] = authInfo.TeamID
+	auditFields["slack_team_name"] = authInfo.TeamName
+	auditFields["workspace_url"] = authInfo.WorkspaceURL
+	return "slack-auth", nil
+}
+
+func (h *Handler) testSlackChannel(ctx context.Context, inputs slack.ConnInputs, auditFields map[string]any) (string, error) {
+	validateChannel := h.slackValidateChannel
+	if validateChannel == nil {
+		validateChannel = slack.ValidateChannel
+	}
+	authInfo, channelInfo, err := validateChannel(ctx, inputs.BotToken, inputs.ChannelID)
+	if err != nil {
+		return inputs.ChannelID, err
+	}
+	auditFields["slack_team_id"] = authInfo.TeamID
+	auditFields["slack_team_name"] = authInfo.TeamName
+	auditFields["workspace_url"] = authInfo.WorkspaceURL
+	auditFields["slack_channel_id"] = channelInfo.ID
+	auditFields["slack_channel_name"] = channelInfo.Name
+	return inputs.ChannelID, nil
 }
 
 // testConnInputs — narrower variant of EmailCreateConfig used only by

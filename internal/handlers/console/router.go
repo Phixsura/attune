@@ -157,6 +157,7 @@ var (
 //	 POST /inbound/sources/{id}/resume -> dispatcher.Bind(inbound.Handler.Resume)
 //	 DELETE /inbound/sources/{id} -> dispatcher.Bind(inbound.Handler.Delete)
 //	 POST /inbound/sources/test-connection -> dispatcher.Bind(inbound.Handler.TestConnection)
+//	 POST /inbound/sources/slack/discover -> dispatcher.Bind(inbound.Handler.DiscoverSlackChannels)
 //	 POST /llm/channels/{id}/test -> dispatcher.Bind(llmconfig.Handler.TestChannel)
 //	 GET /llm/channels/{channel_id}/models -> dispatcher.Bind(llmconfig.Handler.ListChannelModels)
 //	 GET /clusters -> dispatcher.Bind(clusters.Handler.List)
@@ -2837,6 +2838,16 @@ func (r *Router) mountInbound(m chi.Router) {
 			}),
 			r.inbound.TestConnection,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestInboundConnectionRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		s.Post("/slack/discover", dispatcher.Bind(
+			"console.inbound.DiscoverSlackChannels",
+			dispatcher.JSON(func() *attunev1.DiscoverSlackChannelsRequest {
+				return ptrext.Of(attunev1.DiscoverSlackChannelsRequest{})
+			}),
+			r.inbound.DiscoverSlackChannels,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DiscoverSlackChannelsRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))

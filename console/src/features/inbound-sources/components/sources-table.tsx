@@ -5,6 +5,7 @@ import {
   Key,
   Loader2,
   Mail,
+  MessageSquare,
   PauseCircle,
   PlayCircle,
   Trash2,
@@ -21,20 +22,25 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { InboundSource } from '@/features/inbound-sources/api/list-inbound-sources'
+import { cn } from '@/lib/utils'
 
 // SourcesTable — pure presentation. The route owns the data + mutations
 // and passes pending flags + callbacks; this component just renders.
 
 export function SourcesTable({
   sources,
+  selectedID,
   togglingId,
+  onSelect,
   onRotate,
   onPause,
   onResume,
   onDelete,
 }: {
   sources: InboundSource[]
+  selectedID: string
   togglingId: string | undefined
+  onSelect: (s: InboundSource) => void
   onRotate: (s: InboundSource) => void
   onPause: (s: InboundSource) => void
   onResume: (s: InboundSource) => void
@@ -55,8 +61,20 @@ export function SourcesTable({
       </TableHeader>
       <TableBody>
         {sources.map((src) => (
-          <TableRow key={src.id} className={src.enabled ? '' : 'opacity-50'}>
-            <TableCell className="font-medium">{src.name}</TableCell>
+          <TableRow
+            key={src.id}
+            className={cn(selectedID === src.id ? 'bg-primary/5' : !src.enabled && 'bg-muted/20')}
+          >
+            <TableCell className="font-medium">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto px-0 py-0 font-medium text-foreground hover:bg-transparent hover:underline"
+                onClick={() => onSelect(src)}
+              >
+                {src.name}
+              </Button>
+            </TableCell>
             <TableCell>
               <ChannelPill channel={src.channel} />
             </TableCell>
@@ -128,15 +146,17 @@ export function SourcesTable({
   )
 }
 
-function ChannelPill({ channel }: { channel: string }) {
+export function ChannelPill({ channel }: { channel: string }) {
   const { t } = useTranslation()
-  const isEmail = channel === 'email'
-  const Icon = isEmail ? Mail : Webhook
-  const label = isEmail
-    ? t('inbound_sources.channel.email')
-    : channel === 'webhook'
-      ? t('inbound_sources.channel.webhook')
-      : channel
+  const Icon = channel === 'email' ? Mail : channel === 'slack' ? MessageSquare : Webhook
+  const label =
+    channel === 'email'
+      ? t('inbound_sources.channel.email')
+      : channel === 'slack'
+        ? t('inbound_sources.channel.slack')
+        : channel === 'webhook'
+          ? t('inbound_sources.channel.webhook')
+          : channel
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-xs">
       <Icon className="h-3 w-3" />
@@ -145,7 +165,7 @@ function ChannelPill({ channel }: { channel: string }) {
   )
 }
 
-function StateBadge({ source }: { source: InboundSource }) {
+export function StateBadge({ source }: { source: InboundSource }) {
   const { t } = useTranslation()
   if (!source.enabled) {
     return (
@@ -170,7 +190,7 @@ function StateBadge({ source }: { source: InboundSource }) {
     )
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border border-green-600/30 bg-green-600/10 px-1.5 py-0.5 text-xs text-green-700 dark:text-green-500">
+    <span className="inline-flex items-center gap-1 rounded-md border border-green-600/30 bg-green-600/10 px-1.5 py-0.5 text-xs text-green-800 dark:text-green-400">
       {t('inbound_sources.state.healthy')}
     </span>
   )

@@ -84,7 +84,7 @@ func TestBuildSourceSet_Conformance(t *testing.T) {
 			t.Errorf("source %q has an empty display in the assembled set", s)
 		}
 	}
-	for _, ch := range []string{"webhook", "email"} {
+	for _, ch := range []string{"webhook", "email", "slack"} {
 		if !set.Has(ch) {
 			t.Errorf("assembled set is missing built-in adapter channel %q", ch)
 		}

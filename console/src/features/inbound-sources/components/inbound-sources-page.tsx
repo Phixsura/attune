@@ -1,6 +1,8 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { InboxIcon } from 'lucide-react'
-import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { format, formatDistanceToNow } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
+import { InboxIcon, Loader2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
@@ -13,6 +15,7 @@ import {
   useCreateInboundSource,
 } from '@/features/inbound-sources/api/create-inbound-source'
 import { useDeleteInboundSource } from '@/features/inbound-sources/api/delete-inbound-source'
+import { inboundSourceQuery } from '@/features/inbound-sources/api/get-inbound-source'
 import {
   type InboundSource,
   inboundSourcesQuery,
@@ -24,7 +27,11 @@ import { CreateInboundSourceDialog } from '@/features/inbound-sources/components
 import { DeleteInboundSourceDialog } from '@/features/inbound-sources/components/delete-dialog'
 import { RotateConfirmDialog } from '@/features/inbound-sources/components/rotate-dialog'
 import { SecretRevealDialog } from '@/features/inbound-sources/components/secret-reveal-dialog'
-import { SourcesTable } from '@/features/inbound-sources/components/sources-table'
+import {
+  ChannelPill,
+  SourcesTable,
+  StateBadge,
+} from '@/features/inbound-sources/components/sources-table'
 import { ErrorCode } from '@/proto/attune/v1/common'
 
 // reveal — the local state slot for "show the freshly-minted webhook
@@ -38,6 +45,7 @@ interface RevealState {
 
 export function InboundSourcesPage() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const list = useQuery(inboundSourcesQuery())
   const create = useCreateInboundSource()
   const rotate = useRotateInboundSource()
@@ -46,18 +54,49 @@ export function InboundSourcesPage() {
   const del = useDeleteInboundSource()
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [selectedSourceID, setSelectedSourceID] = useState('')
   const [rotateTarget, setRotateTarget] = useState<InboundSource | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<InboundSource | null>(null)
   const [reveal, setReveal] = useState<RevealState | null>(null)
   const sources = list.data ?? []
+  const selectedSource = sources.find((source) => source.id === selectedSourceID) ?? null
+  const selectedSourceQuery = useQuery({
+    ...inboundSourceQuery(selectedSourceID || 'selected-source'),
+    enabled: Boolean(selectedSourceID),
+    placeholderData: selectedSource ?? undefined,
+  })
+  const selectedDetail = selectedSourceQuery.data ?? selectedSource
   const healthyCount = sources.filter((source) => source.enabled && !source.lastError).length
   const pausedCount = sources.filter((source) => !source.enabled).length
   const errorCount = sources.filter((source) => source.enabled && Boolean(source.lastError)).length
 
+  useEffect(() => {
+    if (sources.length === 0) {
+      if (selectedSourceID) setSelectedSourceID('')
+      return
+    }
+    if (selectedSourceID && sources.some((source) => source.id === selectedSourceID)) {
+      return
+    }
+    setSelectedSourceID(sources[0]?.id ?? '')
+  }, [selectedSourceID, sources])
+
   const handleCreate = (body: InboundSourceCreate) =>
     create.mutateAsync(body, {
       onSuccess: (res) => {
+        const source = res.source
         setCreateOpen(false)
+        if (source) {
+          queryClient.setQueryData<InboundSource[]>(
+            ['console', 'inbound-sources'],
+            (current = []) => {
+              const next = current.filter((item) => item.id !== source.id)
+              return [...next, source]
+            },
+          )
+          queryClient.setQueryData(['console', 'inbound-sources', 'detail', source.id], source)
+          setSelectedSourceID(source.id)
+        }
         toast.success(t('inbound_sources.toast.created'))
         if (res.webhookSecretReveal?.secretHex) {
           setReveal({
@@ -91,7 +130,13 @@ export function InboundSourcesPage() {
 
   const handleDelete = useMutation({
     mutationFn: (id: string) => del.mutateAsync(id),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
+      queryClient.setQueryData<InboundSource[]>(['console', 'inbound-sources'], (current = []) =>
+        current.filter((source) => source.id !== id),
+      )
+      if (selectedSourceID === id) {
+        setSelectedSourceID('')
+      }
       setDeleteTarget(null)
       toast.success(t('inbound_sources.toast.deleted'))
     },
@@ -166,7 +211,9 @@ export function InboundSourcesPage() {
             ) : sources.length > 0 ? (
               <SourcesTable
                 sources={sources}
+                selectedID={selectedSourceID}
                 togglingId={togglingId}
+                onSelect={(s) => setSelectedSourceID(s.id)}
                 onRotate={(s) => setRotateTarget(s)}
                 onPause={handlePause}
                 onResume={handleResume}
@@ -186,26 +233,34 @@ export function InboundSourcesPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-border/60 shadow-none">
-          <CardHeader>
-            <CardTitle className="text-base">{t('inbound_sources.playbook_title')}</CardTitle>
-            <CardDescription>{t('inbound_sources.playbook_description')}</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-6">
-            <PlaybookRow
-              title={t('inbound_sources.playbook.segmentation_title')}
-              body={t('inbound_sources.playbook.segmentation_body')}
-            />
-            <PlaybookRow
-              title={t('inbound_sources.playbook.rotation_title')}
-              body={t('inbound_sources.playbook.rotation_body')}
-            />
-            <PlaybookRow
-              title={t('inbound_sources.playbook.pause_title')}
-              body={t('inbound_sources.playbook.pause_body')}
-            />
-          </CardContent>
-        </Card>
+        <div className="space-y-6">
+          <SourceDetailCard
+            source={selectedDetail}
+            loading={selectedSourceQuery.isFetching && Boolean(selectedSourceID)}
+            onCreate={() => setCreateOpen(true)}
+          />
+
+          <Card className="border-border/60 shadow-none">
+            <CardHeader>
+              <CardTitle className="text-base">{t('inbound_sources.playbook_title')}</CardTitle>
+              <CardDescription>{t('inbound_sources.playbook_description')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-6">
+              <PlaybookRow
+                title={t('inbound_sources.playbook.segmentation_title')}
+                body={t('inbound_sources.playbook.segmentation_body')}
+              />
+              <PlaybookRow
+                title={t('inbound_sources.playbook.rotation_title')}
+                body={t('inbound_sources.playbook.rotation_body')}
+              />
+              <PlaybookRow
+                title={t('inbound_sources.playbook.pause_title')}
+                body={t('inbound_sources.playbook.pause_body')}
+              />
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <CreateInboundSourceDialog
@@ -242,6 +297,156 @@ function PlaybookRow({ title, body }: { title: string; body: string }) {
     <div className="rounded-[1rem] border border-border/60 bg-background/85 px-4 py-3.5">
       <div className="text-sm font-semibold text-foreground">{title}</div>
       <div className="mt-1 text-sm leading-6 text-muted-foreground">{body}</div>
+    </div>
+  )
+}
+
+function SourceDetailCard({
+  source,
+  loading,
+  onCreate,
+}: {
+  source: InboundSource | null
+  loading: boolean
+  onCreate: () => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <Card className="border-border/60 shadow-none">
+      <CardHeader>
+        <CardTitle className="text-base">{t('inbound_sources.detail_title')}</CardTitle>
+        <CardDescription>
+          {source
+            ? t('inbound_sources.detail_description', { name: source.name })
+            : t('inbound_sources.detail_empty_body')}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-6">
+        {!source ? (
+          <EmptyState
+            icon={InboxIcon}
+            title={t('inbound_sources.detail_empty_title')}
+            description={t('inbound_sources.detail_empty_body')}
+            action={{
+              label: t('inbound_sources.create_button'),
+              onClick: onCreate,
+            }}
+          />
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <ChannelPill channel={source.channel} />
+              <StateBadge source={source} />
+              <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                {source.slug}
+              </span>
+              {loading && (
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  {t('inbound_sources.detail_refreshing')}
+                </span>
+              )}
+            </div>
+
+            <DetailGrid
+              rows={[
+                { label: t('inbound_sources.detail.source_id'), value: source.id, mono: true },
+                { label: t('inbound_sources.detail.slug'), value: source.slug, mono: true },
+                {
+                  label: t('inbound_sources.detail.last_event'),
+                  value: source.lastEventAt
+                    ? formatDistanceToNow(new Date(source.lastEventAt), {
+                        addSuffix: true,
+                        locale: zhCN,
+                      })
+                    : t('common.never'),
+                  hint: source.lastEventAt
+                    ? format(new Date(source.lastEventAt), 'PPP HH:mm', { locale: zhCN })
+                    : t('inbound_sources.detail.last_event_empty'),
+                },
+                {
+                  label: t('inbound_sources.detail.cursor'),
+                  value:
+                    source.lastUid && source.lastUid !== '0'
+                      ? source.lastUid
+                      : t('inbound_sources.detail.cursor_empty'),
+                  hint:
+                    source.lastUid && source.lastUid !== '0'
+                      ? t('inbound_sources.detail.cursor_hint')
+                      : t('inbound_sources.detail.cursor_empty_hint'),
+                  mono: true,
+                },
+                {
+                  label: t('inbound_sources.detail.created_at'),
+                  value: formatDistanceToNow(new Date(source.createdAt), {
+                    addSuffix: true,
+                    locale: zhCN,
+                  }),
+                  hint: format(new Date(source.createdAt), 'PPP HH:mm', { locale: zhCN }),
+                },
+                {
+                  label: t('inbound_sources.detail.updated_at'),
+                  value: formatDistanceToNow(new Date(source.updatedAt), {
+                    addSuffix: true,
+                    locale: zhCN,
+                  }),
+                  hint: format(new Date(source.updatedAt), 'PPP HH:mm', { locale: zhCN }),
+                },
+              ]}
+            />
+
+            <div
+              className={
+                source.lastError
+                  ? 'rounded-[1rem] border border-destructive/30 bg-destructive/10 p-4'
+                  : 'rounded-[1rem] border border-border/60 bg-background/85 p-4'
+              }
+            >
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                {t('inbound_sources.detail.last_error')}
+              </div>
+              <div
+                className={
+                  source.lastError
+                    ? 'mt-2 break-words text-sm leading-6 text-destructive'
+                    : 'mt-2 text-sm leading-6 text-muted-foreground'
+                }
+              >
+                {source.lastError || t('inbound_sources.detail.no_error')}
+              </div>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function DetailGrid({
+  rows,
+}: {
+  rows: Array<{ hint?: string; label: string; mono?: boolean; value: string }>
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {rows.map((row) => (
+        <div key={row.label} className="rounded-[1rem] border border-border/60 bg-muted/20 p-3.5">
+          <div className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
+            {row.label}
+          </div>
+          <div
+            className={
+              row.mono ? 'mt-2 font-mono text-sm text-foreground' : 'mt-2 text-sm text-foreground'
+            }
+          >
+            {row.value}
+          </div>
+          {row.hint && (
+            <span className="mt-1 block text-xs leading-5 text-muted-foreground">{row.hint}</span>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

@@ -248,6 +248,7 @@ func workflowMutatingRouteCoverage() map[string]string {
 		"POST /guard-policies/effective":                     "exempt: effective-policy preview, no persisted mutation",
 		"POST /inbound/sources/":                             "audited: inbound_source.create",
 		"POST /inbound/sources/test-connection":              "audited: inbound_source.test_connection",
+		"POST /inbound/sources/slack/discover":               "exempt: discover-only Slack channel lookup, no persisted mutation",
 		"DELETE /inbound/sources/{id}":                       "audited: inbound_source.delete",
 		"POST /inbound/sources/{id}/rotate-secret":           "audited: inbound_source.rotate_secret",
 		"POST /inbound/sources/{id}/pause":                   "audited: inbound_source.pause",

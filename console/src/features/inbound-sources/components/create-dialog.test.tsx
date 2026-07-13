@@ -35,4 +35,48 @@ describe('CreateInboundSourceDialog', () => {
 
     expect(await screen.findByText('request body is not valid JSON')).toBeInTheDocument()
   })
+
+  it('discovers a Slack channel and submits the Slack create payload', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/slack/discover', async ({ request }) => {
+        const body = (await request.json()) as {
+          slackConfig?: { botToken?: string; channelId?: string }
+        }
+        expect(body.slackConfig?.botToken).toBe('xoxb-test-token')
+        return HttpResponse.json({
+          channels: [
+            {
+              id: 'C123456',
+              name: 'feedback',
+              isPrivate: false,
+              isArchived: false,
+              isShared: false,
+            },
+          ],
+        })
+      }),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
+    await user.type(screen.getByLabelText('Slack Bot Token'), 'xoxb-test-token')
+    await user.click(screen.getByRole('button', { name: '发现频道' }))
+    await screen.findByText('#feedback')
+    await user.click(screen.getByRole('combobox', { name: '频道' }))
+    await user.click(screen.getByRole('option', { name: '#feedback' }))
+    await user.type(screen.getByLabelText('名称'), 'Slack Feedback')
+    await user.click(screen.getByRole('button', { name: '新建' }))
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      channel: 'slack',
+      name: 'Slack Feedback',
+      slackConfig: {
+        botToken: 'xoxb-test-token',
+        channelId: 'C123456',
+      },
+    })
+  })
 })

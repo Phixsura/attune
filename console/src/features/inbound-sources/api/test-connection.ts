@@ -9,11 +9,11 @@ import type {
 export type TestInboundConnectionInput = TestInboundConnectionRequest
 export type TestInboundConnectionResult = TestInboundConnectionResponse
 
-// useTestInboundSourceConnection — currently email-only. Validates the
-// IMAP creds (dial + login + select + logout) without persisting. The
-// server returns 200 with ok=true|false for connection probe outcomes;
-// malformed requests still use the shared {code,message,requestId}
-// error envelope.
+// useTestInboundSourceConnection validates the selected inbound source
+// connection without persisting it. Email probes IMAP creds; Slack probes
+// auth.test and optionally the selected channel. The server returns 200 with
+// ok=true|false for probe outcomes; malformed requests still use the shared
+// {code,message,requestId} error envelope.
 export function useTestInboundSourceConnection() {
   return useMutation({
     mutationFn: (body: TestInboundConnectionInput) =>

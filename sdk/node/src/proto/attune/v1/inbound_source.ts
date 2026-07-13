@@ -53,6 +53,7 @@ export interface CreateInboundSourceRequest {
   name: string;
   webhookConfig?: WebhookCreateConfig | undefined;
   emailConfig?: EmailCreateConfig | undefined;
+  slackConfig?: SlackConnConfig | undefined;
 }
 
 /**
@@ -131,12 +132,13 @@ export interface DeleteInboundSourceResponse {
 /**
  * TestInboundConnectionRequest validates an IMAP config without
  * persisting it. Returns ok=false + error message rather than 5xx when
- * the IMAP server rejects credentials.
+ * the upstream rejects credentials or channel access.
  */
 export interface TestInboundConnectionRequest {
-  /** currently "email" only */
+  /** currently "email" or "slack" */
   channel: string;
   emailConfig?: EmailConnConfig | undefined;
+  slackConfig?: SlackConnConfig | undefined;
 }
 
 export interface TestInboundConnectionResponse {
@@ -154,11 +156,33 @@ export interface EmailConnConfig {
   folder: string;
 }
 
+export interface SlackConnConfig {
+  botToken: string;
+  /** optional for auth-only test / required for create */
+  channelId: string;
+}
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  isArchived: boolean;
+  isShared: boolean;
+}
+
+export interface DiscoverSlackChannelsRequest {
+  slackConfig?: SlackConnConfig | undefined;
+}
+
+export interface DiscoverSlackChannelsResponse {
+  channels: SlackChannel[];
+}
+
 /**
  * InboundSourceService manages a tenant's inbound source rows (#66
- * channel-agnostic inbound framework). Sources back the webhook and
- * email IMAP adapters; future channels (RSS, scrape, MQ, …) hang off
- * the same shape.
+ * channel-agnostic inbound framework). Sources back the webhook,
+ * email IMAP, and Slack adapters; future channels (RSS, scrape, MQ,
+ * …) hang off the same shape.
  */
 export interface InboundSourceService {
   /** GET /fb/v1/console/inbound/sources */
@@ -166,7 +190,7 @@ export interface InboundSourceService {
   /** GET /fb/v1/console/inbound/sources/{id} */
   GetInboundSource(request: GetInboundSourceRequest): Promise<InboundSource>;
   /**
-   * POST /fb/v1/console/inbound/sources — create webhook or email source.
+   * POST /fb/v1/console/inbound/sources — create webhook, email, or Slack source.
    * Webhook responses include a one-time secret reveal (url + secret +
    * example); the raw secret is never returned again.
    */
@@ -184,8 +208,14 @@ export interface InboundSourceService {
   /** DELETE /fb/v1/console/inbound/sources/{id} */
   DeleteInboundSource(request: DeleteInboundSourceRequest): Promise<DeleteInboundSourceResponse>;
   /**
-   * POST /fb/v1/console/inbound/sources/test-connection — IMAP-only,
-   * no state changes. Validates host/port/login/SELECT round-trip.
+   * POST /fb/v1/console/inbound/sources/test-connection — email or
+   * Slack only, no state changes. Validates the configured auth path.
    */
   TestInboundConnection(request: TestInboundConnectionRequest): Promise<TestInboundConnectionResponse>;
+  /**
+   * POST /fb/v1/console/inbound/sources/slack/discover — returns the
+   * readable channels for a Slack bot token so Console can let the
+   * operator select a channel without hand-typing opaque IDs.
+   */
+  DiscoverSlackChannels(request: DiscoverSlackChannelsRequest): Promise<DiscoverSlackChannelsResponse>;
 }

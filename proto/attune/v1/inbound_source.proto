@@ -6,9 +6,9 @@ import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
 
 // InboundSourceService manages a tenant's inbound source rows (#66
-// channel-agnostic inbound framework). Sources back the webhook and
-// email IMAP adapters; future channels (RSS, scrape, MQ, …) hang off
-// the same shape.
+// channel-agnostic inbound framework). Sources back the webhook,
+// email IMAP, and Slack adapters; future channels (RSS, scrape, MQ,
+// …) hang off the same shape.
 service InboundSourceService {
   // GET /fb/v1/console/inbound/sources
   rpc ListInboundSources(ListInboundSourcesRequest) returns (ListInboundSourcesResponse) {
@@ -18,7 +18,7 @@ service InboundSourceService {
   rpc GetInboundSource(GetInboundSourceRequest) returns (InboundSource) {
     option (google.api.http) = {get: "/fb/v1/console/inbound/sources/{id}"};
   }
-  // POST /fb/v1/console/inbound/sources — create webhook or email source.
+  // POST /fb/v1/console/inbound/sources — create webhook, email, or Slack source.
   // Webhook responses include a one-time secret reveal (url + secret +
   // example); the raw secret is never returned again.
   rpc CreateInboundSource(CreateInboundSourceRequest) returns (CreateInboundSourceResponse) {
@@ -54,11 +54,20 @@ service InboundSourceService {
   rpc DeleteInboundSource(DeleteInboundSourceRequest) returns (DeleteInboundSourceResponse) {
     option (google.api.http) = {delete: "/fb/v1/console/inbound/sources/{id}"};
   }
-  // POST /fb/v1/console/inbound/sources/test-connection — IMAP-only,
-  // no state changes. Validates host/port/login/SELECT round-trip.
+  // POST /fb/v1/console/inbound/sources/test-connection — email or
+  // Slack only, no state changes. Validates the configured auth path.
   rpc TestInboundConnection(TestInboundConnectionRequest) returns (TestInboundConnectionResponse) {
     option (google.api.http) = {
       post: "/fb/v1/console/inbound/sources/test-connection"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/inbound/sources/slack/discover — returns the
+  // readable channels for a Slack bot token so Console can let the
+  // operator select a channel without hand-typing opaque IDs.
+  rpc DiscoverSlackChannels(DiscoverSlackChannelsRequest) returns (DiscoverSlackChannelsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/inbound/sources/slack/discover"
       body: "*"
     };
   }
@@ -97,6 +106,7 @@ message CreateInboundSourceRequest {
   string name = 2 [(google.api.field_behavior) = REQUIRED];
   optional WebhookCreateConfig webhook_config = 3;
   optional EmailCreateConfig email_config = 4;
+  optional SlackConnConfig slack_config = 5;
 }
 
 // CreateInboundSourceResponse always carries the persisted InboundSource.
@@ -167,10 +177,11 @@ message DeleteInboundSourceResponse {}
 
 // TestInboundConnectionRequest validates an IMAP config without
 // persisting it. Returns ok=false + error message rather than 5xx when
-// the IMAP server rejects credentials.
+// the upstream rejects credentials or channel access.
 message TestInboundConnectionRequest {
-  string channel = 1 [(google.api.field_behavior) = REQUIRED];  // currently "email" only
+  string channel = 1 [(google.api.field_behavior) = REQUIRED];  // currently "email" or "slack"
   optional EmailConnConfig email_config = 2;
+  optional SlackConnConfig slack_config = 3;
 }
 
 message TestInboundConnectionResponse {
@@ -186,4 +197,25 @@ message EmailConnConfig {
   string username = 4;
   string password = 5;
   string folder = 6;
+}
+
+message SlackConnConfig {
+  string bot_token = 1;
+  string channel_id = 2;  // optional for auth-only test / required for create
+}
+
+message SlackChannel {
+  string id = 1;
+  string name = 2;
+  bool is_private = 3;
+  bool is_archived = 4;
+  bool is_shared = 5;
+}
+
+message DiscoverSlackChannelsRequest {
+  SlackConnConfig slack_config = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DiscoverSlackChannelsResponse {
+  repeated SlackChannel channels = 1;
 }

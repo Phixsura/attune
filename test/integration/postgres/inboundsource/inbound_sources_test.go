@@ -47,6 +47,33 @@ func TestPG_InboundSourceRepoListLookupAndState(t *testing.T) {
 	assertStateAndEnabled(t, ctx, repo, webhookID)
 }
 
+func TestPG_InboundSourceRepoUpdateConfig(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+	tenantID := insertTenant(t, ctx, pool)
+	sourceID := insertSource(t, ctx, pool, sourceRow{
+		tenantID: tenantID,
+		channel:  "slack",
+		name:     "Slack Feed",
+		slug:     "slack-feed",
+		enabled:  true,
+	})
+
+	repo := inboundsource.NewRepo(pool)
+	want := []byte(`{"thread_cache":[{"root_ts":"1700000000.000100"}]}`)
+	if err := repo.UpdateConfig(ctx, sourceID, want); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+
+	got, err := repo.Get(ctx, sourceID)
+	if err != nil {
+		t.Fatalf("Get after UpdateConfig: %v", err)
+	}
+	if string(got.Config) != string(want) {
+		t.Fatalf("Config = %s, want %s", got.Config, want)
+	}
+}
+
 func assertListAndLookup(t *testing.T, ctx context.Context, repo *inboundsource.Repo, webhookID string) {
 	t.Helper()
 	webhooks, err := repo.List(ctx, "webhook")

@@ -4077,7 +4077,7 @@ paths:
             tags:
                 - InboundSourceService
             description: |-
-                POST /fb/v1/console/inbound/sources — create webhook or email source.
+                POST /fb/v1/console/inbound/sources — create webhook, email, or Slack source.
                  Webhook responses include a one-time secret reveal (url + secret +
                  example); the raw secret is never returned again.
             operationId: InboundSourceService_CreateInboundSource
@@ -4100,13 +4100,41 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/inbound/sources/slack/discover:
+        post:
+            tags:
+                - InboundSourceService
+            description: |-
+                POST /fb/v1/console/inbound/sources/slack/discover — returns the
+                 readable channels for a Slack bot token so Console can let the
+                 operator select a channel without hand-typing opaque IDs.
+            operationId: InboundSourceService_DiscoverSlackChannels
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/DiscoverSlackChannelsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DiscoverSlackChannelsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/inbound/sources/test-connection:
         post:
             tags:
                 - InboundSourceService
             description: |-
-                POST /fb/v1/console/inbound/sources/test-connection — IMAP-only,
-                 no state changes. Validates host/port/login/SELECT round-trip.
+                POST /fb/v1/console/inbound/sources/test-connection — email or
+                 Slack only, no state changes. Validates the configured auth path.
             operationId: InboundSourceService_TestInboundConnection
             requestBody:
                 content:
@@ -9851,6 +9879,8 @@ components:
                     $ref: '#/components/schemas/WebhookCreateConfig'
                 emailConfig:
                     $ref: '#/components/schemas/EmailCreateConfig'
+                slackConfig:
+                    $ref: '#/components/schemas/SlackConnConfig'
             description: |-
                 CreateInboundSourceRequest — one of webhook_config / email_config is
                  required based on channel. The framework selects the relevant payload;
@@ -10899,6 +10929,20 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ExternalObjectSchema'
+        DiscoverSlackChannelsRequest:
+            required:
+                - slackConfig
+            type: object
+            properties:
+                slackConfig:
+                    $ref: '#/components/schemas/SlackConnConfig'
+        DiscoverSlackChannelsResponse:
+            type: object
+            properties:
+                channels:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SlackChannel'
         EmailConnConfig:
             type: object
             properties:
@@ -15366,6 +15410,26 @@ components:
                 expiresAt:
                     type: string
             description: Signing keys for PKCV
+        SlackChannel:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                isPrivate:
+                    type: boolean
+                isArchived:
+                    type: boolean
+                isShared:
+                    type: boolean
+        SlackConnConfig:
+            type: object
+            properties:
+                botToken:
+                    type: string
+                channelId:
+                    type: string
         Status:
             type: object
             properties:
@@ -15505,10 +15569,12 @@ components:
                     type: string
                 emailConfig:
                     $ref: '#/components/schemas/EmailConnConfig'
+                slackConfig:
+                    $ref: '#/components/schemas/SlackConnConfig'
             description: |-
                 TestInboundConnectionRequest validates an IMAP config without
                  persisting it. Returns ok=false + error message rather than 5xx when
-                 the IMAP server rejects credentials.
+                 the upstream rejects credentials or channel access.
         TestInboundConnectionResponse:
             type: object
             properties:
@@ -16325,9 +16391,9 @@ tags:
     - name: InboundSourceService
       description: |-
         InboundSourceService manages a tenant's inbound source rows (#66
-         channel-agnostic inbound framework). Sources back the webhook and
-         email IMAP adapters; future channels (RSS, scrape, MQ, …) hang off
-         the same shape.
+         channel-agnostic inbound framework). Sources back the webhook,
+         email IMAP, and Slack adapters; future channels (RSS, scrape, MQ,
+         …) hang off the same shape.
     - name: JobService
       description: JobService provides status tracking for async batch operations (#30).
     - name: LLMConfigService

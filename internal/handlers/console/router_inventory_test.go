@@ -148,6 +148,7 @@ var expectedOtherRoutes = []string{
 	"GET /inbound/sources/",
 	"POST /inbound/sources/",
 	"POST /inbound/sources/test-connection",
+	"POST /inbound/sources/slack/discover",
 	"GET /inbound/sources/{id}",
 	"DELETE /inbound/sources/{id}",
 	"POST /inbound/sources/{id}/rotate-secret",

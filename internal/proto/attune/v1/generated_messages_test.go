@@ -8,6 +8,8 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 type registeredGeneratedMessage interface {
@@ -35,6 +37,14 @@ func TestRegisteredGeneratedMessagesCommonMethods(t *testing.T) {
 			touchRegisteredNilProtoReflect(t, value.Type(), fullName)
 		})
 	}
+}
+
+func TestSlackGeneratedMessagesExposeProtoMessage(t *testing.T) {
+	t.Parallel()
+	ptrext.Of(SlackConnConfig{}).ProtoMessage()
+	ptrext.Of(SlackChannel{}).ProtoMessage()
+	ptrext.Of(DiscoverSlackChannelsRequest{}).ProtoMessage()
+	ptrext.Of(DiscoverSlackChannelsResponse{}).ProtoMessage()
 }
 
 func registeredAttuneGeneratedMessages(t *testing.T) []protoreflect.MessageType {
