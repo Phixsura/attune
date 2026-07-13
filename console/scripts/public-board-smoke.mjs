@@ -792,6 +792,13 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
     const publicBoard = await context.newPage()
     try {
       await gotoBoard(publicBoard, baseURL, tenant)
+      const publicSearch = publicBoard.getByPlaceholder('Search requests or comments', {
+        exact: true,
+      })
+      await expect(publicSearch).toHaveCount(1)
+
+      await publicSearch.fill(data.pendingRequestTitle)
+      await publicBoard.getByRole('button', { name: 'Search', exact: true }).click()
       await expect(
         publicBoard.getByRole('link', { name: data.pendingRequestTitle, exact: true }),
       ).toHaveCount(1)
@@ -801,6 +808,8 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
       ).toBeVisible()
       await publicBoard.getByRole('link', { name: 'Back to results', exact: true }).click()
 
+      await publicSearch.fill('Audit log')
+      await publicBoard.getByRole('button', { name: 'Search', exact: true }).click()
       await publicBoard.getByRole('link', { name: data.searchTitle, exact: true }).click()
       await expect(publicBoard.getByText(data.pendingCommentBody, { exact: true })).toBeVisible()
       await expect(publicBoard.getByText('2 comments', { exact: true }).first()).toBeVisible()
