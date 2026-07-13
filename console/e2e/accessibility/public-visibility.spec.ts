@@ -305,6 +305,10 @@ async function installPublicVisibilityMocks(
       await fulfillJson(route, { subjects: state.subjects })
       return
     }
+    if (method === 'GET' && path === '/public-visibility/views') {
+      await fulfillJson(route, { views: [] })
+      return
+    }
 
     const profileMatch = path.match(/^\/public-visibility\/requests\/([^/]+)\/profile$/)
     if (profileMatch && method === 'GET') {

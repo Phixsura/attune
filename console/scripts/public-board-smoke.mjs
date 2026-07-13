@@ -47,7 +47,9 @@ try {
     stdio: 'inherit',
   })
   log('build console dist')
-  execFileSync('pnpm', ['build'], {
+  // The smoke script only needs the generated SPA bundle; the console
+  // workflow already runs `pnpm tsc -b --noEmit` separately.
+  execFileSync('pnpm', ['exec', 'vite', 'build'], {
     cwd: consoleDir,
     stdio: 'inherit',
   })
