@@ -87,6 +87,15 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- **Docker builds now match the Go 1.26.5 module floor.**
+  The root image builder stage now uses Go 1.26.5, so `docker-build` runs on
+  the same toolchain version as `go.mod` and the rest of CI.
+
+- **Public visibility smoke checks now cover saved views and the bundle build path.**
+  The accessibility mocks now answer the saved-views query the page issues on
+  load, and the public board smoke builds the Console bundle with Vite directly
+  so the generated route tree is available before typecheck-sensitive startup.
+
 - **Public board empty states now respect quick filters.**
   The public board now treats `My votes` and `With comments` as active filters
   when the result set is empty, so the empty state explains that filters need
