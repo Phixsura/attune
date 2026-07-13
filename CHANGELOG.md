@@ -96,6 +96,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   load, and the public board smoke builds the Console bundle with Vite directly
   so the generated route tree is available before typecheck-sensitive startup.
 
+- **Public board smoke now starts PostgreSQL with a writable socket directory.**
+  The temporary cluster writes its Unix socket into the smoke workdir, which
+  keeps the browser smoke compatible with GitHub Actions runners that cannot
+  create sockets under `/var/run/postgresql`.
+
 - **Public board empty states now respect quick filters.**
   The public board now treats `My votes` and `With comments` as active filters
   when the result set is empty, so the empty state explains that filters need

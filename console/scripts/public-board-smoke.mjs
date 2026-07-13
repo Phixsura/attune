@@ -70,7 +70,14 @@ try {
   })
   execFileSync(
     pgCtlPath,
-    ['-D', pgDataDir, '-o', `-p ${dbPort} -c listen_addresses=127.0.0.1`, '-w', 'start'],
+    [
+      '-D',
+      pgDataDir,
+      '-o',
+      `-p ${dbPort} -c listen_addresses=127.0.0.1 -c unix_socket_directories=${workDir}`,
+      '-w',
+      'start',
+    ],
     { stdio: 'inherit' },
   )
   await waitForPg(pgIsReadyPath, dbPort, 'postgres')
