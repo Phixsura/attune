@@ -205,7 +205,6 @@ function buildSeedData() {
     [10, 'Search misses exact phrase'],
   ])
   const plannedIndices = new Set([1, 2, 4, 10, 16])
-  const roadmapNowIndices = new Set([1, 4, 7, 10, 13, 16, 19, 22])
   const roadmapPublishedIndices = new Set([4, 10, 16, 22])
   const commentIndices = new Set([2, 3, 17, 19])
   const requests = []
@@ -237,7 +236,7 @@ function buildSeedData() {
       title: specialTitles.get(index) ?? `Portal request ${index}`,
       summary: `Portal request ${index} about billing exports, public visibility filters, and roadmap triage.`,
       publicState: plannedIndices.has(index) ? 'planned' : 'open',
-      roadmapColumn: roadmapNowIndices.has(index) ? 'Now' : 'Next',
+      roadmapColumn: plannedIndices.has(index) ? 'planned' : 'under consideration',
       includedInPortal: true,
       includedInRoadmap: roadmapPublishedIndices.has(index),
       comments,
@@ -253,7 +252,7 @@ function buildSeedData() {
       title: 'Internal triage note',
       summary: 'This request stays private and should never appear on the public board.',
       publicState: 'open',
-      roadmapColumn: 'Now',
+      roadmapColumn: 'under consideration',
       includedInPortal: false,
       includedInRoadmap: false,
       moderationState: 'pending',
@@ -266,7 +265,7 @@ function buildSeedData() {
       title: 'Pending public request',
       summary: 'This request is still waiting on moderation and must stay hidden.',
       publicState: 'planned',
-      roadmapColumn: 'Next',
+      roadmapColumn: 'planned',
       includedInPortal: true,
       includedInRoadmap: false,
       moderationState: 'pending',
@@ -287,8 +286,8 @@ function buildSeedData() {
     basePageSize: 20,
     searchTitle: 'Audit log actor filter',
     detailSlug: 'portal-request-02',
-    roadmapNowPortalCount: 8,
-    roadmapNowPublishedCount: 4,
+    roadmapPlannedPortalCount: plannedIndices.size,
+    roadmapPlannedPublishedCount: [...plannedIndices].filter((index) => roadmapPublishedIndices.has(index)).length,
     plannedCount: 5,
     commentCount: 4,
     expectedSearchCount: 1,
@@ -640,10 +639,10 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
 
     await gotoBoard(page, baseURL, tenant)
     const roadmapInput = page.getByPlaceholder('Filter by roadmap', { exact: true })
-    await roadmapInput.fill('Now')
+    await roadmapInput.fill('planned')
     await page.getByRole('button', { name: 'Search', exact: true }).click()
-    await expect(page).toHaveURL(/roadmap=Now/)
-    await expect(page.locator('article.board-card')).toHaveCount(data.roadmapNowPortalCount)
+    await expect(page).toHaveURL(/roadmap=planned/)
+    await expect(page.locator('article.board-card')).toHaveCount(data.roadmapPlannedPortalCount)
 
     await gotoBoard(page, baseURL, tenant)
     const commentsFilter = page.getByRole('checkbox', { name: 'With comments', exact: true })
@@ -857,21 +856,23 @@ async function approveModerationSubject(page, subjectId) {
 }
 
 async function verifyRoadmapApi(baseURL, data, tenant) {
-  const response = await fetch(`${baseURL}/v1/portal/${tenant.slug}/roadmap?roadmap=Now&limit=10`)
+  const response = await fetch(`${baseURL}/v1/portal/${tenant.slug}/roadmap?roadmap=planned&limit=10`)
   if (!response.ok) {
     throw new Error(`roadmap API failed with HTTP ${response.status}`)
   }
   const json = await response.json()
-  if (!Array.isArray(json.columns) || json.columns.length !== 1) {
+  if (!Array.isArray(json.columns) || json.columns.length !== 4) {
     throw new Error(`roadmap API columns mismatch: ${JSON.stringify(json)}`)
   }
-  const column = json.columns[0]
-  if (column.name !== 'Now') {
-    throw new Error(`roadmap API column name = ${JSON.stringify(column.name)}, want "Now"`)
+  const columnNames = json.columns.map((column) => column.name)
+  const wantColumnNames = ['under consideration', 'planned', 'in progress', 'shipped']
+  if (JSON.stringify(columnNames) !== JSON.stringify(wantColumnNames)) {
+    throw new Error(`roadmap API column names = ${JSON.stringify(columnNames)}, want ${JSON.stringify(wantColumnNames)}`)
   }
-  if (!Array.isArray(column.requests) || column.requests.length !== data.roadmapNowPublishedCount) {
+  const column = json.columns.find((item) => item.name === 'planned')
+  if (!column || !Array.isArray(column.requests) || column.requests.length !== data.roadmapPlannedPublishedCount) {
     throw new Error(
-      `roadmap API request count = ${column.requests?.length ?? 'n/a'}, want ${data.roadmapNowPublishedCount}`,
+      `roadmap API request count = ${column?.requests?.length ?? 'n/a'}, want ${data.roadmapPlannedPublishedCount}`,
     )
   }
 }
