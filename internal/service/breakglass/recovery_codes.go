@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/ProtonMail/bcrypt"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -191,14 +191,10 @@ func generateRecoveryCode() (string, error) {
 
 // hashRecoveryCode hashes a recovery code for storage.
 func hashRecoveryCode(code string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(code), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
+	return bcrypt.Hash(code)
 }
 
 // verifyRecoveryCode checks if a code matches a hash.
 func verifyRecoveryCode(code, hash string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(code)) == nil
+	return bcrypt.Match(code, hash)
 }

@@ -2007,6 +2007,8 @@ function PortalSubmissionSection({
                 <Link
                   to="/feedback/customer-requests"
                   search={{
+                    request_id: undefined,
+                    merge_target_id: undefined,
                     promote_feedback_ids: feedbackId,
                     feedback_id: feedbackId,
                   }}

@@ -110,9 +110,13 @@ interface OwnerFilterOption {
 export function CustomerRequestsPage({
   initialPromoteFeedbackIDs = [],
   initialFeedbackID,
+  initialRequestID,
+  initialMergeTargetID,
 }: {
   initialPromoteFeedbackIDs?: string[]
   initialFeedbackID?: string
+  initialRequestID?: string
+  initialMergeTargetID?: string
 } = {}) {
   const { t } = useTranslation()
   const permissions = usePermissions()
@@ -124,7 +128,7 @@ export function CustomerRequestsPage({
     ...DEFAULT_FILTERS,
     feedbackId: initialFeedbackID,
   }))
-  const [selectedID, setSelectedID] = useState<string | null>(null)
+  const [selectedID, setSelectedID] = useState<string | null>(() => initialRequestID ?? null)
   const [createOpen, setCreateOpen] = useState(false)
   const [promoteOpen, setPromoteOpen] = useState(false)
   const [scoringOpen, setScoringOpen] = useState(false)
@@ -140,6 +144,9 @@ export function CustomerRequestsPage({
         : { ...current, feedbackId: initialFeedbackID },
     )
   }, [initialFeedbackID])
+  useEffect(() => {
+    setSelectedID(initialRequestID ?? null)
+  }, [initialRequestID])
 
   const list = useInfiniteQuery(customerRequestsInfiniteQuery(filters))
   const items = useMemo(
@@ -246,6 +253,7 @@ export function CustomerRequestsPage({
         id={selectedID}
         fallback={selected}
         ownerOptions={ownerOptions}
+        initialMergeTargetID={initialMergeTargetID}
         open={selectedID != null}
         onMerged={setSelectedID}
         onOpenChange={(open) => {
@@ -975,6 +983,7 @@ function CustomerRequestDetailSheet({
   id,
   fallback,
   ownerOptions,
+  initialMergeTargetID,
   open,
   onMerged,
   onOpenChange,
@@ -982,6 +991,7 @@ function CustomerRequestDetailSheet({
   id: string | null
   fallback: CustomerRequestSummary | null
   ownerOptions: OwnerFilterOption[]
+  initialMergeTargetID?: string
   open: boolean
   onMerged: (targetID: string) => void
   onOpenChange: (open: boolean) => void
@@ -1089,7 +1099,11 @@ function CustomerRequestDetailSheet({
               <RequestEditControls request={detail.data.request} ownerOptions={ownerOptions} />
             ) : null}
             {detail.data.request && canMerge ? (
-              <MergeForm sourceID={detail.data.request.id} onMerged={onMerged} />
+              <MergeForm
+                sourceID={detail.data.request.id}
+                initialTargetID={initialMergeTargetID}
+                onMerged={onMerged}
+              />
             ) : null}
             {canEdit ? <FeedbackLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
             {canEdit ? <CustomerLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
@@ -1335,14 +1349,19 @@ function RequestEditControls({
 
 function MergeForm({
   sourceID,
+  initialTargetID,
   onMerged,
 }: {
   sourceID: string
+  initialTargetID?: string
   onMerged: (targetID: string) => void
 }) {
   const { t } = useTranslation()
   const merge = useMergeCustomerRequests(sourceID)
-  const [targetID, setTargetID] = useState('')
+  const [targetID, setTargetID] = useState(() => initialTargetID ?? '')
+  useEffect(() => {
+    setTargetID(initialTargetID ?? '')
+  }, [initialTargetID])
   const normalizedTargetID = targetID.trim()
   return (
     <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_auto]">

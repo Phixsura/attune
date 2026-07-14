@@ -21,13 +21,18 @@ import (
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
 
+const portalBoardPageSize = 20
+
 var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="{{if .NoIndex}}noindex,nofollow{{else}}index,follow{{end}}">
-  <title>{{.TenantName}} | Public board</title>
+  <meta name="description" content="{{.TenantName}} public board for browsing, voting, and commenting on requests.">
+  <link rel="canonical" href="{{.BoardURL}}">
+  {{if .NextURL}}<link rel="next" href="{{.NextURL}}">{{end}}
+  <title>{{.TenantName}} | Public board{{if .HasQuery}} | {{.Query}}{{end}}</title>
   <style>
     :root {
       color-scheme: light;
@@ -96,6 +101,89 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
       align-items: center;
       color: var(--muted);
       font-size: 0.92rem;
+    }
+    .search {
+      display: grid;
+      gap: 10px;
+      padding: 18px 18px 16px;
+      border: 1px solid rgba(19, 21, 26, 0.08);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.86);
+    }
+    .search-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .search-row input,
+    .search-row select {
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: 14px;
+      border: 1px solid rgba(19, 21, 26, 0.12);
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    .search-row input {
+      flex: 1 1 280px;
+      min-width: 0;
+    }
+    .search-row input.search-main {
+      flex: 2 1 320px;
+      min-width: 0;
+    }
+    .search-row input.search-filter {
+      flex: 1 1 180px;
+      min-width: 0;
+    }
+    .search-row select {
+      min-width: 160px;
+    }
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+    .chip-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 40px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(19, 21, 26, 0.12);
+      background: rgba(255, 255, 255, 0.92);
+      color: var(--text);
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .chip-control input {
+      margin: 0;
+      accent-color: var(--accent);
+    }
+    .chip-control.active {
+      border-color: rgba(15, 118, 110, 0.34);
+      background: rgba(15, 118, 110, 0.08);
+      color: var(--accent-strong);
+    }
+    .search-submit {
+      min-height: 44px;
+      padding-block: 0;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
     .pill {
       display: inline-flex;
@@ -249,6 +337,24 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
       gap: 16px;
       padding-top: 8px;
     }
+    .suggestion-list {
+      display: grid;
+      gap: 12px;
+    }
+    .suggestion-card {
+      display: grid;
+      gap: 10px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 1px solid rgba(19, 21, 26, 0.08);
+      background: rgba(255, 255, 255, 0.96);
+    }
+    .suggestion-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: start;
+    }
     .comment-thread .section-head h3 {
       margin: 0;
       font-size: 1.35rem;
@@ -333,6 +439,29 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
       font-size: 0.92rem;
       line-height: 1.5;
     }
+    .pager {
+      display: flex;
+      justify-content: center;
+      margin-top: 18px;
+    }
+    .pager-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(15, 118, 110, 0.18);
+      background: rgba(255, 255, 255, 0.94);
+      color: var(--accent-strong);
+      text-decoration: none;
+      font-weight: 700;
+      box-shadow: 0 14px 34px -24px rgba(15, 118, 110, 0.44);
+    }
+    .pager-link:hover {
+      background: rgba(255, 255, 255, 1);
+      text-decoration: none;
+    }
     .backlink {
       display: inline-flex;
       align-items: center;
@@ -352,12 +481,39 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
     <section class="hero">
       <p class="eyebrow">{{.TenantName}}</p>
       <h1>Public board</h1>
-      <p class="lede">Browse the requests already on the board, vote for the ones that matter most, and open any item for the full public summary.</p>
+      <p class="lede">Browse the requests already on the board, search by request or comment text, and vote for the ones that matter most.</p>
       <div class="meta">
         <span class="pill">{{.RequestCount}} requests</span>
         <a class="link" href="{{.SubmissionURL}}">Submit new feedback</a>
-        <a class="link" href="{{.BoardURL}}">Refresh board</a>
+        <a class="link" href="{{.BoardBaseURL}}">Reset filters</a>
       </div>
+      <form class="search" method="get" action="{{.BoardBaseURL}}">
+        <label class="sr-only" for="board-search">Search requests</label>
+        <div class="search-row">
+          <input id="board-search" class="search-main" type="search" name="q" value="{{.Query}}" placeholder="Search requests or comments">
+          <select name="sort" aria-label="Sort requests">
+            <option value="top"{{if eq .Sort "top"}} selected{{end}}>Top</option>
+            <option value="recent"{{if eq .Sort "recent"}} selected{{end}}>Recent</option>
+          </select>
+          <input id="board-state" class="search-filter" type="search" name="state" value="{{.State}}" placeholder="Filter by state">
+          <input id="board-roadmap" class="search-filter" type="search" name="roadmap" value="{{.Roadmap}}" placeholder="Filter by roadmap">
+          <button class="vote-button search-submit" type="submit">Search</button>
+          {{if or .HasQuery .HasState .HasRoadmap .OnlyVotedByMe .OnlyWithComments (ne .Sort "top")}}
+          <a class="ghost" href="{{.BoardBaseURL}}">Clear filters</a>
+          {{end}}
+        </div>
+        <div class="filter-row" aria-label="Quick filters">
+          <label class="chip-control{{if .OnlyVotedByMe}} active{{end}}">
+            <input type="checkbox" name="voted" value="mine"{{if .OnlyVotedByMe}} checked{{end}}>
+            <span>My votes</span>
+          </label>
+          <label class="chip-control{{if .OnlyWithComments}} active{{end}}">
+            <input type="checkbox" name="comments" value="with"{{if .OnlyWithComments}} checked{{end}}>
+            <span>With comments</span>
+          </label>
+        </div>
+        <p class="comment-note">Search spans titles, summaries, and approved public comments. Quick filters narrow to requests you've voted on or requests with approved comments. State and roadmap filters match the public labels shown on each card.</p>
+      </form>
     </section>
 
     {{if .Selected}}
@@ -383,7 +539,7 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
         <div class="tags">
           {{if .Selected.SubmittedByDisplay}}<span class="tag tag-muted">{{.Selected.SubmittedByDisplay}}</span>{{end}}
           {{if .Selected.ShowCommentCount}}<span class="tag tag-muted">{{.Selected.CommentLabel}}</span>{{end}}
-          <a class="ghost backlink" href="{{.Selected.DetailURL}}">Open public detail</a>
+          <a class="ghost backlink" href="{{.Selected.BoardURL}}">Back to results</a>
         </div>
       </div>
       {{if .Selected.ShowComments}}
@@ -413,16 +569,47 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
         {{else}}
         <div class="empty">No public comments are visible yet.</div>
         {{end}}
-        {{if .Selected.CanComment}}
-        <form class="comment-form" data-comment-form data-url="{{.Selected.CommentURL}}">
-          <label for="comment-body">Add a comment</label>
-          <textarea id="comment-body" name="body" maxlength="5000" placeholder="Share context, workarounds, or why this matters."></textarea>
-          <div class="comment-form-footer">
+      {{if .Selected.CanComment}}
+      <form class="comment-form" data-comment-form data-url="{{.Selected.CommentURL}}">
+        <label for="comment-body">Add a comment</label>
+        <textarea id="comment-body" name="body" maxlength="5000" placeholder="Share context, workarounds, or why this matters."></textarea>
+        <div class="comment-form-footer">
             <p class="comment-note">Comments are reviewed before they appear publicly.</p>
             <button class="vote-button comment-submit" type="submit">Post comment</button>
           </div>
         </form>
         {{end}}
+      </div>
+      {{end}}
+      {{if .Selected.SimilarRequests}}
+      <div class="comment-thread">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Possible duplicates</p>
+            <h3>Similar requests</h3>
+          </div>
+          <p>These requests share the same words and are worth checking before posting a duplicate.</p>
+        </div>
+        <div class="suggestion-list">
+          {{range .Selected.SimilarRequests}}
+          <article class="suggestion-card">
+            <div class="suggestion-head">
+              <div>
+                <h4><a class="link" href="{{.DetailURL}}">{{.Title}}</a></h4>
+                <p class="summary">{{.Summary}}</p>
+              </div>
+              <div class="tags">
+                {{if .RoadmapColumn}}<span class="tag tag-accent">{{.RoadmapColumn}}</span>{{end}}
+                <span class="tag">{{.State}}</span>
+              </div>
+            </div>
+            <div class="tags">
+              {{if .ShowVoteCount}}<span class="tag">{{.VoteLabel}}</span>{{end}}
+              {{if .ShowCommentCount}}<span class="tag tag-muted">{{.CommentLabel}}</span>{{end}}
+            </div>
+          </article>
+          {{end}}
+        </div>
       </div>
       {{end}}
     </section>
@@ -457,9 +644,18 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
       </article>
       {{end}}
     </section>
+    {{if .NextURL}}
+    <section class="pager" aria-label="Pagination">
+      <a class="pager-link" href="{{.NextURL}}">Load more requests</a>
+    </section>
+    {{end}}
     {{else if not .Selected}}
     <section class="empty">
+      {{if or .HasQuery .HasState .HasRoadmap .OnlyVotedByMe .OnlyWithComments}}
+      No public requests matched the current filters. <a class="ghost" href="{{.BoardBaseURL}}">Clear filters</a>
+      {{else}}
       No public requests are visible yet. When operators publish requests, they will appear here automatically.
+      {{end}}
     </section>
     {{end}}
   </main>
@@ -536,15 +732,26 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
 </html>`))
 
 type portalBoardPageData struct {
-	TenantSlug    string
-	TenantName    string
-	BoardURL      string
-	SubmissionURL string
-	NoIndex       bool
-	CanVote       bool
-	RequestCount  int
-	Selected      *portalBoardRequestView
-	Requests      []portalBoardRequestView
+	TenantSlug       string
+	TenantName       string
+	BoardBaseURL     string
+	BoardURL         string
+	NextURL          string
+	SubmissionURL    string
+	Query            string
+	Sort             string
+	HasQuery         bool
+	State            string
+	Roadmap          string
+	HasState         bool
+	HasRoadmap       bool
+	OnlyVotedByMe    bool
+	OnlyWithComments bool
+	NoIndex          bool
+	CanVote          bool
+	RequestCount     int
+	Selected         *portalBoardRequestView
+	Requests         []portalBoardRequestView
 }
 
 type portalBoardRequestView struct {
@@ -567,11 +774,13 @@ type portalBoardRequestView struct {
 	VoteMethod         string
 	VoteButtonLabel    string
 	DetailURL          string
+	BoardURL           string
 	CommentURL         string
 	CanVote            bool
 	CanComment         bool
 	ShowComments       bool
 	Comments           []portalBoardCommentView
+	SimilarRequests    []portalBoardRequestView
 	IsFeatured         bool
 }
 
@@ -609,7 +818,8 @@ func (h *Handler) renderBoardPage(w http.ResponseWriter, r *http.Request, select
 		http.Error(w, "portal unavailable", http.StatusInternalServerError)
 		return
 	}
-	list, err := h.read.ListPublicRequests(ctx, tenantSlug, 100, "", visitorID)
+	query, sort, state, roadmap, votedOnly, commentsOnly, cursor := portalBoardSearchParams(r)
+	list, err := h.read.ListPublicRequests(ctx, tenantSlug, portalBoardPageSize, cursor, query, sort, state, roadmap, votedOnly, commentsOnly, visitorID)
 	if portalBoardLoadError(w, r, err) {
 		return
 	}
@@ -619,17 +829,34 @@ func (h *Handler) renderBoardPage(w http.ResponseWriter, r *http.Request, select
 	if !list.NoIndex {
 		w.Header().Del("X-Robots-Tag")
 	}
+	boardBaseURL := "/portal/" + url.PathEscape(cfg.TenantSlug) + "/requests"
+	querySuffix := portalBoardQueryString(query, sort, state, roadmap, votedOnly, commentsOnly, cursor)
+	nextURL := ""
+	if list.NextCursor != "" {
+		nextURL = boardBaseURL + portalBoardQueryString(query, sort, state, roadmap, votedOnly, commentsOnly, list.NextCursor)
+	}
 	data := portalBoardPageData{
-		TenantSlug:    cfg.TenantSlug,
-		TenantName:    cfg.TenantName,
-		BoardURL:      "/portal/" + url.PathEscape(cfg.TenantSlug) + "/requests",
-		SubmissionURL: "/portal/" + url.PathEscape(cfg.TenantSlug),
-		NoIndex:       list.NoIndex,
-		RequestCount:  len(list.Requests),
-		Requests:      portalBoardRequestViews(cfg.TenantSlug, list.Requests, selectedSlug),
+		TenantSlug:       cfg.TenantSlug,
+		TenantName:       cfg.TenantName,
+		BoardBaseURL:     boardBaseURL,
+		BoardURL:         boardBaseURL + querySuffix,
+		NextURL:          nextURL,
+		SubmissionURL:    "/portal/" + url.PathEscape(cfg.TenantSlug),
+		Query:            query,
+		Sort:             sort,
+		HasQuery:         query != "",
+		State:            state,
+		Roadmap:          roadmap,
+		HasState:         state != "",
+		HasRoadmap:       roadmap != "",
+		OnlyVotedByMe:    votedOnly,
+		OnlyWithComments: commentsOnly,
+		NoIndex:          list.NoIndex,
+		RequestCount:     len(list.Requests),
+		Requests:         portalBoardRequestViews(cfg.TenantSlug, list.Requests, selectedSlug, querySuffix),
 	}
 	if selectedSlug != "" {
-		selected, loadErr := h.portalBoardSelectedView(ctx, tenantSlug, selectedSlug, visitorID, cfg.TenantSlug)
+		selected, loadErr := h.portalBoardSelectedView(ctx, tenantSlug, selectedSlug, visitorID, cfg.TenantSlug, querySuffix)
 		if portalBoardLoadError(w, r, loadErr) {
 			return
 		}
@@ -660,10 +887,73 @@ func portalBoardLoadError(w http.ResponseWriter, r *http.Request, err error) boo
 	switch {
 	case errors.Is(err, portalsvc.ErrNotFound), errors.Is(err, pvrepo.ErrNotFound):
 		http.NotFound(w, r)
+	case errors.Is(err, portalsvc.ErrValidation), errors.Is(err, pvrepo.ErrInvalidInput):
+		http.Error(w, "invalid request", http.StatusBadRequest)
 	default:
 		http.Error(w, "portal unavailable", http.StatusInternalServerError)
 	}
 	return true
+}
+
+func portalBoardSearchParams(r *http.Request) (string, string, string, string, bool, bool, string) {
+	if r == nil {
+		return "", "top", "", "", false, false, ""
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	sort := normalizePortalBoardSort(r.URL.Query().Get("sort"))
+	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	roadmap := strings.TrimSpace(r.URL.Query().Get("roadmap"))
+	votedOnly := normalizePortalBoardQuickFilter(r.URL.Query().Get("voted"), "mine")
+	commentsOnly := normalizePortalBoardQuickFilter(r.URL.Query().Get("comments"), "with")
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	return query, sort, state, roadmap, votedOnly, commentsOnly, cursor
+}
+
+func normalizePortalBoardSort(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "recent", "new", "newest", "latest", "activity":
+		return "recent"
+	default:
+		return "top"
+	}
+}
+
+func normalizePortalBoardQuickFilter(raw string, want string) bool {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case want, "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func portalBoardQueryString(query, sort, state, roadmap string, votedOnly bool, commentsOnly bool, cursor string) string {
+	values := url.Values{}
+	if trimmed := strings.TrimSpace(query); trimmed != "" {
+		values.Set("q", trimmed)
+	}
+	if normalized := normalizePortalBoardSort(sort); normalized != "top" {
+		values.Set("sort", normalized)
+	}
+	if trimmed := strings.TrimSpace(state); trimmed != "" {
+		values.Set("state", trimmed)
+	}
+	if trimmed := strings.TrimSpace(roadmap); trimmed != "" {
+		values.Set("roadmap", trimmed)
+	}
+	if votedOnly {
+		values.Set("voted", "mine")
+	}
+	if commentsOnly {
+		values.Set("comments", "with")
+	}
+	if trimmed := strings.TrimSpace(cursor); trimmed != "" {
+		values.Set("cursor", trimmed)
+	}
+	if len(values) == 0 {
+		return ""
+	}
+	return "?" + values.Encode()
 }
 
 func (h *Handler) portalBoardSelectedView(
@@ -672,20 +962,21 @@ func (h *Handler) portalBoardSelectedView(
 	selectedSlug string,
 	visitorID string,
 	boardTenantSlug string,
+	querySuffix string,
 ) (*portalBoardRequestView, error) {
 	detail, err := h.read.GetPublicRequest(ctx, tenantSlug, selectedSlug, visitorID)
 	if err != nil {
 		return nil, err
 	}
-	view := boardRequestView(boardTenantSlug, detail)
+	view := boardRequestView(boardTenantSlug, detail, querySuffix)
 	view.IsFeatured = true
 	return ptrext.Of(view), nil
 }
 
-func portalBoardRequestViews(tenantSlug string, requests []pvsvc.PublicRequest, selectedSlug string) []portalBoardRequestView {
+func portalBoardRequestViews(tenantSlug string, requests []pvsvc.PublicRequest, selectedSlug string, querySuffix string) []portalBoardRequestView {
 	views := make([]portalBoardRequestView, 0, len(requests))
 	for _, item := range requests {
-		view := boardRequestView(tenantSlug, item)
+		view := boardRequestView(tenantSlug, item, querySuffix)
 		if selectedSlug != "" && view.Slug == selectedSlug {
 			continue
 		}
@@ -705,7 +996,8 @@ func portalBoardExecuteTemplate(w http.ResponseWriter, data portalBoardPageData)
 	return err
 }
 
-func boardRequestView(tenantSlug string, request pvsvc.PublicRequest) portalBoardRequestView {
+func boardRequestView(tenantSlug string, request pvsvc.PublicRequest, querySuffix string) portalBoardRequestView {
+	baseURL := "/portal/" + url.PathEscape(tenantSlug) + "/requests"
 	voteLabel := ""
 	commentLabel := ""
 	if request.Policy.ShowVoteCount {
@@ -731,7 +1023,8 @@ func boardRequestView(tenantSlug string, request pvsvc.PublicRequest) portalBoar
 		VoteURL:            "/v1/portal/" + url.PathEscape(tenantSlug) + "/requests/" + url.PathEscape(request.Summary.PublicSlug) + "/votes",
 		VoteMethod:         http.MethodPost,
 		VoteButtonLabel:    "Vote",
-		DetailURL:          "/portal/" + url.PathEscape(tenantSlug) + "/requests/" + url.PathEscape(request.Summary.PublicSlug),
+		DetailURL:          baseURL + "/" + url.PathEscape(request.Summary.PublicSlug) + querySuffix,
+		BoardURL:           baseURL + querySuffix,
 		CommentURL:         "/v1/portal/" + url.PathEscape(tenantSlug) + "/requests/" + url.PathEscape(request.Summary.PublicSlug) + "/comments",
 		CanVote:            request.Policy.VoteWriteMode != pvrepo.WriteModeDisabled,
 		CanComment:         request.CanComment,
@@ -742,6 +1035,9 @@ func boardRequestView(tenantSlug string, request pvsvc.PublicRequest) portalBoar
 		for _, comment := range request.CommentItems {
 			view.Comments = append(view.Comments, boardCommentView(request.Policy, comment))
 		}
+	}
+	if len(request.SimilarRequests) > 0 {
+		view.SimilarRequests = portalBoardRequestViews(tenantSlug, request.SimilarRequests, "", querySuffix)
 	}
 	if request.ViewerHasVoted {
 		view.VoteMethod = http.MethodDelete

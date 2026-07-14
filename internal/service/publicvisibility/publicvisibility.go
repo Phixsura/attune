@@ -164,6 +164,7 @@ type PublicRequest struct {
 	Votes            int
 	Comments         int
 	CommentItems     []repo.PublicRequestComment
+	SimilarRequests  []PublicRequest
 	SubmitterDisplay string
 	ViewerHasVoted   bool
 	CanComment       bool
@@ -355,16 +356,21 @@ func (s *Service) GetPublicRequest(ctx context.Context, tenantSlug string, publi
 		}
 		request.CommentItems = comments
 	}
+	similar, err := s.listSimilarPublicRequests(ctx, tenantSlug, request.Summary.PublicTitle, publicSlug, visitorID)
+	if err != nil {
+		return PublicRequest{}, err
+	}
+	request.SimilarRequests = similar
 	request.CanComment = publicCommentWriteEnabled(request.Policy)
 	return request, nil
 }
 
-func (s *Service) ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (PublicRequestList, error) {
-	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, false, visitorID)
+func (s *Service) ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string, query string, sort string, state string, roadmap string, onlyVotedByViewer bool, onlyWithComments bool, visitorID string) (PublicRequestList, error) {
+	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, false, query, sort, state, roadmap, onlyVotedByViewer, onlyWithComments, visitorID)
 }
 
-func (s *Service) ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (PublicRequestList, error) {
-	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, true, visitorID)
+func (s *Service) ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string, query string, sort string, state string, roadmap string, onlyVotedByViewer bool, onlyWithComments bool, visitorID string) (PublicRequestList, error) {
+	return s.listPublicRequests(ctx, tenantSlug, limit, cursor, true, query, sort, state, roadmap, onlyVotedByViewer, onlyWithComments, visitorID)
 }
 
 func (s *Service) listPublicRequests(
@@ -373,6 +379,12 @@ func (s *Service) listPublicRequests(
 	limit int,
 	cursor string,
 	roadmap bool,
+	query string,
+	sort string,
+	state string,
+	roadmapColumn string,
+	onlyVotedByViewer bool,
+	onlyWithComments bool,
 	visitorID string,
 ) (PublicRequestList, error) {
 	tenantSlug = strings.TrimSpace(tenantSlug)
@@ -380,11 +392,17 @@ func (s *Service) listPublicRequests(
 		return PublicRequestList{}, ErrNotFound
 	}
 	result, err := s.repo.ListPublicRequestCandidates(ctx, repo.PublicRequestListFilter{
-		TenantSlug:       tenantSlug,
-		Roadmap:          roadmap,
-		Limit:            limit,
-		Cursor:           strings.TrimSpace(cursor),
-		ViewerSubjectKey: portalVisitorSubjectKey(visitorID),
+		TenantSlug:        tenantSlug,
+		Roadmap:           roadmap,
+		Query:             strings.TrimSpace(query),
+		Sort:              strings.TrimSpace(sort),
+		State:             strings.TrimSpace(state),
+		RoadmapColumn:     strings.TrimSpace(roadmapColumn),
+		OnlyVotedByViewer: onlyVotedByViewer,
+		OnlyWithComments:  onlyWithComments,
+		Limit:             limit,
+		Cursor:            strings.TrimSpace(cursor),
+		ViewerSubjectKey:  portalVisitorSubjectKey(visitorID),
 	})
 	if errors.Is(err, repo.ErrNotFound) {
 		return PublicRequestList{}, ErrNotFound
@@ -407,6 +425,43 @@ func (s *Service) listPublicRequests(
 		NoIndex:    !result.Policy.SearchIndexingEnabled,
 		NextCursor: result.NextCursor,
 	}, nil
+}
+
+func (s *Service) listSimilarPublicRequests(
+	ctx context.Context,
+	tenantSlug string,
+	title string,
+	currentSlug string,
+	visitorID string,
+) ([]PublicRequest, error) {
+	tenantSlug = strings.TrimSpace(tenantSlug)
+	title = strings.TrimSpace(title)
+	currentSlug = strings.TrimSpace(currentSlug)
+	if tenantSlug == "" || title == "" {
+		return nil, nil
+	}
+	result, err := s.repo.ListPublicRequestCandidates(ctx, repo.PublicRequestListFilter{
+		TenantSlug:        tenantSlug,
+		SimilarityText:    title,
+		ExcludePublicSlug: currentSlug,
+		Sort:              "top",
+		Limit:             4,
+		ViewerSubjectKey:  portalVisitorSubjectKey(visitorID),
+	})
+	if errors.Is(err, repo.ErrNotFound) {
+		return nil, nil
+	}
+	if errors.Is(err, repo.ErrInvalidInput) {
+		return nil, ErrValidation
+	}
+	if err != nil {
+		return nil, err
+	}
+	similar := make([]PublicRequest, 0, len(result.Items))
+	for _, item := range result.Items {
+		similar = append(similar, publicRequestFromListCandidate(result.Policy, item))
+	}
+	return similar, nil
 }
 
 func (s *Service) VotePublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, actor auditlogsvc.Actor) (PublicRequest, error) {

@@ -33,6 +33,7 @@ type service interface {
 
 type Handler struct {
 	service service
+	views   savedViewService
 }
 
 func NewHandler(service service) *Handler {

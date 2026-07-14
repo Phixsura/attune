@@ -407,10 +407,10 @@ func TestPublicMethodsValidateBeforeRepositoryAccess(t *testing.T) {
 	if _, err := service.GetPublicRequest(ctx, "tenant", " ", "visitor-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetPublicRequest(empty slug) error = %v, want %v", err, ErrNotFound)
 	}
-	if _, err := service.ListPublicRequests(ctx, " ", 0, "", "visitor-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.ListPublicRequests(ctx, " ", 0, "", "", "", "", "", false, false, "visitor-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ListPublicRequests(empty tenant) error = %v, want %v", err, ErrNotFound)
 	}
-	if _, err := service.ListPublicRoadmap(ctx, " ", 0, "", "visitor-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.ListPublicRoadmap(ctx, " ", 0, "", "", "", "", "", false, false, "visitor-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ListPublicRoadmap(empty tenant) error = %v, want %v", err, ErrNotFound)
 	}
 }
@@ -436,10 +436,10 @@ func TestServicePolicyModerationAndPublicationReadsUseRepository(t *testing.T) {
 	if _, err := service.GetPublicRequest(ctx, "tenant-slug", "pricing-api", "visitor-1"); err != nil || fake.publicRequestViewerSubjectKey != "portal:visitor-1" {
 		t.Fatalf("GetPublicRequest() viewer key = %q, err=%v", fake.publicRequestViewerSubjectKey, err)
 	}
-	if _, err := service.ListPublicRequests(ctx, "tenant-slug", 10, "", "visitor-1"); err != nil || fake.publicListFilter.ViewerSubjectKey != "portal:visitor-1" {
+	if _, err := service.ListPublicRequests(ctx, "tenant-slug", 10, "", "", "", "", "", false, false, "visitor-1"); err != nil || fake.publicListFilter.ViewerSubjectKey != "portal:visitor-1" {
 		t.Fatalf("ListPublicRequests() viewer key = %q, err=%v", fake.publicListFilter.ViewerSubjectKey, err)
 	}
-	if _, err := service.ListPublicRoadmap(ctx, "tenant-slug", 10, "", "visitor-1"); err != nil || fake.publicListFilter.ViewerSubjectKey != "portal:visitor-1" {
+	if _, err := service.ListPublicRoadmap(ctx, "tenant-slug", 10, "", "", "", "", "", false, false, "visitor-1"); err != nil || fake.publicListFilter.ViewerSubjectKey != "portal:visitor-1" {
 		t.Fatalf("ListPublicRoadmap() viewer key = %q, err=%v", fake.publicListFilter.ViewerSubjectKey, err)
 	}
 }
@@ -448,7 +448,7 @@ func TestServiceGetPublicRequestUsesRepository(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	service, _, _ := serviceReadFixture(t)
+	service, fake, _ := serviceReadFixture(t)
 
 	publicRequest, err := service.GetPublicRequest(ctx, " tenant-slug ", " pricing-api ", "visitor-1")
 	if err != nil || publicRequest.Votes != 7 || publicRequest.SubmitterDisplay != "Ada" {
@@ -456,6 +456,15 @@ func TestServiceGetPublicRequestUsesRepository(t *testing.T) {
 	}
 	if !publicRequest.ViewerHasVoted {
 		t.Fatalf("GetPublicRequest() viewer vote = %#v, want true", publicRequest)
+	}
+	if len(publicRequest.SimilarRequests) != 1 || publicRequest.SimilarRequests[0].Summary.PublicSlug != "pricing-dashboard" {
+		t.Fatalf("GetPublicRequest() similar requests = %#v, want pricing-dashboard", publicRequest.SimilarRequests)
+	}
+	if fake.publicListFilter.TenantSlug != "tenant-slug" || fake.publicListFilter.Query != "" ||
+		fake.publicListFilter.SimilarityText != "Pricing API" || fake.publicListFilter.ExcludePublicSlug != "pricing-api" ||
+		fake.publicListFilter.Sort != "top" || fake.publicListFilter.Limit != 4 ||
+		fake.publicListFilter.ViewerSubjectKey != "portal:visitor-1" {
+		t.Fatalf("GetPublicRequest() similar filter = %#v", fake.publicListFilter)
 	}
 }
 
@@ -465,9 +474,12 @@ func TestServiceListPublicRequestsUsesRepository(t *testing.T) {
 	ctx := context.Background()
 	service, fake, _ := serviceReadFixture(t)
 
-	publicRequests, err := service.ListPublicRequests(ctx, " tenant-slug ", 10, " 0 ", "visitor-1")
+	publicRequests, err := service.ListPublicRequests(ctx, " tenant-slug ", 10, " 0 ", "pricing", "recent", "planned", "next", true, true, "visitor-1")
 	if err != nil || len(publicRequests.Requests) != 1 || publicRequests.NextCursor != "50" ||
-		fake.publicListFilter.TenantSlug != "tenant-slug" || fake.publicListFilter.Roadmap {
+		fake.publicListFilter.TenantSlug != "tenant-slug" || fake.publicListFilter.Roadmap ||
+		fake.publicListFilter.Query != "pricing" || fake.publicListFilter.Sort != "recent" ||
+		fake.publicListFilter.State != "planned" || fake.publicListFilter.RoadmapColumn != "next" ||
+		!fake.publicListFilter.OnlyVotedByViewer || !fake.publicListFilter.OnlyWithComments {
 		t.Fatalf("ListPublicRequests() = %#v, %v, filter=%#v", publicRequests, err, fake.publicListFilter)
 	}
 	if !publicRequests.Requests[0].ViewerHasVoted {
@@ -481,7 +493,7 @@ func TestServiceListPublicRoadmapUsesRepository(t *testing.T) {
 	ctx := context.Background()
 	service, fake, _ := serviceReadFixture(t)
 
-	publicRoadmap, err := service.ListPublicRoadmap(ctx, " tenant-slug ", 10, " 0 ", "visitor-1")
+	publicRoadmap, err := service.ListPublicRoadmap(ctx, " tenant-slug ", 10, " 0 ", "pricing", "recent", "planned", "next", true, true, "visitor-1")
 	if err != nil || len(publicRoadmap.Requests) != 1 || !fake.publicListFilter.Roadmap {
 		t.Fatalf("ListPublicRoadmap() = %#v, %v, filter=%#v", publicRoadmap, err, fake.publicListFilter)
 	}
@@ -521,8 +533,23 @@ func serviceReadFixture(t *testing.T) (*Service, *fakePublicRepo, uuid.UUID) {
 		publicListResult: repo.PublicRequestListResult{
 			Policy: policy,
 			Items: []repo.PublicRequestListCandidate{{
-				Profile:          publication.Profile,
-				Moderation:       publication.Moderation,
+				Profile: repo.RequestProfile{
+					ID:            uuid.New(),
+					TenantID:      "tenant-a",
+					RequestID:     uuid.New(),
+					PublicSlug:    "pricing-dashboard",
+					PublicTitle:   "Pricing Dashboard",
+					PublicSummary: "Dashboard for pricing requests",
+					PublicState:   "planned",
+					RoadmapColumn: "next",
+				},
+				Moderation: repo.ModerationSubject{
+					ID:        uuid.New(),
+					TenantID:  "tenant-a",
+					Surface:   repo.SurfaceRequest,
+					SubjectID: uuid.NewString(),
+					State:     repo.ModerationStateApproved,
+				},
 				VoteCount:        3,
 				CommentCount:     1,
 				SubmitterDisplay: "Ada",
@@ -573,21 +600,46 @@ func TestServiceReadMethodErrors(t *testing.T) {
 		t.Fatalf("GetPublicRequest(repo error) error = %v, want %v", err, boom)
 	}
 	fake.publicListErr = repo.ErrNotFound
-	if _, err := service.ListPublicRequests(ctx, "tenant", 0, "", "visitor-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.ListPublicRequests(ctx, "tenant", 0, "", "", "", "", "", false, false, "visitor-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ListPublicRequests(not found) error = %v, want %v", err, ErrNotFound)
 	}
 	fake.publicListErr = repo.ErrInvalidInput
-	if _, err := service.ListPublicRoadmap(ctx, "tenant", 0, "bad", "visitor-1"); !errors.Is(err, ErrValidation) {
+	if _, err := service.ListPublicRoadmap(ctx, "tenant", 0, "bad", "", "", "", "", false, false, "visitor-1"); !errors.Is(err, ErrValidation) {
 		t.Fatalf("ListPublicRoadmap(invalid cursor) error = %v, want %v", err, ErrValidation)
 	}
 	fake.publicListErr = nil
 	fake.publicListResult = repo.PublicRequestListResult{Policy: repo.Policy{PortalAccessMode: repo.AccessModeDisabled}}
-	if _, err := service.ListPublicRequests(ctx, "tenant", 0, "", "visitor-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := service.ListPublicRequests(ctx, "tenant", 0, "", "", "", "", "", false, false, "visitor-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ListPublicRequests(hidden policy) error = %v, want %v", err, ErrNotFound)
 	}
 	fake.publicListErr = boom
-	if _, err := service.ListPublicRequests(ctx, "tenant", 0, "", "visitor-1"); !errors.Is(err, boom) {
+	if _, err := service.ListPublicRequests(ctx, "tenant", 0, "", "", "", "", "", false, false, "visitor-1"); !errors.Is(err, boom) {
 		t.Fatalf("ListPublicRequests(repo error) error = %v, want %v", err, boom)
+	}
+	fake.candidateErr = nil
+	fake.candidate = ptrext.Of(repo.PublicRequestCandidate{
+		Policy: repo.Policy{
+			TenantID:         "tenant-a",
+			PortalAccessMode: repo.AccessModePublic,
+			RequestsEnabled:  true,
+		},
+		Profile: repo.RequestProfile{
+			PublicSlug:       "title-only",
+			PublicTitle:      "Title Only",
+			IncludedInPortal: true,
+		},
+		Moderation: repo.ModerationSubject{
+			State: repo.ModerationStateApproved,
+		},
+		CustomerRequestLive: true,
+	})
+	fake.publicListErr = repo.ErrInvalidInput
+	if _, err := service.GetPublicRequest(ctx, "tenant", "title-only", "visitor-1"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("GetPublicRequest(similar invalid input) error = %v, want %v", err, ErrValidation)
+	}
+	fake.publicListErr = boom
+	if _, err := service.GetPublicRequest(ctx, "tenant", "title-only", "visitor-1"); !errors.Is(err, boom) {
+		t.Fatalf("GetPublicRequest(similar repo error) error = %v, want %v", err, boom)
 	}
 }
 

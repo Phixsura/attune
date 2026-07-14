@@ -145,6 +145,7 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 		"portal-roadmap", "Portal roadmap", "Now", true, true)
 	e.addVote(t, portalRoadmapRequest.ID, "portal:portal-roadmap")
 	e.approve(t, portalRoadmap.Moderation.ID)
+	e.setRequestPublicState(t, portalRoadmapRequest.ID, "shipped")
 
 	portalOnlyRequest := e.createRequest(t, "Portal only request")
 	portalOnly := e.upsertRequestPublicationCustom(t, portalOnlyRequest.ID,
@@ -186,26 +187,215 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	}
 
 	roadmapList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
-		TenantSlug: e.tenantSlug,
-		Roadmap:    true,
-		Limit:      10,
+		TenantSlug:    e.tenantSlug,
+		Roadmap:       true,
+		RoadmapColumn: "next",
+		Limit:         10,
 	})
 	if err != nil {
 		t.Fatalf("ListPublicRequestCandidates(roadmap): %v", err)
 	}
-	assertPublicListSlugs(t, roadmapList.Items, []string{"portal-roadmap", "roadmap-only"})
+	assertPublicListSlugs(t, roadmapList.Items, []string{"roadmap-only"})
+
+	stateList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug: e.tenantSlug,
+		State:      "ship",
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(state): %v", err)
+	}
+	assertPublicListSlugs(t, stateList.Items, []string{"portal-roadmap"})
+
+	combinedList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug:    e.tenantSlug,
+		State:         "ship",
+		RoadmapColumn: "now",
+		Limit:         10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(combined): %v", err)
+	}
+	assertPublicListSlugs(t, combinedList.Items, []string{"portal-roadmap"})
 
 	service := pvsvc.New(e.publicRepo, nil)
-	publicRequests, err := service.ListPublicRequests(e.ctx, e.tenantSlug, 10, "", "")
+	publicRequests, err := service.ListPublicRequests(e.ctx, e.tenantSlug, 10, "", "", "", "ship", "now", false, false, "")
 	if err != nil {
 		t.Fatalf("ListPublicRequests: %v", err)
 	}
-	assertPublicRequestSlugs(t, publicRequests.Requests, []string{"portal-roadmap", "portal-only"})
-	publicRoadmap, err := service.ListPublicRoadmap(e.ctx, e.tenantSlug, 10, "", "")
+	assertPublicRequestSlugs(t, publicRequests.Requests, []string{"portal-roadmap"})
+	publicRoadmap, err := service.ListPublicRoadmap(e.ctx, e.tenantSlug, 10, "", "", "", "", "next", false, false, "")
 	if err != nil {
 		t.Fatalf("ListPublicRoadmap: %v", err)
 	}
-	assertPublicRequestSlugs(t, publicRoadmap.Requests, []string{"portal-roadmap", "roadmap-only"})
+	assertPublicRequestSlugs(t, publicRoadmap.Requests, []string{"roadmap-only"})
+}
+
+func TestPGPublicVisibilitySearchAndSortPublicRequests(t *testing.T) {
+	e := setup(t)
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+
+	olderRequest := e.createRequest(t, "Older request")
+	older := e.upsertRequestPublicationCustom(t, olderRequest.ID, "older-request", "Older request", "Now", true, true)
+	e.approve(t, older.Moderation.ID)
+	e.addVote(t, olderRequest.ID, "portal:older-1")
+	e.addVote(t, olderRequest.ID, "portal:older-2")
+
+	newerRequest := e.createRequest(t, "Newer request")
+	newer := e.upsertRequestPublicationCustom(t, newerRequest.ID, "newer-request", "Newer request", "Now", true, true)
+	e.approve(t, newer.Moderation.ID)
+
+	searchRequest := e.createRequest(t, "Zebra request")
+	searchable := e.upsertRequestPublicationCustom(t, searchRequest.ID, "zebra-request", "Zebra request", "Next", true, true)
+	e.approve(t, searchable.Moderation.ID)
+	e.touchRequestProfile(t, searchRequest.ID, time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC))
+	e.touchRequestProfile(t, olderRequest.ID, time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC))
+	e.touchRequestProfile(t, newerRequest.ID, time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC))
+
+	searchList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug: e.tenantSlug,
+		Query:      "zebra",
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(search): %v", err)
+	}
+	assertPublicListSlugs(t, searchList.Items, []string{"zebra-request"})
+
+	topList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug: e.tenantSlug,
+		Sort:       "top",
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(top): %v", err)
+	}
+	assertPublicListSlugs(t, topList.Items, []string{"older-request", "newer-request", "zebra-request"})
+	if got := topList.Items[0].Profile.PublicSlug; got != "older-request" {
+		t.Fatalf("top sort first slug = %q, want older-request", got)
+	}
+
+	recentList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug: e.tenantSlug,
+		Sort:       "recent",
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(recent): %v", err)
+	}
+	if got := recentList.Items[0].Profile.PublicSlug; got != "newer-request" {
+		t.Fatalf("recent sort first slug = %q, want newer-request", got)
+	}
+}
+
+func TestPGPublicVisibilityFiltersViewerVotesAndComments(t *testing.T) {
+	e := setup(t)
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+
+	votedOnlyRequest := e.createRequest(t, "Voted only request")
+	votedOnly := e.upsertRequestPublicationCustom(t, votedOnlyRequest.ID, "voted-only", "Voted only", "Now", true, true)
+	e.approve(t, votedOnly.Moderation.ID)
+
+	commentOnlyRequest := e.createRequest(t, "Comment only request")
+	commentOnly := e.upsertRequestPublicationCustom(t, commentOnlyRequest.ID, "comment-only", "Comment only", "Next", true, true)
+	e.approve(t, commentOnly.Moderation.ID)
+
+	bothRequest := e.createRequest(t, "Both filters request")
+	both := e.upsertRequestPublicationCustom(t, bothRequest.ID, "both-filters", "Both filters", "Later", true, true)
+	e.approve(t, both.Moderation.ID)
+
+	e.addVote(t, votedOnlyRequest.ID, "portal:visitor-1")
+	e.addVote(t, bothRequest.ID, "portal:visitor-1")
+	e.addVote(t, bothRequest.ID, "portal:visitor-2")
+
+	auditRepo := auditlogrepo.New(e.pool)
+	service := pvsvc.New(e.publicRepo, auditlogsvc.New(auditRepo))
+	actor := auditlogsvc.Actor{Type: "portal", ID: "visitor-1", UserAgent: "integration-test"}
+
+	createAndApproveComment := func(publicSlug, visitorID, body string) {
+		t.Helper()
+		detail, err := service.CreatePublicRequestComment(e.ctx, e.tenantSlug, publicSlug, visitorID, body, actor)
+		if err != nil {
+			t.Fatalf("CreatePublicRequestComment(%s): %v", publicSlug, err)
+		}
+		pending := mustListCommentModeration(t, service, e)
+		assertPendingCommentModeration(t, pending, detail)
+		approved := mustApproveCommentModeration(t, service, e, pending.Items[0].ID, actor)
+		assertApprovedCommentModeration(t, approved)
+	}
+
+	createAndApproveComment("comment-only", "visitor-3", "Comment only body")
+	createAndApproveComment("both-filters", "visitor-4", "Both filters body")
+
+	votedList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug:        e.tenantSlug,
+		OnlyVotedByViewer: true,
+		ViewerSubjectKey:  "portal:visitor-1",
+		Sort:              "top",
+		Limit:             10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(voted): %v", err)
+	}
+	assertPublicListSlugs(t, votedList.Items, []string{"both-filters", "voted-only"})
+
+	commentList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug:       e.tenantSlug,
+		OnlyWithComments: true,
+		Sort:             "top",
+		Limit:            10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(comments): %v", err)
+	}
+	assertPublicListSlugs(t, commentList.Items, []string{"both-filters", "comment-only"})
+
+	combinedList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug:        e.tenantSlug,
+		OnlyVotedByViewer: true,
+		OnlyWithComments:  true,
+		ViewerSubjectKey:  "portal:visitor-1",
+		Sort:              "top",
+		Limit:             10,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(combined): %v", err)
+	}
+	assertPublicListSlugs(t, combinedList.Items, []string{"both-filters"})
+}
+
+func TestPGPublicVisibilitySimilarRequests(t *testing.T) {
+	e := setup(t)
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+
+	primaryRequest := e.createRequest(t, "Pricing API request")
+	primary := e.upsertRequestPublicationCustom(t, primaryRequest.ID, "pricing-api", "Pricing API", "Now", true, true)
+	e.approve(t, primary.Moderation.ID)
+
+	similarRequest := e.createRequest(t, "Pricing dashboard request")
+	similar := e.upsertRequestPublicationCustom(t, similarRequest.ID, "pricing-dashboard", "Pricing Dashboard", "Next", true, true)
+	e.approve(t, similar.Moderation.ID)
+
+	list, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
+		TenantSlug:        e.tenantSlug,
+		SimilarityText:    "Pricing API",
+		ExcludePublicSlug: "pricing-api",
+		Sort:              "top",
+		Limit:             4,
+	})
+	if err != nil {
+		t.Fatalf("ListPublicRequestCandidates(similar): %v", err)
+	}
+	assertPublicListSlugs(t, list.Items, []string{"pricing-dashboard"})
+
+	service := pvsvc.New(e.publicRepo, nil)
+	detail, err := service.GetPublicRequest(e.ctx, e.tenantSlug, "pricing-api", "visitor-1")
+	if err != nil {
+		t.Fatalf("GetPublicRequest(similar): %v", err)
+	}
+	if len(detail.SimilarRequests) != 1 || detail.SimilarRequests[0].Summary.PublicSlug != "pricing-dashboard" {
+		t.Fatalf("GetPublicRequest(similar) = %+v, want dashboard suggestion", detail.SimilarRequests)
+	}
 }
 
 func TestPGPublicVisibilityPortalVoteLifecycle(t *testing.T) {
@@ -240,6 +430,53 @@ func TestPGPublicVisibilityPortalVoteLifecycle(t *testing.T) {
 	}
 	if unvoted.Votes != 0 || unvoted.ViewerHasVoted {
 		t.Fatalf("unvoted request = %+v, want no portal vote", unvoted)
+	}
+}
+
+func TestPGPublicVisibilityPortalVoteIsIdempotent(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, "Idempotent vote request")
+	e.upsertPublicPolicy(t, pvrepo.ModerationStatePending)
+	publication := e.upsertRequestPublication(t, request.ID, "vote-idempotent")
+	e.approve(t, publication.Moderation.ID)
+
+	service := pvsvc.New(e.publicRepo, nil)
+	actor := auditlogsvc.Actor{Type: "portal", ID: "visitor-1", UserAgent: "integration-test"}
+
+	first, err := service.VotePublicRequest(e.ctx, e.tenantSlug, "vote-idempotent", "visitor-1", actor)
+	if err != nil {
+		t.Fatalf("VotePublicRequest(first): %v", err)
+	}
+	if first.Votes != 1 || !first.ViewerHasVoted {
+		t.Fatalf("first vote result = %+v, want one portal vote", first)
+	}
+
+	second, err := service.VotePublicRequest(e.ctx, e.tenantSlug, "vote-idempotent", "visitor-1", actor)
+	if err != nil {
+		t.Fatalf("VotePublicRequest(second): %v", err)
+	}
+	if second.Votes != 1 || !second.ViewerHasVoted {
+		t.Fatalf("second vote result = %+v, want idempotent single portal vote", second)
+	}
+
+	var voteRows int
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT COUNT(*)
+		FROM customer_request_votes
+		WHERE tenant_id = $1
+		  AND request_id = $2
+		  AND subject_key = $3`,
+		e.tenantID, request.ID, "portal:visitor-1",
+	).Scan(&voteRows); err != nil {
+		t.Fatalf("count vote rows: %v", err)
+	}
+	if voteRows != 1 {
+		t.Fatalf("vote rows = %d, want 1", voteRows)
+	}
+
+	candidate := mustGetPublicRequestCandidate(t, e, "vote-idempotent", "portal:visitor-1")
+	if candidate.VoteCount != 1 || !candidate.ViewerHasVoted {
+		t.Fatalf("candidate after duplicate vote = %+v, want single counted vote", candidate)
 	}
 }
 
@@ -742,6 +979,28 @@ func (e env) archiveRequest(t *testing.T, requestID uuid.UUID) {
 		SET archived_at = NOW()
 		WHERE tenant_id = $1 AND id = $2`, e.tenantID, requestID); err != nil {
 		t.Fatalf("archive request: %v", err)
+	}
+}
+
+func (e env) touchRequestProfile(t *testing.T, requestID uuid.UUID, updatedAt time.Time) {
+	t.Helper()
+	if _, err := e.pool.Exec(e.ctx, `
+		UPDATE public_request_profiles
+		SET updated_at = $1
+		WHERE tenant_id = $2 AND request_id = $3`,
+		updatedAt, e.tenantID, requestID); err != nil {
+		t.Fatalf("touch request profile: %v", err)
+	}
+}
+
+func (e env) setRequestPublicState(t *testing.T, requestID uuid.UUID, state string) {
+	t.Helper()
+	if _, err := e.pool.Exec(e.ctx, `
+		UPDATE public_request_profiles
+		SET public_state = $1
+		WHERE tenant_id = $2 AND request_id = $3`,
+		state, e.tenantID, requestID); err != nil {
+		t.Fatalf("set request public state: %v", err)
 	}
 }
 

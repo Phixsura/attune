@@ -74,8 +74,20 @@ Attune already has a meaningful subset of the needed architecture:
   `portal_submission`.
 - `customer_request_votes` already stores tenant-scoped vote identities and
   contributes to request prioritization.
-- Public request summaries already expose vote and comment count fields, and
-  the public comment projection now counts only approved public comments.
+- Public request summaries already expose vote and comment count fields, the
+  public comment projection now counts only approved public comments, the
+  public board now supports search, cursor pagination, top/recent sorting,
+  state/roadmap filters, and quick filters for viewer-voted and
+  comment-rich requests, public request detail pages now surface similar
+  requests to help visitors avoid duplicates, and the Console request profile
+  view can reuse the live public projection to flag likely duplicates for
+  operators once the request is actually public. That same profile view now
+  deep-links back into the internal Customer Requests detail drawer so the
+  operator can move straight from public context into merge or linking work,
+  with similar-request actions able to prefill the merge target when a likely
+  duplicate is found. Console public-visibility moderation also now exposes
+  surface filters plus per-user saved views, so operators can snap between
+  common triage states without rebuilding the filter set every time.
 
 The missing pieces are the public write paths, a stable public visitor
 identity model, and a board UI that uses the existing public projection instead
@@ -141,7 +153,8 @@ The cookie should be:
 
 - opaque to the browser;
 - `HttpOnly`, `Secure`, and `SameSite=Lax`;
-- scoped to the portal path;
+- scoped to the attune origin (`Path=/`) so the same identity reaches both the
+  board pages and the `/v1/portal/...` write endpoints;
 - refreshed on successful vote writes; and
 - treated as an inactivity-bound session, with a long TTL such as 180 days.
 
@@ -260,6 +273,10 @@ The board UI should mirror the product patterns above:
 The UI should not try to be a support inbox or a full CRM. It should feel like
 a polished feedback board: simple to read and simple to vote on.
 
+The Console preview should deep-link to the live board and the submission page
+so operators can verify both the public request surface and the intake surface
+from the same policy card.
+
 ### 8. Add the missing public safety rails
 
 Public write endpoints should be hardened from the start:
@@ -268,7 +285,8 @@ Public write endpoints should be hardened from the start:
   so the tenant cannot be enumerated.
 - anonymous participation requires a signed portal visitor token.
 - vote writes use idempotent semantics where possible.
-- rate limits apply per tenant and per visitor.
+- rate limits apply per tenant and per visitor, with separate read and write
+  buckets so browsing does not starve vote, comment, or submission writes.
 - `search_indexing_enabled` stays `false` by default.
 - public write responses avoid leaking private identity details.
 
@@ -314,7 +332,14 @@ system.
 - `go test ./...`
 - `go test -tags=integration ./test/integration/postgres/publicvisibility`
 - `pnpm tsc -b --noEmit` from `console/`
+- `cd console && pnpm build`
 - `pnpm biome check` from `console/`
+- `make public-board-smoke`
+
+The browser smoke covers live board browsing, vote/unvote, comment writes,
+Console preview links, and Console moderation approval for a pending public
+request plus a pending comment, then verifies the approved content appears on
+the public board.
 
 ## References
 
@@ -331,3 +356,4 @@ system.
 - [Linear Customer Requests](https://linear.app/customer-requests)
 - [Productlane feedback portal](https://productlane.com/feedback)
 - [Sleekplan feedback and roadmap](https://sleekplan.com/feedback)
+- [Public feedback platform phase 2 roadmap](../../../research/2026-07-13-public-feedback-platform-phase-2-roadmap.md)

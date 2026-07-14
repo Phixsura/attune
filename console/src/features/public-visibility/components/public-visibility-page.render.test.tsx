@@ -6,6 +6,8 @@ import {
   type ModerationSubject,
   PortalSubmissionFieldKind,
   PublicAccessMode,
+  type PublicCustomerRequestDetail,
+  type PublicCustomerRequestSummary,
   PublicIdentityMode,
   type PublicRequestPublication,
   PublicSurface,
@@ -18,6 +20,13 @@ import { fireEvent, renderWithProviders, screen, waitFor } from '@/testing/test-
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+server.use(
+  http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
+)
+
+const currentRequestID = '11111111-1111-1111-1111-111111111111'
+const similarRequestID = '33333333-3333-3333-3333-333333333333'
 
 describe('PublicVisibilityPage', () => {
   it('lets admins save public policy and request profile changes', async () => {
@@ -38,6 +47,9 @@ describe('PublicVisibilityPage', () => {
         loadedProfilePath = new URL(request.url).pathname
         return HttpResponse.json(publicationFixture())
       }),
+      http.get('/fb/v1/portal/:tenantSlug/requests/:publicSlug', () =>
+        HttpResponse.json(publicRequestDetailFixture()),
+      ),
       http.put(
         '/fb/v1/console/public-visibility/requests/:requestId/profile',
         async ({ request }) => {
@@ -54,6 +66,10 @@ describe('PublicVisibilityPage', () => {
     expect(screen.getByText('公开需求资料')).toBeInTheDocument()
     expect(screen.getByText('门户投稿表单')).toBeInTheDocument()
     expect(screen.getByText('实时预览')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '打开公开看板' })).toHaveAttribute(
+      'href',
+      '/portal/tenant/requests',
+    )
     expect(screen.getByRole('link', { name: '打开公开门户' })).toHaveAttribute(
       'href',
       '/portal/tenant',
@@ -111,12 +127,35 @@ describe('PublicVisibilityPage', () => {
       })
     })
 
-    await user.type(screen.getByPlaceholderText('粘贴 customer request UUID'), ' request-1 ')
+    await user.type(
+      screen.getByPlaceholderText('粘贴 customer request UUID'),
+      ` ${currentRequestID} `,
+    )
     await user.click(screen.getByRole('button', { name: '载入' }))
     await waitFor(() => {
       expect(screen.getByText('当前 slug: billing-export')).toBeInTheDocument()
     })
-    expect(loadedProfilePath).toBe('/fb/v1/console/public-visibility/requests/request-1/profile')
+    await waitFor(() => {
+      expect(screen.getByText('可能重复')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByText('Pricing dashboard')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('link', { name: '打开客户需求' })).toHaveAttribute(
+      'href',
+      `/feedback/customer-requests?request_id=${currentRequestID}`,
+    )
+    expect(screen.getByRole('link', { name: '设为合并目标' })).toHaveAttribute(
+      'href',
+      `/feedback/customer-requests?request_id=${currentRequestID}&merge_target_id=${similarRequestID}`,
+    )
+    expect(screen.getByRole('link', { name: 'Pricing dashboard' })).toHaveAttribute(
+      'href',
+      '/portal/tenant/requests/pricing-dashboard',
+    )
+    expect(loadedProfilePath).toBe(
+      `/fb/v1/console/public-visibility/requests/${currentRequestID}/profile`,
+    )
 
     await user.clear(screen.getByPlaceholderText('面向客户展示的标题'))
     await user.type(screen.getByPlaceholderText('面向客户展示的标题'), 'Improved billing export')
@@ -126,7 +165,7 @@ describe('PublicVisibilityPage', () => {
     await user.click(screen.getByRole('button', { name: '保存资料' }))
     await waitFor(() => {
       expect(savedProfile).toMatchObject({
-        requestId: 'request-1',
+        requestId: currentRequestID,
         publicSlug: 'billing-export',
         publicTitle: 'Improved billing export',
         publicSummary: 'Export invoices safely',
@@ -135,6 +174,202 @@ describe('PublicVisibilityPage', () => {
         submittedByDisplay: 'Jane Customer',
       })
     })
+  }, 60_000)
+
+  it('saves and reapplies moderation views', async () => {
+    mockMe('admin')
+    type SavedViewBody = {
+      name?: string
+      state?: { queueView?: string; surfaces?: string[] }
+    }
+    let savedViewBody: SavedViewBody | null = null
+    let savedViews = { views: [] as Record<string, unknown>[] }
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json(savedViews)),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({ subjects: moderationSubjects() }),
+      ),
+      http.post('/fb/v1/console/public-visibility/views', async ({ request }) => {
+        savedViewBody = (await request.json()) as SavedViewBody
+        const view = {
+          id: 'view-1',
+          name: savedViewBody?.name ?? 'Approved portal requests',
+          state: savedViewBody?.state,
+          createdAt: '2026-07-10T00:00:00Z',
+          updatedAt: '2026-07-10T00:00:00Z',
+        }
+        savedViews = { views: [view] }
+        return HttpResponse.json({ view })
+      }),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByText('保存的视图')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: '门户投稿' }))
+    await user.click(screen.getByRole('button', { name: '已公开 (1)' }))
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), 'Approved portal requests')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => {
+      expect(savedViewBody).toMatchObject({
+        name: 'Approved portal requests',
+        state: {
+          queueView: 'approved',
+          surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+        },
+      })
+    })
+
+    await user.click(screen.getByRole('combobox', { name: '保存的视图' }))
+    expect(
+      await screen.findByRole('option', { name: 'Approved portal requests' }),
+    ).toBeInTheDocument()
+  })
+
+  it('loads, updates, and deletes an existing saved moderation view', async () => {
+    mockMe('admin')
+    type SavedViewState = {
+      queueView: string
+      surfaces: PublicSurface[]
+    }
+    type SavedViewRecord = {
+      id: string
+      name: string
+      state: SavedViewState
+      createdAt: string
+      updatedAt: string
+    }
+    type SavedViewBody = {
+      name?: string
+      state?: SavedViewState
+    }
+    let savedViewBody: SavedViewBody | null = null
+    let deletedViewID = ''
+    let savedViews: { views: SavedViewRecord[] } = {
+      views: [
+        {
+          id: 'view-1',
+          name: 'Approved portal requests',
+          state: {
+            queueView: 'approved',
+            surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+          },
+          createdAt: '2026-07-10T00:00:00Z',
+          updatedAt: '2026-07-10T00:00:00Z',
+        },
+      ],
+    }
+
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json(savedViews)),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({ subjects: moderationSubjects() }),
+      ),
+      http.put('/fb/v1/console/public-visibility/views/:id', async ({ request, params }) => {
+        savedViewBody = (await request.json()) as SavedViewBody
+        const updated: SavedViewRecord = {
+          id: params.id as string,
+          name: savedViewBody?.name ?? 'Updated portal requests',
+          state: savedViewBody?.state ?? {
+            queueView: 'pending',
+            surfaces: [],
+          },
+          createdAt: '2026-07-10T00:00:00Z',
+          updatedAt: '2026-07-11T00:00:00Z',
+        }
+        savedViews = { views: [updated] }
+        return HttpResponse.json({ view: updated })
+      }),
+      http.delete('/fb/v1/console/public-visibility/views/:id', ({ params }) => {
+        deletedViewID = params.id as string
+        savedViews = { views: [] }
+        return HttpResponse.json({})
+      }),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByText('保存的视图')).toBeInTheDocument())
+    expect(screen.getByText('当前筛选未绑定保存视图')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '保存的视图' })).toBeEnabled())
+
+    await user.click(screen.getByRole('combobox', { name: '保存的视图' }))
+    await user.click(await screen.findByRole('option', { name: 'Approved portal requests' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('已绑定为 Approved portal requests')).toBeInTheDocument()
+      expect(screen.getByText('当前筛选与该保存视图一致。')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '待审 (1)' }))
+    expect(screen.getByText('当前筛选已修改，尚未保存到该视图。')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    expect(screen.getByLabelText('视图名称')).toHaveValue('Approved portal requests')
+
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), 'Updated portal requests')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => {
+      expect(savedViewBody).toMatchObject({
+        name: 'Updated portal requests',
+        state: {
+          queueView: 'pending',
+          surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByText('已绑定为 Updated portal requests')).toBeInTheDocument()
+      expect(screen.getByText('当前筛选与该保存视图一致。')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '删除保存视图' }))
+
+    await waitFor(() => {
+      expect(deletedViewID).toBe('view-1')
+      expect(screen.getByText('当前筛选未绑定保存视图')).toBeInTheDocument()
+    })
+    expect(screen.getByRole('button', { name: '删除保存视图' })).toBeDisabled()
+  })
+
+  it('keeps similar requests locked until the publication is public', async () => {
+    mockMe('admin')
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({
+          subjects: moderationSubjects(ModerationState.MODERATION_STATE_PENDING),
+        }),
+      ),
+      http.get('/fb/v1/console/public-visibility/requests/:requestId/profile', () =>
+        HttpResponse.json(publicationFixture(ModerationState.MODERATION_STATE_PENDING)),
+      ),
+      http.get('/fb/v1/portal/:tenantSlug/requests/:publicSlug', () => {
+        throw new Error('portal similarity lookup must stay disabled until publication is public')
+      }),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByText('公开需求资料')).toBeInTheDocument())
+    await user.type(
+      screen.getByPlaceholderText('粘贴 customer request UUID'),
+      ` ${currentRequestID} `,
+    )
+    await user.click(screen.getByRole('button', { name: '载入' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('可能重复')).toBeInTheDocument()
+      expect(screen.getByText('此需求公开后会自动显示相似请求。')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('Pricing dashboard')).not.toBeInTheDocument()
   })
 
   it('lets admins add, reorder, and normalize portal submission fields', async () => {
@@ -451,13 +686,11 @@ function policyFixture(overrides: Partial<PublicVisibilityPolicy> = {}): PublicV
   }
 }
 
-function moderationSubjects(): ModerationSubject[] {
+function moderationSubjects(
+  state: ModerationState = ModerationState.MODERATION_STATE_PENDING,
+): ModerationSubject[] {
   return [
-    moderationSubject(
-      'moderation-pending',
-      'profile-pending',
-      ModerationState.MODERATION_STATE_PENDING,
-    ),
+    moderationSubject('moderation-pending', 'profile-pending', state),
     moderationSubject(
       'moderation-approved',
       'profile-approved',
@@ -495,12 +728,14 @@ function moderationSubject(
   }
 }
 
-function publicationFixture(): PublicRequestPublication {
+function publicationFixture(
+  moderationState: ModerationState = ModerationState.MODERATION_STATE_APPROVED,
+): PublicRequestPublication {
   return {
     profile: {
       id: 'profile-1',
       tenantId: 'tenant-1',
-      requestId: 'request-1',
+      requestId: currentRequestID,
       publicSlug: 'billing-export',
       publicTitle: 'Billing export',
       publicSummary: 'Customers can export billing data.',
@@ -512,10 +747,47 @@ function publicationFixture(): PublicRequestPublication {
       createdAt: '2026-07-10T00:00:00Z',
       updatedAt: '2026-07-10T00:00:00Z',
     },
-    moderation: moderationSubject(
-      'moderation-pending',
-      'profile-pending',
-      ModerationState.MODERATION_STATE_PENDING,
-    ),
+    moderation: moderationSubject('moderation-pending', 'profile-pending', moderationState),
+  }
+}
+
+function publicRequestDetailFixture(): PublicCustomerRequestDetail {
+  return {
+    request: publicRequestSummaryFixture('billing-export', 'Billing export'),
+    links: ['/portal/tenant/requests/billing-export'],
+    comments: [],
+    canComment: false,
+    similarRequests: [
+      publicRequestSummaryFixture('pricing-dashboard', 'Pricing dashboard', {
+        id: similarRequestID,
+        summary: 'Show pricing comparisons in one place.',
+        voteCount: 18,
+        commentCount: 4,
+        submittedByDisplay: 'Portal visitor',
+        viewerHasVoted: true,
+      }),
+    ],
+  }
+}
+
+function publicRequestSummaryFixture(
+  slug: string,
+  title: string,
+  overrides: Partial<PublicCustomerRequestSummary> = {},
+): PublicCustomerRequestSummary {
+  return {
+    id: `${slug}-id`,
+    slug,
+    title,
+    summary: 'Customers want this.',
+    state: 'planned',
+    roadmapColumn: 'Next',
+    voteCount: 12,
+    commentCount: 3,
+    submittedByDisplay: 'Jane Customer',
+    createdAt: '2026-07-10T00:00:00Z',
+    updatedAt: '2026-07-10T00:00:00Z',
+    viewerHasVoted: false,
+    ...overrides,
   }
 }

@@ -1,6 +1,6 @@
 module github.com/Phixsura/attune/sdk/go
 
-go 1.25.0
+go 1.26.5
 
 require (
 	github.com/google/gnostic-models v0.7.1

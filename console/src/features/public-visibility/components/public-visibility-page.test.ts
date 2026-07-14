@@ -59,6 +59,43 @@ describe('publicVisibilityPageTestables', () => {
     expect(publicVisibilityPageTestables.filterSubjects(subjects, 'all')).toEqual(subjects)
   })
 
+  it('maps saved views to and from moderation filters', () => {
+    const t = ((key: string) => key) as TFunction
+    const filters = {
+      queueView: 'blocked' as const,
+      surfaces: [
+        PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION,
+        PublicSurface.PUBLIC_SURFACE_REQUEST_COMMENT,
+        PublicSurface.PUBLIC_SURFACE_REQUEST_COMMENT,
+      ],
+    }
+    const state = publicVisibilityPageTestables.savedViewStateFromFilters(filters)
+
+    expect(state).toEqual({
+      queueView: 'blocked',
+      surfaces: [
+        PublicSurface.PUBLIC_SURFACE_REQUEST_COMMENT,
+        PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION,
+      ],
+    })
+    expect(publicVisibilityPageTestables.savedViewStateSignature(state)).toBe(
+      'blocked|PUBLIC_SURFACE_REQUEST_COMMENT,PUBLIC_SURFACE_PORTAL_SUBMISSION',
+    )
+    expect(publicVisibilityPageTestables.savedViewStateToFilters(state)).toEqual({
+      queueView: 'blocked',
+      surfaces: [
+        PublicSurface.PUBLIC_SURFACE_REQUEST_COMMENT,
+        PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION,
+      ],
+    })
+    expect(publicVisibilityPageTestables.suggestSavedViewName(filters, t)).toBe(
+      'public_visibility.queue_views.blocked · public_visibility.surfaces.PUBLIC_SURFACE_REQUEST_COMMENT · public_visibility.surfaces.PUBLIC_SURFACE_PORTAL_SUBMISSION',
+    )
+    expect(publicVisibilityPageTestables.describeSavedViewState(filters, t)).toBe(
+      'public_visibility.saved_views.summary',
+    )
+  })
+
   it('maps policy and profile records into editable form payloads', () => {
     const policy = policyFixture()
     const policyForm = publicVisibilityPageTestables.formFromPolicy(policy)

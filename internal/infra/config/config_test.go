@@ -365,7 +365,7 @@ console:
     password: "correct horse battery staple"
 secrets:
   tink_keyset: |
-    TINK_KEYSET
+TINK_KEYSET
 observability:
   environment: "test"
 rate_limit:

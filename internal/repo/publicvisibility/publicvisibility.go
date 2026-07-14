@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -169,11 +170,19 @@ type PublicRequestCandidate struct {
 }
 
 type PublicRequestListFilter struct {
-	TenantSlug       string
-	Roadmap          bool
-	Limit            int
-	Cursor           string
-	ViewerSubjectKey string
+	TenantSlug        string
+	Roadmap           bool
+	Query             string
+	SimilarityText    string
+	ExcludePublicSlug string
+	Sort              string
+	State             string
+	RoadmapColumn     string
+	OnlyVotedByViewer bool
+	OnlyWithComments  bool
+	Limit             int
+	Cursor            string
+	ViewerSubjectKey  string
 }
 
 type PublicRequestListCandidate struct {
@@ -569,7 +578,7 @@ func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string,
 			FROM customer_request_votes v
 			WHERE v.tenant_id = prp.tenant_id
 			  AND v.request_id = prp.request_id
-			  AND v.subject_key LIKE 'portal:%'
+			  AND v.subject_key LIKE 'portal:%%'
 		) votes ON true
 		LEFT JOIN LATERAL (
 			SELECT COUNT(*)::bigint AS comment_count
@@ -611,28 +620,7 @@ func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string,
 	return ptrext.Of(out), nil
 }
 
-func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicRequestListFilter) (PublicRequestListResult, error) {
-	limit := boundedLimit(filter.Limit)
-	offset, err := parseCursor(filter.Cursor)
-	if err != nil {
-		return PublicRequestListResult{}, err
-	}
-	tenantID, err := r.ResolveTenantIDBySlug(ctx, filter.TenantSlug)
-	if err != nil {
-		return PublicRequestListResult{}, err
-	}
-	policy, err := r.GetPolicy(ctx, tenantID)
-	if err != nil {
-		return PublicRequestListResult{}, err
-	}
-
-	includedClause := "prp.included_in_portal = TRUE"
-	orderBy := "COALESCE(votes.vote_count, 0) DESC, prp.updated_at DESC, prp.id DESC"
-	if filter.Roadmap {
-		includedClause = "prp.included_in_roadmap = TRUE"
-		orderBy = "LOWER(NULLIF(prp.roadmap_column, '')) ASC NULLS LAST, COALESCE(votes.vote_count, 0) DESC, prp.updated_at DESC, prp.id DESC"
-	}
-	q := `
+var publicBoardListCandidatesQuery = `
 		SELECT
 			` + prefixedProfileColumns("prp") + `,
 			` + prefixedSubjectColumns("pms") + `,
@@ -665,7 +653,7 @@ func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicReq
 			FROM customer_request_votes v
 			WHERE v.tenant_id = prp.tenant_id
 			  AND v.request_id = prp.request_id
-			  AND v.subject_key LIKE 'portal:%'
+			  AND v.subject_key LIKE 'portal:%%'
 		) votes ON true
 		LEFT JOIN LATERAL (
 			SELECT COUNT(*)::bigint AS comment_count
@@ -679,10 +667,57 @@ func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicReq
 			  AND c.request_id = prp.request_id
 		) comments ON true
 		WHERE prp.tenant_id = $1
-		  AND ` + includedClause + `
-		ORDER BY ` + orderBy + `
+		  AND %s%s%s%s%s%s%s
+		ORDER BY %s
 		LIMIT $2 OFFSET $3`
-	rows, err := r.pool.Query(ctx, q, tenantID, limit+1, offset, filter.ViewerSubjectKey)
+
+func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicRequestListFilter) (PublicRequestListResult, error) {
+	limit := boundedLimit(filter.Limit)
+	offset, err := parseCursor(filter.Cursor)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+	tenantID, err := r.ResolveTenantIDBySlug(ctx, filter.TenantSlug)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+	policy, err := r.GetPolicy(ctx, tenantID)
+	if err != nil {
+		return PublicRequestListResult{}, err
+	}
+
+	includedClause := "prp.included_in_portal = TRUE"
+	orderBy := publicBoardOrderByClause(filter.Sort, filter.Roadmap)
+	if filter.Roadmap {
+		includedClause = "prp.included_in_roadmap = TRUE"
+	}
+	args := []any{tenantID, limit + 1, offset, filter.ViewerSubjectKey}
+	stateClause, args := publicBoardContainsClause("prp.public_state", filter.State, args)
+	roadmapClause, args := publicBoardContainsClause("prp.roadmap_column", filter.RoadmapColumn, args)
+	excludeClause, args := publicBoardExcludeClause(filter.ExcludePublicSlug, args)
+	voteClause, args := publicBoardViewerVoteClause(filter.OnlyVotedByViewer, filter.ViewerSubjectKey, args)
+	commentClause := ""
+	if filter.OnlyWithComments {
+		commentClause = "\n		  AND COALESCE(comments.comment_count, 0) > 0"
+	}
+	var searchClause string
+	if strings.TrimSpace(filter.SimilarityText) != "" {
+		searchClause, args = publicBoardSimilarityClause(filter.SimilarityText, args)
+	} else {
+		searchClause, args = publicBoardSearchClause(filter.Query, args)
+	}
+	q := fmt.Sprintf(
+		publicBoardListCandidatesQuery,
+		includedClause,
+		excludeClause,
+		stateClause,
+		roadmapClause,
+		voteClause,
+		commentClause,
+		searchClause,
+		orderBy,
+	)
+	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
 		return PublicRequestListResult{}, err
 	}
@@ -701,6 +736,149 @@ func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicReq
 		Items:      items,
 		NextCursor: next,
 	}, nil
+}
+
+func publicBoardContainsClause(column string, value string, args []any) (string, []any) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", args
+	}
+	args = append(args, "%"+trimmed+"%")
+	return fmt.Sprintf(`
+		  AND %s ILIKE $%d`, column, len(args)), args
+}
+
+func publicBoardSearchClause(query string, args []any) (string, []any) {
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
+		return "", args
+	}
+	args = append(args, "%"+trimmed+"%")
+	searchArg := len(args)
+	clause := fmt.Sprintf(`
+		  AND (
+		    prp.public_title ILIKE $%[1]d
+		    OR prp.public_summary ILIKE $%[1]d
+		    OR EXISTS(
+		      SELECT 1
+		      FROM customer_request_comments c
+		      JOIN public_moderation_subjects cps
+		        ON cps.tenant_id = c.tenant_id
+		       AND cps.surface = 'request_comment'
+		       AND cps.subject_id = c.id::text
+		       AND cps.state = 'approved'
+		      WHERE c.tenant_id = prp.tenant_id
+		        AND c.request_id = prp.request_id
+		        AND c.body ILIKE $%[1]d
+		    )
+	)`, searchArg)
+	return clause, args
+}
+
+func publicBoardSimilarityClause(text string, args []any) (string, []any) {
+	terms := publicBoardSearchTerms(text)
+	if len(terms) == 0 {
+		return "\n		  AND FALSE", args
+	}
+	clauses := make([]string, 0, len(terms))
+	for _, term := range terms {
+		args = append(args, "%"+term+"%")
+		termArg := len(args)
+		clauses = append(clauses, fmt.Sprintf(`
+		  (
+		    prp.public_title ILIKE $%[1]d
+		    OR prp.public_summary ILIKE $%[1]d
+		    OR EXISTS(
+		      SELECT 1
+		      FROM customer_request_comments c
+		      JOIN public_moderation_subjects cps
+		        ON cps.tenant_id = c.tenant_id
+		       AND cps.surface = 'request_comment'
+		       AND cps.subject_id = c.id::text
+		       AND cps.state = 'approved'
+		      WHERE c.tenant_id = prp.tenant_id
+		        AND c.request_id = prp.request_id
+		        AND c.body ILIKE $%[1]d
+		    )
+		  )`, termArg))
+	}
+	return "\n		  AND (" + strings.Join(clauses, "\n		    OR ") + ")", args
+}
+
+func publicBoardSearchTerms(text string) []string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	terms := make([]string, 0, 6)
+	for _, raw := range strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	}) {
+		term := strings.TrimSpace(raw)
+		if len(term) < 3 {
+			continue
+		}
+		if _, ok := seen[term]; ok {
+			continue
+		}
+		seen[term] = struct{}{}
+		terms = append(terms, term)
+		if len(terms) == 6 {
+			break
+		}
+	}
+	return terms
+}
+
+func publicBoardExcludeClause(slug string, args []any) (string, []any) {
+	trimmed := strings.TrimSpace(slug)
+	if trimmed == "" {
+		return "", args
+	}
+	args = append(args, trimmed)
+	return fmt.Sprintf("\n		  AND prp.public_slug <> $%d", len(args)), args
+}
+
+func publicBoardViewerVoteClause(onlyVotedByViewer bool, viewerSubjectKey string, args []any) (string, []any) {
+	if !onlyVotedByViewer {
+		return "", args
+	}
+	trimmed := strings.TrimSpace(viewerSubjectKey)
+	if trimmed == "" {
+		return "\n		  AND FALSE", args
+	}
+	args = append(args, trimmed)
+	return fmt.Sprintf(`
+		  AND EXISTS(
+		    SELECT 1
+		    FROM customer_request_votes vv
+		    WHERE vv.tenant_id = prp.tenant_id
+		      AND vv.request_id = prp.request_id
+		      AND vv.subject_key = $%d
+		  )`, len(args)), args
+}
+
+func publicBoardOrderByClause(sort string, roadmap bool) string {
+	prefix := ""
+	if roadmap {
+		prefix = "LOWER(NULLIF(prp.roadmap_column, '')) ASC NULLS LAST, "
+	}
+	switch normalizePublicBoardSort(sort) {
+	case "recent":
+		return prefix + "prp.updated_at DESC, COALESCE(votes.vote_count, 0) DESC, prp.id DESC"
+	default:
+		return prefix + "COALESCE(votes.vote_count, 0) DESC, prp.updated_at DESC, prp.id DESC"
+	}
+}
+
+func normalizePublicBoardSort(sort string) string {
+	switch strings.ToLower(strings.TrimSpace(sort)) {
+	case "recent", "new", "newest", "latest", "activity":
+		return "recent"
+	default:
+		return "top"
+	}
 }
 
 func (r *Repo) AddPublicRequestVoteTx(

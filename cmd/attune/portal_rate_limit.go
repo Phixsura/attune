@@ -32,18 +32,13 @@ type portalAnonymousLimiter struct {
 
 func newPortalAnonymousLimiter(perMinute, burst int, disabled bool, trustedHop int) *portalAnonymousLimiter {
 	return newPortalLimiter(perMinute, burst, disabled, trustedHop, func(r *http.Request) string {
-		return nethardening.ClientIP(r, trustedHop)
+		return portalTenantClientRateKey(r, trustedHop)
 	})
 }
 
 func newPortalSubmissionLimiter(perMinute, burst int, disabled bool, trustedHop int) *portalAnonymousLimiter {
 	return newPortalLimiter(perMinute, burst, disabled, trustedHop, func(r *http.Request) string {
-		tenantSlug := strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
-		clientIP := nethardening.ClientIP(r, trustedHop)
-		if tenantSlug == "" {
-			return clientIP
-		}
-		return tenantSlug + "|" + clientIP
+		return portalTenantClientRateKey(r, trustedHop)
 	})
 }
 
@@ -77,7 +72,7 @@ func (l *portalAnonymousLimiter) Middleware(next http.Handler) http.Handler {
 		}
 		retryAfter := l.retryAfterSeconds(limiter)
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
-		logext.Warnf(r.Context(), "[portal.ratelimit] reject,path:%s,client_ip:%s", r.URL.Path, key)
+		logext.Warnf(r.Context(), "[portal.ratelimit] reject,path:%s,rate_key:%s", r.URL.Path, key)
 		dispatcher.Reject(r.Context(), w, http.StatusTooManyRequests,
 			attunev1.ErrorCode_RATE_LIMITED, fmt.Sprintf("request too frequent, retry in %d seconds", retryAfter))
 	})
@@ -121,4 +116,13 @@ func (l *portalAnonymousLimiter) retryAfterSeconds(limiter *rate.Limiter) int {
 		return 1
 	}
 	return int(math.Ceil(delay.Seconds()))
+}
+
+func portalTenantClientRateKey(r *http.Request, trustedHop int) string {
+	tenantSlug := strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+	clientIP := nethardening.ClientIP(r, trustedHop)
+	if tenantSlug == "" {
+		return clientIP
+	}
+	return tenantSlug + "|" + clientIP
 }

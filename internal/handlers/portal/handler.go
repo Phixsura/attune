@@ -31,9 +31,9 @@ const publicRequestCacheControl = "no-store"
 var createPublicSubmissionUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
 
 type readService interface {
-	ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (pvsvc.PublicRequestList, error)
+	ListPublicRequests(ctx context.Context, tenantSlug string, limit int, cursor string, query string, sort string, state string, roadmap string, onlyVotedByViewer bool, onlyWithComments bool, visitorID string) (pvsvc.PublicRequestList, error)
 	GetPublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string) (pvsvc.PublicRequest, error)
-	ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string, visitorID string) (pvsvc.PublicRequestList, error)
+	ListPublicRoadmap(ctx context.Context, tenantSlug string, limit int, cursor string, query string, sort string, state string, roadmap string, onlyVotedByViewer bool, onlyWithComments bool, visitorID string) (pvsvc.PublicRequestList, error)
 	VotePublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, actor auditlogsvc.Actor) (pvsvc.PublicRequest, error)
 	UnvotePublicRequest(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, actor auditlogsvc.Actor) (pvsvc.PublicRequest, error)
 	CreatePublicRequestComment(ctx context.Context, tenantSlug string, publicSlug string, visitorID string, body string, actor auditlogsvc.Actor) (pvsvc.PublicRequest, error)
@@ -73,7 +73,7 @@ func (h *Handler) ListPublicCustomerRequests(
 	if err != nil {
 		return dispatcher.Fail[*attunev1.ListPublicCustomerRequestsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
 	}
-	result, err := h.read.ListPublicRequests(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor(), visitorID)
+	result, err := h.read.ListPublicRequests(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor(), req.GetQ(), req.GetSort(), req.GetState(), req.GetRoadmap(), false, false, visitorID)
 	if err != nil {
 		return portalError[*attunev1.ListPublicCustomerRequestsResponse](err)
 	}
@@ -117,7 +117,7 @@ func (h *Handler) ListPublicRoadmap(
 	if err != nil {
 		return dispatcher.Fail[*attunev1.ListPublicRoadmapResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "portal visitor unavailable")
 	}
-	result, err := h.read.ListPublicRoadmap(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor(), visitorID)
+	result, err := h.read.ListPublicRoadmap(ctx, req.GetTenantSlug(), int(req.GetLimit()), req.GetCursor(), req.GetQ(), req.GetSort(), req.GetState(), req.GetRoadmap(), false, false, visitorID)
 	if err != nil {
 		return portalError[*attunev1.ListPublicRoadmapResponse](err)
 	}
@@ -288,9 +288,10 @@ func portalSubmissionError[Resp proto.Message](err error) (dispatcher.Result[Res
 
 func publicRequestToProto(result pvsvc.PublicRequest) *attunev1.PublicCustomerRequestDetail {
 	out := ptrext.Of(attunev1.PublicCustomerRequestDetail{
-		Request:  publicRequestSummaryToProto(result),
-		Links:    []string{},
-		Comments: make([]*attunev1.PublicCustomerRequestComment, 0, len(result.CommentItems)),
+		Request:         publicRequestSummaryToProto(result),
+		Links:           []string{},
+		Comments:        make([]*attunev1.PublicCustomerRequestComment, 0, len(result.CommentItems)),
+		SimilarRequests: make([]*attunev1.PublicCustomerRequestSummary, 0, len(result.SimilarRequests)),
 	})
 	if result.Policy.CommentsEnabled {
 		for _, comment := range result.CommentItems {
@@ -299,6 +300,9 @@ func publicRequestToProto(result pvsvc.PublicRequest) *attunev1.PublicCustomerRe
 	}
 	if result.CanComment {
 		out.CanComment = ptrext.Of(true)
+	}
+	for _, similar := range result.SimilarRequests {
+		out.SimilarRequests = append(out.SimilarRequests, publicRequestSummaryToProto(similar))
 	}
 	return out
 }
@@ -559,22 +563,32 @@ func optionalTime(t time.Time) *string {
 }
 
 func BindListCustomerRequests(r *http.Request, req *attunev1.ListPublicCustomerRequestsRequest) error {
+	q := r.URL.Query()
 	limit, cursor, err := bindPublicListQuery(r)
 	if err != nil {
 		return err
 	}
 	req.Limit = limit
 	req.Cursor = cursor
+	req.Q = strings.TrimSpace(q.Get("q"))
+	req.Sort = strings.TrimSpace(q.Get("sort"))
+	req.State = strings.TrimSpace(q.Get("state"))
+	req.Roadmap = strings.TrimSpace(q.Get("roadmap"))
 	return nil
 }
 
 func BindListRoadmap(r *http.Request, req *attunev1.ListPublicRoadmapRequest) error {
+	q := r.URL.Query()
 	limit, cursor, err := bindPublicListQuery(r)
 	if err != nil {
 		return err
 	}
 	req.Limit = limit
 	req.Cursor = cursor
+	req.Q = strings.TrimSpace(q.Get("q"))
+	req.Sort = strings.TrimSpace(q.Get("sort"))
+	req.State = strings.TrimSpace(q.Get("state"))
+	req.Roadmap = strings.TrimSpace(q.Get("roadmap"))
 	return nil
 }
 

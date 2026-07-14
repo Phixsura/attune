@@ -202,6 +202,10 @@ async function handleRoute(
     await fulfillJson(route, consoleA11yModerationSubjects)
     return true
   }
+  if (method === 'GET' && path === '/public-visibility/views') {
+    await fulfillJson(route, { views: [] })
+    return true
+  }
   if (method === 'GET' && path === '/inbound/sources') {
     await fulfillJson(route, { items: sortInboundSources(state.inboundSources) })
     return true

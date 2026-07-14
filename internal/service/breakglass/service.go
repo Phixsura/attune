@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
+	"github.com/ProtonMail/bcrypt"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -37,13 +37,11 @@ const (
 	TokenPrefix = "bg_"
 	// tokenBytes is the number of random bytes in a token (32 bytes = 256 bits).
 	tokenBytes = 32
-	// bcryptCost is the bcrypt cost factor for token hashing.
-	bcryptCost = 12
 )
 
 // dummyHash is a pre-computed bcrypt hash used to prevent timing attacks.
-// When no valid token is found, we still run bcrypt.CompareHashAndPassword
-// against this dummy hash to normalize response time.
+// When no valid token is found, we still run bcrypt.Match against this dummy
+// hash to normalize response time.
 // #nosec G101 -- not a credential, intentional dummy value for timing normalization
 var dummyHash = []byte("$2a$12$000000000000000000000uGWpQ7c0AqnqcP6EehRw.4.FBgm6KKSK")
 
@@ -225,7 +223,7 @@ func (s *Service) ValidateByToken(ctx context.Context, tenantID, rawToken, clien
 	// Timing normalization: always run bcrypt comparison even when no valid
 	// token is found, to prevent timing side-channel attacks that could reveal
 	// whether valid tokens exist for a tenant.
-	_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(rawToken))
+	_ = bcrypt.Match(rawToken, string(dummyHash))
 
 	logext.Warnf(ctx, "[%s] no valid token found", where)
 	return domain.BreakGlassToken{}, breakglass.ErrNotFound
@@ -288,14 +286,10 @@ func generateToken() (string, error) {
 
 // hashToken creates a bcrypt hash of a token.
 func hashToken(token string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(token), bcryptCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
+	return bcrypt.Hash(token)
 }
 
 // verifyToken checks if a token matches a hash.
 func verifyToken(token, hash string) bool {
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil
+	return bcrypt.Match(token, hash)
 }

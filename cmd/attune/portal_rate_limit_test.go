@@ -38,7 +38,7 @@ func TestPortalAnonymousLimiter_DisabledBypasses(t *testing.T) {
 	}
 }
 
-func TestPortalAnonymousLimiter_LimitsPerClientIP(t *testing.T) {
+func TestPortalAnonymousLimiter_LimitsPerTenantAndClientIP(t *testing.T) {
 	t.Parallel()
 
 	limiter := newPortalAnonymousLimiter(60, 1, false, 0)
@@ -46,12 +46,12 @@ func TestPortalAnonymousLimiter_LimitsPerClientIP(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	first := portalLimiterRequest(limiter, next, "203.0.113.10:1234")
+	first := portalLimiterRequest(limiter, next, "203.0.113.10:1234", "acme")
 	if first.Code != http.StatusOK {
 		t.Fatalf("first status = %d, want %d", first.Code, http.StatusOK)
 	}
 
-	second := portalLimiterRequest(limiter, next, "203.0.113.10:5678")
+	second := portalLimiterRequest(limiter, next, "203.0.113.10:5678", "acme")
 	if second.Code != http.StatusTooManyRequests {
 		t.Fatalf("second status = %d, want %d", second.Code, http.StatusTooManyRequests)
 	}
@@ -66,7 +66,12 @@ func TestPortalAnonymousLimiter_LimitsPerClientIP(t *testing.T) {
 		t.Fatalf("code = %v, want RATE_LIMITED; body=%s", body["code"], second.Body.String())
 	}
 
-	otherClient := portalLimiterRequest(limiter, next, "203.0.113.11:1234")
+	otherTenant := portalLimiterRequest(limiter, next, "203.0.113.10:1234", "globex")
+	if otherTenant.Code != http.StatusOK {
+		t.Fatalf("other tenant status = %d, want %d", otherTenant.Code, http.StatusOK)
+	}
+
+	otherClient := portalLimiterRequest(limiter, next, "203.0.113.11:1234", "acme")
 	if otherClient.Code != http.StatusOK {
 		t.Fatalf("other client status = %d, want %d", otherClient.Code, http.StatusOK)
 	}
@@ -81,12 +86,12 @@ func TestPortalNoStoreWrapsRateLimitRejections(t *testing.T) {
 	})
 	handler := portal.NoStore(limiter.Middleware(next))
 
-	first := portalNoStoreLimiterRequest(handler, "203.0.113.20:1234")
+	first := portalNoStoreLimiterRequest(handler, "203.0.113.20:1234", "acme")
 	if first.Code != http.StatusOK {
 		t.Fatalf("first status = %d, want %d", first.Code, http.StatusOK)
 	}
 
-	second := portalNoStoreLimiterRequest(handler, "203.0.113.20:5678")
+	second := portalNoStoreLimiterRequest(handler, "203.0.113.20:5678", "acme")
 	if second.Code != http.StatusTooManyRequests {
 		t.Fatalf("second status = %d, want %d", second.Code, http.StatusTooManyRequests)
 	}
@@ -95,7 +100,39 @@ func TestPortalNoStoreWrapsRateLimitRejections(t *testing.T) {
 	}
 }
 
-func TestPortalSubmissionLimiter_LimitsPerTenantAndIP(t *testing.T) {
+func TestMountV1PortalRoutesSeparatesReadAndWriteBuckets(t *testing.T) {
+	t.Parallel()
+
+	readLimiter := newPortalAnonymousLimiter(60, 1, false, 0)
+	writeLimiter := newPortalSubmissionLimiter(60, 1, false, 0)
+	r := chi.NewRouter()
+	r.Route("/v1", func(r chi.Router) {
+		mountV1PortalRoutes(
+			r,
+			portal.NewHandler(nil, nil, nil),
+			func(next http.Handler) http.Handler { return next },
+			readLimiter,
+			writeLimiter,
+		)
+	})
+
+	readFirst := portalRouteRequest(r, http.MethodGet, "/v1/portal/acme/requests", "203.0.113.30:1234")
+	if readFirst.Code != http.StatusNotImplemented {
+		t.Fatalf("first read status = %d, want %d", readFirst.Code, http.StatusNotImplemented)
+	}
+
+	writeAllowed := portalRouteRequest(r, http.MethodPost, "/v1/portal/acme/requests/pricing/votes", "203.0.113.30:5678")
+	if writeAllowed.Code != http.StatusNotImplemented {
+		t.Fatalf("write status = %d, want %d", writeAllowed.Code, http.StatusNotImplemented)
+	}
+
+	readSecond := portalRouteRequest(r, http.MethodGet, "/v1/portal/acme/requests", "203.0.113.30:9999")
+	if readSecond.Code != http.StatusTooManyRequests {
+		t.Fatalf("second read status = %d, want %d", readSecond.Code, http.StatusTooManyRequests)
+	}
+}
+
+func TestPortalSubmissionLimiter_LimitsPortalWritesPerTenantAndIP(t *testing.T) {
 	t.Parallel()
 
 	limiter := newPortalSubmissionLimiter(60, 1, false, 0)
@@ -103,17 +140,21 @@ func TestPortalSubmissionLimiter_LimitsPerTenantAndIP(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	first := portalSubmissionLimiterRequest(limiter, next, "203.0.113.10:1234", "acme")
+	first := portalWriteLimiterRequest(limiter, next, http.MethodPost, "/v1/portal/acme/requests/pricing/votes", "203.0.113.10:1234", "acme")
 	if first.Code != http.StatusOK {
 		t.Fatalf("first status = %d, want %d", first.Code, http.StatusOK)
 	}
 
-	sameTenant := portalSubmissionLimiterRequest(limiter, next, "203.0.113.10:5678", "acme")
+	sameTenant := portalWriteLimiterRequest(limiter, next, http.MethodPost, "/v1/portal/acme/requests/pricing/comments", "203.0.113.10:5678", "acme")
 	if sameTenant.Code != http.StatusTooManyRequests {
-		t.Fatalf("same tenant status = %d, want %d", sameTenant.Code, http.StatusTooManyRequests)
+		t.Fatalf("same tenant write status = %d, want %d", sameTenant.Code, http.StatusTooManyRequests)
 	}
 
-	otherTenant := portalSubmissionLimiterRequest(limiter, next, "203.0.113.10:1234", "globex")
+	if sameTenant.Header().Get("Retry-After") != "1" {
+		t.Fatalf("Retry-After = %q, want 1", sameTenant.Header().Get("Retry-After"))
+	}
+
+	otherTenant := portalWriteLimiterRequest(limiter, next, http.MethodPost, "/v1/portal/globex/submissions", "203.0.113.10:1234", "globex")
 	if otherTenant.Code != http.StatusOK {
 		t.Fatalf("other tenant status = %d, want %d", otherTenant.Code, http.StatusOK)
 	}
@@ -123,34 +164,54 @@ func portalLimiterRequest(
 	limiter *portalAnonymousLimiter,
 	next http.Handler,
 	remoteAddr string,
-) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/requests/pricing", nil)
-	req.RemoteAddr = remoteAddr
-	limiter.Middleware(next).ServeHTTP(w, req)
-	return w
-}
-
-func portalNoStoreLimiterRequest(handler http.Handler, remoteAddr string) *httptest.ResponseRecorder {
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/requests/pricing", nil)
-	req.RemoteAddr = remoteAddr
-	handler.ServeHTTP(w, req)
-	return w
-}
-
-func portalSubmissionLimiterRequest(
-	limiter *portalAnonymousLimiter,
-	next http.Handler,
-	remoteAddr string,
 	tenantSlug string,
 ) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/portal/"+tenantSlug+"/submissions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/"+tenantSlug+"/requests/pricing", nil)
 	req.RemoteAddr = remoteAddr
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("tenant_slug", tenantSlug)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	limiter.Middleware(next).ServeHTTP(w, req)
+	return w
+}
+
+func portalNoStoreLimiterRequest(handler http.Handler, remoteAddr string, tenantSlug string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/"+tenantSlug+"/requests/pricing", nil)
+	req.RemoteAddr = remoteAddr
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("tenant_slug", tenantSlug)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	handler.ServeHTTP(w, req)
+	return w
+}
+
+func portalWriteLimiterRequest(
+	limiter *portalAnonymousLimiter,
+	next http.Handler,
+	method string,
+	path string,
+	remoteAddr string,
+	tenantSlug string,
+) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, nil)
+	req.RemoteAddr = remoteAddr
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("tenant_slug", tenantSlug)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	limiter.Middleware(next).ServeHTTP(w, req)
+	return w
+}
+
+func portalRouteRequest(r http.Handler, method, path, remoteAddr string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, nil)
+	req.RemoteAddr = remoteAddr
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("tenant_slug", "acme")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	r.ServeHTTP(w, req)
 	return w
 }

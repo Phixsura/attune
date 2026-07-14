@@ -299,6 +299,9 @@ func replyDraftMutatingRouteCoverage() map[string]string {
 func publicVisibilityMutatingRouteCoverage() map[string]string {
 	return map[string]string{
 		"PUT /public-visibility/policy":                        "audited: public_policy.update",
+		"POST /public-visibility/views":                        "exempt: per-user saved public visibility state, not unified control-plane audit",
+		"PUT /public-visibility/views/{id}":                    "exempt: per-user saved public visibility state, not unified control-plane audit",
+		"DELETE /public-visibility/views/{id}":                 "exempt: per-user saved public visibility state, not unified control-plane audit",
 		"PUT /public-visibility/requests/{request_id}/profile": "audited: public_request_profile.upsert",
 		"POST /public-visibility/moderation/{id}:approve":      "audited: moderation.approve",
 		"POST /public-visibility/moderation/{id}:reject":       "audited: moderation.reject",

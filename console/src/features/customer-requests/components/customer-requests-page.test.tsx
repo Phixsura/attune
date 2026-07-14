@@ -27,6 +27,27 @@ const targetRequestID = '33333333-3333-3333-3333-333333333333'
 const baseURL = '/fb/v1/console/customer-requests'
 
 describe('CustomerRequestsPage', () => {
+  it('opens the detail drawer from an initial request id deep link', async () => {
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+
+    renderWithProviders(<CustomerRequestsPage initialRequestID={requestID} />)
+
+    expect(await screen.findByText('关联反馈')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('反馈 ID')).toBeInTheDocument()
+  })
+
+  it('pre-fills the merge target from an initial deep link', async () => {
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+
+    renderWithProviders(
+      <CustomerRequestsPage initialRequestID={requestID} initialMergeTargetID={targetRequestID} />,
+    )
+
+    expect(await screen.findByPlaceholderText('目标客户需求 UUID')).toHaveValue(targetRequestID)
+  })
+
   it('renders customer request rows and opens detail actions', async () => {
     mockList({ requests: [sampleSummary()] })
     mockDetail(sampleDetail())

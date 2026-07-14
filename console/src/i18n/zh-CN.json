@@ -184,8 +184,39 @@
       "included_in_portal": "进入公开入口",
       "included_in_roadmap": "进入公开路线图",
       "current_slug": "当前 slug",
-      "current_state": "审核状态"
+      "current_state": "审核状态",
+      "similar_title": "可能重复",
+      "similar_help": "与“{{title}}”相近的公开需求，帮助你识别可能重复项。",
+      "open_customer_request": "打开客户需求",
+      "merge_target_action": "设为合并目标",
+      "similar_locked": "此需求公开后会自动显示相似请求。",
+      "similar_empty": "暂未发现相似请求。",
+      "similar_error": "相似请求加载失败",
+      "similar_state_unknown": "未设置状态",
+      "similar_votes": "{{count}} 票",
+      "similar_comments": "{{count}} 条评论",
+      "similar_submitter": "提交者：{{display}}"
     },
+    "saved_views_title": "保存的视图",
+    "saved_views_help": "保存常用的审核筛选组合，快速切换到常见的调查场景。",
+    "saved_views_label": "保存的视图",
+    "saved_views_current": "当前筛选",
+    "saved_views_save": "保存视图",
+    "saved_views_save_title": "保存当前筛选",
+    "saved_views_name": "视图名称",
+    "saved_views_empty": "还没有保存的视图",
+    "saved_views_delete": "删除保存视图",
+    "saved_views": {
+      "current_bound": "已绑定为 {{name}}",
+      "current_unbound": "当前筛选未绑定保存视图",
+      "current_in_sync": "当前筛选与该保存视图一致。",
+      "current_dirty": "当前筛选已修改，尚未保存到该视图。",
+      "current_unbound_hint": "先保存一个视图，就能一键恢复常用审核组合。",
+      "summary_queue_only": "{{queue}} 队列",
+      "summary": "{{queue}} · {{surfaces}}"
+    },
+    "surface_filters_title": "表面过滤",
+    "surface_filters_clear": "清除",
     "portal_title": "门户投稿表单",
     "portal_help": "配置公开投稿页面的文案、字段和实时预览。",
     "portal": {
@@ -245,6 +276,7 @@
         "no_fields": "当前没有自定义字段。",
         "acknowledgement_fallback": "谢谢。我们会尽快查看你的提交。",
         "identity_hint": "提交者身份：{{value}}",
+        "open_board": "打开公开看板",
         "open_portal": "打开公开门户",
         "submit_fallback": "提交反馈"
       }

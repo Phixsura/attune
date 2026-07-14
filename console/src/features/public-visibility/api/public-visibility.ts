@@ -11,8 +11,11 @@ import {
   PortalSubmissionFieldKind,
   type PortalSubmissionFormConfig,
   PublicAccessMode,
+  type PublicCustomerRequestDetail,
+  type PublicCustomerRequestSummary,
   PublicIdentityMode,
   type PublicRequestPublication,
+  PublicSurface,
   type PublicVisibilityPolicy,
   PublicWriteMode,
   type RejectModerationSubjectRequest,
@@ -22,6 +25,11 @@ import {
 } from '@/proto/attune/v1/public_visibility'
 
 const base = '/fb/v1/console/public-visibility'
+const portalBase = '/fb/v1/portal'
+
+export interface ModerationSubjectsFilters {
+  surfaces?: PublicSurface[]
+}
 
 export {
   ModerationState,
@@ -30,8 +38,11 @@ export {
   PortalSubmissionFieldKind,
   type PortalSubmissionFormConfig,
   PublicAccessMode,
+  type PublicCustomerRequestDetail,
+  type PublicCustomerRequestSummary,
   PublicIdentityMode,
   type PublicRequestPublication,
+  PublicSurface,
   type PublicVisibilityPolicy,
   PublicWriteMode,
   type UpdatePublicVisibilityPolicyRequest,
@@ -41,9 +52,17 @@ export {
 export const publicVisibilityQueryKeys = {
   root: ['console', 'public-visibility'] as const,
   policy: () => [...publicVisibilityQueryKeys.root, 'policy'] as const,
-  moderation: () => [...publicVisibilityQueryKeys.root, 'moderation'] as const,
+  moderation: (filters?: ModerationSubjectsFilters) => {
+    const surfaces = normalizeSurfaces(filters?.surfaces)
+    if (surfaces.length === 0) {
+      return [...publicVisibilityQueryKeys.root, 'moderation'] as const
+    }
+    return [...publicVisibilityQueryKeys.root, 'moderation', surfaces.join(',')] as const
+  },
   requestProfile: (requestId: string) =>
     [...publicVisibilityQueryKeys.root, 'request-profile', requestId] as const,
+  publicRequestDetail: (tenantSlug: string, publicSlug: string) =>
+    [...publicVisibilityQueryKeys.root, 'public-request-detail', tenantSlug, publicSlug] as const,
 }
 
 export const publicVisibilityPolicyQuery = () =>
@@ -53,12 +72,15 @@ export const publicVisibilityPolicyQuery = () =>
     staleTime: 20_000,
   })
 
-export const moderationSubjectsQuery = () =>
+export const moderationSubjectsQuery = (filters: ModerationSubjectsFilters = {}) =>
   queryOptions({
-    queryKey: publicVisibilityQueryKeys.moderation(),
+    queryKey: publicVisibilityQueryKeys.moderation(filters),
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams()
       params.set('limit', '50')
+      for (const surface of normalizeSurfaces(filters.surfaces)) {
+        params.append('surface', surface)
+      }
       const resp = await api<ListModerationSubjectsResponse>(`${base}/moderation?${params}`, {
         signal,
       })
@@ -67,12 +89,31 @@ export const moderationSubjectsQuery = () =>
     staleTime: 10_000,
   })
 
+function normalizeSurfaces(surfaces?: PublicSurface[]) {
+  if (!surfaces || surfaces.length === 0) return []
+  return Array.from(new Set(surfaces.filter((surface) => surface !== PublicSurface.UNRECOGNIZED)))
+    .map((surface) => surface)
+    .sort()
+}
+
 export function updatePublicVisibilityPolicy(body: UpdatePublicVisibilityPolicyRequest) {
   return api<PublicVisibilityPolicy>(`${base}/policy`, { method: 'PUT', body })
 }
 
 export function getPublicRequestProfile(requestId: string) {
   return api<PublicRequestPublication>(`${base}/requests/${encodeURIComponent(requestId)}/profile`)
+}
+
+export function publicRequestDetailQuery(tenantSlug: string, publicSlug: string) {
+  return queryOptions({
+    queryKey: publicVisibilityQueryKeys.publicRequestDetail(tenantSlug, publicSlug),
+    queryFn: ({ signal }) =>
+      api<PublicCustomerRequestDetail>(
+        `${portalBase}/${encodeURIComponent(tenantSlug)}/requests/${encodeURIComponent(publicSlug)}`,
+        { signal },
+      ),
+    staleTime: 20_000,
+  })
 }
 
 export function upsertPublicRequestProfile(body: UpsertPublicRequestProfileRequest) {

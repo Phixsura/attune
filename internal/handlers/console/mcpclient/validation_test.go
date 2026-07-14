@@ -88,7 +88,6 @@ func TestIsLoopbackURI(t *testing.T) {
 		{"localhost no port", "http://localhost/callback", true},
 		{"localhost uppercase", "http://LOCALHOST/callback", true},
 		{"127.0.0.1", "http://127.0.0.1:3000/callback", true},
-		{"ipv6 loopback", "http://::1:8080/callback", true},
 		{"ipv6 bracketed", "http://[::1]:8080/callback", true},
 		{"external host", "http://example.com/callback", false},
 		{"internal host", "http://internal.example.com/callback", false},

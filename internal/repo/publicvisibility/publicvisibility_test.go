@@ -132,6 +132,24 @@ func TestColumnHelpers(t *testing.T) {
 	}
 }
 
+func TestPublicBoardSearchTerms(t *testing.T) {
+	t.Parallel()
+
+	terms := publicBoardSearchTerms("Pricing API pricing 24/7 bug")
+	if want := []string{"pricing", "api", "bug"}; !reflect.DeepEqual(terms, want) {
+		t.Fatalf("publicBoardSearchTerms() = %#v, want %#v", terms, want)
+	}
+}
+
+func TestPublicBoardSimilarityClauseWithoutTermsReturnsFalse(t *testing.T) {
+	t.Parallel()
+
+	clause, args := publicBoardSimilarityClause("AI", []any{"tenant-a"})
+	if !strings.Contains(clause, "FALSE") || len(args) != 1 {
+		t.Fatalf("publicBoardSimilarityClause() = %q args=%#v, want false guard", clause, args)
+	}
+}
+
 func TestScanHelpers(t *testing.T) {
 	t.Parallel()
 

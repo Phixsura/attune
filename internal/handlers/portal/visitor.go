@@ -3,7 +3,9 @@
 package portal
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -17,8 +19,8 @@ import (
 )
 
 const (
-	portalVisitorCookieName = "attune_portal_visitor"
-	portalVisitorCookieTTL  = 180 * 24 * time.Hour
+	portalVisitorCookiePrefix = "attune_portal_visitor"
+	portalVisitorCookieTTL    = 180 * 24 * time.Hour
 )
 
 type visitorSecretStore interface {
@@ -49,7 +51,8 @@ func loadOrMintPortalVisitor(
 		return "", nil, errors.New("portal visitor secret store not configured")
 	}
 	now := time.Now().UTC()
-	if cookie, err := r.Cookie(portalVisitorCookieName); err == nil {
+	cookieName := portalVisitorCookieName(tenantScope)
+	if cookie, err := r.Cookie(cookieName); err == nil {
 		if visitorID, refreshed, ok, err := decodePortalVisitorCookie(cookie.Value, secrets, tenantScope, now, refresh); err != nil {
 			return "", nil, err
 		} else if ok {
@@ -109,7 +112,7 @@ func issuePortalVisitorCookie(secrets visitorSecretStore, tenantScope, visitorID
 		return nil, err
 	}
 	return ptrext.Of(http.Cookie{
-		Name:     portalVisitorCookieName,
+		Name:     portalVisitorCookieName(tenantScope),
 		Value:    encoded,
 		Path:     "/",
 		HttpOnly: true,
@@ -146,4 +149,13 @@ func decryptPortalVisitor(raw string, secrets visitorSecretStore, tenantScope st
 
 func portalVisitorAAD(tenantScope string) []byte {
 	return []byte("portal-visitor:" + strings.TrimSpace(tenantScope))
+}
+
+func portalVisitorCookieName(tenantScope string) string {
+	scope := strings.TrimSpace(tenantScope)
+	if scope == "" {
+		return portalVisitorCookiePrefix
+	}
+	sum := sha256.Sum256([]byte(scope))
+	return portalVisitorCookiePrefix + "_" + hex.EncodeToString(sum[:8])
 }
