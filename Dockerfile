@@ -16,7 +16,7 @@ COPY console/ ./
 RUN pnpm exec vite build
 
 # ── Stage 2: build Go binary (cross-compiled, static) ──
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine@sha256:c05ba4b73604069d376c4f41346b05374335b5ca0c46fb6dfede5a59f5196931 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS builder
 
 # CI uses the default module proxy; local CN builds can override, e.g.
 #   docker build --build-arg GOPROXY=https://goproxy.cn,direct .

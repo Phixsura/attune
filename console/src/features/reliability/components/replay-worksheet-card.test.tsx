@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ReplayWorksheetCard } from '@/features/reliability/components/replay-worksheet-card'
 import { expectNoA11yViolations } from '@/testing/a11y'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { act, fireEvent, renderWithProviders, screen } from '@/testing/test-utils'
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.restoreAllMocks()
+})
 
 describe('ReplayWorksheetCard', () => {
   it('renders a tenant-prefilled worksheet with copy and download actions', async () => {
@@ -26,11 +31,32 @@ describe('ReplayWorksheetCard', () => {
     expect(downloadLink).toHaveAttribute('download', 'attune-slo-replay-template.md')
 
     await user.click(screen.getByRole('button', { name: '复制工作表' }))
-    await waitFor(() =>
-      expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('Tenant One')),
-    )
+    expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('Tenant One'))
     expect(screen.getByRole('button', { name: '已复制' })).toBeInTheDocument()
 
     await expectNoA11yViolations(container)
+  })
+
+  it('restores the copy button after the reset timer fires', async () => {
+    vi.useFakeTimers()
+    renderWithProviders(
+      <ReplayWorksheetCard
+        tenantName="Tenant One"
+        dashboardHref="/d/attune-tenant-impact/attune-tenant-impact?var-tenant=tenant-1"
+      />,
+    )
+    const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    fireEvent.click(screen.getByRole('button', { name: '复制工作表' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('Tenant One'))
+    expect(screen.getByRole('button', { name: '已复制' })).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500)
+    })
+    expect(screen.getByRole('button', { name: '复制工作表' })).toBeInTheDocument()
   })
 })
