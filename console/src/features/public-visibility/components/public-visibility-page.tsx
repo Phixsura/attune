@@ -79,7 +79,10 @@ import {
 import { meQuery } from '@/features/session/api/get-me'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
-import type { PublicVisibilityViewState } from '@/proto/attune/v1/public_visibility'
+import type {
+  PublicVisibilityViewState,
+  RoadmapStatusMapping,
+} from '@/proto/attune/v1/public_visibility'
 
 type PolicyForm = {
   portalAccessMode: PublicAccessMode
@@ -98,6 +101,7 @@ type PolicyForm = {
   showCommentCount: boolean
   showSubmitterDisplay: boolean
   hidePublicTimestamps: boolean
+  roadmapStatusMapping: RoadmapStatusMapping[]
   portalSubmissionForm: PortalSubmissionFormState
 }
 
@@ -545,6 +549,17 @@ export function PublicVisibilityPage() {
                         }
                       />
                     </div>
+
+                    <RoadmapStatusMappingCard
+                      mappings={form.roadmapStatusMapping}
+                      canEdit={canEditPolicy}
+                      onChange={(next) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          roadmapStatusMapping: next,
+                        }))
+                      }
+                    />
 
                     {canEditPolicy && (
                       <div className="flex justify-end">
@@ -1435,10 +1450,14 @@ function RequestProfileCard({
         <div className="grid gap-4 md:grid-cols-2">
           <Field label={t('public_visibility.profile.roadmap_column')}>
             <Input
-              value={form.roadmapColumn}
-              onChange={(event) => onChange({ ...form, roadmapColumn: event.target.value })}
-              placeholder={t('public_visibility.profile.roadmap_column_placeholder')}
+              value={form.roadmapColumn || t('public_visibility.profile.roadmap_column_auto')}
+              readOnly
+              disabled
+              placeholder={t('public_visibility.profile.roadmap_column_auto')}
             />
+            <p className="text-xs leading-5 text-muted-foreground">
+              {t('public_visibility.profile.roadmap_column_help')}
+            </p>
           </Field>
           <Field label={t('public_visibility.profile.submitted_by_display')}>
             <Input
@@ -1491,6 +1510,109 @@ function RequestProfileCard({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function RoadmapStatusMappingCard({
+  mappings,
+  canEdit,
+  onChange,
+}: {
+  mappings: RoadmapStatusMapping[]
+  canEdit: boolean
+  onChange: (next: RoadmapStatusMapping[]) => void
+}) {
+  const { t } = useTranslation()
+  const rows = normalizeRoadmapStatusMappingsForForm(mappings)
+
+  const updateRow = (status: string, patch: Partial<RoadmapStatusMapping>) => {
+    onChange(
+      rows.map((row) =>
+        row.status === status
+          ? {
+              ...row,
+              ...patch,
+            }
+          : row,
+      ),
+    )
+  }
+
+  return (
+    <div className="rounded-2xl border border-border/70 bg-muted/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <div className="text-sm font-semibold text-foreground">
+            {t('public_visibility.roadmap_mapping_title')}
+          </div>
+          <div className="text-sm leading-6 text-muted-foreground">
+            {t('public_visibility.roadmap_mapping_help')}
+          </div>
+        </div>
+        {canEdit ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => onChange(defaultRoadmapStatusMappings())}
+          >
+            {t('public_visibility.roadmap_mapping_reset')}
+          </Button>
+        ) : null}
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {rows.map((mapping) => (
+          <div
+            key={mapping.status}
+            className="grid gap-3 rounded-xl border border-border/60 bg-background p-3 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.3fr)_120px_170px]"
+          >
+            <div className="space-y-1">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+                {t('public_visibility.roadmap_mapping.status')}
+              </div>
+              <div className="font-mono text-sm text-foreground">{mapping.status}</div>
+              <div className="text-xs leading-5 text-muted-foreground">
+                {roadmapStatusDefaultLabel(mapping.status)}
+              </div>
+            </div>
+
+            <Field label={t('public_visibility.roadmap_mapping.column_label')}>
+              <Input
+                value={mapping.label}
+                disabled={!canEdit}
+                onChange={(event) => updateRow(mapping.status, { label: event.target.value })}
+                placeholder={roadmapStatusDefaultLabel(mapping.status)}
+              />
+            </Field>
+
+            <Field label={t('public_visibility.roadmap_mapping.order_label')}>
+              <Input
+                type="number"
+                min={1}
+                step={1}
+                value={mapping.order}
+                disabled={!canEdit}
+                onChange={(event) =>
+                  updateRow(mapping.status, {
+                    order: numberFromInput(event.target.value, mapping.order),
+                  })
+                }
+              />
+            </Field>
+
+            <div className="flex items-end">
+              <Toggle
+                label={t('public_visibility.roadmap_mapping.included')}
+                checked={mapping.included}
+                disabled={!canEdit}
+                onChange={(included) => updateRow(mapping.status, { included })}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -2218,8 +2340,63 @@ function defaultForm(): PolicyForm {
     showCommentCount: true,
     showSubmitterDisplay: false,
     hidePublicTimestamps: false,
+    roadmapStatusMapping: defaultRoadmapStatusMappings(),
     portalSubmissionForm: defaultPortalSubmissionForm(),
   }
+}
+
+const roadmapStatusBlueprints = [
+  { status: 'open', defaultLabel: 'under consideration' },
+  { status: 'planned', defaultLabel: 'planned' },
+  { status: 'in_progress', defaultLabel: 'in progress' },
+  { status: 'shipped', defaultLabel: 'shipped' },
+  { status: 'cancelled', defaultLabel: 'cancelled' },
+] as const
+
+function defaultRoadmapStatusMappings(): RoadmapStatusMapping[] {
+  return roadmapStatusBlueprints.map((item, index) => ({
+    status: item.status,
+    label: item.defaultLabel,
+    order: index + 1,
+    included: item.status !== 'cancelled',
+  }))
+}
+
+function normalizeRoadmapStatusMappingsForForm(
+  mappings: RoadmapStatusMapping[] | undefined,
+): RoadmapStatusMapping[] {
+  const byStatus = new Map((mappings ?? []).map((mapping) => [mapping.status, mapping] as const))
+  return roadmapStatusBlueprints.map((item, index) => {
+    const mapping = byStatus.get(item.status)
+    const order = mapping?.order ?? 0
+    return {
+      status: item.status,
+      label: mapping?.label?.trim() || item.defaultLabel,
+      order: Number.isFinite(order) && order > 0 ? order : index + 1,
+      included: mapping?.included ?? item.status !== 'cancelled',
+    }
+  })
+}
+
+function roadmapStatusDefaultLabel(status: string) {
+  return roadmapStatusBlueprints.find((item) => item.status === status)?.defaultLabel ?? status
+}
+
+function roadmapStatusMappingsRequestFromForm(mappings: RoadmapStatusMapping[]) {
+  return normalizeRoadmapStatusMappingsForForm(mappings).map((mapping) => ({
+    status: mapping.status,
+    label: mapping.label.trim(),
+    order: mapping.order,
+    included: mapping.included,
+  }))
+}
+
+function numberFromInput(raw: string, fallback: number) {
+  const parsed = Number.parseInt(raw, 10)
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return parsed
+  }
+  return fallback
 }
 
 function defaultPortalSubmissionForm(): PortalSubmissionFormState {
@@ -2318,6 +2495,7 @@ function formFromPolicy(policy: PublicVisibilityPolicy): PolicyForm {
     showCommentCount: policy.showCommentCount,
     showSubmitterDisplay: policy.showSubmitterDisplay,
     hidePublicTimestamps: policy.hidePublicTimestamps,
+    roadmapStatusMapping: normalizeRoadmapStatusMappingsForForm(policy.roadmapStatusMapping),
     portalSubmissionForm: portalSubmissionFormFromPolicy(policy.portalSubmissionForm),
   }
 }
@@ -2382,6 +2560,7 @@ function policyRequestFromForm(form: PolicyForm) {
     showCommentCount: form.showCommentCount,
     showSubmitterDisplay: form.showSubmitterDisplay,
     hidePublicTimestamps: form.hidePublicTimestamps,
+    roadmapStatusMapping: roadmapStatusMappingsRequestFromForm(form.roadmapStatusMapping),
     portalSubmissionForm: portalSubmissionFormRequestFromForm(form.portalSubmissionForm),
   }
 }
@@ -2550,6 +2729,7 @@ export const publicVisibilityPageTestables = {
   actionRequiresReason,
   countStates,
   defaultForm,
+  defaultRoadmapStatusMappings,
   defaultPortalSubmissionForm,
   defaultProfileForm,
   filterSubjects,
@@ -2562,6 +2742,10 @@ export const publicVisibilityPageTestables = {
   policyRequestFromForm,
   profileFormFromPublication,
   profileRequestFromForm,
+  roadmapStatusDefaultLabel,
+  roadmapStatusMappingsRequestFromForm,
+  normalizeRoadmapStatusMappingsForForm,
+  numberFromInput,
   describeSavedViewState,
   portalSubmissionFieldKindLabel,
   portalSubmissionFieldKindName,

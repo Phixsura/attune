@@ -20,6 +20,7 @@ import {
   PublicWriteMode,
   type RejectModerationSubjectRequest,
   type RestoreModerationSubjectRequest,
+  type RoadmapStatusMapping,
   type UpdatePublicVisibilityPolicyRequest,
   type UpsertPublicRequestProfileRequest,
 } from '@/proto/attune/v1/public_visibility'
@@ -45,6 +46,7 @@ export {
   PublicSurface,
   type PublicVisibilityPolicy,
   PublicWriteMode,
+  type RoadmapStatusMapping,
   type UpdatePublicVisibilityPolicyRequest,
   type UpsertPublicRequestProfileRequest,
 }

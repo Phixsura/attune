@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Workflow-derived public roadmap columns.**
+  Public roadmap columns now come from a tenant roadmap-status mapping on the
+  public visibility policy, request profile roadmap labels stay in sync with
+  workflow-state changes, and the Console policy editor can configure the same
+  mapping that the public roadmap uses.
+
 - **Public visibility moderation saved views and surface filters.**
   Operators can now save, reapply, update, and delete common public-visibility
   moderation views, with queue-state and surface filters wired into the Console

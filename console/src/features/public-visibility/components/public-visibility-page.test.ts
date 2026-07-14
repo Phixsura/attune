@@ -125,6 +125,9 @@ describe('publicVisibilityPageTestables', () => {
         ],
       },
     })
+    expect(policyForm.roadmapStatusMapping).toEqual(
+      publicVisibilityPageTestables.defaultRoadmapStatusMappings(),
+    )
     expect(publicVisibilityPageTestables.policyRequestFromForm(policyForm)).toMatchObject({
       portalAccessMode: policy.portalAccessMode,
       searchIndexingEnabled: policy.searchIndexingEnabled,
@@ -142,6 +145,7 @@ describe('publicVisibilityPageTestables', () => {
       showCommentCount: policy.showCommentCount,
       showSubmitterDisplay: policy.showSubmitterDisplay,
       hidePublicTimestamps: policy.hidePublicTimestamps,
+      roadmapStatusMapping: policy.roadmapStatusMapping,
       portalSubmissionForm: policyForm.portalSubmissionForm,
     })
 
@@ -172,6 +176,9 @@ describe('publicVisibilityPageTestables', () => {
       showPageUrl: true,
       fields: [],
     })
+    expect(publicVisibilityPageTestables.defaultForm().roadmapStatusMapping).toEqual(
+      publicVisibilityPageTestables.defaultRoadmapStatusMappings(),
+    )
     expect(
       publicVisibilityPageTestables.profileRequestFromForm({
         ...publicVisibilityPageTestables.defaultProfileForm(),
@@ -437,6 +444,7 @@ function policyFixture(): PublicVisibilityPolicy {
     showCommentCount: false,
     showSubmitterDisplay: true,
     hidePublicTimestamps: false,
+    roadmapStatusMapping: publicVisibilityPageTestables.defaultRoadmapStatusMappings(),
     portalSubmissionForm: {
       headline: 'Share feedback',
       description: 'Tell us what is broken, missing, or worth improving.',

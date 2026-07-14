@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -109,6 +110,7 @@ type UpdatePolicyInput struct {
 	DefaultCommentState   repo.ModerationState
 	SubmitterIdentityMode repo.IdentityMode
 	PortalSubmissionForm  repo.PortalSubmissionForm
+	RoadmapStatusMappings []repo.RoadmapStatusMapping
 	ShowVoteCount         bool
 	ShowCommentCount      bool
 	ShowSubmitterDisplay  bool
@@ -173,6 +175,7 @@ type PublicRequest struct {
 
 type PublicRequestList struct {
 	Requests   []PublicRequest
+	Policy     repo.Policy
 	NoIndex    bool
 	NextCursor string
 }
@@ -422,6 +425,7 @@ func (s *Service) listPublicRequests(
 	}
 	return PublicRequestList{
 		Requests:   requests,
+		Policy:     result.Policy,
 		NoIndex:    !result.Policy.SearchIndexingEnabled,
 		NextCursor: result.NextCursor,
 	}, nil
@@ -617,6 +621,7 @@ func defaultPolicy(tenantID string) repo.Policy {
 		DefaultCommentState:   repo.ModerationStatePending,
 		SubmitterIdentityMode: repo.IdentityModeAnonymous,
 		PortalSubmissionForm:  defaultPortalSubmissionForm(),
+		RoadmapStatusMappings: defaultRoadmapStatusMappings(),
 		ShowVoteCount:         true,
 		ShowCommentCount:      true,
 	}
@@ -645,6 +650,7 @@ func normalizePolicyInput(in UpdatePolicyInput) (repo.Policy, error) {
 		DefaultCommentState:   in.DefaultCommentState,
 		SubmitterIdentityMode: in.SubmitterIdentityMode,
 		PortalSubmissionForm:  in.PortalSubmissionForm,
+		RoadmapStatusMappings: in.RoadmapStatusMappings,
 		ShowVoteCount:         in.ShowVoteCount,
 		ShowCommentCount:      in.ShowCommentCount,
 		ShowSubmitterDisplay:  in.ShowSubmitterDisplay,
@@ -662,6 +668,11 @@ func normalizePolicyInput(in UpdatePolicyInput) (repo.Policy, error) {
 		return repo.Policy{}, err
 	}
 	policy.PortalSubmissionForm = form
+	roadmapMappings, err := normalizeRoadmapStatusMappings(policy.RoadmapStatusMappings)
+	if err != nil {
+		return repo.Policy{}, err
+	}
+	policy.RoadmapStatusMappings = roadmapMappings
 	return policy, nil
 }
 
@@ -697,7 +708,7 @@ func normalizeRequestProfileInput(in UpsertRequestProfileInput) (repo.RequestPro
 		return repo.RequestProfile{}, ErrValidation
 	}
 	if !publicSlugPattern.MatchString(slug) || title == "" || tooLong(title, 200) ||
-		tooLong(summary, 2000) || tooLong(state, 80) || tooLong(column, 80) {
+		tooLong(summary, 2000) || tooLong(state, 80) {
 		return repo.RequestProfile{}, ErrValidation
 	}
 	return repo.RequestProfile{
@@ -712,6 +723,80 @@ func normalizeRequestProfileInput(in UpsertRequestProfileInput) (repo.RequestPro
 		IncludedInRoadmap: in.IncludedInRoadmap,
 		UpdatedBy:         actorID(in.Actor),
 	}, nil
+}
+
+var roadmapStatusRanks = map[string]int{
+	"open":        0,
+	"planned":     1,
+	"in_progress": 2,
+	"shipped":     3,
+	"cancelled":   4,
+}
+
+func defaultRoadmapStatusMappings() []repo.RoadmapStatusMapping {
+	return []repo.RoadmapStatusMapping{
+		{Status: "open", Label: "under consideration", Order: 1, Included: true},
+		{Status: "planned", Label: "planned", Order: 2, Included: true},
+		{Status: "in_progress", Label: "in progress", Order: 3, Included: true},
+		{Status: "shipped", Label: "shipped", Order: 4, Included: true},
+		{Status: "cancelled", Label: "cancelled", Order: 5, Included: false},
+	}
+}
+
+func normalizeRoadmapStatusMappings(mappings []repo.RoadmapStatusMapping) ([]repo.RoadmapStatusMapping, error) {
+	if len(mappings) == 0 {
+		return defaultRoadmapStatusMappings(), nil
+	}
+	normalized := make([]repo.RoadmapStatusMapping, 0, len(mappings))
+	seenStatuses := make(map[string]struct{}, len(mappings))
+	seenLabels := make(map[string]struct{}, len(mappings))
+	for _, mapping := range mappings {
+		status := strings.ToLower(strings.TrimSpace(mapping.Status))
+		label := strings.TrimSpace(mapping.Label)
+		if status == "" || label == "" || !roadmapStatusKnown(status) || mapping.Order <= 0 {
+			return nil, ErrValidation
+		}
+		if _, dup := seenStatuses[status]; dup {
+			return nil, ErrValidation
+		}
+		labelKey := strings.ToLower(label)
+		if _, dup := seenLabels[labelKey]; dup {
+			return nil, ErrValidation
+		}
+		seenStatuses[status] = struct{}{}
+		seenLabels[labelKey] = struct{}{}
+		normalized = append(normalized, repo.RoadmapStatusMapping{
+			Status:   status,
+			Label:    bounded(label, 80),
+			Order:    mapping.Order,
+			Included: mapping.Included,
+		})
+	}
+	if len(normalized) != len(defaultRoadmapStatusMappings()) {
+		return nil, ErrValidation
+	}
+	sort.SliceStable(normalized, func(i, j int) bool {
+		if normalized[i].Order == normalized[j].Order {
+			return roadmapStatusRank(normalized[i].Status) < roadmapStatusRank(normalized[j].Status)
+		}
+		return normalized[i].Order < normalized[j].Order
+	})
+	for i := range normalized {
+		normalized[i].Order = i + 1
+	}
+	return normalized, nil
+}
+
+func roadmapStatusKnown(status string) bool {
+	_, ok := roadmapStatusRanks[status]
+	return ok
+}
+
+func roadmapStatusRank(status string) int {
+	if rank, ok := roadmapStatusRanks[status]; ok {
+		return rank
+	}
+	return len(roadmapStatusRanks)
 }
 
 func nextState(current repo.ModerationState, action ModerationAction) (repo.ModerationState, error) {
@@ -1008,6 +1093,7 @@ func policyAuditFields(policy repo.Policy) map[string]any {
 		"show_comment_count":              policy.ShowCommentCount,
 		"show_submitter_display":          policy.ShowSubmitterDisplay,
 		"hide_public_timestamps":          policy.HidePublicTimestamps,
+		"roadmap_status_mapping_count":    len(policy.RoadmapStatusMappings),
 		"portal_submission_headline":      policy.PortalSubmissionForm.Headline,
 		"portal_submission_field_count":   len(policy.PortalSubmissionForm.Fields),
 		"portal_submission_show_page_url": policy.PortalSubmissionForm.ShowPageURL,
@@ -1031,6 +1117,8 @@ func requestProfileAuditFields(profile repo.RequestProfile) map[string]any {
 		"public_summary_length": utf8.RuneCountInString(profile.PublicSummary),
 		"public_state":          profile.PublicState,
 		"roadmap_column":        profile.RoadmapColumn,
+		"roadmap_order":         profile.RoadmapOrder,
+		"roadmap_visible":       profile.RoadmapVisible,
 		"included_in_portal":    profile.IncludedInPortal,
 		"included_in_roadmap":   profile.IncludedInRoadmap,
 	}

@@ -249,23 +249,34 @@ func TestPublicRoadmapToProtoGroupsColumns(t *testing.T) {
 	t.Parallel()
 
 	result := pvsvc.PublicRequestList{
+		Policy: pvrepo.Policy{
+			RoadmapStatusMappings: []pvrepo.RoadmapStatusMapping{
+				{Status: "open", Label: "Under consideration", Order: 1, Included: true},
+				{Status: "planned", Label: "Planned", Order: 2, Included: true},
+				{Status: "shipped", Label: "Shipped", Order: 3, Included: true},
+				{Status: "cancelled", Label: "Cancelled", Order: 4, Included: false},
+			},
+		},
 		Requests: []pvsvc.PublicRequest{
-			publicRequestForPortalTest("pricing-api", "Now"),
-			publicRequestForPortalTest("mobile-app", "Next"),
-			publicRequestForPortalTest("bulk-export", "Now"),
+			publicRequestForPortalTest("pricing-api", "Under consideration"),
+			publicRequestForPortalTest("mobile-app", "Shipped"),
+			publicRequestForPortalTest("bulk-export", "Under consideration"),
 		},
 		NextCursor: "3",
 	}
 
 	roadmap := publicRoadmapToProto(result)
-	if roadmap.GetNextCursor() != "3" || len(roadmap.GetColumns()) != 2 {
-		t.Fatalf("roadmap = %#v, want two columns and cursor", roadmap)
+	if roadmap.GetNextCursor() != "3" || len(roadmap.GetColumns()) != 3 {
+		t.Fatalf("roadmap = %#v, want three columns and cursor", roadmap)
 	}
-	if roadmap.GetColumns()[0].GetName() != "Now" || len(roadmap.GetColumns()[0].GetRequests()) != 2 {
-		t.Fatalf("first roadmap column = %#v, want Now with two requests", roadmap.GetColumns()[0])
+	if roadmap.GetColumns()[0].GetName() != "Under consideration" || len(roadmap.GetColumns()[0].GetRequests()) != 2 {
+		t.Fatalf("first roadmap column = %#v, want Under consideration with two requests", roadmap.GetColumns()[0])
 	}
-	if roadmap.GetColumns()[1].GetName() != "Next" || len(roadmap.GetColumns()[1].GetRequests()) != 1 {
-		t.Fatalf("second roadmap column = %#v, want Next with one request", roadmap.GetColumns()[1])
+	if roadmap.GetColumns()[1].GetName() != "Planned" || len(roadmap.GetColumns()[1].GetRequests()) != 0 {
+		t.Fatalf("second roadmap column = %#v, want empty Planned column", roadmap.GetColumns()[1])
+	}
+	if roadmap.GetColumns()[2].GetName() != "Shipped" || len(roadmap.GetColumns()[2].GetRequests()) != 1 {
+		t.Fatalf("third roadmap column = %#v, want Shipped with one request", roadmap.GetColumns()[2])
 	}
 }
 
