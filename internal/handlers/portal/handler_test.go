@@ -249,23 +249,34 @@ func TestPublicRoadmapToProtoGroupsColumns(t *testing.T) {
 	t.Parallel()
 
 	result := pvsvc.PublicRequestList{
+		Policy: pvrepo.Policy{
+			RoadmapStatusMappings: []pvrepo.RoadmapStatusMapping{
+				{Status: "open", Label: "Under consideration", Order: 1, Included: true},
+				{Status: "planned", Label: "Planned", Order: 2, Included: true},
+				{Status: "shipped", Label: "Shipped", Order: 3, Included: true},
+				{Status: "cancelled", Label: "Cancelled", Order: 4, Included: false},
+			},
+		},
 		Requests: []pvsvc.PublicRequest{
-			publicRequestForPortalTest("pricing-api", "Now"),
-			publicRequestForPortalTest("mobile-app", "Next"),
-			publicRequestForPortalTest("bulk-export", "Now"),
+			publicRequestForPortalTest("pricing-api", "Under consideration"),
+			publicRequestForPortalTest("mobile-app", "Shipped"),
+			publicRequestForPortalTest("bulk-export", "Under consideration"),
 		},
 		NextCursor: "3",
 	}
 
 	roadmap := publicRoadmapToProto(result)
-	if roadmap.GetNextCursor() != "3" || len(roadmap.GetColumns()) != 2 {
-		t.Fatalf("roadmap = %#v, want two columns and cursor", roadmap)
+	if roadmap.GetNextCursor() != "3" || len(roadmap.GetColumns()) != 3 {
+		t.Fatalf("roadmap = %#v, want three columns and cursor", roadmap)
 	}
-	if roadmap.GetColumns()[0].GetName() != "Now" || len(roadmap.GetColumns()[0].GetRequests()) != 2 {
-		t.Fatalf("first roadmap column = %#v, want Now with two requests", roadmap.GetColumns()[0])
+	if roadmap.GetColumns()[0].GetName() != "Under consideration" || len(roadmap.GetColumns()[0].GetRequests()) != 2 {
+		t.Fatalf("first roadmap column = %#v, want Under consideration with two requests", roadmap.GetColumns()[0])
 	}
-	if roadmap.GetColumns()[1].GetName() != "Next" || len(roadmap.GetColumns()[1].GetRequests()) != 1 {
-		t.Fatalf("second roadmap column = %#v, want Next with one request", roadmap.GetColumns()[1])
+	if roadmap.GetColumns()[1].GetName() != "Planned" || len(roadmap.GetColumns()[1].GetRequests()) != 0 {
+		t.Fatalf("second roadmap column = %#v, want empty Planned column", roadmap.GetColumns()[1])
+	}
+	if roadmap.GetColumns()[2].GetName() != "Shipped" || len(roadmap.GetColumns()[2].GetRequests()) != 1 {
+		t.Fatalf("third roadmap column = %#v, want Shipped with one request", roadmap.GetColumns()[2])
 	}
 }
 
@@ -457,7 +468,7 @@ func TestRequestsPageRendersBoardAndSetsVisitorCookie(t *testing.T) {
 		t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Public board", "pricing-api", `data-vote-action`, "Vote", `value="pricing"`, `value="planned"`, `value="next"`, `name="voted" value="mine" checked`, `name="comments" value="with" checked`, `selected>Recent`, `/portal/acme/requests/pricing-api?comments=with&amp;cursor=page-2&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`, `Load more requests`, `/portal/acme/requests?comments=with&amp;cursor=page-3&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`} {
+	for _, want := range []string{"Public board", "pricing-api", "Updated Jul 10", `datetime="2026-07-10T13:00:00Z"`, `title="Updated 2026-07-10 13:00 UTC"`, `card-overlay`, `data-vote-action`, "Vote", `value="pricing"`, `value="planned"`, `value="next"`, `name="voted" value="mine" checked`, `name="comments" value="with" checked`, `selected>Recent`, `/portal/acme/requests/pricing-api?comments=with&amp;cursor=page-2&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`, `Load more requests`, `/portal/acme/requests?comments=with&amp;cursor=page-3&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("board body missing %q: %s", want, body)
 		}
@@ -491,7 +502,7 @@ func TestRequestsPageShowsMatchedFiltersEmptyStateForQuickFilters(t *testing.T) 
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"No public requests matched the current filters.", "Clear filters"} {
+	for _, want := range []string{"No public requests matched the current filters.", "Show all requests"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("board body missing %q: %s", want, body)
 		}
@@ -547,7 +558,7 @@ func TestRequestPageRendersSimilarRequests(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Possible duplicates", "Similar requests", "pricing-dashboard", "/portal/acme/requests/pricing-dashboard"} {
+	for _, want := range []string{"Possible duplicates", "Similar requests", "pricing-dashboard", "Updated Jul 10", `datetime="2026-07-10T13:00:00Z"`, `title="Updated 2026-07-10 13:00 UTC"`, "/portal/acme/requests/pricing-dashboard"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("request page missing %q: %s", want, body)
 		}
@@ -1238,6 +1249,8 @@ func publicRequestForPortalTest(slug string, column string) pvsvc.PublicRequest 
 			PublicSummary: "Safe public summary",
 			PublicState:   "planned",
 			RoadmapColumn: column,
+			CreatedAt:     time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:     time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC),
 		},
 		Policy: pvrepo.Policy{
 			ShowVoteCount:        true,

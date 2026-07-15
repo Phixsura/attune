@@ -98,6 +98,34 @@ func TestExportPublicKey_NoArg(t *testing.T) {
 	}
 }
 
+func TestRunAuditDispatch(t *testing.T) {
+	t.Run("missing subcommand", func(t *testing.T) {
+		err := runAudit(nil)
+		if err == nil {
+			t.Fatal("expected error for missing subcommand")
+		}
+	})
+
+	t.Run("generate signing key", func(t *testing.T) {
+		if err := runAudit([]string{"generate-signing-key"}); err != nil {
+			t.Fatalf("runAudit(generate-signing-key): %v", err)
+		}
+	})
+
+	t.Run("export public key dispatches", func(t *testing.T) {
+		if err := runAudit([]string{"export-public-key"}); err == nil {
+			t.Fatal("expected usage error from export-public-key dispatch without args")
+		}
+	})
+
+	t.Run("unknown subcommand", func(t *testing.T) {
+		err := runAudit([]string{"bogus"})
+		if err == nil {
+			t.Fatal("expected error for unknown subcommand")
+		}
+	})
+}
+
 type testChainEvent struct {
 	Sequence  int             `json:"sequence"`
 	Event     json.RawMessage `json:"event"`

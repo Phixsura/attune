@@ -146,6 +146,7 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	e.addVote(t, portalRoadmapRequest.ID, "portal:portal-roadmap")
 	e.approve(t, portalRoadmap.Moderation.ID)
 	e.setRequestPublicState(t, portalRoadmapRequest.ID, "shipped")
+	e.setRequestStatus(t, portalRoadmapRequest.ID, crrepo.StatusShipped)
 
 	portalOnlyRequest := e.createRequest(t, "Portal only request")
 	portalOnly := e.upsertRequestPublicationCustom(t, portalOnlyRequest.ID,
@@ -154,7 +155,7 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 
 	roadmapOnlyRequest := e.createRequest(t, "Roadmap only request")
 	roadmapOnly := e.upsertRequestPublicationCustom(t, roadmapOnlyRequest.ID,
-		"roadmap-only", "Roadmap only", "Next", false, true)
+		"roadmap-only", "Roadmap only", "under consideration", false, true)
 	e.approve(t, roadmapOnly.Moderation.ID)
 
 	pendingRequest := e.createRequest(t, "Pending public request")
@@ -189,7 +190,7 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	roadmapList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
 		TenantSlug:    e.tenantSlug,
 		Roadmap:       true,
-		RoadmapColumn: "next",
+		RoadmapColumn: "under consideration",
 		Limit:         10,
 	})
 	if err != nil {
@@ -210,7 +211,7 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	combinedList, err := e.publicRepo.ListPublicRequestCandidates(e.ctx, pvrepo.PublicRequestListFilter{
 		TenantSlug:    e.tenantSlug,
 		State:         "ship",
-		RoadmapColumn: "now",
+		RoadmapColumn: "shipped",
 		Limit:         10,
 	})
 	if err != nil {
@@ -219,12 +220,12 @@ func TestPGPublicVisibilityListsOnlyApprovedIncludedLiveRequests(t *testing.T) {
 	assertPublicListSlugs(t, combinedList.Items, []string{"portal-roadmap"})
 
 	service := pvsvc.New(e.publicRepo, nil)
-	publicRequests, err := service.ListPublicRequests(e.ctx, e.tenantSlug, 10, "", "", "", "ship", "now", false, false, "")
+	publicRequests, err := service.ListPublicRequests(e.ctx, e.tenantSlug, 10, "", "", "", "ship", "shipped", false, false, "")
 	if err != nil {
 		t.Fatalf("ListPublicRequests: %v", err)
 	}
 	assertPublicRequestSlugs(t, publicRequests.Requests, []string{"portal-roadmap"})
-	publicRoadmap, err := service.ListPublicRoadmap(e.ctx, e.tenantSlug, 10, "", "", "", "", "next", false, false, "")
+	publicRoadmap, err := service.ListPublicRoadmap(e.ctx, e.tenantSlug, 10, "", "", "", "", "under consideration", false, false, "")
 	if err != nil {
 		t.Fatalf("ListPublicRoadmap: %v", err)
 	}
@@ -1002,6 +1003,22 @@ func (e env) setRequestPublicState(t *testing.T, requestID uuid.UUID, state stri
 		state, e.tenantID, requestID); err != nil {
 		t.Fatalf("set request public state: %v", err)
 	}
+}
+
+func (e env) setRequestStatus(t *testing.T, requestID uuid.UUID, status crrepo.Status) {
+	t.Helper()
+	tx := e.begin(t)
+	_, _, err := e.requests.UpdateTx(e.ctx, tx, crrepo.UpdateInput{
+		TenantID: e.tenantID,
+		ID:       requestID,
+		Status:   ptrext.Of(status),
+		ActorID:  "operator",
+	})
+	if err != nil {
+		rollback(t, e.ctx, tx)
+		t.Fatalf("set request status: %v", err)
+	}
+	commit(t, e.ctx, tx)
 }
 
 func (e env) createRequest(t *testing.T, title string) crrepo.Summary {

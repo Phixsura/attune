@@ -349,6 +349,42 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
       border: 1px solid rgba(19, 21, 26, 0.08);
       background: rgba(255, 255, 255, 0.96);
     }
+    .board-card,
+    .suggestion-card {
+      position: relative;
+      cursor: pointer;
+      transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+    .board-card > *,
+    .suggestion-card > * {
+      position: relative;
+      z-index: 0;
+    }
+    .card-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      display: block;
+      border-radius: inherit;
+    }
+    .board-card .link,
+    .suggestion-card .link,
+    .board-card .vote-button {
+      position: relative;
+      z-index: 2;
+    }
+    @media (hover: hover) {
+      .board-card:hover,
+      .suggestion-card:hover {
+        transform: translateY(-1px);
+        border-color: rgba(15, 118, 110, 0.18);
+      }
+    }
+    .board-card:focus-within,
+    .suggestion-card:focus-within {
+      border-color: rgba(15, 118, 110, 0.22);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.08), var(--shadow);
+    }
     .suggestion-head {
       display: flex;
       justify-content: space-between;
@@ -485,6 +521,7 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
       <div class="meta">
         <span class="pill">{{.RequestCount}} requests</span>
         <a class="link" href="{{.SubmissionURL}}">Submit new feedback</a>
+        <a class="link" href="{{.RoadmapURL}}">Roadmap</a>
         <a class="link" href="{{.BoardBaseURL}}">Reset filters</a>
       </div>
       <form class="search" method="get" action="{{.BoardBaseURL}}">
@@ -524,6 +561,7 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
           <h2>{{.Selected.Title}}</h2>
         </div>
         <div class="tags">
+          {{if .Selected.FreshnessLabel}}<time class="tag tag-muted" data-freshness datetime="{{.Selected.FreshnessDateTime}}" title="{{.Selected.FreshnessTitle}}" aria-label="{{.Selected.FreshnessTitle}}">{{.Selected.FreshnessLabel}}</time>{{end}}
           {{if .Selected.RoadmapColumn}}<span class="tag tag-accent">{{.Selected.RoadmapColumn}}</span>{{end}}
           <span class="tag">{{.Selected.State}}</span>
         </div>
@@ -593,16 +631,18 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
         <div class="suggestion-list">
           {{range .Selected.SimilarRequests}}
           <article class="suggestion-card">
+            <a class="card-overlay" href="{{.DetailURL}}" aria-hidden="true" tabindex="-1"></a>
             <div class="suggestion-head">
               <div>
                 <h4><a class="link" href="{{.DetailURL}}">{{.Title}}</a></h4>
                 <p class="summary">{{.Summary}}</p>
               </div>
-              <div class="tags">
-                {{if .RoadmapColumn}}<span class="tag tag-accent">{{.RoadmapColumn}}</span>{{end}}
-                <span class="tag">{{.State}}</span>
-              </div>
+            <div class="tags">
+                {{if .FreshnessLabel}}<time class="tag tag-muted" data-freshness datetime="{{.FreshnessDateTime}}" title="{{.FreshnessTitle}}" aria-label="{{.FreshnessTitle}}">{{.FreshnessLabel}}</time>{{end}}
+              {{if .RoadmapColumn}}<span class="tag tag-accent">{{.RoadmapColumn}}</span>{{end}}
+              <span class="tag">{{.State}}</span>
             </div>
+          </div>
             <div class="tags">
               {{if .ShowVoteCount}}<span class="tag">{{.VoteLabel}}</span>{{end}}
               {{if .ShowCommentCount}}<span class="tag tag-muted">{{.CommentLabel}}</span>{{end}}
@@ -619,12 +659,14 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
     <section class="grid" aria-label="Public requests">
       {{range .Requests}}
       <article class="board-card{{if .IsFeatured}} featured{{end}}">
+        <a class="card-overlay" href="{{.DetailURL}}" aria-hidden="true" tabindex="-1"></a>
         <div class="board-card-header">
           <div>
             <h3><a class="link" href="{{.DetailURL}}">{{.Title}}</a></h3>
             <p class="summary">{{.Summary}}</p>
           </div>
           <div class="tags">
+            {{if .FreshnessLabel}}<time class="tag tag-muted" data-freshness datetime="{{.FreshnessDateTime}}" title="{{.FreshnessTitle}}" aria-label="{{.FreshnessTitle}}">{{.FreshnessLabel}}</time>{{end}}
             {{if .RoadmapColumn}}<span class="tag tag-accent">{{.RoadmapColumn}}</span>{{end}}
             <span class="tag">{{.State}}</span>
           </div>
@@ -652,7 +694,7 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
     {{else if not .Selected}}
     <section class="empty">
       {{if or .HasQuery .HasState .HasRoadmap .OnlyVotedByMe .OnlyWithComments}}
-      No public requests matched the current filters. <a class="ghost" href="{{.BoardBaseURL}}">Clear filters</a>
+      No public requests matched the current filters. <a class="ghost" href="{{.BoardBaseURL}}">Show all requests</a>
       {{else}}
       No public requests are visible yet. When operators publish requests, they will appear here automatically.
       {{end}}
@@ -736,6 +778,7 @@ type portalBoardPageData struct {
 	TenantName       string
 	BoardBaseURL     string
 	BoardURL         string
+	RoadmapURL       string
 	NextURL          string
 	SubmissionURL    string
 	Query            string
@@ -768,6 +811,9 @@ type portalBoardRequestView struct {
 	SubmittedByDisplay string
 	CreatedAt          string
 	UpdatedAt          string
+	FreshnessLabel     string
+	FreshnessTitle     string
+	FreshnessDateTime  string
 	VoteLabel          string
 	CommentLabel       string
 	VoteURL            string
@@ -830,7 +876,9 @@ func (h *Handler) renderBoardPage(w http.ResponseWriter, r *http.Request, select
 		w.Header().Del("X-Robots-Tag")
 	}
 	boardBaseURL := "/portal/" + url.PathEscape(cfg.TenantSlug) + "/requests"
+	roadmapBaseURL := "/portal/" + url.PathEscape(cfg.TenantSlug) + "/roadmap"
 	querySuffix := portalBoardQueryString(query, sort, state, roadmap, votedOnly, commentsOnly, cursor)
+	returnURL := portalBoardReturnURL(r, boardBaseURL, roadmapBaseURL)
 	nextURL := ""
 	if list.NextCursor != "" {
 		nextURL = boardBaseURL + portalBoardQueryString(query, sort, state, roadmap, votedOnly, commentsOnly, list.NextCursor)
@@ -840,6 +888,7 @@ func (h *Handler) renderBoardPage(w http.ResponseWriter, r *http.Request, select
 		TenantName:       cfg.TenantName,
 		BoardBaseURL:     boardBaseURL,
 		BoardURL:         boardBaseURL + querySuffix,
+		RoadmapURL:       "/portal/" + url.PathEscape(cfg.TenantSlug) + "/roadmap",
 		NextURL:          nextURL,
 		SubmissionURL:    "/portal/" + url.PathEscape(cfg.TenantSlug),
 		Query:            query,
@@ -853,10 +902,10 @@ func (h *Handler) renderBoardPage(w http.ResponseWriter, r *http.Request, select
 		OnlyWithComments: commentsOnly,
 		NoIndex:          list.NoIndex,
 		RequestCount:     len(list.Requests),
-		Requests:         portalBoardRequestViews(cfg.TenantSlug, list.Requests, selectedSlug, querySuffix),
+		Requests:         portalBoardRequestViews(cfg.TenantSlug, list.Requests, selectedSlug, querySuffix, returnURL),
 	}
 	if selectedSlug != "" {
-		selected, loadErr := h.portalBoardSelectedView(ctx, tenantSlug, selectedSlug, visitorID, cfg.TenantSlug, querySuffix)
+		selected, loadErr := h.portalBoardSelectedView(ctx, tenantSlug, selectedSlug, visitorID, cfg.TenantSlug, querySuffix, returnURL)
 		if portalBoardLoadError(w, r, loadErr) {
 			return
 		}
@@ -956,6 +1005,33 @@ func portalBoardQueryString(query, sort, state, roadmap string, votedOnly bool, 
 	return "?" + values.Encode()
 }
 
+func portalBoardAppendQueryParam(querySuffix string, key string, value string) string {
+	trimmedKey := strings.TrimSpace(key)
+	trimmedValue := strings.TrimSpace(value)
+	if trimmedKey == "" || trimmedValue == "" {
+		return querySuffix
+	}
+	escaped := url.QueryEscape(trimmedValue)
+	if querySuffix == "" {
+		return "?" + trimmedKey + "=" + escaped
+	}
+	return querySuffix + "&" + trimmedKey + "=" + escaped
+}
+
+func portalBoardReturnURL(r *http.Request, boardBaseURL string, roadmapBaseURL string) string {
+	if r == nil {
+		return boardBaseURL
+	}
+	switch strings.TrimSpace(r.URL.Query().Get("back")) {
+	case roadmapBaseURL:
+		return roadmapBaseURL
+	case boardBaseURL:
+		return boardBaseURL
+	default:
+		return boardBaseURL
+	}
+}
+
 func (h *Handler) portalBoardSelectedView(
 	ctx context.Context,
 	tenantSlug string,
@@ -963,20 +1039,21 @@ func (h *Handler) portalBoardSelectedView(
 	visitorID string,
 	boardTenantSlug string,
 	querySuffix string,
+	returnURL string,
 ) (*portalBoardRequestView, error) {
 	detail, err := h.read.GetPublicRequest(ctx, tenantSlug, selectedSlug, visitorID)
 	if err != nil {
 		return nil, err
 	}
-	view := boardRequestView(boardTenantSlug, detail, querySuffix)
+	view := boardRequestView(boardTenantSlug, detail, querySuffix, returnURL)
 	view.IsFeatured = true
 	return ptrext.Of(view), nil
 }
 
-func portalBoardRequestViews(tenantSlug string, requests []pvsvc.PublicRequest, selectedSlug string, querySuffix string) []portalBoardRequestView {
+func portalBoardRequestViews(tenantSlug string, requests []pvsvc.PublicRequest, selectedSlug string, querySuffix string, returnURL string) []portalBoardRequestView {
 	views := make([]portalBoardRequestView, 0, len(requests))
 	for _, item := range requests {
-		view := boardRequestView(tenantSlug, item, querySuffix)
+		view := boardRequestView(tenantSlug, item, querySuffix, returnURL)
 		if selectedSlug != "" && view.Slug == selectedSlug {
 			continue
 		}
@@ -996,7 +1073,7 @@ func portalBoardExecuteTemplate(w http.ResponseWriter, data portalBoardPageData)
 	return err
 }
 
-func boardRequestView(tenantSlug string, request pvsvc.PublicRequest, querySuffix string) portalBoardRequestView {
+func boardRequestView(tenantSlug string, request pvsvc.PublicRequest, querySuffix string, returnURL string) portalBoardRequestView {
 	baseURL := "/portal/" + url.PathEscape(tenantSlug) + "/requests"
 	voteLabel := ""
 	commentLabel := ""
@@ -1018,13 +1095,18 @@ func boardRequestView(tenantSlug string, request pvsvc.PublicRequest, querySuffi
 		ShowVoteCount:      request.Policy.ShowVoteCount,
 		ShowCommentCount:   request.Policy.CommentsEnabled && request.Policy.ShowCommentCount,
 		SubmittedByDisplay: request.SubmitterDisplay,
+		CreatedAt:          boardPublicTimestamp(request.Policy, request.Summary.CreatedAt),
+		UpdatedAt:          boardPublicTimestamp(request.Policy, request.Summary.UpdatedAt),
+		FreshnessLabel:     boardRequestFreshnessLabel(request.Policy, request.Summary.CreatedAt, request.Summary.UpdatedAt),
+		FreshnessTitle:     boardRequestFreshnessTitle(request.Policy, request.Summary.CreatedAt, request.Summary.UpdatedAt),
+		FreshnessDateTime:  boardRequestFreshnessDateTime(request.Policy, request.Summary.CreatedAt, request.Summary.UpdatedAt),
 		VoteLabel:          voteLabel,
 		CommentLabel:       commentLabel,
 		VoteURL:            "/v1/portal/" + url.PathEscape(tenantSlug) + "/requests/" + url.PathEscape(request.Summary.PublicSlug) + "/votes",
 		VoteMethod:         http.MethodPost,
 		VoteButtonLabel:    "Vote",
 		DetailURL:          baseURL + "/" + url.PathEscape(request.Summary.PublicSlug) + querySuffix,
-		BoardURL:           baseURL + querySuffix,
+		BoardURL:           strings.TrimSpace(returnURL) + querySuffix,
 		CommentURL:         "/v1/portal/" + url.PathEscape(tenantSlug) + "/requests/" + url.PathEscape(request.Summary.PublicSlug) + "/comments",
 		CanVote:            request.Policy.VoteWriteMode != pvrepo.WriteModeDisabled,
 		CanComment:         request.CanComment,
@@ -1037,7 +1119,7 @@ func boardRequestView(tenantSlug string, request pvsvc.PublicRequest, querySuffi
 		}
 	}
 	if len(request.SimilarRequests) > 0 {
-		view.SimilarRequests = portalBoardRequestViews(tenantSlug, request.SimilarRequests, "", querySuffix)
+		view.SimilarRequests = portalBoardRequestViews(tenantSlug, request.SimilarRequests, "", querySuffix, returnURL)
 	}
 	if request.ViewerHasVoted {
 		view.VoteMethod = http.MethodDelete
@@ -1086,11 +1168,54 @@ func boardCommentTone(state pvrepo.ModerationState) string {
 	}
 }
 
-func boardCommentCreatedAt(policy pvrepo.Policy, createdAt time.Time) string {
-	if policy.HidePublicTimestamps || createdAt.IsZero() {
+func boardPublicTimestamp(policy pvrepo.Policy, at time.Time) string {
+	if policy.HidePublicTimestamps || at.IsZero() {
 		return ""
 	}
-	return createdAt.UTC().Format("2006-01-02 15:04 UTC")
+	return at.UTC().Format("2006-01-02 15:04 UTC")
+}
+
+func boardRequestFreshnessLabel(policy pvrepo.Policy, createdAt time.Time, updatedAt time.Time) string {
+	if policy.HidePublicTimestamps {
+		return ""
+	}
+	if !updatedAt.IsZero() {
+		return "Updated " + updatedAt.UTC().Format("Jan 2")
+	}
+	if !createdAt.IsZero() {
+		return "Published " + createdAt.UTC().Format("Jan 2")
+	}
+	return ""
+}
+
+func boardRequestFreshnessTitle(policy pvrepo.Policy, createdAt time.Time, updatedAt time.Time) string {
+	if policy.HidePublicTimestamps {
+		return ""
+	}
+	if !updatedAt.IsZero() {
+		return "Updated " + boardPublicTimestamp(policy, updatedAt)
+	}
+	if !createdAt.IsZero() {
+		return "Published " + boardPublicTimestamp(policy, createdAt)
+	}
+	return ""
+}
+
+func boardRequestFreshnessDateTime(policy pvrepo.Policy, createdAt time.Time, updatedAt time.Time) string {
+	if policy.HidePublicTimestamps {
+		return ""
+	}
+	if !updatedAt.IsZero() {
+		return updatedAt.UTC().Format(time.RFC3339)
+	}
+	if !createdAt.IsZero() {
+		return createdAt.UTC().Format(time.RFC3339)
+	}
+	return ""
+}
+
+func boardCommentCreatedAt(policy pvrepo.Policy, createdAt time.Time) string {
+	return boardPublicTimestamp(policy, createdAt)
 }
 
 func boardCanVote(selected *portalBoardRequestView, requests []portalBoardRequestView) bool {

@@ -90,10 +90,18 @@ type Policy struct {
 	ShowCommentCount      bool
 	ShowSubmitterDisplay  bool
 	HidePublicTimestamps  bool
+	RoadmapStatusMappings []RoadmapStatusMapping
 	PortalSubmissionForm  PortalSubmissionForm
 	UpdatedBy             string
 	CreatedAt             time.Time
 	UpdatedAt             time.Time
+}
+
+type RoadmapStatusMapping struct {
+	Status   string `json:"status"`
+	Label    string `json:"label"`
+	Order    int    `json:"order"`
+	Included bool   `json:"included"`
 }
 
 type PortalSubmissionFieldKind string
@@ -149,6 +157,8 @@ type RequestProfile struct {
 	PublicSummary     string
 	PublicState       string
 	RoadmapColumn     string
+	RoadmapOrder      int
+	RoadmapVisible    bool
 	IncludedInPortal  bool
 	IncludedInRoadmap bool
 	PublishedAt       *time.Time
@@ -258,6 +268,9 @@ func (r *Repo) ResolveTenantIDBySlug(ctx context.Context, slug string) (string, 
 }
 
 func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*Policy, error) {
+	if len(policy.RoadmapStatusMappings) == 0 {
+		policy.RoadmapStatusMappings = defaultRoadmapStatusMappings()
+	}
 	q := `
 		INSERT INTO public_visibility_policies (
 			tenant_id, portal_access_mode, search_indexing_enabled,
@@ -265,9 +278,9 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 			submission_write_mode, comment_write_mode, vote_write_mode,
 			default_request_state, default_comment_state, submitter_identity_mode,
 			show_vote_count, show_comment_count, show_submitter_display,
-			hide_public_timestamps, portal_submission_form, updated_by
+			hide_public_timestamps, roadmap_status_mapping, portal_submission_form, updated_by
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
 		)
 		ON CONFLICT (tenant_id) DO UPDATE SET
 			portal_access_mode = EXCLUDED.portal_access_mode,
@@ -286,9 +299,14 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 			show_comment_count = EXCLUDED.show_comment_count,
 			show_submitter_display = EXCLUDED.show_submitter_display,
 			hide_public_timestamps = EXCLUDED.hide_public_timestamps,
+			roadmap_status_mapping = EXCLUDED.roadmap_status_mapping,
 			portal_submission_form = EXCLUDED.portal_submission_form,
 			updated_by = EXCLUDED.updated_by
 		RETURNING ` + policyColumns()
+	roadmapJSON, err := json.Marshal(policy.RoadmapStatusMappings)
+	if err != nil {
+		return nil, fmt.Errorf("marshal roadmap status mapping: %w", err)
+	}
 	formJSON, err := json.Marshal(policy.PortalSubmissionForm)
 	if err != nil {
 		return nil, fmt.Errorf("marshal portal submission form: %w", err)
@@ -311,6 +329,7 @@ func (r *Repo) UpsertPolicyTx(ctx context.Context, tx pgx.Tx, policy Policy) (*P
 		policy.ShowCommentCount,
 		policy.ShowSubmitterDisplay,
 		policy.HidePublicTimestamps,
+		roadmapJSON,
 		formJSON,
 		policy.UpdatedBy,
 	))
@@ -599,10 +618,11 @@ func (r *Repo) GetPublicRequestCandidate(ctx context.Context, tenantSlug string,
 	var votes int64
 	var viewerHasVoted bool
 	var comments int64
+	var roadmapJSON []byte
 	var formJSON []byte
-	targets := policyScanTargets(&out.Policy, &formJSON)              // ptrext:allow scan-target
-	targets = append(targets, profileScanTargets(&out.Profile)...)    // ptrext:allow scan-target
-	targets = append(targets, subjectScanTargets(&out.Moderation)...) // ptrext:allow scan-target
+	targets := policyScanTargets(&out.Policy, &roadmapJSON, &formJSON) // ptrext:allow scan-target
+	targets = append(targets, profileScanTargets(&out.Profile)...)     // ptrext:allow scan-target
+	targets = append(targets, subjectScanTargets(&out.Moderation)...)  // ptrext:allow scan-target
 	targets = append(targets,
 		&votes, &viewerHasVoted, &comments, &out.CustomerRequestID, &out.CustomerRequestLive, // ptrext:allow scan-target
 	)
@@ -689,7 +709,7 @@ func (r *Repo) ListPublicRequestCandidates(ctx context.Context, filter PublicReq
 	includedClause := "prp.included_in_portal = TRUE"
 	orderBy := publicBoardOrderByClause(filter.Sort, filter.Roadmap)
 	if filter.Roadmap {
-		includedClause = "prp.included_in_roadmap = TRUE"
+		includedClause = "prp.included_in_roadmap = TRUE AND prp.roadmap_visible = TRUE"
 	}
 	args := []any{tenantID, limit + 1, offset, filter.ViewerSubjectKey}
 	stateClause, args := publicBoardContainsClause("prp.public_state", filter.State, args)
@@ -862,7 +882,7 @@ func publicBoardViewerVoteClause(onlyVotedByViewer bool, viewerSubjectKey string
 func publicBoardOrderByClause(sort string, roadmap bool) string {
 	prefix := ""
 	if roadmap {
-		prefix = "LOWER(NULLIF(prp.roadmap_column, '')) ASC NULLS LAST, "
+		prefix = "COALESCE(prp.roadmap_order, 2147483647) ASC, LOWER(NULLIF(prp.roadmap_column, '')) ASC NULLS LAST, "
 	}
 	switch normalizePublicBoardSort(sort) {
 	case "recent":
@@ -1084,6 +1104,7 @@ func policyColumns() string {
 		"show_comment_count",
 		"show_submitter_display",
 		"hide_public_timestamps",
+		"roadmap_status_mapping",
 		"portal_submission_form",
 		"updated_by",
 		"created_at",
@@ -1119,6 +1140,8 @@ func profileColumns() string {
 		"public_summary",
 		"public_state",
 		"roadmap_column",
+		"roadmap_order",
+		"roadmap_visible",
 		"included_in_portal",
 		"included_in_roadmap",
 		"published_at",
@@ -1148,28 +1171,47 @@ func prefixColumns(alias string, columns string) string {
 	return strings.Join(parts, ", ")
 }
 
+func defaultRoadmapStatusMappings() []RoadmapStatusMapping {
+	return []RoadmapStatusMapping{
+		{Status: "open", Label: "under consideration", Order: 1, Included: true},
+		{Status: "planned", Label: "planned", Order: 2, Included: true},
+		{Status: "in_progress", Label: "in progress", Order: 3, Included: true},
+		{Status: "shipped", Label: "shipped", Order: 4, Included: true},
+		{Status: "cancelled", Label: "cancelled", Order: 5, Included: false},
+	}
+}
+
 func scanPolicy(row rowScanner) (*Policy, error) {
 	var policy Policy
+	var roadmapJSON []byte
 	var formJSON []byte
-	if err := row.Scan(policyScanTargets(&policy, &formJSON)...); err != nil { // ptrext:allow scan-target
+	if err := row.Scan(policyScanTargets(&policy, &roadmapJSON, &formJSON)...); err != nil { // ptrext:allow scan-target
 		return nil, err
+	}
+	if len(roadmapJSON) > 0 {
+		if err := json.Unmarshal(roadmapJSON, &policy.RoadmapStatusMappings); err != nil {
+			return nil, fmt.Errorf("unmarshal roadmap status mapping: %w", err)
+		}
 	}
 	if len(formJSON) > 0 {
 		if err := json.Unmarshal(formJSON, &policy.PortalSubmissionForm); err != nil {
 			return nil, fmt.Errorf("unmarshal portal submission form: %w", err)
 		}
 	}
+	if len(policy.RoadmapStatusMappings) == 0 {
+		policy.RoadmapStatusMappings = defaultRoadmapStatusMappings()
+	}
 	return ptrext.Of(policy), nil
 }
 
-func policyScanTargets(policy *Policy, formJSON *[]byte, extra ...any) []any {
+func policyScanTargets(policy *Policy, roadmapJSON *[]byte, formJSON *[]byte, extra ...any) []any {
 	targets := []any{
 		&policy.TenantID, &policy.PortalAccessMode, &policy.SearchIndexingEnabled, // ptrext:allow scan-target
 		&policy.RequestsEnabled, &policy.CommentsEnabled, &policy.RoadmapEnabled, // ptrext:allow scan-target
 		&policy.ChangelogEnabled, &policy.SubmissionWriteMode, &policy.CommentWriteMode, // ptrext:allow scan-target
 		&policy.VoteWriteMode, &policy.DefaultRequestState, &policy.DefaultCommentState, // ptrext:allow scan-target
 		&policy.SubmitterIdentityMode, &policy.ShowVoteCount, &policy.ShowCommentCount, // ptrext:allow scan-target
-		&policy.ShowSubmitterDisplay, &policy.HidePublicTimestamps, formJSON, &policy.UpdatedBy, // ptrext:allow scan-target
+		&policy.ShowSubmitterDisplay, &policy.HidePublicTimestamps, roadmapJSON, formJSON, &policy.UpdatedBy, // ptrext:allow scan-target
 		&policy.CreatedAt, &policy.UpdatedAt, // ptrext:allow scan-target
 	}
 	return append(targets, extra...)
@@ -1205,7 +1247,8 @@ func profileScanTargets(profile *RequestProfile, extra ...any) []any {
 	targets := []any{
 		&profile.ID, &profile.TenantID, &profile.RequestID, &profile.PublicSlug, // ptrext:allow scan-target
 		&profile.PublicTitle, &profile.PublicSummary, &profile.PublicState, // ptrext:allow scan-target
-		&profile.RoadmapColumn, &profile.IncludedInPortal, &profile.IncludedInRoadmap, // ptrext:allow scan-target
+		&profile.RoadmapColumn, &profile.RoadmapOrder, &profile.RoadmapVisible, // ptrext:allow scan-target
+		&profile.IncludedInPortal, &profile.IncludedInRoadmap, // ptrext:allow scan-target
 		&profile.PublishedAt, &profile.UpdatedBy, &profile.CreatedAt, &profile.UpdatedAt, // ptrext:allow scan-target
 	}
 	return append(targets, extra...)

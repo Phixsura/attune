@@ -130,6 +130,7 @@ func buildRouter(
 
 	r.Method(http.MethodGet, "/portal/{tenant_slug}", portal.NoStore(http.HandlerFunc(portalHandler.Page)))
 	r.Method(http.MethodGet, "/portal/{tenant_slug}/requests", portal.NoStore(http.HandlerFunc(portalHandler.RequestsPage)))
+	r.Method(http.MethodGet, "/portal/{tenant_slug}/roadmap", portal.NoStore(http.HandlerFunc(portalHandler.RoadmapPage)))
 	r.Method(http.MethodGet, "/portal/{tenant_slug}/requests/{public_slug}", portal.NoStore(http.HandlerFunc(portalHandler.RequestPage)))
 
 	mountV1Routes(

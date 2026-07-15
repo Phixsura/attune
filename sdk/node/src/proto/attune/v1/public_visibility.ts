@@ -93,6 +93,7 @@ export interface PublicVisibilityPolicy {
   createdAt: string;
   updatedAt: string;
   portalSubmissionForm?: PortalSubmissionFormConfig | undefined;
+  roadmapStatusMapping: RoadmapStatusMapping[];
 }
 
 export interface GetPublicVisibilityPolicyRequest {
@@ -116,6 +117,7 @@ export interface UpdatePublicVisibilityPolicyRequest {
   showSubmitterDisplay: boolean;
   hidePublicTimestamps: boolean;
   portalSubmissionForm?: PortalSubmissionFormConfig | undefined;
+  roadmapStatusMapping: RoadmapStatusMapping[];
 }
 
 export interface PortalSubmissionField {
@@ -134,6 +136,13 @@ export interface PortalSubmissionFormConfig {
   submitButtonLabel: string;
   showPageUrl: boolean;
   fields: PortalSubmissionField[];
+}
+
+export interface RoadmapStatusMapping {
+  status: string;
+  label: string;
+  order: number;
+  included: boolean;
 }
 
 export interface PortalSubmissionConfig {

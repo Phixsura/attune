@@ -132,6 +132,11 @@ function formatTimeRemaining(
   return t('security.time.days', '{{count}}d left', { count: days })
 }
 
+export const securityPageTestables = {
+  formatTimeRemaining,
+  getTokenStatus,
+}
+
 export function SecurityPage() {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()

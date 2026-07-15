@@ -323,8 +323,26 @@ func publicRequestListToProto(result pvsvc.PublicRequestList) *attunev1.ListPubl
 func publicRoadmapToProto(result pvsvc.PublicRequestList) *attunev1.ListPublicRoadmapResponse {
 	out := ptrext.Of(attunev1.ListPublicRoadmapResponse{})
 	columnsByName := map[string]*attunev1.PublicRoadmapColumn{}
+	for _, mapping := range result.Policy.RoadmapStatusMappings {
+		if !mapping.Included {
+			continue
+		}
+		name := strings.TrimSpace(mapping.Label)
+		if name == "" {
+			continue
+		}
+		if _, ok := columnsByName[name]; ok {
+			continue
+		}
+		column := ptrext.Of(attunev1.PublicRoadmapColumn{Name: name})
+		columnsByName[name] = column
+		out.Columns = append(out.Columns, column)
+	}
 	for _, item := range result.Requests {
-		name := item.Summary.RoadmapColumn
+		name := strings.TrimSpace(item.Summary.RoadmapColumn)
+		if name == "" {
+			continue
+		}
 		column, ok := columnsByName[name]
 		if !ok {
 			column = ptrext.Of(attunev1.PublicRoadmapColumn{Name: name})

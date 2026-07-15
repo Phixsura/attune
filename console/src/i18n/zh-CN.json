@@ -163,6 +163,15 @@
     "comments": "评论写入",
     "votes": "投票写入",
     "submitter_identity": "提交者身份",
+    "roadmap_mapping_title": "路线图状态映射",
+    "roadmap_mapping_help": "把客户需求状态映射为公开路线图列，并按这里的顺序展示公开路线图。",
+    "roadmap_mapping_reset": "恢复默认映射",
+    "roadmap_mapping": {
+      "status": "内部状态",
+      "column_label": "公开列名称",
+      "order_label": "列顺序",
+      "included": "显示在公开路线图"
+    },
     "empty_title": "没有待显示的审核项",
     "empty_description": "新的公开投稿、评论或公开需求会出现在这里。",
     "profile_title": "公开需求资料",
@@ -179,6 +188,8 @@
       "public_state_placeholder": "planned / in progress / shipped",
       "roadmap_column": "路线图列",
       "roadmap_column_placeholder": "例如 Now / Next / Later",
+      "roadmap_column_auto": "由状态映射自动生成",
+      "roadmap_column_help": "该列由客户需求状态和公开映射自动生成，不能直接编辑。",
       "submitted_by_display": "提交者展示名",
       "submitted_by_display_placeholder": "按公开策略展示",
       "included_in_portal": "进入公开入口",
@@ -277,6 +288,7 @@
         "acknowledgement_fallback": "谢谢。我们会尽快查看你的提交。",
         "identity_hint": "提交者身份：{{value}}",
         "open_board": "打开公开看板",
+        "open_roadmap": "打开公开路线图",
         "open_portal": "打开公开门户",
         "submit_fallback": "提交反馈"
       }

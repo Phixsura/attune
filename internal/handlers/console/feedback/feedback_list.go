@@ -181,6 +181,12 @@ func applyListOptionalOpts(req *attunev1.ListFeedbackRequest, opts *feedback.Con
 	if req.Limit != nil {
 		opts.Limit = int(req.GetLimit())
 	}
+	if source := req.GetSource(); source != "" {
+		opts.Source = ptrext.Of(source)
+	}
+	if typ := req.GetType(); typ != "" {
+		opts.Type = ptrext.Of(typ)
+	}
 	opts.Urgent = req.Urgent
 	opts.TagID = req.TagId
 	opts.WorkflowStateID = req.WorkflowStateId

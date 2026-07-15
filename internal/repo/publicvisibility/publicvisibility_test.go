@@ -150,7 +150,7 @@ func TestPublicBoardSimilarityClauseWithoutTermsReturnsFalse(t *testing.T) {
 	}
 }
 
-func TestScanHelpers(t *testing.T) {
+func TestScanPolicyHelper(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
@@ -164,7 +164,15 @@ func TestScanHelpers(t *testing.T) {
 	if policy.PortalSubmissionForm.Headline != "Share feedback" || len(policy.PortalSubmissionForm.Fields) != 1 {
 		t.Fatalf("scanPolicy() portal form = %#v, want normalized portal form", policy.PortalSubmissionForm)
 	}
+	if len(policy.RoadmapStatusMappings) != 5 || policy.RoadmapStatusMappings[0].Status != "open" {
+		t.Fatalf("scanPolicy() roadmap mappings = %#v, want normalized roadmap defaults", policy.RoadmapStatusMappings)
+	}
+}
 
+func TestScanSubjectHelper(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	subjectID := uuid.New()
 	subject, err := scanSubject(fakeRow{values: subjectValues(subjectID, now)})
 	if err != nil {
@@ -173,7 +181,12 @@ func TestScanHelpers(t *testing.T) {
 	if subject.ID != subjectID || subject.State != ModerationStatePending {
 		t.Fatalf("scanSubject() = %#v, want subject", subject)
 	}
+}
 
+func TestScanProfileHelper(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	requestID := uuid.New()
 	profile, err := scanProfile(fakeRow{values: profileValues(requestID, now)})
 	if err != nil {
@@ -182,6 +195,13 @@ func TestScanHelpers(t *testing.T) {
 	if profile.RequestID != requestID || profile.PublicSlug != "pricing-api" {
 		t.Fatalf("scanProfile() = %#v, want profile", profile)
 	}
+	if profile.RoadmapOrder != 2 || !profile.RoadmapVisible {
+		t.Fatalf("scanProfile() roadmap fields = %#v, want derived roadmap metadata", profile)
+	}
+}
+
+func TestScanHelpersPropagateErrors(t *testing.T) {
+	t.Parallel()
 
 	scanErr := errors.New("scan failed")
 	if _, err := scanPolicy(fakeRow{err: scanErr}); !errors.Is(err, scanErr) {
@@ -320,7 +340,7 @@ func policyValues(now time.Time) []any {
 		"tenant-a", AccessModePublic, true, true, true, true, false,
 		WriteModeIdentified, WriteModeDisabled, WriteModeAnonymous,
 		ModerationStateApproved, ModerationStatePending, IdentityModeDisplayName,
-		true, false, true, false, portalSubmissionFormJSON(), "admin-1", now, now.Add(time.Minute),
+		true, false, true, false, nil, portalSubmissionFormJSON(), "admin-1", now, now.Add(time.Minute),
 	}
 }
 
@@ -355,7 +375,7 @@ func subjectValues(id uuid.UUID, now time.Time) []any {
 func profileValues(requestID uuid.UUID, now time.Time) []any {
 	return []any{
 		uuid.New(), "tenant-a", requestID, "pricing-api", "Pricing API", "Summary",
-		"planned", "next", true, false, ptrext.Of(now), "admin-1",
+		"planned", "next", 2, true, true, false, ptrext.Of(now), "admin-1",
 		now, now.Add(time.Minute),
 	}
 }

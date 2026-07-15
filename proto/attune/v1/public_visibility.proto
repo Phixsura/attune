@@ -193,6 +193,7 @@ message PublicVisibilityPolicy {
   string created_at = 19;
   string updated_at = 20;
   PortalSubmissionFormConfig portal_submission_form = 21;
+  repeated RoadmapStatusMapping roadmap_status_mapping = 22;
 }
 
 message GetPublicVisibilityPolicyRequest {}
@@ -215,6 +216,7 @@ message UpdatePublicVisibilityPolicyRequest {
   bool show_submitter_display = 15;
   bool hide_public_timestamps = 16;
   PortalSubmissionFormConfig portal_submission_form = 17;
+  repeated RoadmapStatusMapping roadmap_status_mapping = 18;
 }
 
 message PortalSubmissionField {
@@ -233,6 +235,13 @@ message PortalSubmissionFormConfig {
   string submit_button_label = 4;
   bool show_page_url = 5;
   repeated PortalSubmissionField fields = 6;
+}
+
+message RoadmapStatusMapping {
+  string status = 1;
+  string label = 2;
+  uint32 order = 3;
+  bool included = 4;
 }
 
 message PortalSubmissionConfig {

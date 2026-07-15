@@ -14581,6 +14581,10 @@ components:
                     type: string
                 portalSubmissionForm:
                     $ref: '#/components/schemas/PortalSubmissionFormConfig'
+                roadmapStatusMapping:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RoadmapStatusMapping'
         PublicVisibilityViewState:
             type: object
             properties:
@@ -15290,6 +15294,18 @@ components:
         RevokeMCPSessionResponse:
             type: object
             properties: {}
+        RoadmapStatusMapping:
+            type: object
+            properties:
+                status:
+                    type: string
+                label:
+                    type: string
+                order:
+                    type: integer
+                    format: uint32
+                included:
+                    type: boolean
         RollbackEnrichmentRuntimeRequest:
             type: object
             properties:
@@ -16455,6 +16471,10 @@ components:
                     type: boolean
                 portalSubmissionForm:
                     $ref: '#/components/schemas/PortalSubmissionFormConfig'
+                roadmapStatusMapping:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RoadmapStatusMapping'
         UpdateQualityActionRequest:
             type: object
             properties:

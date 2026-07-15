@@ -108,6 +108,38 @@ export const consoleA11yPublicVisibilityPolicy: PublicVisibilityPolicy = {
   showCommentCount: true,
   showSubmitterDisplay: true,
   hidePublicTimestamps: false,
+  roadmapStatusMapping: [
+    {
+      status: 'open',
+      label: 'under consideration',
+      order: 1,
+      included: true,
+    },
+    {
+      status: 'planned',
+      label: 'planned',
+      order: 2,
+      included: true,
+    },
+    {
+      status: 'in_progress',
+      label: 'in progress',
+      order: 3,
+      included: true,
+    },
+    {
+      status: 'shipped',
+      label: 'shipped',
+      order: 4,
+      included: true,
+    },
+    {
+      status: 'cancelled',
+      label: 'cancelled',
+      order: 5,
+      included: false,
+    },
+  ],
   portalSubmissionForm: {
     headline: 'Share feedback',
     description: 'Tell us what is broken, missing, or worth improving.',

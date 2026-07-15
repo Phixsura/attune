@@ -4,6 +4,7 @@ import type {
   ModerationSubject,
   PublicRequestPublication,
   PublicVisibilityPolicy,
+  RoadmapStatusMapping,
 } from '@/proto/attune/v1/public_visibility'
 import {
   ModerationState,
@@ -125,6 +126,9 @@ describe('publicVisibilityPageTestables', () => {
         ],
       },
     })
+    expect(policyForm.roadmapStatusMapping).toEqual(
+      publicVisibilityPageTestables.defaultRoadmapStatusMappings(),
+    )
     expect(publicVisibilityPageTestables.policyRequestFromForm(policyForm)).toMatchObject({
       portalAccessMode: policy.portalAccessMode,
       searchIndexingEnabled: policy.searchIndexingEnabled,
@@ -142,6 +146,7 @@ describe('publicVisibilityPageTestables', () => {
       showCommentCount: policy.showCommentCount,
       showSubmitterDisplay: policy.showSubmitterDisplay,
       hidePublicTimestamps: policy.hidePublicTimestamps,
+      roadmapStatusMapping: policy.roadmapStatusMapping,
       portalSubmissionForm: policyForm.portalSubmissionForm,
     })
 
@@ -172,6 +177,9 @@ describe('publicVisibilityPageTestables', () => {
       showPageUrl: true,
       fields: [],
     })
+    expect(publicVisibilityPageTestables.defaultForm().roadmapStatusMapping).toEqual(
+      publicVisibilityPageTestables.defaultRoadmapStatusMappings(),
+    )
     expect(
       publicVisibilityPageTestables.profileRequestFromForm({
         ...publicVisibilityPageTestables.defaultProfileForm(),
@@ -192,6 +200,106 @@ describe('publicVisibilityPageTestables', () => {
       roadmapColumn: 'Next',
       submittedByDisplay: 'Jane',
     })
+  })
+
+  it('normalizes roadmap status mappings and numeric inputs', () => {
+    const customMappings = [
+      {
+        status: 'open',
+        label: '  Soon  ',
+        order: 0,
+      },
+      {
+        status: 'planned',
+        label: '   ',
+        order: -2,
+        included: true,
+      },
+      {
+        status: 'cancelled',
+        label: '  ',
+        order: 0,
+      },
+    ] as unknown as RoadmapStatusMapping[]
+
+    expect(publicVisibilityPageTestables.normalizeRoadmapStatusMappingsForForm(undefined)).toEqual(
+      publicVisibilityPageTestables.defaultRoadmapStatusMappings(),
+    )
+    expect(
+      publicVisibilityPageTestables.normalizeRoadmapStatusMappingsForForm(customMappings),
+    ).toEqual([
+      {
+        status: 'open',
+        label: 'Soon',
+        order: 1,
+        included: true,
+      },
+      {
+        status: 'planned',
+        label: 'planned',
+        order: 2,
+        included: true,
+      },
+      {
+        status: 'in_progress',
+        label: 'in progress',
+        order: 3,
+        included: true,
+      },
+      {
+        status: 'shipped',
+        label: 'shipped',
+        order: 4,
+        included: true,
+      },
+      {
+        status: 'cancelled',
+        label: 'cancelled',
+        order: 5,
+        included: false,
+      },
+    ])
+    expect(
+      publicVisibilityPageTestables.roadmapStatusMappingsRequestFromForm(customMappings),
+    ).toEqual([
+      {
+        status: 'open',
+        label: 'Soon',
+        order: 1,
+        included: true,
+      },
+      {
+        status: 'planned',
+        label: 'planned',
+        order: 2,
+        included: true,
+      },
+      {
+        status: 'in_progress',
+        label: 'in progress',
+        order: 3,
+        included: true,
+      },
+      {
+        status: 'shipped',
+        label: 'shipped',
+        order: 4,
+        included: true,
+      },
+      {
+        status: 'cancelled',
+        label: 'cancelled',
+        order: 5,
+        included: false,
+      },
+    ])
+    expect(publicVisibilityPageTestables.roadmapStatusDefaultLabel('shipped')).toBe('shipped')
+    expect(publicVisibilityPageTestables.roadmapStatusDefaultLabel('custom-status')).toBe(
+      'custom-status',
+    )
+    expect(publicVisibilityPageTestables.numberFromInput('17', 3)).toBe(17)
+    expect(publicVisibilityPageTestables.numberFromInput('0', 3)).toBe(3)
+    expect(publicVisibilityPageTestables.numberFromInput('not-a-number', 3)).toBe(3)
   })
 
   it('derives stable moderation reason defaults and formatting fallbacks', () => {
@@ -437,6 +545,7 @@ function policyFixture(): PublicVisibilityPolicy {
     showCommentCount: false,
     showSubmitterDisplay: true,
     hidePublicTimestamps: false,
+    roadmapStatusMapping: publicVisibilityPageTestables.defaultRoadmapStatusMappings(),
     portalSubmissionForm: {
       headline: 'Share feedback',
       description: 'Tell us what is broken, missing, or worth improving.',
