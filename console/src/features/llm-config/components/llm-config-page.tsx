@@ -592,6 +592,14 @@ function errorText(err: unknown) {
   return details ? `${err.message} (${details})` : err.message
 }
 
+export const llmConfigPageTestables = {
+  deleteBody,
+  deleteTitle,
+  errorText,
+  queryError,
+  toastError,
+}
+
 function deleteTitle(
   target:
     | { kind: 'channel'; row: LLMChannel }

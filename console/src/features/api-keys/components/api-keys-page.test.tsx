@@ -56,15 +56,11 @@ describe('ApiKeysPage user flow', () => {
 
     const { container, user } = renderWithProviders(<ApiKeysPage />)
 
-    await waitFor(() => {
-      expect(screen.getByText('prod ingest')).toBeInTheDocument()
-    })
+    await screen.findByText('prod ingest', {}, { timeout: 5_000 })
     expect(screen.getByText('Key 总数')).toBeInTheDocument()
     expect(screen.getByText('Key 治理建议')).toBeInTheDocument()
-    await waitFor(() => {
-      expect(screen.getByText('服务账号目录')).toBeInTheDocument()
-      expect(screen.getByText('ci-bot')).toBeInTheDocument()
-    })
+    await screen.findByText('服务账号目录', {}, { timeout: 5_000 })
+    await screen.findByText('ci-bot', {}, { timeout: 5_000 })
     expect(screen.getByText('ak_live_1234…')).toBeInTheDocument()
     expect(screen.getByRole('table', { name: 'API key 列表' })).toBeInTheDocument()
     expect(screen.getByText('可用')).toBeInTheDocument()
