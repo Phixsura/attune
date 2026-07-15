@@ -1,4 +1,5 @@
 import { HttpResponse, http } from 'msw'
+import { defaultLLMChannelsList } from '@/testing/mocks/handlers'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 import { LLMConfigPage } from './llm-config-page'
@@ -12,6 +13,40 @@ test('renders managed LLM config surfaces', async () => {
   )
   expect(await screen.findByText('gpt-4o-mini')).toBeInTheDocument()
   expect(await screen.findByText('Routes')).toBeInTheDocument()
+})
+
+test('renders empty states when no LLM channels or routes exist', async () => {
+  server.use(
+    http.get('/fb/v1/console/llm/channels', () => HttpResponse.json({ items: [] })),
+    http.get('/fb/v1/console/llm/routes', () => HttpResponse.json({ items: [] })),
+  )
+
+  renderWithProviders(<LLMConfigPage />)
+
+  expect(await screen.findByText('还没有 channel')).toBeInTheDocument()
+  expect(screen.getByText('还没有路由')).toBeInTheDocument()
+  expect(screen.getAllByText('未选择 channel').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('创建 channel 后再绑定 logical model 能力。').length).toBeGreaterThan(
+    0,
+  )
+})
+
+test('shows query error states for channels, routes, and abilities', async () => {
+  server.use(
+    http.get('/fb/v1/console/llm/channels', () => HttpResponse.json(defaultLLMChannelsList)),
+    http.get('/fb/v1/console/llm/routes', () => new HttpResponse(null, { status: 500 })),
+    http.get(
+      '/fb/v1/console/llm/channels/:id/abilities',
+      () => new HttpResponse(null, { status: 500 }),
+    ),
+  )
+
+  renderWithProviders(<LLMConfigPage />)
+
+  expect((await screen.findAllByText('Primary')).length).toBeGreaterThan(0)
+  await waitFor(() => {
+    expect(screen.getAllByText('出错了').length).toBeGreaterThanOrEqual(2)
+  })
 })
 
 test('loads provider model options in the ability dialog', async () => {
