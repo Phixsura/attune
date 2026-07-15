@@ -5,12 +5,14 @@ package publicvisibility
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -368,6 +370,99 @@ func TestNormalizePortalSubmissionForm(t *testing.T) {
 				t.Fatalf("normalizePortalSubmissionForm() error = %v, want %v", err, ErrValidation)
 			}
 		})
+	}
+}
+
+func TestNormalizePortalSubmissionFormEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	empty, err := normalizePortalSubmissionForm(repo.PortalSubmissionForm{
+		Headline:          " Share feedback ",
+		Description:       " Tell us what is broken. ",
+		Acknowledgement:   " Thanks. ",
+		SubmitButtonLabel: " Submit feedback ",
+	})
+	if err != nil {
+		t.Fatalf("normalizePortalSubmissionForm() empty fields error = %v", err)
+	}
+	if empty.Fields != nil || empty.Headline != "Share feedback" || empty.SubmitButtonLabel != "Submit feedback" {
+		t.Fatalf("normalizePortalSubmissionForm() empty fields = %#v, want trimmed text and nil fields", empty)
+	}
+
+	many := repo.PortalSubmissionForm{Fields: make([]repo.PortalSubmissionField, 9)}
+	for i := range many.Fields {
+		many.Fields[i] = repo.PortalSubmissionField{
+			Key:   fmt.Sprintf("field_%d", i),
+			Label: fmt.Sprintf("Field %d", i),
+			Kind:  repo.PortalSubmissionFieldKindText,
+		}
+	}
+	if _, err := normalizePortalSubmissionForm(many); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizePortalSubmissionForm() oversized form error = %v, want %v", err, ErrValidation)
+	}
+
+	booleanField := repo.PortalSubmissionForm{Fields: []repo.PortalSubmissionField{{
+		Key:     "include",
+		Label:   "Include",
+		Kind:    repo.PortalSubmissionFieldKindBoolean,
+		Options: []string{"ignored"},
+	}}}
+	normalized, err := normalizePortalSubmissionForm(booleanField)
+	if err != nil {
+		t.Fatalf("normalizePortalSubmissionForm() boolean field error = %v", err)
+	}
+	if normalized.Fields[0].Options != nil {
+		t.Fatalf("normalizePortalSubmissionForm() boolean field options = %#v, want nil", normalized.Fields[0].Options)
+	}
+
+	if _, err := normalizePortalSubmissionForm(repo.PortalSubmissionForm{Fields: []repo.PortalSubmissionField{{
+		Key:   "mystery",
+		Label: "Mystery",
+		Kind:  repo.PortalSubmissionFieldKind("mystery"),
+	}}}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizePortalSubmissionForm() invalid kind error = %v, want %v", err, ErrValidation)
+	}
+
+	if _, err := normalizePortalSubmissionForm(repo.PortalSubmissionForm{Fields: []repo.PortalSubmissionField{{
+		Key:     "severity",
+		Label:   "Severity",
+		Kind:    repo.PortalSubmissionFieldKindSelect,
+		Options: []string{"low", " ", "high"},
+	}}}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizePortalSubmissionForm() blank option error = %v, want %v", err, ErrValidation)
+	}
+
+	tooManyOptions := make([]string, 13)
+	for i := range tooManyOptions {
+		tooManyOptions[i] = fmt.Sprintf("option-%d", i)
+	}
+	if _, err := normalizePortalSubmissionForm(repo.PortalSubmissionForm{Fields: []repo.PortalSubmissionField{{
+		Key:     "severity",
+		Label:   "Severity",
+		Kind:    repo.PortalSubmissionFieldKindMultiSelect,
+		Options: tooManyOptions,
+	}}}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizePortalSubmissionForm() oversized options error = %v, want %v", err, ErrValidation)
+	}
+}
+
+func TestPortalSubmissionFieldKindValid(t *testing.T) {
+	t.Parallel()
+
+	validKinds := []repo.PortalSubmissionFieldKind{
+		repo.PortalSubmissionFieldKindText,
+		repo.PortalSubmissionFieldKindTextarea,
+		repo.PortalSubmissionFieldKindSelect,
+		repo.PortalSubmissionFieldKindMultiSelect,
+		repo.PortalSubmissionFieldKindBoolean,
+	}
+	for _, kind := range validKinds {
+		if !portalSubmissionFieldKindValid(kind) {
+			t.Fatalf("portalSubmissionFieldKindValid(%q) = false, want true", kind)
+		}
+	}
+	if portalSubmissionFieldKindValid(repo.PortalSubmissionFieldKind("mystery")) {
+		t.Fatalf("portalSubmissionFieldKindValid(mystery) = true, want false")
 	}
 }
 
@@ -969,6 +1064,569 @@ func TestAuditFieldHelpers(t *testing.T) {
 	}
 }
 
+func TestUpdatePolicyPersistsNormalizedPolicyAndRecordsAudit(t *testing.T) {
+	ctx := context.Background()
+	tx := ptrext.Of(fakePublicTx{})
+	auditRepo := ptrext.Of(fakeAuditRepo{})
+	fake := ptrext.Of(fakePublicRepo{
+		policy:  ptrext.Of(defaultPolicy("tenant-a")),
+		beginTx: tx,
+		upsertPolicyResult: ptrext.Of(repo.Policy{
+			TenantID:              "tenant-a",
+			PortalAccessMode:      repo.AccessModePublic,
+			SearchIndexingEnabled: true,
+			RequestsEnabled:       true,
+			CommentsEnabled:       true,
+			RoadmapEnabled:        true,
+			ChangelogEnabled:      true,
+			SubmissionWriteMode:   repo.WriteModeAnonymous,
+			CommentWriteMode:      repo.WriteModeIdentified,
+			VoteWriteMode:         repo.WriteModeAnonymous,
+			DefaultRequestState:   repo.ModerationStateApproved,
+			DefaultCommentState:   repo.ModerationStatePending,
+			SubmitterIdentityMode: repo.IdentityModeDisplayName,
+			ShowVoteCount:         false,
+			ShowCommentCount:      true,
+			ShowSubmitterDisplay:  true,
+			HidePublicTimestamps:  true,
+			UpdatedBy:             "user-1",
+		}),
+	})
+	service := ptrext.Of(Service{repo: fake, audit: auditlogsvc.New(auditRepo)})
+
+	got, err := service.UpdatePolicy(ctx, UpdatePolicyInput{
+		TenantID:              " tenant-a ",
+		PortalAccessMode:      repo.AccessModePublic,
+		SearchIndexingEnabled: true,
+		RequestsEnabled:       true,
+		CommentsEnabled:       true,
+		RoadmapEnabled:        true,
+		ChangelogEnabled:      true,
+		SubmissionWriteMode:   repo.WriteModeAnonymous,
+		CommentWriteMode:      repo.WriteModeIdentified,
+		VoteWriteMode:         repo.WriteModeAnonymous,
+		DefaultRequestState:   repo.ModerationStateApproved,
+		DefaultCommentState:   repo.ModerationStatePending,
+		SubmitterIdentityMode: repo.IdentityModeDisplayName,
+		PortalSubmissionForm: repo.PortalSubmissionForm{
+			Headline:          " Share feedback ",
+			Description:       " Tell us what is broken. ",
+			Acknowledgement:   " Thanks. ",
+			SubmitButtonLabel: " Submit feedback ",
+			ShowPageURL:       true,
+			Fields: []repo.PortalSubmissionField{{
+				Key:     " severity ",
+				Label:   " Severity ",
+				Kind:    repo.PortalSubmissionFieldKindSelect,
+				Options: []string{" low ", " high "},
+			}},
+		},
+		RoadmapStatusMappings: []repo.RoadmapStatusMapping{
+			{Status: "open", Label: " Under consideration ", Order: 1, Included: true},
+			{Status: "planned", Label: " Planned ", Order: 2, Included: true},
+			{Status: "in_progress", Label: " In progress ", Order: 3, Included: true},
+			{Status: "shipped", Label: " Shipped ", Order: 4, Included: true},
+			{Status: "cancelled", Label: " Cancelled ", Order: 5, Included: false},
+		},
+		ShowVoteCount:        false,
+		ShowCommentCount:     true,
+		ShowSubmitterDisplay: true,
+		HidePublicTimestamps: true,
+		Actor:                auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+	})
+	if err != nil {
+		t.Fatalf("UpdatePolicy() error = %v", err)
+	}
+	if got.TenantID != "tenant-a" || got.PortalAccessMode != repo.AccessModePublic || got.UpdatedBy != "user-1" {
+		t.Fatalf("UpdatePolicy() = %#v, want normalized persisted policy", got)
+	}
+	if !fake.upsertPolicyCalled || fake.upsertPolicyInput.TenantID != "tenant-a" || fake.upsertPolicyInput.PortalSubmissionForm.Headline != "Share feedback" {
+		t.Fatalf("UpdatePolicy() upsert input = %#v", fake.upsertPolicyInput)
+	}
+	if fake.policyTenant != "tenant-a" {
+		t.Fatalf("UpdatePolicy() policy lookup tenant = %q, want tenant-a", fake.policyTenant)
+	}
+	if len(auditRepo.entries) != 1 || auditRepo.entries[0].Action != "public_policy.update" {
+		t.Fatalf("UpdatePolicy() audit entries = %#v, want public policy update", auditRepo.entries)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf("UpdatePolicy() tx counts = commit:%d rollback:%d, want 1/1", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
+func TestUpsertRequestProfilePersistsProfileAndRecordsAudit(t *testing.T) {
+	ctx := context.Background()
+	tx := ptrext.Of(fakePublicTx{})
+	auditRepo := ptrext.Of(fakeAuditRepo{})
+	requestID := uuid.New()
+	before := repo.RequestPublication{
+		Profile: repo.RequestProfile{
+			ID:            uuid.New(),
+			TenantID:      "tenant-a",
+			RequestID:     requestID,
+			PublicSlug:    "old-slug",
+			PublicTitle:   "Old title",
+			PublicSummary: "Old summary",
+			PublicState:   "open",
+		},
+		Moderation: repo.ModerationSubject{
+			ID:        uuid.New(),
+			TenantID:  "tenant-a",
+			State:     repo.ModerationStateApproved,
+			SubjectID: "old-subject",
+		},
+	}
+	after := repo.RequestPublication{
+		Profile: repo.RequestProfile{
+			ID:                before.Profile.ID,
+			TenantID:          "tenant-a",
+			RequestID:         requestID,
+			PublicSlug:        "pricing-api",
+			PublicTitle:       "Pricing API",
+			PublicSummary:     "Safe summary",
+			PublicState:       "planned",
+			RoadmapColumn:     "next",
+			IncludedInPortal:  true,
+			IncludedInRoadmap: true,
+			UpdatedBy:         "user-1",
+		},
+		Moderation: repo.ModerationSubject{
+			ID:                     before.Moderation.ID,
+			TenantID:               "tenant-a",
+			State:                  repo.ModerationStatePending,
+			SubmittedByDisplay:     "Portal visitor",
+			SubmittedByFingerprint: "fingerprint-1",
+		},
+	}
+	fake := ptrext.Of(fakePublicRepo{
+		policy:                         ptrext.Of(defaultPolicy("tenant-a")),
+		publication:                    ptrext.Of(before),
+		beginTx:                        tx,
+		upsertRequestPublicationResult: ptrext.Of(after),
+	})
+	service := ptrext.Of(Service{repo: fake, audit: auditlogsvc.New(auditRepo)})
+
+	got, err := service.UpsertRequestProfile(ctx, UpsertRequestProfileInput{
+		TenantID:               " tenant-a ",
+		RequestID:              requestID,
+		PublicSlug:             " Pricing-API ",
+		PublicTitle:            " Pricing API ",
+		PublicSummary:          " Safe summary ",
+		PublicState:            "planned",
+		RoadmapColumn:          " next ",
+		IncludedInPortal:       true,
+		IncludedInRoadmap:      true,
+		SubmittedByDisplay:     " Ada Customer ",
+		SubmittedByFingerprint: " fingerprint-1 ",
+		Actor:                  auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+	})
+	if err != nil {
+		t.Fatalf("UpsertRequestProfile() error = %v", err)
+	}
+	if got.Profile.PublicSlug != "pricing-api" || got.Profile.UpdatedBy != "user-1" || got.Moderation.State != repo.ModerationStatePending {
+		t.Fatalf("UpsertRequestProfile() = %#v, want normalized publication", got)
+	}
+	if !fake.upsertRequestPublicationCalled || fake.upsertRequestPublicationInput.PublicSlug != "pricing-api" || fake.upsertRequestPublicationDefaultState != repo.ModerationStatePending {
+		t.Fatalf("UpsertRequestProfile() upsert input = %#v, default=%q", fake.upsertRequestPublicationInput, fake.upsertRequestPublicationDefaultState)
+	}
+	if !fake.publicationCalled || fake.publicationTenantID != "tenant-a" || fake.publicationRequestID != requestID {
+		t.Fatalf("UpsertRequestProfile() before lookup = tenant:%q request:%s", fake.publicationTenantID, fake.publicationRequestID)
+	}
+	if len(auditRepo.entries) != 1 || auditRepo.entries[0].Action != "public_request_profile.upsert" {
+		t.Fatalf("UpsertRequestProfile() audit entries = %#v, want request profile update", auditRepo.entries)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf("UpsertRequestProfile() tx counts = commit:%d rollback:%d, want 1/1", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
+func publicWriteAuditCandidate(requestID, subjectID uuid.UUID) repo.PublicRequestCandidate {
+	return repo.PublicRequestCandidate{
+		Policy: repo.Policy{
+			TenantID:              "tenant-a",
+			PortalAccessMode:      repo.AccessModePublic,
+			SearchIndexingEnabled: true,
+			RequestsEnabled:       true,
+			CommentsEnabled:       true,
+			CommentWriteMode:      repo.WriteModeAnonymous,
+			VoteWriteMode:         repo.WriteModeAnonymous,
+			SubmitterIdentityMode: repo.IdentityModeDisplayName,
+			ShowSubmitterDisplay:  true,
+			ShowCommentCount:      true,
+		},
+		Profile: repo.RequestProfile{
+			ID:               uuid.New(),
+			TenantID:         "tenant-a",
+			RequestID:        requestID,
+			PublicSlug:       "pricing-api",
+			PublicTitle:      "Pricing API",
+			PublicSummary:    "Public summary",
+			PublicState:      "planned",
+			RoadmapColumn:    "next",
+			IncludedInPortal: true,
+		},
+		Moderation: repo.ModerationSubject{
+			ID:        subjectID,
+			TenantID:  "tenant-a",
+			Surface:   repo.SurfaceRequest,
+			SubjectID: subjectID.String(),
+			State:     repo.ModerationStateApproved,
+		},
+		VoteCount:           7,
+		CommentCount:        1,
+		SubmitterDisplay:    "Ada",
+		CustomerRequestID:   requestID,
+		CustomerRequestLive: true,
+		ViewerHasVoted:      false,
+	}
+}
+
+func assertModeratePersisted(t *testing.T, got repo.ModerationSubject, fake *fakePublicRepo, auditRepo *fakeAuditRepo, tx *fakePublicTx, subjectID uuid.UUID) {
+	t.Helper()
+
+	if got.State != repo.ModerationStateApproved || got.ReasonCode != "policy" || got.ReviewedBy != "user-1" {
+		t.Fatalf("Moderate() = %#v, want approved moderation", got)
+	}
+	if !fake.subjectForUpdateCalled || fake.subjectForUpdateTenantID != "tenant-a" || fake.subjectForUpdateID != subjectID {
+		t.Fatalf("Moderate() subject lookup = tenant:%q id:%s", fake.subjectForUpdateTenantID, fake.subjectForUpdateID)
+	}
+	if !fake.updateSubjectCalled || fake.updateSubjectState != repo.ModerationStateApproved || fake.updateSubjectReasonCode != "policy" || fake.updateSubjectReviewedBy != "user-1" {
+		t.Fatalf("Moderate() update call = %#v", fake)
+	}
+	if len(auditRepo.entries) != 1 || auditRepo.entries[0].Action != "moderation.approve" {
+		t.Fatalf("Moderate() audit entries = %#v, want moderation approve", auditRepo.entries)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf("Moderate() tx counts = commit:%d rollback:%d, want 1/1", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
+func TestModeratePersistsTransitionAndRecordsAudit(t *testing.T) {
+	ctx := context.Background()
+	tx := ptrext.Of(fakePublicTx{})
+	auditRepo := ptrext.Of(fakeAuditRepo{})
+	subjectID := uuid.New()
+	before := repo.ModerationSubject{
+		ID:        subjectID,
+		TenantID:  "tenant-a",
+		Surface:   repo.SurfaceRequest,
+		SubjectID: "request-1",
+		State:     repo.ModerationStatePending,
+	}
+	after := before
+	after.State = repo.ModerationStateApproved
+	after.ReasonCode = "policy"
+	after.ReasonNote = "Needs review"
+	after.ReviewedBy = "user-1"
+	after.ReviewedAt = ptrext.Of(time.Date(2026, 7, 15, 15, 0, 0, 0, time.UTC))
+	fake := ptrext.Of(fakePublicRepo{
+		beginTx:                tx,
+		subjectForUpdateResult: ptrext.Of(before),
+		updateSubjectResult:    ptrext.Of(after),
+	})
+	service := ptrext.Of(Service{repo: fake, audit: auditlogsvc.New(auditRepo)})
+
+	got, err := service.Moderate(ctx, ModerateInput{
+		TenantID:   " tenant-a ",
+		ID:         subjectID,
+		Action:     ActionApprove,
+		ReasonCode: " Policy ",
+		ReasonNote: " Needs review ",
+		Actor:      auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+	})
+	if err != nil {
+		t.Fatalf("Moderate() error = %v", err)
+	}
+	assertModeratePersisted(t, got, fake, auditRepo, tx, subjectID)
+}
+
+func TestVotePublicRequestMutatesPublicStateAndRecordsAudit(t *testing.T) {
+	ctx := context.Background()
+	tx := ptrext.Of(fakePublicTx{})
+	auditRepo := ptrext.Of(fakeAuditRepo{})
+	requestID := uuid.New()
+	subjectID := uuid.New()
+	fake := ptrext.Of(fakePublicRepo{
+		candidate: ptrext.Of(publicWriteAuditCandidate(requestID, subjectID)),
+		beginTx:   tx,
+	})
+	service := ptrext.Of(Service{repo: fake, audit: auditlogsvc.New(auditRepo)})
+	actor := auditlogsvc.Actor{Type: "admin", ID: "user-1"}
+
+	voted, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", " visitor-1 ", actor)
+	if err != nil {
+		t.Fatalf("VotePublicRequest() error = %v", err)
+	}
+	if !fake.addVoteCalled || fake.addVoteSubjectKey != "portal:visitor-1" || fake.addVoteCreatedBy != "user-1" {
+		t.Fatalf("VotePublicRequest() add vote call = %#v", fake)
+	}
+	if !voted.ViewerHasVoted || voted.Votes != 8 {
+		t.Fatalf("VotePublicRequest() = %#v, want incremented vote state", voted)
+	}
+	if len(auditRepo.entries) != 1 || auditRepo.entries[0].Action != "customer_request.add_vote" {
+		t.Fatalf("VotePublicRequest() audit entries = %#v, want add vote", auditRepo.entries)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf("VotePublicRequest() tx counts = commit:%d rollback:%d, want 1/1", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
+func TestUnvotePublicRequestMutatesPublicStateAndRecordsAudit(t *testing.T) {
+	ctx := context.Background()
+	tx := ptrext.Of(fakePublicTx{})
+	auditRepo := ptrext.Of(fakeAuditRepo{})
+	requestID := uuid.New()
+	subjectID := uuid.New()
+	candidate := publicWriteAuditCandidate(requestID, subjectID)
+	candidate.VoteCount = 8
+	candidate.ViewerHasVoted = true
+	fake := ptrext.Of(fakePublicRepo{
+		candidate: ptrext.Of(candidate),
+		beginTx:   tx,
+	})
+	service := ptrext.Of(Service{repo: fake, audit: auditlogsvc.New(auditRepo)})
+	actor := auditlogsvc.Actor{Type: "admin", ID: "user-1"}
+
+	unvoted, err := service.UnvotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor)
+	if err != nil {
+		t.Fatalf("UnvotePublicRequest() error = %v", err)
+	}
+	if !fake.removeVoteCalled || fake.removeVoteSubjectKey != "portal:visitor-1" {
+		t.Fatalf("UnvotePublicRequest() remove vote call = %#v", fake)
+	}
+	if unvoted.ViewerHasVoted || unvoted.Votes != 7 {
+		t.Fatalf("UnvotePublicRequest() = %#v, want removed vote state", unvoted)
+	}
+	if len(auditRepo.entries) != 1 || auditRepo.entries[0].Action != "customer_request.remove_vote" {
+		t.Fatalf("UnvotePublicRequest() audit entries = %#v, want remove vote", auditRepo.entries)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf("UnvotePublicRequest() tx counts = commit:%d rollback:%d, want 1/1", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
+func TestCreatePublicRequestCommentMutatesPublicStateAndRecordsAudit(t *testing.T) {
+	ctx := context.Background()
+	tx := ptrext.Of(fakePublicTx{})
+	auditRepo := ptrext.Of(fakeAuditRepo{})
+	requestID := uuid.New()
+	subjectID := uuid.New()
+	fake := ptrext.Of(fakePublicRepo{
+		candidate: ptrext.Of(publicWriteAuditCandidate(requestID, subjectID)),
+		beginTx:   tx,
+		publicRequestCommentsResult: []repo.PublicRequestComment{{
+			ID:                 uuid.New(),
+			Body:               "Existing public comment",
+			SubmittedByDisplay: "Portal visitor",
+			State:              repo.ModerationStateApproved,
+		}},
+		addCommentResult: ptrext.Of(repo.PublicRequestComment{
+			ID:                 uuid.New(),
+			Body:               "Great idea",
+			SubmittedByDisplay: "Portal visitor",
+			State:              repo.ModerationStatePending,
+		}),
+	})
+	service := ptrext.Of(Service{repo: fake, audit: auditlogsvc.New(auditRepo)})
+	actor := auditlogsvc.Actor{Type: "admin", ID: "user-1"}
+
+	commented, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", " Great idea ", actor)
+	if err != nil {
+		t.Fatalf("CreatePublicRequestComment() error = %v", err)
+	}
+	if !fake.addCommentCalled || fake.addCommentBody != "Great idea" || fake.addCommentCreatedBy != "user-1" {
+		t.Fatalf("CreatePublicRequestComment() add comment call = %#v", fake)
+	}
+	if !commented.CanComment || commented.Comments != 2 || len(commented.CommentItems) != 2 {
+		t.Fatalf("CreatePublicRequestComment() = %#v, want refreshed comment thread", commented)
+	}
+	if len(auditRepo.entries) != 1 || auditRepo.entries[0].Action != "customer_request.add_comment" {
+		t.Fatalf("CreatePublicRequestComment() audit entries = %#v, want add comment", auditRepo.entries)
+	}
+	if tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+		t.Fatalf("CreatePublicRequestComment() tx counts = commit:%d rollback:%d, want 1/1", tx.commitCalls, tx.rollbackCalls)
+	}
+}
+
+func TestWriteMethodsHandleValidationAndRepoErrors(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.New()
+	subjectID := uuid.New()
+	baseCandidate := repo.PublicRequestCandidate{
+		Policy: repo.Policy{
+			TenantID:              "tenant-a",
+			PortalAccessMode:      repo.AccessModePublic,
+			RequestsEnabled:       true,
+			CommentsEnabled:       true,
+			CommentWriteMode:      repo.WriteModeIdentified,
+			VoteWriteMode:         repo.WriteModeIdentified,
+			SubmitterIdentityMode: repo.IdentityModeDisplayName,
+			ShowSubmitterDisplay:  true,
+		},
+		Profile: repo.RequestProfile{
+			ID:               uuid.New(),
+			TenantID:         "tenant-a",
+			RequestID:        requestID,
+			PublicSlug:       "pricing-api",
+			PublicTitle:      "Pricing API",
+			PublicSummary:    "Public summary",
+			PublicState:      "planned",
+			RoadmapColumn:    "next",
+			IncludedInPortal: true,
+		},
+		Moderation: repo.ModerationSubject{
+			ID:        subjectID,
+			TenantID:  "tenant-a",
+			Surface:   repo.SurfaceRequest,
+			SubjectID: subjectID.String(),
+			State:     repo.ModerationStateApproved,
+		},
+		CustomerRequestID:   requestID,
+		CustomerRequestLive: true,
+	}
+
+	tests := []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{
+			name: "update policy begin error",
+			run: func(t *testing.T) {
+				service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+					policy:   ptrext.Of(defaultPolicy("tenant-a")),
+					beginErr: errors.New("boom"),
+				})})
+				_, err := service.UpdatePolicy(ctx, UpdatePolicyInput{
+					TenantID:              "tenant-a",
+					PortalAccessMode:      repo.AccessModePublic,
+					SubmissionWriteMode:   repo.WriteModeDisabled,
+					CommentWriteMode:      repo.WriteModeDisabled,
+					VoteWriteMode:         repo.WriteModeDisabled,
+					DefaultRequestState:   repo.ModerationStatePending,
+					DefaultCommentState:   repo.ModerationStatePending,
+					SubmitterIdentityMode: repo.IdentityModeAnonymous,
+					Actor:                 auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+				})
+				if err == nil || err.Error() != "boom" {
+					t.Fatalf("UpdatePolicy() error = %v, want boom", err)
+				}
+			},
+		},
+		{
+			name: "upsert request profile repo not found before update",
+			run: func(t *testing.T) {
+				tx := ptrext.Of(fakePublicTx{})
+				fake := ptrext.Of(fakePublicRepo{
+					policy:         ptrext.Of(defaultPolicy("tenant-a")),
+					publicationErr: repo.ErrNotFound,
+					beginTx:        tx,
+					upsertRequestPublicationResult: ptrext.Of(repo.RequestPublication{
+						Profile: repo.RequestProfile{
+							TenantID:          "tenant-a",
+							RequestID:         requestID,
+							PublicSlug:        "pricing-api",
+							PublicTitle:       "Pricing API",
+							PublicSummary:     "Safe summary",
+							PublicState:       "planned",
+							RoadmapColumn:     "next",
+							IncludedInPortal:  true,
+							IncludedInRoadmap: true,
+							UpdatedBy:         "user-1",
+						},
+						Moderation: repo.ModerationSubject{
+							TenantID:               "tenant-a",
+							State:                  repo.ModerationStatePending,
+							SubmittedByDisplay:     "Portal visitor",
+							SubmittedByFingerprint: "fingerprint-1",
+						},
+					}),
+				})
+				service := ptrext.Of(Service{repo: fake, audit: auditlogsvc.New(ptrext.Of(fakeAuditRepo{}))})
+				_, err := service.UpsertRequestProfile(ctx, UpsertRequestProfileInput{
+					TenantID:               "tenant-a",
+					RequestID:              requestID,
+					PublicSlug:             "pricing-api",
+					PublicTitle:            "Pricing API",
+					PublicSummary:          "Safe summary",
+					PublicState:            "planned",
+					RoadmapColumn:          "next",
+					IncludedInPortal:       true,
+					IncludedInRoadmap:      true,
+					SubmittedByDisplay:     "Portal visitor",
+					SubmittedByFingerprint: "fingerprint-1",
+					Actor:                  auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+				})
+				if err != nil {
+					t.Fatalf("UpsertRequestProfile() error = %v, want nil", err)
+				}
+				if !fake.publicationCalled || !errors.Is(fake.publicationErr, repo.ErrNotFound) {
+					t.Fatalf("UpsertRequestProfile() before lookup = %#v", fake)
+				}
+			},
+		},
+		{
+			name: "moderate not found",
+			run: func(t *testing.T) {
+				service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+					beginTx:             ptrext.Of(fakePublicTx{}),
+					subjectForUpdateErr: repo.ErrNotFound,
+				})})
+				_, err := service.Moderate(ctx, ModerateInput{
+					TenantID: "tenant-a",
+					ID:       subjectID,
+					Action:   ActionApprove,
+					Actor:    auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+				})
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatalf("Moderate() error = %v, want %v", err, ErrNotFound)
+				}
+			},
+		},
+		{
+			name: "vote disabled",
+			run: func(t *testing.T) {
+				candidate := ptrext.Of(baseCandidate)
+				candidate.Policy.VoteWriteMode = repo.WriteModeDisabled
+				service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+					candidate: candidate,
+				})})
+				_, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", auditlogsvc.Actor{Type: "admin", ID: "user-1"})
+				if !errors.Is(err, ErrDisabled) {
+					t.Fatalf("VotePublicRequest() error = %v, want %v", err, ErrDisabled)
+				}
+			},
+		},
+		{
+			name: "comment too long",
+			run: func(t *testing.T) {
+				service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+					candidate: ptrext.Of(baseCandidate),
+				})})
+				_, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", strings.Repeat("x", 5001), auditlogsvc.Actor{Type: "admin", ID: "user-1"})
+				if !errors.Is(err, ErrValidation) {
+					t.Fatalf("CreatePublicRequestComment() error = %v, want %v", err, ErrValidation)
+				}
+			},
+		},
+		{
+			name: "vote missing visitor",
+			run: func(t *testing.T) {
+				service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+					candidate: ptrext.Of(baseCandidate),
+				})})
+				_, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", " ", auditlogsvc.Actor{Type: "admin", ID: "user-1"})
+				if !errors.Is(err, ErrValidation) {
+					t.Fatalf("VotePublicRequest() error = %v, want %v", err, ErrValidation)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, tt.run)
+	}
+}
+
 func TestRecordAuditNoServiceConfigured(t *testing.T) {
 	t.Parallel()
 
@@ -996,6 +1654,453 @@ func TestRecordAuditNoServiceConfigured(t *testing.T) {
 	if err := service.recordModerationAuditTx(ctx, nil, auditlogsvc.Actor{}, ActionApprove, before, after); err != nil {
 		t.Fatalf("recordModerationAuditTx() error = %v, want nil", err)
 	}
+}
+
+func TestRecordPortalAuditHelpersNoServiceConfigured(t *testing.T) {
+	t.Parallel()
+
+	service := New(nil, nil)
+	ctx := context.Background()
+	candidate := repo.PublicRequestCandidate{
+		Policy: repo.Policy{
+			TenantID:            "tenant-a",
+			PortalAccessMode:    repo.AccessModePublic,
+			RequestsEnabled:     true,
+			CommentsEnabled:     true,
+			CommentWriteMode:    repo.WriteModeAnonymous,
+			VoteWriteMode:       repo.WriteModeAnonymous,
+			DefaultCommentState: repo.ModerationStatePending,
+		},
+		Profile: repo.RequestProfile{
+			ID:            uuid.New(),
+			TenantID:      "tenant-a",
+			RequestID:     uuid.New(),
+			PublicSlug:    "pricing-api",
+			PublicTitle:   "Pricing API",
+			PublicSummary: "Public summary",
+		},
+		Moderation: repo.ModerationSubject{
+			ID:        uuid.New(),
+			TenantID:  "tenant-a",
+			Surface:   repo.SurfaceRequest,
+			SubjectID: uuid.NewString(),
+			State:     repo.ModerationStateApproved,
+		},
+		CustomerRequestID: uuid.New(),
+	}
+	comment := ptrext.Of(repo.PublicRequestComment{ID: uuid.New()})
+	moderation := repo.ModerationSubject{
+		ID:        uuid.New(),
+		TenantID:  "tenant-a",
+		Surface:   repo.SurfaceRequestComment,
+		SubjectID: comment.ID.String(),
+		State:     repo.ModerationStatePending,
+	}
+	if err := service.recordPortalVoteAuditTx(ctx, nil, auditlogsvc.Actor{}, "customer_request.add_vote", candidate, "portal:visitor-1", "hash"); err != nil {
+		t.Fatalf("recordPortalVoteAuditTx() error = %v, want nil", err)
+	}
+	if err := service.recordPortalCommentAuditTx(ctx, nil, auditlogsvc.Actor{}, candidate, "portal:visitor-1", "hash", comment, moderation); err != nil {
+		t.Fatalf("recordPortalCommentAuditTx() error = %v, want nil", err)
+	}
+}
+
+func TestUpdatePolicyFailurePaths(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	input := UpdatePolicyInput{
+		TenantID:              "tenant-a",
+		PortalAccessMode:      repo.AccessModePublic,
+		SubmissionWriteMode:   repo.WriteModeDisabled,
+		CommentWriteMode:      repo.WriteModeDisabled,
+		VoteWriteMode:         repo.WriteModeDisabled,
+		DefaultRequestState:   repo.ModerationStatePending,
+		DefaultCommentState:   repo.ModerationStatePending,
+		SubmitterIdentityMode: repo.IdentityModeAnonymous,
+		Actor:                 auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+	}
+
+	t.Run("policy lookup error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			policyErr: errors.New("policy boom"),
+		})})
+		if _, err := service.UpdatePolicy(ctx, input); err == nil || err.Error() != "policy boom" {
+			t.Fatalf("UpdatePolicy() error = %v, want policy boom", err)
+		}
+	})
+
+	t.Run("upsert error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			policy:          ptrext.Of(defaultPolicy("tenant-a")),
+			beginTx:         tx,
+			upsertPolicyErr: errors.New("upsert boom"),
+		})})
+		if _, err := service.UpdatePolicy(ctx, input); err == nil || err.Error() != "upsert boom" {
+			t.Fatalf("UpdatePolicy() error = %v, want upsert boom", err)
+		}
+	})
+
+	t.Run("commit error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{commitErr: errors.New("commit boom")})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			policy:  ptrext.Of(defaultPolicy("tenant-a")),
+			beginTx: tx,
+		})})
+		if _, err := service.UpdatePolicy(ctx, input); err == nil || err.Error() != "commit boom" {
+			t.Fatalf("UpdatePolicy() error = %v, want commit boom", err)
+		}
+		if tx.commitCalls != 1 {
+			t.Fatalf("UpdatePolicy() commit calls = %d, want 1", tx.commitCalls)
+		}
+	})
+}
+
+func TestUpsertRequestProfileFailurePaths(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	requestID := uuid.New()
+	input := UpsertRequestProfileInput{
+		TenantID:               "tenant-a",
+		RequestID:              requestID,
+		PublicSlug:             "pricing-api",
+		PublicTitle:            "Pricing API",
+		PublicSummary:          "Public summary",
+		PublicState:            "planned",
+		RoadmapColumn:          "next",
+		IncludedInPortal:       true,
+		IncludedInRoadmap:      true,
+		SubmittedByDisplay:     "Ada",
+		SubmittedByFingerprint: "fingerprint-1",
+		Actor:                  auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+	}
+
+	t.Run("policy lookup error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			policyErr: errors.New("policy boom"),
+		})})
+		if _, err := service.UpsertRequestProfile(ctx, input); err == nil || err.Error() != "policy boom" {
+			t.Fatalf("UpsertRequestProfile() error = %v, want policy boom", err)
+		}
+	})
+
+	t.Run("begin error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			policy:         ptrext.Of(defaultPolicy("tenant-a")),
+			beginErr:       errors.New("begin boom"),
+			publicationErr: repo.ErrNotFound,
+		})})
+		if _, err := service.UpsertRequestProfile(ctx, input); err == nil || err.Error() != "begin boom" {
+			t.Fatalf("UpsertRequestProfile() error = %v, want begin boom", err)
+		}
+	})
+
+	t.Run("invalid input from repo", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			policy:                      ptrext.Of(defaultPolicy("tenant-a")),
+			publicationErr:              repo.ErrNotFound,
+			beginTx:                     tx,
+			upsertRequestPublicationErr: repo.ErrInvalidInput,
+		})})
+		if _, err := service.UpsertRequestProfile(ctx, input); !errors.Is(err, ErrValidation) {
+			t.Fatalf("UpsertRequestProfile() error = %v, want %v", err, ErrValidation)
+		}
+	})
+
+	t.Run("commit error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{commitErr: errors.New("commit boom")})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			policy:  ptrext.Of(defaultPolicy("tenant-a")),
+			beginTx: tx,
+		})})
+		if _, err := service.UpsertRequestProfile(ctx, input); err == nil || err.Error() != "commit boom" {
+			t.Fatalf("UpsertRequestProfile() error = %v, want commit boom", err)
+		}
+	})
+}
+
+func TestModerateFailurePaths(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	subjectID := uuid.New()
+	input := ModerateInput{
+		TenantID:   "tenant-a",
+		ID:         subjectID,
+		Action:     ActionReject,
+		ReasonCode: "policy",
+		ReasonNote: "Needs review",
+		Actor:      auditlogsvc.Actor{Type: "admin", ID: "user-1"},
+	}
+	before := repo.ModerationSubject{
+		ID:        subjectID,
+		TenantID:  "tenant-a",
+		Surface:   repo.SurfaceRequest,
+		SubjectID: "request-1",
+		State:     repo.ModerationStateApproved,
+	}
+
+	t.Run("begin error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			beginErr: errors.New("begin boom"),
+		})})
+		if _, err := service.Moderate(ctx, input); err == nil || err.Error() != "begin boom" {
+			t.Fatalf("Moderate() error = %v, want begin boom", err)
+		}
+	})
+
+	t.Run("transition error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			beginTx:                ptrext.Of(fakePublicTx{}),
+			subjectForUpdateResult: ptrext.Of(before),
+		})})
+		if _, err := service.Moderate(ctx, input); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("Moderate() error = %v, want %v", err, ErrInvalidTransition)
+		}
+	})
+
+	t.Run("update error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			beginTx: tx,
+			subjectForUpdateResult: ptrext.Of(func() repo.ModerationSubject {
+				subject := before
+				subject.State = repo.ModerationStatePending
+				return subject
+			}()),
+			updateSubjectErr: errors.New("update boom"),
+		})})
+		if _, err := service.Moderate(ctx, input); err == nil || err.Error() != "update boom" {
+			t.Fatalf("Moderate() error = %v, want update boom", err)
+		}
+	})
+
+	t.Run("commit error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{commitErr: errors.New("commit boom")})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			beginTx: tx,
+			subjectForUpdateResult: ptrext.Of(func() repo.ModerationSubject {
+				subject := before
+				subject.State = repo.ModerationStatePending
+				return subject
+			}()),
+			updateSubjectResult: ptrext.Of(func() repo.ModerationSubject {
+				subject := before
+				subject.State = repo.ModerationStatePending
+				subject.ReasonCode = "policy"
+				subject.ReasonNote = "Needs review"
+				subject.ReviewedBy = "user-1"
+				return subject
+			}()),
+		})})
+		if _, err := service.Moderate(ctx, input); err == nil || err.Error() != "commit boom" {
+			t.Fatalf("Moderate() error = %v, want commit boom", err)
+		}
+	})
+}
+
+func TestPublicWriteFailurePaths(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	actor := auditlogsvc.Actor{Type: "admin", ID: "user-1"}
+	requestID := uuid.New()
+	subjectID := uuid.New()
+	candidate := repo.PublicRequestCandidate{
+		Policy: repo.Policy{
+			TenantID:              "tenant-a",
+			PortalAccessMode:      repo.AccessModePublic,
+			RequestsEnabled:       true,
+			CommentsEnabled:       true,
+			CommentWriteMode:      repo.WriteModeAnonymous,
+			VoteWriteMode:         repo.WriteModeAnonymous,
+			SubmitterIdentityMode: repo.IdentityModeDisplayName,
+			ShowSubmitterDisplay:  true,
+		},
+		Profile: repo.RequestProfile{
+			ID:               uuid.New(),
+			TenantID:         "tenant-a",
+			RequestID:        requestID,
+			PublicSlug:       "pricing-api",
+			PublicTitle:      "Pricing API",
+			PublicSummary:    "Public summary",
+			PublicState:      "planned",
+			RoadmapColumn:    "next",
+			IncludedInPortal: true,
+		},
+		Moderation: repo.ModerationSubject{
+			ID:        subjectID,
+			TenantID:  "tenant-a",
+			Surface:   repo.SurfaceRequest,
+			SubjectID: subjectID.String(),
+			State:     repo.ModerationStateApproved,
+		},
+		CustomerRequestID:   requestID,
+		CustomerRequestLive: true,
+	}
+
+	t.Run("vote candidate not found", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidateErr: repo.ErrNotFound,
+		})})
+		if _, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("VotePublicRequest() error = %v, want %v", err, ErrNotFound)
+		}
+	})
+
+	t.Run("vote candidate invisible", func(t *testing.T) {
+		invisible := ptrext.Of(candidate)
+		invisible.CustomerRequestLive = false
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{candidate: invisible})})
+		if _, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("VotePublicRequest() error = %v, want %v", err, ErrNotFound)
+		}
+	})
+
+	t.Run("vote begin error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate: ptrext.Of(candidate),
+			beginErr:  errors.New("begin boom"),
+		})})
+		if _, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); err == nil || err.Error() != "begin boom" {
+			t.Fatalf("VotePublicRequest() error = %v, want begin boom", err)
+		}
+	})
+
+	t.Run("vote add error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate:  ptrext.Of(candidate),
+			beginTx:    tx,
+			addVoteErr: errors.New("vote boom"),
+		})})
+		if _, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); err == nil || err.Error() != "vote boom" {
+			t.Fatalf("VotePublicRequest() error = %v, want vote boom", err)
+		}
+	})
+
+	t.Run("vote commit error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{commitErr: errors.New("commit boom")})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate: ptrext.Of(candidate),
+			beginTx:   tx,
+		})})
+		if _, err := service.VotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); err == nil || err.Error() != "commit boom" {
+			t.Fatalf("VotePublicRequest() error = %v, want commit boom", err)
+		}
+	})
+
+	t.Run("comment candidate not found", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidateErr: repo.ErrNotFound,
+		})})
+		if _, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", "Great idea", actor); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("CreatePublicRequestComment() error = %v, want %v", err, ErrNotFound)
+		}
+	})
+
+	t.Run("comment disabled", func(t *testing.T) {
+		disabled := ptrext.Of(candidate)
+		disabled.Policy.CommentWriteMode = repo.WriteModeDisabled
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{candidate: disabled})})
+		if _, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", "Great idea", actor); !errors.Is(err, ErrDisabled) {
+			t.Fatalf("CreatePublicRequestComment() error = %v, want %v", err, ErrDisabled)
+		}
+	})
+
+	t.Run("comment begin error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate: ptrext.Of(candidate),
+			beginErr:  errors.New("begin boom"),
+		})})
+		if _, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", "Great idea", actor); err == nil || err.Error() != "begin boom" {
+			t.Fatalf("CreatePublicRequestComment() error = %v, want begin boom", err)
+		}
+	})
+
+	t.Run("comment add error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate:     ptrext.Of(candidate),
+			beginTx:       tx,
+			addCommentErr: errors.New("comment boom"),
+		})})
+		if _, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", "Great idea", actor); err == nil || err.Error() != "comment boom" {
+			t.Fatalf("CreatePublicRequestComment() error = %v, want comment boom", err)
+		}
+	})
+
+	t.Run("comment add not found", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate:     ptrext.Of(candidate),
+			beginTx:       tx,
+			addCommentErr: repo.ErrNotFound,
+		})})
+		if _, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", "Great idea", actor); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("CreatePublicRequestComment() error = %v, want %v", err, ErrNotFound)
+		}
+	})
+
+	t.Run("comment create moderation subject error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate:                  ptrext.Of(candidate),
+			beginTx:                    tx,
+			addCommentResult:           ptrext.Of(repo.PublicRequestComment{ID: uuid.New(), Body: "Great idea", SubmittedByDisplay: "Portal visitor"}),
+			createModerationSubjectErr: errors.New("moderation boom"),
+		})})
+		if _, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", "Great idea", actor); err == nil || err.Error() != "moderation boom" {
+			t.Fatalf("CreatePublicRequestComment() error = %v, want moderation boom", err)
+		}
+	})
+
+	t.Run("comment commit error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{commitErr: errors.New("commit boom")})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate:        ptrext.Of(candidate),
+			beginTx:          tx,
+			addCommentResult: ptrext.Of(repo.PublicRequestComment{ID: uuid.New(), Body: "Great idea", SubmittedByDisplay: "Portal visitor"}),
+		})})
+		if _, err := service.CreatePublicRequestComment(ctx, "tenant-a", "pricing-api", "visitor-1", "Great idea", actor); err == nil || err.Error() != "commit boom" {
+			t.Fatalf("CreatePublicRequestComment() error = %v, want commit boom", err)
+		}
+	})
+
+	t.Run("unvote begin error", func(t *testing.T) {
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate: ptrext.Of(candidate),
+			beginErr:  errors.New("begin boom"),
+		})})
+		if _, err := service.UnvotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); err == nil || err.Error() != "begin boom" {
+			t.Fatalf("UnvotePublicRequest() error = %v, want begin boom", err)
+		}
+	})
+
+	t.Run("unvote remove error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate:     ptrext.Of(candidate),
+			beginTx:       tx,
+			removeVoteErr: errors.New("remove boom"),
+		})})
+		if _, err := service.UnvotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); err == nil || err.Error() != "remove boom" {
+			t.Fatalf("UnvotePublicRequest() error = %v, want remove boom", err)
+		}
+	})
+
+	t.Run("unvote commit error", func(t *testing.T) {
+		tx := ptrext.Of(fakePublicTx{commitErr: errors.New("commit boom")})
+		service := ptrext.Of(Service{repo: ptrext.Of(fakePublicRepo{
+			candidate: ptrext.Of(candidate),
+			beginTx:   tx,
+		})})
+		if _, err := service.UnvotePublicRequest(ctx, "tenant-a", "pricing-api", "visitor-1", actor); err == nil || err.Error() != "commit boom" {
+			t.Fatalf("UnvotePublicRequest() error = %v, want commit boom", err)
+		}
+	})
 }
 
 func TestRecordAuditWritesEvents(t *testing.T) {
@@ -1098,8 +2203,13 @@ type fakePublicRepo struct {
 	listFilter                            repo.ListFilter
 	publication                           *repo.RequestPublication
 	publicationErr                        error
+	publicationTenantID                   string
+	publicationRequestID                  uuid.UUID
+	publicationCalled                     bool
 	candidate                             *repo.PublicRequestCandidate
 	candidateErr                          error
+	candidateTenantSlug                   string
+	candidatePublicSlug                   string
 	publicRequestViewerSubjectKey         string
 	publicListResult                      repo.PublicRequestListResult
 	publicListErr                         error
@@ -1109,10 +2219,71 @@ type fakePublicRepo struct {
 	publicRequestCommentsTenantSlug       string
 	publicRequestCommentsPublicSlug       string
 	publicRequestCommentsViewerSubjectKey string
+	beginTx                               pgx.Tx
+	beginErr                              error
+	upsertPolicyResult                    *repo.Policy
+	upsertPolicyErr                       error
+	upsertPolicyCalled                    bool
+	upsertPolicyInput                     repo.Policy
+	upsertRequestPublicationResult        *repo.RequestPublication
+	upsertRequestPublicationErr           error
+	upsertRequestPublicationCalled        bool
+	upsertRequestPublicationInput         repo.RequestProfile
+	upsertRequestPublicationDefaultState  repo.ModerationState
+	upsertRequestPublicationDisplay       string
+	upsertRequestPublicationFingerprint   string
+	subjectForUpdateResult                *repo.ModerationSubject
+	subjectForUpdateErr                   error
+	subjectForUpdateCalled                bool
+	subjectForUpdateTenantID              string
+	subjectForUpdateID                    uuid.UUID
+	updateSubjectResult                   *repo.ModerationSubject
+	updateSubjectErr                      error
+	updateSubjectCalled                   bool
+	updateSubjectTenantID                 string
+	updateSubjectID                       uuid.UUID
+	updateSubjectState                    repo.ModerationState
+	updateSubjectReasonCode               string
+	updateSubjectReasonNote               string
+	updateSubjectReviewedBy               string
+	updateSubjectReviewedAt               time.Time
+	createModerationSubjectResult         *repo.ModerationSubject
+	createModerationSubjectErr            error
+	createModerationSubjectCalled         bool
+	createModerationSubjectInput          repo.ModerationSubject
+	addVoteErr                            error
+	addVoteCalled                         bool
+	addVoteTenantID                       string
+	addVoteRequestID                      uuid.UUID
+	addVoteSubjectKey                     string
+	addVoteSubjectHash                    string
+	addVoteSubjectDisplay                 string
+	addVoteCreatedBy                      string
+	removeVoteErr                         error
+	removeVoteCalled                      bool
+	removeVoteTenantID                    string
+	removeVoteRequestID                   uuid.UUID
+	removeVoteSubjectKey                  string
+	addCommentResult                      *repo.PublicRequestComment
+	addCommentErr                         error
+	addCommentCalled                      bool
+	addCommentTenantID                    string
+	addCommentRequestID                   uuid.UUID
+	addCommentSubjectKey                  string
+	addCommentSubjectHash                 string
+	addCommentSubjectDisplay              string
+	addCommentBody                        string
+	addCommentCreatedBy                   string
 }
 
 func (r *fakePublicRepo) Begin(context.Context) (pgx.Tx, error) {
-	return nil, errors.New("not implemented")
+	if r.beginErr != nil {
+		return nil, r.beginErr
+	}
+	if r.beginTx == nil {
+		return nil, errors.New("not implemented")
+	}
+	return r.beginTx, nil
 }
 
 func (r *fakePublicRepo) GetPolicy(_ context.Context, tenantID string) (*repo.Policy, error) {
@@ -1126,61 +2297,109 @@ func (r *fakePublicRepo) ListSubjects(_ context.Context, filter repo.ListFilter)
 }
 
 func (r *fakePublicRepo) GetRequestPublication(
-	context.Context,
-	string,
-	uuid.UUID,
+	_ context.Context,
+	tenantID string,
+	requestID uuid.UUID,
 ) (*repo.RequestPublication, error) {
+	r.publicationCalled = true
+	r.publicationTenantID = tenantID
+	r.publicationRequestID = requestID
 	return r.publication, r.publicationErr
 }
 
-func (r *fakePublicRepo) UpsertPolicyTx(context.Context, pgx.Tx, repo.Policy) (*repo.Policy, error) {
-	return nil, errors.New("not implemented")
+func (r *fakePublicRepo) UpsertPolicyTx(_ context.Context, _ pgx.Tx, policy repo.Policy) (*repo.Policy, error) {
+	r.upsertPolicyCalled = true
+	r.upsertPolicyInput = policy
+	if r.upsertPolicyErr != nil {
+		return nil, r.upsertPolicyErr
+	}
+	if r.upsertPolicyResult != nil {
+		return r.upsertPolicyResult, nil
+	}
+	out := policy
+	return ptrext.Of(out), nil
 }
 
 func (r *fakePublicRepo) UpsertRequestPublicationTx(
-	context.Context,
-	pgx.Tx,
-	repo.RequestProfile,
-	repo.ModerationState,
-	string,
-	string,
+	_ context.Context,
+	_ pgx.Tx,
+	profile repo.RequestProfile,
+	defaultState repo.ModerationState,
+	submittedByDisplay string,
+	submittedByFingerprint string,
 ) (*repo.RequestPublication, error) {
-	return nil, errors.New("not implemented")
+	r.upsertRequestPublicationCalled = true
+	r.upsertRequestPublicationInput = profile
+	r.upsertRequestPublicationDefaultState = defaultState
+	r.upsertRequestPublicationDisplay = submittedByDisplay
+	r.upsertRequestPublicationFingerprint = submittedByFingerprint
+	if r.upsertRequestPublicationErr != nil {
+		return nil, r.upsertRequestPublicationErr
+	}
+	if r.upsertRequestPublicationResult != nil {
+		return r.upsertRequestPublicationResult, nil
+	}
+	return ptrext.Of(repo.RequestPublication{
+		Profile: profile,
+		Moderation: repo.ModerationSubject{
+			TenantID:               profile.TenantID,
+			State:                  defaultState,
+			SubmittedByDisplay:     submittedByDisplay,
+			SubmittedByFingerprint: submittedByFingerprint,
+		},
+	}), nil
 }
 
-func (r *fakePublicRepo) GetSubjectForUpdateTx(
-	context.Context,
-	pgx.Tx,
-	string,
-	uuid.UUID,
-) (*repo.ModerationSubject, error) {
-	return nil, errors.New("not implemented")
+func (r *fakePublicRepo) GetSubjectForUpdateTx(_ context.Context, _ pgx.Tx, tenantID string, id uuid.UUID) (*repo.ModerationSubject, error) {
+	r.subjectForUpdateCalled = true
+	r.subjectForUpdateTenantID = tenantID
+	r.subjectForUpdateID = id
+	return r.subjectForUpdateResult, r.subjectForUpdateErr
 }
 
 func (r *fakePublicRepo) UpdateSubjectStateTx(
-	context.Context,
-	pgx.Tx,
-	string,
-	uuid.UUID,
-	repo.ModerationState,
-	string,
-	string,
-	string,
-	time.Time,
+	_ context.Context,
+	_ pgx.Tx,
+	tenantID string,
+	id uuid.UUID,
+	state repo.ModerationState,
+	reasonCode string,
+	reasonNote string,
+	reviewedBy string,
+	reviewedAt time.Time,
 ) (*repo.ModerationSubject, error) {
-	return nil, errors.New("not implemented")
+	r.updateSubjectCalled = true
+	r.updateSubjectTenantID = tenantID
+	r.updateSubjectID = id
+	r.updateSubjectState = state
+	r.updateSubjectReasonCode = reasonCode
+	r.updateSubjectReasonNote = reasonNote
+	r.updateSubjectReviewedBy = reviewedBy
+	r.updateSubjectReviewedAt = reviewedAt
+	return r.updateSubjectResult, r.updateSubjectErr
 }
 
-func (r *fakePublicRepo) CreateModerationSubjectTx(context.Context, pgx.Tx, repo.ModerationSubject) (*repo.ModerationSubject, error) {
-	return nil, errors.New("not implemented")
+func (r *fakePublicRepo) CreateModerationSubjectTx(_ context.Context, _ pgx.Tx, subject repo.ModerationSubject) (*repo.ModerationSubject, error) {
+	r.createModerationSubjectCalled = true
+	r.createModerationSubjectInput = subject
+	if r.createModerationSubjectErr != nil {
+		return nil, r.createModerationSubjectErr
+	}
+	if r.createModerationSubjectResult != nil {
+		return r.createModerationSubjectResult, nil
+	}
+	out := subject
+	return ptrext.Of(out), nil
 }
 
 func (r *fakePublicRepo) GetPublicRequestCandidate(
 	_ context.Context,
-	_ string,
-	_ string,
+	tenantSlug string,
+	publicSlug string,
 	viewerSubjectKey string,
 ) (*repo.PublicRequestCandidate, error) {
+	r.candidateTenantSlug = tenantSlug
+	r.candidatePublicSlug = publicSlug
 	r.publicRequestViewerSubjectKey = viewerSubjectKey
 	return r.candidate, r.candidateErr
 }
@@ -1205,14 +2424,130 @@ func (r *fakePublicRepo) ListPublicRequestComments(
 	return r.publicRequestCommentsResult, r.publicRequestCommentsErr
 }
 
-func (r *fakePublicRepo) AddPublicRequestVoteTx(context.Context, pgx.Tx, string, uuid.UUID, string, string, string, string) error {
-	return errors.New("not implemented")
+func (r *fakePublicRepo) AddPublicRequestVoteTx(
+	_ context.Context,
+	_ pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	subjectKey string,
+	subjectHash string,
+	subjectDisplay string,
+	createdBy string,
+) error {
+	r.addVoteCalled = true
+	r.addVoteTenantID = tenantID
+	r.addVoteRequestID = requestID
+	r.addVoteSubjectKey = subjectKey
+	r.addVoteSubjectHash = subjectHash
+	r.addVoteSubjectDisplay = subjectDisplay
+	r.addVoteCreatedBy = createdBy
+	if r.candidate != nil {
+		r.candidate.ViewerHasVoted = true
+		r.candidate.VoteCount++
+	}
+	return r.addVoteErr
 }
 
-func (r *fakePublicRepo) RemovePublicRequestVoteTx(context.Context, pgx.Tx, string, uuid.UUID, string) error {
-	return errors.New("not implemented")
+func (r *fakePublicRepo) RemovePublicRequestVoteTx(_ context.Context, _ pgx.Tx, tenantID string, requestID uuid.UUID, subjectKey string) error {
+	r.removeVoteCalled = true
+	r.removeVoteTenantID = tenantID
+	r.removeVoteRequestID = requestID
+	r.removeVoteSubjectKey = subjectKey
+	if r.candidate != nil {
+		r.candidate.ViewerHasVoted = false
+		if r.candidate.VoteCount > 0 {
+			r.candidate.VoteCount--
+		}
+	}
+	return r.removeVoteErr
 }
 
-func (r *fakePublicRepo) AddPublicRequestCommentTx(context.Context, pgx.Tx, string, uuid.UUID, string, string, string, string, string) (*repo.PublicRequestComment, error) {
-	return nil, errors.New("not implemented")
+func (r *fakePublicRepo) AddPublicRequestCommentTx(
+	_ context.Context,
+	_ pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	subjectKey string,
+	subjectHash string,
+	subjectDisplay string,
+	body string,
+	createdBy string,
+) (*repo.PublicRequestComment, error) {
+	r.addCommentCalled = true
+	r.addCommentTenantID = tenantID
+	r.addCommentRequestID = requestID
+	r.addCommentSubjectKey = subjectKey
+	r.addCommentSubjectHash = subjectHash
+	r.addCommentSubjectDisplay = subjectDisplay
+	r.addCommentBody = body
+	r.addCommentCreatedBy = createdBy
+	if r.addCommentErr != nil {
+		return nil, r.addCommentErr
+	}
+	if r.addCommentResult != nil {
+		if r.candidate != nil {
+			r.candidate.CommentCount++
+		}
+		comment := ptrext.Indirect(r.addCommentResult)
+		r.publicRequestCommentsResult = append(r.publicRequestCommentsResult, comment)
+		return r.addCommentResult, nil
+	}
+	out := repo.PublicRequestComment{Body: body, SubmittedByDisplay: subjectDisplay}
+	if r.candidate != nil {
+		r.candidate.CommentCount++
+	}
+	r.publicRequestCommentsResult = append(r.publicRequestCommentsResult, out)
+	return ptrext.Of(out), nil
+}
+
+type fakePublicTx struct {
+	commitCalls   int
+	rollbackCalls int
+	commitErr     error
+}
+
+func (f *fakePublicTx) Begin(context.Context) (pgx.Tx, error) {
+	return nil, errors.New("unexpected begin")
+}
+
+func (f *fakePublicTx) Commit(context.Context) error {
+	f.commitCalls++
+	return f.commitErr
+}
+
+func (f *fakePublicTx) Rollback(context.Context) error {
+	f.rollbackCalls++
+	return nil
+}
+
+func (f *fakePublicTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, errors.New("unexpected copyfrom")
+}
+
+func (f *fakePublicTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults {
+	return nil
+}
+
+func (f *fakePublicTx) LargeObjects() pgx.LargeObjects {
+	return pgx.LargeObjects{}
+}
+
+func (f *fakePublicTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, errors.New("unexpected prepare")
+}
+
+func (f *fakePublicTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, errors.New("unexpected exec")
+}
+
+func (f *fakePublicTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errors.New("unexpected query")
+}
+
+func (f *fakePublicTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return nil
+}
+
+func (f *fakePublicTx) Conn() *pgx.Conn {
+	return nil
 }
