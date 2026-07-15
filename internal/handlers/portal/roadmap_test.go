@@ -4,11 +4,15 @@ package portal
 
 import (
 	"errors"
+	"html/template"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
 
@@ -52,6 +56,195 @@ func TestPortalRoadmapExecuteTemplatePropagatesWriteErrors(t *testing.T) {
 	err := portalRoadmapExecuteTemplate(ptrext.Of(failingRoadmapWriter{}), roadmapPageData{})
 	if err == nil || err.Error() != "write failed" {
 		t.Fatalf("portalRoadmapExecuteTemplate() error = %v, want write failure", err)
+	}
+}
+
+func TestRoadmapPageReturnsNotImplementedWhenPortalUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/roadmap", "acme", nil)
+	handler.RoadmapPage(rec, req)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("RoadmapPage() status = %d, want %d", rec.Code, http.StatusNotImplemented)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal not configured") {
+		t.Fatalf("RoadmapPage() body = %q, want not configured message", body)
+	}
+}
+
+func TestRoadmapPageReturnsInternalServerErrorForPortalConfigFailure(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{}, ptrext.Of(fakeSubmissionService{configErr: errors.New("boom")}), testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/roadmap", "acme", nil)
+	handler.RoadmapPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RoadmapPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("RoadmapPage() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestRoadmapPageReturnsInternalServerErrorWhenVisitorSecretsMissing(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			roadmapResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("billing-export", "Planned")},
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/roadmap", "acme", nil)
+	handler.RoadmapPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RoadmapPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("RoadmapPage() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestRoadmapPageReturnsInternalServerErrorForListFailure(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			err: errors.New("boom"),
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/roadmap", "acme", nil)
+	handler.RoadmapPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RoadmapPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("RoadmapPage() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestRoadmapPageClearsRobotsTagWhenIndexingAllowed(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			roadmapResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("billing-export", "Planned")},
+				NoIndex:  false,
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/roadmap", "acme", nil)
+	handler.RoadmapPage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("RoadmapPage() status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("X-Robots-Tag"); got != "" {
+		t.Fatalf("X-Robots-Tag = %q, want empty when indexing is allowed", got)
+	}
+}
+
+func TestRoadmapPageReturnsInternalServerErrorWhenTemplateFails(t *testing.T) {
+	original := portalRoadmapTemplate
+	t.Cleanup(func() { portalRoadmapTemplate = original })
+
+	portalRoadmapTemplate = template.Must(template.New("roadmap-test").Funcs(template.FuncMap{
+		"boom": func() (string, error) {
+			return "", errors.New("boom")
+		},
+	}).Parse(`{{boom}}`))
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			roadmapResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("billing-export", "Planned")},
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/roadmap", "acme", nil)
+	handler.RoadmapPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RoadmapPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal render failed") {
+		t.Fatalf("RoadmapPage() body = %q, want portal render failed message", body)
+	}
+}
+
+func TestPortalRoadmapExecuteTemplatePropagatesExecuteErrors(t *testing.T) {
+	original := portalRoadmapTemplate
+	t.Cleanup(func() { portalRoadmapTemplate = original })
+
+	portalRoadmapTemplate = template.Must(template.New("roadmap-test").Funcs(template.FuncMap{
+		"boom": func() (string, error) {
+			return "", errors.New("boom")
+		},
+	}).Parse(`{{boom}}`))
+
+	err := portalRoadmapExecuteTemplate(ptrext.Of(failingRoadmapWriter{}), roadmapPageData{})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("portalRoadmapExecuteTemplate() execute error = %v, want boom", err)
+	}
+}
+
+func TestRoadmapPublicColumnsSkipsBlankRequestColumn(t *testing.T) {
+	t.Parallel()
+
+	request := publicRequestForPortalTest("blank-roadmap", " ")
+	request.Summary.RoadmapColumn = " "
+	result := pvsvc.PublicRequestList{
+		Requests: []pvsvc.PublicRequest{request},
+	}
+
+	if got := roadmapPublicColumns(result); len(got) != 0 {
+		t.Fatalf("roadmapPublicColumns(blank) = %#v, want no columns", got)
 	}
 }
 

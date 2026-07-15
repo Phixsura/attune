@@ -5,12 +5,16 @@ package portal
 import (
 	"context"
 	"errors"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
 
@@ -175,4 +179,363 @@ func TestPortalBoardSelectedViewMarksFeaturedAndPropagatesErrors(t *testing.T) {
 	if _, err := errHandler.portalBoardSelectedView(context.Background(), "acme", "pricing-api", "visitor-1", "acme", "", "/portal/acme/roadmap"); err == nil || err.Error() != "boom" {
 		t.Fatalf("portalBoardSelectedView() error = %v, want boom", err)
 	}
+}
+
+func TestPortalBoardConfigured(t *testing.T) {
+	t.Parallel()
+
+	misconfigured := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	if misconfigured.portalBoardConfigured(rec) {
+		t.Fatal("portalBoardConfigured() = true, want false when submission service is missing")
+	}
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("portalBoardConfigured() status = %d, want %d", rec.Code, http.StatusNotImplemented)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal not configured") {
+		t.Fatalf("portalBoardConfigured() body = %q, want not configured message", body)
+	}
+
+	configured := NewHandler(fakePublicRequestService{}, ptrext.Of(fakeSubmissionService{}), testVisitorSecrets())
+	rec = httptest.NewRecorder()
+	if !configured.portalBoardConfigured(rec) {
+		t.Fatal("portalBoardConfigured() = false, want true when both services are present")
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("portalBoardConfigured() wrote unexpected body = %q", rec.Body.String())
+	}
+}
+
+func TestRequestsPageReturnsNotImplementedWhenPortalUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("RequestsPage() status = %d, want %d", rec.Code, http.StatusNotImplemented)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal not configured") {
+		t.Fatalf("RequestsPage() body = %q, want not configured message", body)
+	}
+}
+
+func TestRequestsPageReturnsInternalServerErrorWhenVisitorSecretsMissing(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			listResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RequestsPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("RequestsPage() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestRequestsPageReturnsInternalServerErrorForListFailure(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			err: errors.New("boom"),
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RequestsPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("RequestsPage() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestRequestsPageReturnsInternalServerErrorForPortalConfigFailure(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{}, ptrext.Of(fakeSubmissionService{configErr: errors.New("boom")}), testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RequestsPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("RequestsPage() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestRequestsPageSetsRobotsTagWhenIndexingIsDisabled(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			listResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+				NoIndex:  true,
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("RequestsPage() status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex" {
+		t.Fatalf("RequestsPage() X-Robots-Tag = %q, want noindex", got)
+	}
+}
+
+func TestRequestPageReturnsInternalServerErrorWhenSelectedLookupFails(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(
+		selectedLookupErrorBoardService{
+			fakePublicRequestService: fakePublicRequestService{
+				listResult: pvsvc.PublicRequestList{
+					Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+				},
+			},
+			getErr: errors.New("boom"),
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithPortalSlug(http.MethodGet, "/portal/acme/requests/pricing-api", "acme", "pricing-api", nil)
+	handler.RequestPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RequestPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("RequestPage() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestRequestsPageReturnsInternalServerErrorWhenTemplateFails(t *testing.T) {
+	original := portalBoardTemplate
+	t.Cleanup(func() { portalBoardTemplate = original })
+
+	portalBoardTemplate = template.Must(template.New("board-test").Funcs(template.FuncMap{
+		"boom": func() (string, error) {
+			return "", errors.New("boom")
+		},
+	}).Parse(`{{boom}}`))
+
+	handler := NewHandler(
+		fakePublicRequestService{
+			listResult: pvsvc.PublicRequestList{
+				Requests: []pvsvc.PublicRequest{publicRequestForPortalTest("pricing-api", "Next")},
+			},
+		},
+		ptrext.Of(fakeSubmissionService{
+			config: portalsvc.SubmissionConfig{
+				TenantID:   "tenant-1",
+				TenantSlug: "acme",
+				TenantName: "Acme Co",
+			},
+		}),
+		testVisitorSecrets(),
+	)
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme/requests", "acme", nil)
+	handler.RequestsPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("RequestsPage() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal render failed") {
+		t.Fatalf("RequestsPage() body = %q, want portal render failed message", body)
+	}
+}
+
+func TestPortalBoardLoadError(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequest(http.MethodGet, "/portal/acme/requests", nil)
+	tests := []struct {
+		name string
+		err  error
+		want int
+	}{
+		{name: "nil", err: nil, want: 0},
+		{name: "service not found", err: portalsvc.ErrNotFound, want: http.StatusNotFound},
+		{name: "repo not found", err: pvrepo.ErrNotFound, want: http.StatusNotFound},
+		{name: "service validation", err: portalsvc.ErrValidation, want: http.StatusBadRequest},
+		{name: "repo invalid input", err: pvrepo.ErrInvalidInput, want: http.StatusBadRequest},
+		{name: "unexpected", err: errors.New("boom"), want: http.StatusInternalServerError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rec := httptest.NewRecorder()
+			if got := portalBoardLoadError(rec, request, tt.err); got != (tt.err != nil) {
+				t.Fatalf("portalBoardLoadError() = %v, want %v", got, tt.err != nil)
+			}
+			if tt.want != 0 && rec.Code != tt.want {
+				t.Fatalf("portalBoardLoadError() status = %d, want %d", rec.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestBoardCommentViewAndLabels(t *testing.T) {
+	t.Parallel()
+
+	policy := pvrepo.Policy{
+		ShowSubmitterDisplay:  true,
+		SubmitterIdentityMode: pvrepo.IdentityModeDisplayName,
+		HidePublicTimestamps:  false,
+		CommentsEnabled:       true,
+		ShowCommentCount:      true,
+		ShowVoteCount:         true,
+	}
+	comment := pvrepo.PublicRequestComment{
+		Body:               "Use the API",
+		SubmittedByDisplay: "Ada",
+		State:              pvrepo.ModerationStateApproved,
+		CreatedAt:          time.Date(2026, 7, 10, 15, 0, 0, 0, time.UTC),
+	}
+	view := boardCommentView(policy, comment)
+	if view.AuthorLabel != "Ada" || view.Body != "Use the API" || view.StateLabel != "Approved" || view.ToneClass != "approved" || view.CreatedAt != "2026-07-10 15:00 UTC" {
+		t.Fatalf("boardCommentView() = %#v, want approved comment view", view)
+	}
+
+	fallback := boardCommentView(pvrepo.Policy{}, pvrepo.PublicRequestComment{
+		Body:      "Needs review",
+		State:     pvrepo.ModerationStatePending,
+		CreatedAt: time.Date(2026, 7, 10, 16, 0, 0, 0, time.UTC),
+	})
+	if fallback.AuthorLabel != "Visitor" || fallback.StateLabel != "Pending review" || fallback.ToneClass != "pending" {
+		t.Fatalf("boardCommentView() fallback = %#v, want visitor fallback", fallback)
+	}
+}
+
+func TestBoardCommentStateLabelAndTone(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		state     pvrepo.ModerationState
+		wantLabel string
+		wantTone  string
+	}{
+		{name: "pending", state: pvrepo.ModerationStatePending, wantLabel: "Pending review", wantTone: "pending"},
+		{name: "approved", state: pvrepo.ModerationStateApproved, wantLabel: "Approved", wantTone: "approved"},
+		{name: "rejected", state: pvrepo.ModerationStateRejected, wantLabel: "Rejected", wantTone: "flagged"},
+		{name: "hidden", state: pvrepo.ModerationStateHidden, wantLabel: "Hidden", wantTone: "flagged"},
+		{name: "spam", state: pvrepo.ModerationStateSpam, wantLabel: "Spam", wantTone: "flagged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := boardCommentStateLabel(tt.state); got != tt.wantLabel {
+				t.Fatalf("boardCommentStateLabel() = %q, want %q", got, tt.wantLabel)
+			}
+			if got := boardCommentTone(tt.state); got != tt.wantTone {
+				t.Fatalf("boardCommentTone() = %q, want %q", got, tt.wantTone)
+			}
+		})
+	}
+}
+
+func TestPortalBoardExecuteTemplatePropagatesWriteErrors(t *testing.T) {
+	t.Parallel()
+
+	err := portalBoardExecuteTemplate(ptrext.Of(failingBoardWriter{}), portalBoardPageData{})
+	if err == nil || err.Error() != "write failed" {
+		t.Fatalf("portalBoardExecuteTemplate() error = %v, want write failure", err)
+	}
+}
+
+func TestPortalBoardExecuteTemplatePropagatesExecuteErrors(t *testing.T) {
+	original := portalBoardTemplate
+	t.Cleanup(func() { portalBoardTemplate = original })
+
+	portalBoardTemplate = template.Must(template.New("board-test").Funcs(template.FuncMap{
+		"boom": func() (string, error) {
+			return "", errors.New("boom")
+		},
+	}).Parse(`{{boom}}`))
+
+	err := portalBoardExecuteTemplate(ptrext.Of(failingBoardWriter{}), portalBoardPageData{})
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("portalBoardExecuteTemplate() execute error = %v, want boom", err)
+	}
+}
+
+type selectedLookupErrorBoardService struct {
+	fakePublicRequestService
+	getErr error
+}
+
+func (s selectedLookupErrorBoardService) GetPublicRequest(context.Context, string, string, string) (pvsvc.PublicRequest, error) {
+	return pvsvc.PublicRequest{}, s.getErr
+}
+
+type failingBoardWriter struct {
+	header http.Header
+}
+
+func (w *failingBoardWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingBoardWriter) WriteHeader(int) {}
+
+func (w *failingBoardWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed")
 }

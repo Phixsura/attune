@@ -3,6 +3,8 @@
 package portal
 
 import (
+	"errors"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -309,5 +311,201 @@ func TestPageReturnsNotFoundForMissingPortal(t *testing.T) {
 	}
 	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex" {
 		t.Fatalf("X-Robots-Tag = %q, want noindex", got)
+	}
+}
+
+func TestPageReturnsInternalServerErrorForPortalConfigFailure(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{}, ptrext.Of(fakeSubmissionService{configErr: errors.New("boom")}), testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme", "acme", nil)
+	handler.Page(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("Page() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex" {
+		t.Fatalf("X-Robots-Tag = %q, want noindex", got)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal unavailable") {
+		t.Fatalf("Page() body = %q, want portal unavailable message", body)
+	}
+}
+
+func TestPageReturnsInternalServerErrorWhenTemplateFails(t *testing.T) {
+	original := portalPageTemplate
+	t.Cleanup(func() { portalPageTemplate = original })
+
+	portalPageTemplate = template.Must(template.New("page-test").Funcs(template.FuncMap{
+		"boom": func() (string, error) {
+			return "", errors.New("boom")
+		},
+	}).Parse(`{{boom}}`))
+
+	handler := NewHandler(fakePublicRequestService{}, ptrext.Of(fakeSubmissionService{
+		config: portalsvc.SubmissionConfig{
+			TenantID:   "tenant-1",
+			TenantSlug: "acme",
+			TenantName: "Acme Co",
+		},
+	}), testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme", "acme", nil)
+	handler.Page(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("Page() status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal render failed") {
+		t.Fatalf("Page() body = %q, want portal render failed message", body)
+	}
+}
+
+func TestPageReturnsNotImplementedWhenPortalUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodGet, "/portal/acme", "acme", nil)
+	handler.Page(rec, req)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("Page() status = %d, want %d", rec.Code, http.StatusNotImplemented)
+	}
+	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex" {
+		t.Fatalf("X-Robots-Tag = %q, want noindex", got)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "portal not configured") {
+		t.Fatalf("Page() body = %q, want not configured message", body)
+	}
+}
+
+func TestPortalIdentityMeta(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                string
+		cfg                 portalsvc.SubmissionConfig
+		wantGroupLabel      string
+		wantFieldLabel      string
+		wantFieldName       string
+		wantPlaceholder     string
+		wantShowIdentity    bool
+		wantIdentityRequire bool
+	}{
+		{
+			name: "anonymous",
+			cfg: portalsvc.SubmissionConfig{
+				SubmissionWriteMode: pvrepo.WriteModeDisabled,
+			},
+			wantGroupLabel:   "Anonymous submissions",
+			wantShowIdentity: false,
+		},
+		{
+			name: "organization",
+			cfg: portalsvc.SubmissionConfig{
+				SubmissionWriteMode:   pvrepo.WriteModeIdentified,
+				SubmitterIdentityMode: pvrepo.IdentityModeOrganization,
+			},
+			wantGroupLabel:      "Organization required",
+			wantFieldLabel:      "Organization",
+			wantFieldName:       "organization",
+			wantPlaceholder:     "Company or team name",
+			wantShowIdentity:    true,
+			wantIdentityRequire: true,
+		},
+		{
+			name: "display name",
+			cfg: portalsvc.SubmissionConfig{
+				SubmissionWriteMode:   pvrepo.WriteModeIdentified,
+				SubmitterIdentityMode: pvrepo.IdentityModeDisplayName,
+			},
+			wantGroupLabel:      "Display name required",
+			wantFieldLabel:      "Display name",
+			wantFieldName:       "displayName",
+			wantPlaceholder:     "Your name or handle",
+			wantShowIdentity:    true,
+			wantIdentityRequire: true,
+		},
+		{
+			name: "fallback to display name",
+			cfg: portalsvc.SubmissionConfig{
+				SubmissionWriteMode:   pvrepo.WriteModeIdentified,
+				SubmitterIdentityMode: pvrepo.IdentityModeAnonymous,
+			},
+			wantGroupLabel:      "Display name required",
+			wantFieldLabel:      "Display name",
+			wantFieldName:       "displayName",
+			wantPlaceholder:     "Your name or handle",
+			wantShowIdentity:    true,
+			wantIdentityRequire: true,
+		},
+		{
+			name: "unknown identity mode",
+			cfg: portalsvc.SubmissionConfig{
+				SubmissionWriteMode:   pvrepo.WriteModeIdentified,
+				SubmitterIdentityMode: pvrepo.IdentityMode("custom"),
+			},
+			wantGroupLabel:      "Display name required",
+			wantFieldLabel:      "Display name",
+			wantFieldName:       "displayName",
+			wantPlaceholder:     "Your name or handle",
+			wantShowIdentity:    true,
+			wantIdentityRequire: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			groupLabel, fieldLabel, fieldName, placeholder, showIdentity, required := portalIdentityMeta(tt.cfg)
+			if groupLabel != tt.wantGroupLabel || fieldLabel != tt.wantFieldLabel || fieldName != tt.wantFieldName || placeholder != tt.wantPlaceholder || showIdentity != tt.wantShowIdentity || required != tt.wantIdentityRequire {
+				t.Fatalf("portalIdentityMeta() = %q, %q, %q, %q, %v, %v", groupLabel, fieldLabel, fieldName, placeholder, showIdentity, required)
+			}
+		})
+	}
+}
+
+func TestPortalFieldKindHelpers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		kind      pvrepo.PortalSubmissionFieldKind
+		wantName  string
+		wantLabel string
+	}{
+		{name: "text", kind: pvrepo.PortalSubmissionFieldKind(""), wantName: "text", wantLabel: "Short text"},
+		{name: "textarea", kind: pvrepo.PortalSubmissionFieldKindTextarea, wantName: "textarea", wantLabel: "Paragraph"},
+		{name: "select", kind: pvrepo.PortalSubmissionFieldKindSelect, wantName: "select", wantLabel: "Single select"},
+		{name: "multi select", kind: pvrepo.PortalSubmissionFieldKindMultiSelect, wantName: "multiselect", wantLabel: "Multi select"},
+		{name: "boolean", kind: pvrepo.PortalSubmissionFieldKindBoolean, wantName: "boolean", wantLabel: "Checkbox"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := portalFieldKindName(tt.kind); got != tt.wantName {
+				t.Fatalf("portalFieldKindName() = %q, want %q", got, tt.wantName)
+			}
+			if got := portalFieldKindLabel(tt.kind); got != tt.wantLabel {
+				t.Fatalf("portalFieldKindLabel() = %q, want %q", got, tt.wantLabel)
+			}
+		})
+	}
+}
+
+func TestMaxInt(t *testing.T) {
+	t.Parallel()
+
+	if got := maxInt(4, 9); got != 9 {
+		t.Fatalf("maxInt(4, 9) = %d, want 9", got)
+	}
+	if got := maxInt(9, 4); got != 9 {
+		t.Fatalf("maxInt(9, 4) = %d, want 9", got)
+	}
+	if got := maxInt(7, 7); got != 7 {
+		t.Fatalf("maxInt(7, 7) = %d, want 7", got)
 	}
 }

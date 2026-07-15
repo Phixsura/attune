@@ -141,6 +141,66 @@ func TestPublicRequestListVisible(t *testing.T) {
 	}
 }
 
+func TestPortalVisitorAndSubmitterHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got := portalVisitorSubjectKey("  visitor-1  "); got != "portal:visitor-1" {
+		t.Fatalf("portalVisitorSubjectKey() = %q, want trimmed portal key", got)
+	}
+	if got := portalVisitorSubjectKey("   "); got != "" {
+		t.Fatalf("portalVisitorSubjectKey(blank) = %q, want empty", got)
+	}
+	if got := portalVisitorSubjectDisplay(); got != "Portal visitor" {
+		t.Fatalf("portalVisitorSubjectDisplay() = %q, want public label", got)
+	}
+
+	displayPolicy := repo.Policy{
+		ShowSubmitterDisplay:  true,
+		SubmitterIdentityMode: repo.IdentityModeDisplayName,
+		CommentsEnabled:       true,
+		CommentWriteMode:      repo.WriteModeAnonymous,
+	}
+	if got := publicSubmitterDisplay(displayPolicy, "Ada"); got != "Ada" {
+		t.Fatalf("publicSubmitterDisplay() = %q, want visible submitter", got)
+	}
+	if got := publicSubmitterDisplay(repo.Policy{ShowSubmitterDisplay: false, SubmitterIdentityMode: repo.IdentityModeDisplayName}, "Ada"); got != "" {
+		t.Fatalf("publicSubmitterDisplay(hidden) = %q, want hidden display", got)
+	}
+	if got := publicSubmitterDisplay(repo.Policy{ShowSubmitterDisplay: true, SubmitterIdentityMode: repo.IdentityModeAnonymous}, "Ada"); got != "" {
+		t.Fatalf("publicSubmitterDisplay(anonymous) = %q, want hidden display", got)
+	}
+
+	if !publicCommentWriteEnabled(displayPolicy) {
+		t.Fatal("publicCommentWriteEnabled() = false, want true for enabled comments")
+	}
+	if publicCommentWriteEnabled(repo.Policy{CommentsEnabled: true, CommentWriteMode: repo.WriteModeDisabled}) {
+		t.Fatal("publicCommentWriteEnabled() = true, want false for disabled write mode")
+	}
+	if !publicCommentsVisible(displayPolicy) || publicCommentsVisible(repo.Policy{}) {
+		t.Fatal("publicCommentsVisible() did not reflect comment visibility policy")
+	}
+}
+
+func TestPolicyModeHelpers(t *testing.T) {
+	t.Parallel()
+
+	if !validAccessMode(repo.AccessModeDisabled) || !validAccessMode(repo.AccessModePublic) || validAccessMode(repo.AccessModeAuthenticated) {
+		t.Fatal("validAccessMode() returned unexpected result")
+	}
+	if !validWriteMode(repo.WriteModeDisabled) || !validWriteMode(repo.WriteModeAnonymous) || !validWriteMode(repo.WriteModeIdentified) {
+		t.Fatal("validWriteMode() should accept supported modes")
+	}
+	if validWriteMode(repo.WriteMode("invalid")) {
+		t.Fatal("validWriteMode() accepted invalid mode")
+	}
+	if !validDefaultState(repo.ModerationStatePending) || !validDefaultState(repo.ModerationStateApproved) || validDefaultState(repo.ModerationStateRejected) {
+		t.Fatal("validDefaultState() returned unexpected result")
+	}
+	if !validIdentityMode(repo.IdentityModeAnonymous) || !validIdentityMode(repo.IdentityModeDisplayName) || !validIdentityMode(repo.IdentityModeOrganization) || validIdentityMode(repo.IdentityMode("invalid")) {
+		t.Fatal("validIdentityMode() returned unexpected result")
+	}
+}
+
 func TestNormalizePolicyInput(t *testing.T) {
 	t.Parallel()
 
