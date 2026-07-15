@@ -468,7 +468,7 @@ func TestRequestsPageRendersBoardAndSetsVisitorCookie(t *testing.T) {
 		t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Public board", "pricing-api", `data-vote-action`, "Vote", `value="pricing"`, `value="planned"`, `value="next"`, `name="voted" value="mine" checked`, `name="comments" value="with" checked`, `selected>Recent`, `/portal/acme/requests/pricing-api?comments=with&amp;cursor=page-2&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`, `Load more requests`, `/portal/acme/requests?comments=with&amp;cursor=page-3&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`} {
+	for _, want := range []string{"Public board", "pricing-api", "Updated Jul 10", `datetime="2026-07-10T13:00:00Z"`, `title="Updated 2026-07-10 13:00 UTC"`, `card-overlay`, `data-vote-action`, "Vote", `value="pricing"`, `value="planned"`, `value="next"`, `name="voted" value="mine" checked`, `name="comments" value="with" checked`, `selected>Recent`, `/portal/acme/requests/pricing-api?comments=with&amp;cursor=page-2&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`, `Load more requests`, `/portal/acme/requests?comments=with&amp;cursor=page-3&amp;q=pricing&amp;roadmap=next&amp;sort=recent&amp;state=planned&amp;voted=mine`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("board body missing %q: %s", want, body)
 		}
@@ -558,7 +558,7 @@ func TestRequestPageRendersSimilarRequests(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Possible duplicates", "Similar requests", "pricing-dashboard", "/portal/acme/requests/pricing-dashboard"} {
+	for _, want := range []string{"Possible duplicates", "Similar requests", "pricing-dashboard", "Updated Jul 10", `datetime="2026-07-10T13:00:00Z"`, `title="Updated 2026-07-10 13:00 UTC"`, "/portal/acme/requests/pricing-dashboard"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("request page missing %q: %s", want, body)
 		}
@@ -1249,6 +1249,8 @@ func publicRequestForPortalTest(slug string, column string) pvsvc.PublicRequest 
 			PublicSummary: "Safe public summary",
 			PublicState:   "planned",
 			RoadmapColumn: column,
+			CreatedAt:     time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:     time.Date(2026, 7, 10, 13, 0, 0, 0, time.UTC),
 		},
 		Policy: pvrepo.Policy{
 			ShowVoteCount:        true,

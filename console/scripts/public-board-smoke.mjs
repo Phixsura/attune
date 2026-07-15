@@ -21,8 +21,8 @@ const binaryPath = path.join(workDir, 'attune')
 const dbUser = 'attune'
 const dbName = 'attune'
 const keepAlive = process.env.ATTUNE_PUBLIC_BOARD_E2E_KEEP_SERVER === '1'
-const tenantA = { slug: 'attune-demo', name: 'Attune Demo' }
-const tenantB = { slug: 'attune-demo-b', name: 'Attune Demo B' }
+const tenantA = { slug: 'acme', name: 'Acme' }
+const tenantB = { slug: 'acme-b', name: 'Acme B' }
 const consoleAdmin = {
   email: 'smoke-admin@example.com',
   password: 'Attune-Smoke-Console-1234',
@@ -132,7 +132,7 @@ ${indent(keyset, 4)}
   serverPid = child.pid ?? null
   await waitForHttpOk(`${baseURL}/healthz`, 'healthz')
 
-  log('bootstrap demo tenant')
+  log('bootstrap smoke tenant')
   const tenantAId = await bootstrapDemoTenant(binaryPath, configPath, repoRoot, dsn, tenantA)
   const tenantBId = await bootstrapDemoTenant(binaryPath, configPath, repoRoot, dsn, tenantB)
 
@@ -285,9 +285,13 @@ function buildSeedData() {
     hiddenRequests,
     basePageSize: 20,
     searchTitle: 'Audit log actor filter',
+    roadmapSearchTitle: 'Search misses exact phrase',
     detailSlug: 'portal-request-02',
+    roadmapDetailSlug: 'portal-request-10',
     roadmapPlannedPortalCount: plannedIndices.size,
-    roadmapPlannedPublishedCount: [...plannedIndices].filter((index) => roadmapPublishedIndices.has(index)).length,
+    roadmapPlannedPublishedCount: [...plannedIndices].filter((index) =>
+      roadmapPublishedIndices.has(index),
+    ).length,
     plannedCount: 5,
     commentCount: 4,
     expectedSearchCount: 1,
@@ -540,6 +544,8 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
   try {
     await gotoBoard(page, baseURL, tenant)
     await expect(page.locator('article.board-card')).toHaveCount(data.basePageSize)
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(data.basePageSize)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
     await expect(page.getByRole('link', { name: 'Load more requests', exact: true })).toHaveCount(1)
     for (const hiddenTitle of data.hiddenTitles) {
       await expect(page.getByRole('link', { name: hiddenTitle, exact: true })).toHaveCount(0)
@@ -548,9 +554,12 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
     await page.getByRole('link', { name: 'Load more requests', exact: true }).click()
     await expect(page).toHaveURL(/cursor=20/)
     await expect(page.locator('article.board-card')).toHaveCount(2)
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(2)
 
     await gotoBoard(page, baseURL, tenant)
     await expect(page.locator('article.board-card')).toHaveCount(data.basePageSize)
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(data.basePageSize)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
 
     const search = page.getByPlaceholder('Search requests or comments', { exact: true })
     await expect(search).toHaveCount(1)
@@ -558,9 +567,13 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
     await page.getByRole('button', { name: 'Search', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/portal/${tenant.slug}/requests\\?q=Audit\\+log`))
     await expect(page.locator('article.board-card')).toHaveCount(data.expectedSearchCount)
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(
+      data.expectedSearchCount,
+    )
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
     await expect(page.getByRole('link', { name: data.searchTitle, exact: true })).toHaveCount(1)
 
-    await page.getByRole('link', { name: data.searchTitle, exact: true }).click()
+    await clickCardSurface(page, 'article.board-card')
     await expect(page).toHaveURL(
       new RegExp(`/portal/${tenant.slug}/requests/${data.detailSlug}\\?q=Audit\\+log`),
     )
@@ -609,7 +622,7 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
     await expect(page.getByRole('link', { name: data.searchTitle, exact: true })).toHaveCount(1)
     await expect(page.getByRole('button', { name: 'Remove vote', exact: true })).toHaveCount(1)
 
-    await page.getByRole('link', { name: data.searchTitle, exact: true }).click()
+    await clickCardSurface(page, 'article.board-card')
     const removeVote = page.locator('section.detail [data-vote-action]')
     await expect(removeVote).toHaveText('Remove vote')
     await removeVote.click()
@@ -650,6 +663,8 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
     await page.getByRole('button', { name: 'Search', exact: true }).click()
     await expect(page).toHaveURL(/comments=with/)
     await expect(page.locator('article.board-card')).toHaveCount(data.commentCount)
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(data.commentCount)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
     for (const title of [
       'Audit log actor filter',
       'Reply draft tone',
@@ -679,6 +694,56 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
     await expect(
       page.getByText('No public requests matched the current filters.', { exact: false }),
     ).toBeVisible()
+
+    await gotoRoadmap(page, baseURL, tenant)
+    await expect(page).toHaveTitle(`${tenant.name} | Public roadmap`)
+    await expect(page.locator('article.roadmap-column')).toHaveCount(4)
+    await expect(page.getByRole('link', { name: 'Browse requests', exact: true })).toHaveAttribute(
+      'href',
+      `/portal/${tenant.slug}/requests`,
+    )
+    await expect(
+      page.getByRole('link', { name: 'Submit new feedback', exact: true }),
+    ).toHaveAttribute('href', `/portal/${tenant.slug}`)
+
+    const roadmapSearch = page.getByPlaceholder('Search requests or comments', { exact: true })
+    await roadmapSearch.fill(data.roadmapSearchTitle)
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/portal/${tenant.slug}/roadmap\\?q=${encodeURIComponent(
+          data.roadmapSearchTitle,
+        ).replaceAll('%20', '\\+')}`,
+      ),
+    )
+    await expect(page.locator('article.roadmap-card')).toHaveCount(1)
+    await expect(page.locator('article.roadmap-card [data-freshness]')).toHaveCount(1)
+    await assertFreshnessTag(page.locator('article.roadmap-card [data-freshness]').first())
+    await expect(
+      page.getByRole('link', { name: data.roadmapSearchTitle, exact: true }),
+    ).toHaveCount(1)
+
+    await clickCardSurface(page, 'article.roadmap-card')
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/portal/${tenant.slug}/requests/${data.roadmapDetailSlug}\\?q=${encodeURIComponent(
+          data.roadmapSearchTitle,
+        ).replaceAll('%20', '\\+')}&back=%2Fportal%2F${tenant.slug}%2Froadmap`,
+      ),
+    )
+    await expect(page.getByRole('link', { name: 'Back to results', exact: true })).toHaveCount(1)
+    await page.getByRole('link', { name: 'Back to results', exact: true }).click()
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/portal/${tenant.slug}/roadmap\\?q=${encodeURIComponent(
+          data.roadmapSearchTitle,
+        ).replaceAll('%20', '\\+')}`,
+      ),
+    )
+    await expect(
+      page.getByRole('link', { name: data.roadmapSearchTitle, exact: true }),
+    ).toHaveCount(1)
+    await expect(page.getByRole('heading', { name: 'Public roadmap', exact: true })).toHaveCount(1)
   } finally {
     await context.close()
   }
@@ -690,9 +755,13 @@ async function runTenantIsolationSmoke(browserInstance, baseURL, data, tenantA, 
 
   try {
     await gotoBoard(page, baseURL, tenantA)
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(data.basePageSize)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
     await page.getByPlaceholder('Search requests or comments', { exact: true }).fill('Audit log')
     await page.getByRole('button', { name: 'Search', exact: true }).click()
-    await page.getByRole('link', { name: data.searchTitle, exact: true }).click()
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(1)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
+    await clickCardSurface(page, 'article.board-card')
     const tenantAVote = page.locator('section.detail [data-vote-action]')
     await expect(tenantAVote).toHaveText('Vote')
     await tenantAVote.click()
@@ -701,7 +770,9 @@ async function runTenantIsolationSmoke(browserInstance, baseURL, data, tenantA, 
     await gotoBoard(page, baseURL, tenantB)
     await page.getByPlaceholder('Search requests or comments', { exact: true }).fill('Audit log')
     await page.getByRole('button', { name: 'Search', exact: true }).click()
-    await page.getByRole('link', { name: data.searchTitle, exact: true }).click()
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(1)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
+    await clickCardSurface(page, 'article.board-card')
     const tenantBVote = page.locator('section.detail [data-vote-action]')
     await expect(tenantBVote).toHaveText('Vote')
     await tenantBVote.click()
@@ -710,7 +781,7 @@ async function runTenantIsolationSmoke(browserInstance, baseURL, data, tenantA, 
     await gotoBoard(page, baseURL, tenantA)
     await page.getByPlaceholder('Search requests or comments', { exact: true }).fill('Audit log')
     await page.getByRole('button', { name: 'Search', exact: true }).click()
-    await page.getByRole('link', { name: data.searchTitle, exact: true }).click()
+    await clickCardSurface(page, 'article.board-card')
     await expect(page.locator('section.detail [data-vote-action]')).toHaveText('Remove vote')
   } finally {
     await context.close()
@@ -735,15 +806,56 @@ async function runMobileSmoke(browserInstance, baseURL, data, tenant) {
       throw new Error(`mobile viewport overflow: ${JSON.stringify(metrics)}`)
     }
     await expect(page.locator('article.board-card')).toHaveCount(data.basePageSize)
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(data.basePageSize)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
 
     const search = page.getByPlaceholder('Search requests or comments', { exact: true })
     await search.fill('Audit log')
     await page.getByRole('button', { name: 'Search', exact: true }).click()
     await expect(page).toHaveURL(/q=Audit\+log/)
     await expect(page.locator('article.board-card')).toHaveCount(1)
-    await page.getByRole('link', { name: data.searchTitle, exact: true }).click()
+    await expect(page.locator('article.board-card [data-freshness]')).toHaveCount(1)
+    await assertFreshnessTag(page.locator('article.board-card [data-freshness]').first())
+    await clickCardSurface(page, 'article.board-card')
     await expect(page.getByRole('link', { name: 'Back to results', exact: true })).toHaveCount(1)
     await expect(page.locator('section.detail [data-vote-action]')).toHaveCount(1)
+
+    await gotoRoadmap(page, baseURL, tenant)
+    const roadmapMetrics = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+      innerWidth: window.innerWidth,
+    }))
+    if (
+      roadmapMetrics.scrollWidth > roadmapMetrics.innerWidth + 1 ||
+      roadmapMetrics.scrollWidth > roadmapMetrics.clientWidth + 1
+    ) {
+      throw new Error(`mobile roadmap overflow: ${JSON.stringify(roadmapMetrics)}`)
+    }
+    await expect(page.locator('article.roadmap-column')).toHaveCount(4)
+    const roadmapSearch = page.getByPlaceholder('Search requests or comments', { exact: true })
+    await roadmapSearch.fill(data.roadmapSearchTitle)
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/portal/${tenant.slug}/roadmap\\?q=${encodeURIComponent(
+          data.roadmapSearchTitle,
+        ).replaceAll('%20', '\\+')}`,
+      ),
+    )
+    await expect(page.locator('article.roadmap-card')).toHaveCount(1)
+    await expect(page.locator('article.roadmap-card [data-freshness]')).toHaveCount(1)
+    await assertFreshnessTag(page.locator('article.roadmap-card [data-freshness]').first())
+    await clickCardSurface(page, 'article.roadmap-card')
+    await expect(page.getByRole('link', { name: 'Back to results', exact: true })).toHaveCount(1)
+    await page.getByRole('link', { name: 'Back to results', exact: true }).click()
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/portal/${tenant.slug}/roadmap\\?q=${encodeURIComponent(
+          data.roadmapSearchTitle,
+        ).replaceAll('%20', '\\+')}`,
+      ),
+    )
   } finally {
     await context.close()
   }
@@ -778,7 +890,7 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
         .getByPlaceholder('Search requests or comments', { exact: true })
         .fill('Audit log')
       await commentBoard.getByRole('button', { name: 'Search', exact: true }).click()
-      await commentBoard.getByRole('link', { name: data.searchTitle, exact: true }).click()
+      await clickCardSurface(commentBoard, 'article.board-card')
       await expect(commentBoard.getByText(data.pendingCommentBody, { exact: true })).toHaveCount(0)
       await expect(commentBoard.getByText('1 comments', { exact: true }).first()).toBeVisible()
     } finally {
@@ -801,7 +913,7 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
       await expect(
         publicBoard.getByRole('link', { name: data.pendingRequestTitle, exact: true }),
       ).toHaveCount(1)
-      await publicBoard.getByRole('link', { name: data.pendingRequestTitle, exact: true }).click()
+      await clickCardSurface(publicBoard, 'article.board-card')
       await expect(
         publicBoard.getByRole('heading', { name: data.pendingRequestTitle, exact: true }),
       ).toBeVisible()
@@ -809,7 +921,7 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
 
       await publicSearch.fill('Audit log')
       await publicBoard.getByRole('button', { name: 'Search', exact: true }).click()
-      await publicBoard.getByRole('link', { name: data.searchTitle, exact: true }).click()
+      await clickCardSurface(publicBoard, 'article.board-card')
       await expect(publicBoard.getByText(data.pendingCommentBody, { exact: true })).toBeVisible()
       await expect(publicBoard.getByText('2 comments', { exact: true }).first()).toBeVisible()
     } finally {
@@ -817,8 +929,10 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
     }
 
     const boardLink = page.locator(`a[href="/portal/${tenant.slug}/requests"]`)
+    const roadmapLink = page.locator(`a[href="/portal/${tenant.slug}/roadmap"]`)
     const portalLink = page.locator(`a[href="/portal/${tenant.slug}"]`)
     await expect(boardLink).toHaveAttribute('href', `/portal/${tenant.slug}/requests`)
+    await expect(roadmapLink).toHaveAttribute('href', `/portal/${tenant.slug}/roadmap`)
     await expect(portalLink).toHaveAttribute('href', `/portal/${tenant.slug}`)
 
     const boardPopupPromise = page.waitForEvent('popup')
@@ -829,6 +943,13 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
     await expect(
       boardPopup.getByRole('heading', { name: 'Public board', exact: true }),
     ).toHaveCount(1)
+
+    const roadmapPopupPromise = page.waitForEvent('popup')
+    await roadmapLink.click()
+    const roadmapPopup = await roadmapPopupPromise
+    await roadmapPopup.waitForLoadState('domcontentloaded')
+    await expect(roadmapPopup).toHaveURL(new RegExp(`/portal/${tenant.slug}/roadmap(?:\\?|$)`))
+    await expect(roadmapPopup).toHaveTitle(`${tenant.name} | Public roadmap`)
 
     const portalPopupPromise = page.waitForEvent('popup')
     await portalLink.click()
@@ -856,7 +977,9 @@ async function approveModerationSubject(page, subjectId) {
 }
 
 async function verifyRoadmapApi(baseURL, data, tenant) {
-  const response = await fetch(`${baseURL}/v1/portal/${tenant.slug}/roadmap?roadmap=planned&limit=10`)
+  const response = await fetch(
+    `${baseURL}/v1/portal/${tenant.slug}/roadmap?roadmap=planned&limit=10`,
+  )
   if (!response.ok) {
     throw new Error(`roadmap API failed with HTTP ${response.status}`)
   }
@@ -867,10 +990,16 @@ async function verifyRoadmapApi(baseURL, data, tenant) {
   const columnNames = json.columns.map((column) => column.name)
   const wantColumnNames = ['under consideration', 'planned', 'in progress', 'shipped']
   if (JSON.stringify(columnNames) !== JSON.stringify(wantColumnNames)) {
-    throw new Error(`roadmap API column names = ${JSON.stringify(columnNames)}, want ${JSON.stringify(wantColumnNames)}`)
+    throw new Error(
+      `roadmap API column names = ${JSON.stringify(columnNames)}, want ${JSON.stringify(wantColumnNames)}`,
+    )
   }
   const column = json.columns.find((item) => item.name === 'planned')
-  if (!column || !Array.isArray(column.requests) || column.requests.length !== data.roadmapPlannedPublishedCount) {
+  if (
+    !column ||
+    !Array.isArray(column.requests) ||
+    column.requests.length !== data.roadmapPlannedPublishedCount
+  ) {
     throw new Error(
       `roadmap API request count = ${column?.requests?.length ?? 'n/a'}, want ${data.roadmapPlannedPublishedCount}`,
     )
@@ -880,6 +1009,38 @@ async function verifyRoadmapApi(baseURL, data, tenant) {
 async function gotoBoard(page, baseURL, tenant) {
   await page.goto(`${baseURL}/portal/${tenant.slug}/requests`, { waitUntil: 'domcontentloaded' })
   await expect(page).toHaveTitle(`${tenant.name} | Public board`)
+}
+
+async function gotoRoadmap(page, baseURL, tenant) {
+  await page.goto(`${baseURL}/portal/${tenant.slug}/roadmap`, { waitUntil: 'domcontentloaded' })
+  await expect(page).toHaveTitle(`${tenant.name} | Public roadmap`)
+}
+
+async function clickCardSurface(page, selector) {
+  const card = page.locator(selector)
+  const overlay = card.locator('a.card-overlay')
+  if ((await overlay.count()) === 1) {
+    await overlay.click()
+    return
+  }
+  const box = await card.boundingBox()
+  if (!box) {
+    throw new Error(`unable to locate visible card for ${selector}`)
+  }
+  await page.mouse.click(Math.round(box.x + box.width * 0.5), Math.round(box.y + box.height * 0.45))
+}
+
+async function assertFreshnessTag(locator) {
+  await expect(locator).toHaveText(/^(Updated|Published) [A-Z][a-z]{2} \d{1,2}$/)
+  await expect(locator).toHaveAttribute('datetime', /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)
+  await expect(locator).toHaveAttribute(
+    'title',
+    /^(Updated|Published) \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/,
+  )
+  await expect(locator).toHaveAttribute(
+    'aria-label',
+    /^(Updated|Published) \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/,
+  )
 }
 
 async function bootstrapDemoTenant(binaryPath, configPath, repoRoot, dsn, tenant) {

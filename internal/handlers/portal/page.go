@@ -88,7 +88,8 @@ var portalPageTemplate = template.Must(template.New("portal-page").Parse(`<!doct
     .meta {
       display: flex;
       flex-wrap: wrap;
-      gap: 8px;
+      gap: 10px;
+      align-items: center;
       color: var(--muted);
       font-size: 0.92rem;
     }
@@ -103,6 +104,12 @@ var portalPageTemplate = template.Must(template.New("portal-page").Parse(`<!doct
       font-size: 12px;
       font-weight: 600;
     }
+    .link {
+      color: var(--accent-2);
+      text-decoration: none;
+      font-weight: 650;
+    }
+    .link:hover { text-decoration: underline; }
     .card {
       border: 1px solid var(--border);
       border-radius: 24px;
@@ -288,6 +295,8 @@ var portalPageTemplate = template.Must(template.New("portal-page").Parse(`<!doct
         <span class="pill">{{.IdentityLabel}}</span>
         {{if .ShowPageURL}}<span class="pill">Page URL enabled</span>{{end}}
         {{if .CanSubmit}}<span class="pill">Submissions open</span>{{else}}<span class="pill">Submissions closed</span>{{end}}
+        <a class="link" href="{{.BoardURL}}">Browse requests</a>
+        <a class="link" href="{{.RoadmapURL}}">Roadmap</a>
       </div>
     </section>
 
@@ -509,6 +518,8 @@ type portalPageData struct {
 	IdentityFieldName        string
 	IdentityFieldPlaceholder string
 	SubmitURL                string
+	BoardURL                 string
+	RoadmapURL               string
 	Kinds                    []portalPageKindOption
 	Fields                   []portalPageField
 }
@@ -597,6 +608,8 @@ func portalPageDataFromConfig(cfg portalsvc.SubmissionConfig) portalPageData {
 		IdentityFieldName:        identityFieldName,
 		IdentityFieldPlaceholder: identityPlaceholder,
 		SubmitURL:                "/v1/portal/" + url.PathEscape(cfg.TenantSlug) + "/submissions",
+		BoardURL:                 "/portal/" + url.PathEscape(cfg.TenantSlug) + "/requests",
+		RoadmapURL:               "/portal/" + url.PathEscape(cfg.TenantSlug) + "/roadmap",
 		Kinds:                    kinds,
 		Fields:                   fields,
 	}
