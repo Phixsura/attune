@@ -638,7 +638,7 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
     ).toBeVisible()
     await page
       .locator('section.empty')
-      .getByRole('link', { name: 'Clear filters', exact: true })
+      .getByRole('link', { name: 'Show all requests', exact: true })
       .click()
     await expect(page).toHaveURL(new RegExp(`/portal/${tenant.slug}/requests$`))
     await expect(page.locator('article.board-card')).toHaveCount(data.basePageSize)
@@ -683,7 +683,7 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
       page.getByText('No public requests matched the current filters.', { exact: false }),
     ).toBeVisible()
     await expect(
-      page.locator('section.empty').getByRole('link', { name: 'Clear filters', exact: true }),
+      page.locator('section.empty').getByRole('link', { name: 'Show all requests', exact: true }),
     ).toHaveCount(1)
 
     await gotoBoard(page, baseURL, tenant)
@@ -744,6 +744,22 @@ async function runDesktopSmoke(browserInstance, baseURL, data, tenant) {
       page.getByRole('link', { name: data.roadmapSearchTitle, exact: true }),
     ).toHaveCount(1)
     await expect(page.getByRole('heading', { name: 'Public roadmap', exact: true })).toHaveCount(1)
+
+    await gotoRoadmap(page, baseURL, tenant)
+    const roadmapEmptySearch = page.getByPlaceholder('Search requests or comments', {
+      exact: true,
+    })
+    await roadmapEmptySearch.fill('zzzzzz')
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(page.locator('article.roadmap-card')).toHaveCount(0)
+    await expect(
+      page.getByText('No public roadmap items matched the current filters.', { exact: false }),
+    ).toBeVisible()
+    await expect(
+      page
+        .locator('section.empty')
+        .getByRole('link', { name: 'Show all roadmap items', exact: true }),
+    ).toHaveCount(1)
   } finally {
     await context.close()
   }
@@ -856,6 +872,21 @@ async function runMobileSmoke(browserInstance, baseURL, data, tenant) {
         ).replaceAll('%20', '\\+')}`,
       ),
     )
+    await gotoRoadmap(page, baseURL, tenant)
+    const roadmapEmptySearch = page.getByPlaceholder('Search requests or comments', {
+      exact: true,
+    })
+    await roadmapEmptySearch.fill('zzzzzz')
+    await page.getByRole('button', { name: 'Search', exact: true }).click()
+    await expect(page.locator('article.roadmap-card')).toHaveCount(0)
+    await expect(
+      page.getByText('No public roadmap items matched the current filters.', { exact: false }),
+    ).toBeVisible()
+    await expect(
+      page
+        .locator('section.empty')
+        .getByRole('link', { name: 'Show all roadmap items', exact: true }),
+    ).toHaveCount(1)
   } finally {
     await context.close()
   }

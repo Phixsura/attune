@@ -478,8 +478,8 @@ var portalRoadmapTemplate = template.Must(template.New("portal-roadmap").Parse(`
 
     {{if and (eq .RequestCount 0) (gt (len .Columns) 0)}}
     <section class="empty">
-      {{if or .HasQuery .HasState .HasRoadmap .OnlyVotedByMe .OnlyWithComments}}
-      No public roadmap items matched the current filters. <a class="link" href="{{.RoadmapURL}}">Clear filters</a>
+    {{if or .HasQuery .HasState .HasRoadmap .OnlyVotedByMe .OnlyWithComments}}
+      No public roadmap items matched the current filters. <a class="link" href="{{.RoadmapURL}}">Show all roadmap items</a>
       {{else}}
       No public roadmap items are visible yet. When operators publish requests, they will appear here automatically.
       {{end}}

@@ -502,7 +502,7 @@ func TestRequestsPageShowsMatchedFiltersEmptyStateForQuickFilters(t *testing.T) 
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"No public requests matched the current filters.", "Clear filters"} {
+	for _, want := range []string{"No public requests matched the current filters.", "Show all requests"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("board body missing %q: %s", want, body)
 		}

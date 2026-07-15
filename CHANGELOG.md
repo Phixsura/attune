@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   field options correctly while continuing to trim and validate submission
   field choices.
 
+- Empty-state recovery links on the public board and public roadmap now use
+  unique, descriptive labels, removing duplicate accessible names and making
+  browser automation less brittle.
+
 - Public visibility roadmap mapping inputs now expose explicit accessible
   labels for the column name and order controls, keeping the console
   accessibility gate green on the public visibility configuration page.

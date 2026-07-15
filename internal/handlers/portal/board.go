@@ -694,7 +694,7 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
     {{else if not .Selected}}
     <section class="empty">
       {{if or .HasQuery .HasState .HasRoadmap .OnlyVotedByMe .OnlyWithComments}}
-      No public requests matched the current filters. <a class="ghost" href="{{.BoardBaseURL}}">Clear filters</a>
+      No public requests matched the current filters. <a class="ghost" href="{{.BoardBaseURL}}">Show all requests</a>
       {{else}}
       No public requests are visible yet. When operators publish requests, they will appear here automatically.
       {{end}}
