@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   bcrypt-compatible stored hashes while dropping the vulnerable `openpgp`
   package from the module graph.
 
+### Fixed
+
+- Public visibility roadmap mapping inputs now expose explicit accessible
+  labels for the column name and order controls, keeping the console
+  accessibility gate green on the public visibility configuration page.
+
 ### Added
 
 - **Reply-send-hook batch recovery tools.**

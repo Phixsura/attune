@@ -79,6 +79,8 @@ describe('PublicVisibilityPage', () => {
       'href',
       '/portal/tenant',
     )
+    expect(screen.getAllByLabelText('公开列名称')).toHaveLength(5)
+    expect(screen.getAllByLabelText('列顺序')).toHaveLength(5)
 
     await user.click(await screen.findByRole('combobox', { name: '入口访问' }))
     await user.click(await screen.findByRole('option', { name: '关闭' }))

@@ -1583,6 +1583,7 @@ function RoadmapStatusMappingCard({
               <Input
                 value={mapping.label}
                 disabled={!canEdit}
+                aria-label={t('public_visibility.roadmap_mapping.column_label')}
                 onChange={(event) => updateRow(mapping.status, { label: event.target.value })}
                 placeholder={roadmapStatusDefaultLabel(mapping.status)}
               />
@@ -1595,6 +1596,7 @@ function RoadmapStatusMappingCard({
                 step={1}
                 value={mapping.order}
                 disabled={!canEdit}
+                aria-label={t('public_visibility.roadmap_mapping.order_label')}
                 onChange={(event) =>
                   updateRow(mapping.status, {
                     order: numberFromInput(event.target.value, mapping.order),
