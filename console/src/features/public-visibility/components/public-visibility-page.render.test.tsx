@@ -71,6 +71,10 @@ describe('PublicVisibilityPage', () => {
       'href',
       '/portal/tenant/requests',
     )
+    expect(screen.getByRole('link', { name: '打开公开路线图' })).toHaveAttribute(
+      'href',
+      '/portal/tenant/roadmap',
+    )
     expect(screen.getByRole('link', { name: '打开公开门户' })).toHaveAttribute(
       'href',
       '/portal/tenant',

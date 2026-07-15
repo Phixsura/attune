@@ -288,6 +288,7 @@
         "acknowledgement_fallback": "谢谢。我们会尽快查看你的提交。",
         "identity_hint": "提交者身份：{{value}}",
         "open_board": "打开公开看板",
+        "open_roadmap": "打开公开路线图",
         "open_portal": "打开公开门户",
         "submit_fallback": "提交反馈"
       }

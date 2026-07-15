@@ -182,6 +182,7 @@ export function PublicVisibilityPage() {
   const tenantSlug = me.data?.tenant?.slug ?? null
   const portalHref = tenantSlug ? `/portal/${encodeURIComponent(tenantSlug)}` : null
   const boardHref = tenantSlug ? `/portal/${encodeURIComponent(tenantSlug)}/requests` : null
+  const roadmapHref = tenantSlug ? `/portal/${encodeURIComponent(tenantSlug)}/roadmap` : null
 
   useEffect(() => {
     if (policyQuery.data) {
@@ -592,6 +593,7 @@ export function PublicVisibilityPage() {
               saving={policySaving}
               portalHref={portalHref}
               boardHref={boardHref}
+              roadmapHref={roadmapHref}
               onChange={(next) =>
                 setForm((prev) => ({
                   ...prev,
@@ -1776,6 +1778,7 @@ function PortalSubmissionFormCard({
   saving,
   portalHref,
   boardHref,
+  roadmapHref,
   onChange,
 }: {
   form: PortalSubmissionFormState
@@ -1785,6 +1788,7 @@ function PortalSubmissionFormCard({
   saving: boolean
   portalHref: string | null
   boardHref: string | null
+  roadmapHref: string | null
   onChange: (next: PortalSubmissionFormState) => void
 }) {
   const { t } = useTranslation()
@@ -1937,6 +1941,7 @@ function PortalSubmissionFormCard({
             fieldCount={form.fields.length}
             portalHref={portalHref}
             boardHref={boardHref}
+            roadmapHref={roadmapHref}
           />
         </div>
       </CardContent>
@@ -2116,6 +2121,7 @@ function PortalSubmissionPreview({
   fieldCount,
   portalHref,
   boardHref,
+  roadmapHref,
 }: {
   form: PortalSubmissionFormState
   writeMode: PublicWriteMode
@@ -2123,6 +2129,7 @@ function PortalSubmissionPreview({
   fieldCount: number
   portalHref: string | null
   boardHref: string | null
+  roadmapHref: string | null
 }) {
   const { t } = useTranslation()
 
@@ -2142,13 +2149,21 @@ function PortalSubmissionPreview({
         </div>
       </div>
 
-      {boardHref || portalHref ? (
+      {boardHref || portalHref || roadmapHref ? (
         <div className="mt-3 flex flex-wrap justify-end gap-2">
           {boardHref ? (
             <Button asChild variant="secondary" size="sm" className="h-8 gap-1.5">
               <a href={boardHref} target="_blank" rel="noreferrer">
                 <ExternalLink className="size-4" />
                 {t('public_visibility.portal.preview.open_board')}
+              </a>
+            </Button>
+          ) : null}
+          {roadmapHref ? (
+            <Button asChild variant="secondary" size="sm" className="h-8 gap-1.5">
+              <a href={roadmapHref} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" />
+                {t('public_visibility.portal.preview.open_roadmap')}
               </a>
             </Button>
           ) : null}
