@@ -15,7 +15,41 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   bcrypt-compatible stored hashes while dropping the vulnerable `openpgp`
   package from the module graph.
 
+### Fixed
+
+- Public visibility portal submission form normalization now clears boolean
+  field options correctly while continuing to trim and validate submission
+  field choices.
+
+- Empty-state recovery links on the public board and public roadmap now use
+  unique, descriptive labels, removing duplicate accessible names and making
+  browser automation less brittle.
+
+- Public visibility roadmap mapping inputs now expose explicit accessible
+  labels for the column name and order controls, keeping the console
+  accessibility gate green on the public visibility configuration page.
+
+- Feedback list queries now forward the `source` and `type` filters into the
+  console list options, so the reserved request parameters actually affect the
+  repo query instead of being dropped after binding.
+
 ### Added
+
+- **Reply-send-hook batch recovery tools.**
+  The reply-send-hook delivery log now supports multi-select recovery actions
+  on desktop and mobile, including batch redeliver, batch copy of selected
+  delivery IDs, and a confirmation dialog that skips non-retryable rows.
+
+- **Reply-send-hook delivery evidence dialog.**
+  The reply-send-hook delivery log now opens a safe evidence dialog for each
+  attempt, showing the request fingerprint, response metadata, and a
+  copyable JSON evidence bundle without leaving the list context.
+
+- **Public roadmap now has a dedicated HTML route.**
+  Added `/portal/{tenant_slug}/roadmap` with grouped roadmap columns, the same
+  query filters as the public board, load-more pagination, detail-page
+  back-links that preserve the roadmap context, and Console preview links to
+  the live roadmap surface.
 
 - **Workflow-derived public roadmap columns.**
   Public roadmap columns now come from a tenant roadmap-status mapping on the
@@ -28,6 +62,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   moderation views, with queue-state and surface filters wired into the Console
   moderation workspace so common triage states are one click away.
 
+- **Reply-send-hook delivery filters now survive deep links and browser history.**
+  The reply-send-hook delivery log now reads `q` and `scope` from the URL,
+  keeps the address bar in sync as operators filter and reset the feed, and
+  restores the current investigation state when they use back and forward in
+  the browser.
+
+- **Reply-send-hook now supports structured investigation views.**
+  Operators can now filter deliveries by status, event type, retryability,
+  HTTP class, actor type, host, fingerprint, and time range, then save the
+  current investigation as a reusable view or copy a permalink for sharing.
+
 - **Public portal reads and writes now use separate tenant-scoped buckets.**
   Browsing the public board no longer burns the same rate-limit quota as vote,
   comment, and submission writes, so high read traffic does not block
@@ -35,7 +80,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 - **Public board browser smoke coverage.**
   Added a local browser smoke for the public board that boots attune against a
-  temporary PostgreSQL cluster, seeds two demo tenants, rebuilds the Console
+  temporary PostgreSQL cluster, seeds two smoke tenants, rebuilds the Console
   bundle, logs into Console, and exercises list/detail navigation, voting,
   commenting, tenant-scoped visitor cookies, the public-visibility preview
   links, Console moderation approval, mobile layout, and roadmap semantics in
@@ -91,7 +136,54 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   Customer Requests flow so operators can move from intake to follow-up without
   returning to the queue.
 
+### Changed
+
+- Public request cards on the board, roadmap, and similar-request sections now
+  surface a compact freshness tag near the title, with the exact timestamp in
+  tooltip, aria text, and machine-readable `time` metadata, and the tag still
+  respects the public timestamp-hiding policy so private timing never leaks
+  into the public surface.
+
+- Smoke tenant names and the reply-send-hook sample payload now use neutral
+  `Acme` identifiers, and the reply-send-hook sample payload now derives its
+  `tenant_id` from the current session tenant instead of a placeholder marker;
+  the reply-send-hook URL placeholder and validation example now also use a
+  `your-company.com` style host, so the local browser path reads like a
+  production tenant. The reply-send-hook page also now surfaces the last
+  updated timestamp on the current Hook card, keeps the delivery-log test
+  action in one place instead of repeating it across sections, and switches the
+  delivery log to mobile cards on narrow screens so the recent attempts stay
+  readable without a horizontal squeeze, with desktop/mobile switching now
+  following viewport media-query changes reliably during browser testing. The
+  delivery log now filters and searches on the server, adds cursor pagination
+  with a Load more action, and keeps the quick filters for problem, send, test,
+  and accepted deliveries so operators can narrow down retries and diagnostics
+  without loading the whole history at once.
+
 ### Fixed
+
+- **Public board and roadmap cards now open from the whole card surface.**
+  The shared portal request cards now include a full-surface hit target with
+  hover and focus treatment, so real browser clicks on the card body open the
+  detail page instead of relying on the title text alone. The browser smoke
+  test now clicks the card body on desktop and mobile to keep that affordance
+  covered.
+
+- **Public visibility policy saves now persist roadmap mappings and portal forms.**
+  The Console policy handler now forwards and returns the roadmap status
+  mapping and portal submission form, so a saved policy rehydrates with the
+  same public roadmap labels and portal fields instead of falling back to the
+  defaults.
+
+- **Feedback tag picker popovers now satisfy accessibility semantics.**
+  The tag combobox now names its popover surface and keeps empty exact-match
+  states inside a valid `option`, which removes the mobile axe regressions in
+  the feedback tag workflow.
+
+- **Public visibility roadmap order inputs now have accessible labels.**
+  The Console policy editor's numeric roadmap-order field now exposes an
+  accessible name, which keeps the public-visibility browser accessibility
+  gate clean on desktop and mobile Chromium.
 
 - **Docker builds now match the Go 1.26.5 module floor.**
   The root image builder stage now uses Go 1.26.5, so `docker-build` runs on

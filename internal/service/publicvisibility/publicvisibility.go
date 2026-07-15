@@ -1189,33 +1189,35 @@ func normalizePortalSubmissionFormField(field repo.PortalSubmissionField, seen m
 	if !portalSubmissionFieldKindValid(field.Kind) {
 		return repo.PortalSubmissionField{}, ErrValidation
 	}
-	if err := normalizePortalSubmissionFormFieldOptions(ptrext.Of(field)); err != nil {
+	var err error
+	field, err = normalizePortalSubmissionFormFieldOptions(field)
+	if err != nil {
 		return repo.PortalSubmissionField{}, err
 	}
 	return field, nil
 }
 
-func normalizePortalSubmissionFormFieldOptions(field *repo.PortalSubmissionField) error {
+func normalizePortalSubmissionFormFieldOptions(field repo.PortalSubmissionField) (repo.PortalSubmissionField, error) {
 	if field.Kind == repo.PortalSubmissionFieldKindBoolean {
 		field.Options = nil
-		return nil
+		return field, nil
 	}
 	if field.Kind != repo.PortalSubmissionFieldKindSelect && field.Kind != repo.PortalSubmissionFieldKindMultiSelect {
 		if len(field.Options) > 0 {
-			return ErrValidation
+			return repo.PortalSubmissionField{}, ErrValidation
 		}
-		return nil
+		return field, nil
 	}
 	if len(field.Options) == 0 || len(field.Options) > 12 {
-		return ErrValidation
+		return repo.PortalSubmissionField{}, ErrValidation
 	}
 	for i := range field.Options {
 		field.Options[i] = bounded(strings.TrimSpace(field.Options[i]), 80)
 		if field.Options[i] == "" {
-			return ErrValidation
+			return repo.PortalSubmissionField{}, ErrValidation
 		}
 	}
-	return nil
+	return field, nil
 }
 
 func portalSubmissionFieldKindValid(kind repo.PortalSubmissionFieldKind) bool {

@@ -71,10 +71,16 @@ describe('PublicVisibilityPage', () => {
       'href',
       '/portal/tenant/requests',
     )
+    expect(screen.getByRole('link', { name: '打开公开路线图' })).toHaveAttribute(
+      'href',
+      '/portal/tenant/roadmap',
+    )
     expect(screen.getByRole('link', { name: '打开公开门户' })).toHaveAttribute(
       'href',
       '/portal/tenant',
     )
+    expect(screen.getAllByLabelText('公开列名称')).toHaveLength(5)
+    expect(screen.getAllByLabelText('列顺序')).toHaveLength(5)
 
     await user.click(await screen.findByRole('combobox', { name: '入口访问' }))
     await user.click(await screen.findByRole('option', { name: '关闭' }))
@@ -209,6 +215,50 @@ describe('PublicVisibilityPage', () => {
       })
     })
   }, 60_000)
+
+  it('keeps roadmap mappings and portal field editors interactive', async () => {
+    mockMe('admin')
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({ subjects: moderationSubjects() }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByText('路线图状态映射')).toBeInTheDocument())
+
+    const mappingLabels = screen.getAllByLabelText('公开列名称')
+    await user.clear(mappingLabels[0])
+    await user.type(mappingLabels[0], '待定')
+
+    const mappingOrders = screen.getAllByLabelText('列顺序')
+    await user.clear(mappingOrders[0])
+    await user.type(mappingOrders[0], '7')
+
+    await user.click(screen.getAllByRole('checkbox', { name: '显示在公开路线图' })[0])
+    await user.click(screen.getByRole('button', { name: '恢复默认映射' }))
+
+    expect(screen.getAllByLabelText('公开列名称')[0]).toHaveValue('under consideration')
+    expect(screen.getAllByLabelText('列顺序')[0]).toHaveValue(1)
+
+    await user.click(screen.getByRole('button', { name: '添加字段' }))
+
+    const fieldLabels = screen.getAllByLabelText('字段名称')
+    await user.clear(fieldLabels[0])
+    await user.type(fieldLabels[0], 'Severity level')
+
+    const fieldPlaceholders = screen.getAllByLabelText('占位提示')
+    await user.clear(fieldPlaceholders[0])
+    await user.type(fieldPlaceholders[0], 'Choose severity')
+
+    await user.click(screen.getAllByRole('button', { name: '下移' })[0])
+    await user.click(screen.getAllByRole('button', { name: '删除' })[0])
+
+    expect(screen.getAllByLabelText('字段名称')).toHaveLength(1)
+  })
 
   it('saves and reapplies moderation views', async () => {
     mockMe('admin')
