@@ -1,3 +1,4 @@
+// ptrext:file-allow router adapter tests construct service pointers through public constructors.
 // SPDX-License-Identifier: Apache-2.0
 
 package main
@@ -9,11 +10,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/domain"
 	mcpoauth "github.com/Phixsura/attune/internal/mcp/oauth"
+	"github.com/Phixsura/attune/internal/mcp/tools"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	"github.com/Phixsura/attune/internal/service/ingest"
 )
 
 func TestMCPClientStoreAdapterMapsRepoErrors(t *testing.T) {
@@ -103,6 +111,64 @@ func TestMCPSessionAndPolicyAdaptersReturnRepoErrors(t *testing.T) {
 	}
 }
 
+func TestMCPIngestorAdapterForwardsToIngestor(t *testing.T) {
+	t.Parallel()
+
+	repo := &routerAdapterFeedbackRepo{insertID: 42}
+	adapter := newMCPIngestorAdapter(ingest.NewIngestor(repo, nil, nil))
+
+	id, err := adapter.Ingest(context.Background(), "tenant-1", "user-ignored", domain.IngestInput{
+		Content: "checkout is broken",
+		Source:  "api",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int64(42), id)
+	require.Equal(t, "tenant-1", repo.tenantID)
+	require.Equal(t, "api", repo.input.Source)
+}
+
+func TestMCPAuditAdapterRecordsMCPActor(t *testing.T) {
+	t.Parallel()
+
+	repo := &routerAdapterAuditRepo{}
+	adapter := newMCPAuditAdapter(auditlogsvc.New(repo))
+
+	err := adapter.Record(context.Background(), tools.AuditEvent{
+		TenantID:   "tenant-1",
+		Actor:      "client-1",
+		ActorIP:    "203.0.113.10",
+		UserAgent:  "mcp-test/1.0",
+		Action:     "mcp.submit_feedback",
+		TargetType: "feedback",
+		TargetID:   "42",
+		Summary:    "Submitted feedback",
+		Before:     map[string]any{"state": "before"},
+		After:      map[string]any{"state": "after"},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, repo.entries, 1)
+	entry := repo.entries[0]
+	require.Equal(t, "tenant-1", entry.TenantID)
+	require.Equal(t, "mcp", entry.ActorType)
+	require.Equal(t, "client-1", entry.ActorID)
+	require.Equal(t, "203.0.113.10", entry.ActorIP)
+	require.Equal(t, "mcp.submit_feedback", entry.Action)
+	require.Equal(t, "feedback", entry.TargetType)
+	require.Equal(t, "42", entry.TargetID)
+}
+
+func TestMCPAdapterConstructorsAllowNilDependencies(t *testing.T) {
+	t.Parallel()
+
+	require.NotNil(t, newMCPWorkflowAdapter(nil))
+	require.NotNil(t, newMCPIngestorAdapter(nil))
+	require.NotNil(t, newMCPAuditAdapter(nil))
+	require.NotNil(t, newMCPToolPolicyStore(nil))
+	require.NotNil(t, newMCPSessionStore(nil))
+}
+
 func newUnreachableMCPAdapterPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
@@ -117,4 +183,57 @@ func newUnreachableMCPAdapterPool(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+type routerAdapterFeedbackRepo struct {
+	insertID int64
+	tenantID string
+	input    domain.IngestInput
+}
+
+func (r *routerAdapterFeedbackRepo) Insert(
+	_ context.Context,
+	tenantID string,
+	_, _, _, _ string,
+	in domain.IngestInput,
+) (int64, error) {
+	r.tenantID = tenantID
+	r.input = in
+	return r.insertID, nil
+}
+
+func (r *routerAdapterFeedbackRepo) InsertIdempotent(
+	ctx context.Context,
+	tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+	in domain.IngestInput,
+	_ []byte,
+) (int64, bool, error) {
+	id, err := r.Insert(ctx, tenantID, userID, subjectKey, subjectDisplay, subjectHash, in)
+	return id, false, err
+}
+
+type routerAdapterAuditRepo struct {
+	entries     []auditlogrepo.Entry
+	pruneRows   int64
+	pruneErr    error
+	pruneCutoff time.Time
+}
+
+func (r *routerAdapterAuditRepo) Insert(_ context.Context, entry auditlogrepo.Entry) error {
+	r.entries = append(r.entries, entry)
+	return nil
+}
+
+func (r *routerAdapterAuditRepo) InsertTx(_ context.Context, _ pgx.Tx, entry auditlogrepo.Entry) error {
+	r.entries = append(r.entries, entry)
+	return nil
+}
+
+func (r *routerAdapterAuditRepo) List(context.Context, auditlogrepo.ListFilter) (auditlogrepo.ListResult, error) {
+	return auditlogrepo.ListResult{}, nil
+}
+
+func (r *routerAdapterAuditRepo) PruneBefore(_ context.Context, cutoff time.Time) (int64, error) {
+	r.pruneCutoff = cutoff
+	return r.pruneRows, r.pruneErr
 }

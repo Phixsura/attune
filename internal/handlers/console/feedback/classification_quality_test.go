@@ -2,6 +2,7 @@ package feedback
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -311,6 +312,53 @@ func TestGetClassificationQualityReturnsSummaryWarningsAndSamples(t *testing.T) 
 	require.Len(t, body.GetSamples(), 1)
 	require.Equal(t, "classified sample", body.GetSamples()[0].GetTitle())
 	require.InDelta(t, confidence, body.GetSamples()[0].GetClassificationConfidence(), 0.001)
+}
+
+func TestGetClassificationQualitySamplesReturnsRequestedRows(t *testing.T) {
+	t.Parallel()
+
+	confidence := 0.74
+	repo := ptrext.Of(fakeFeedbackRepo{
+		qualitySamples: []feedbackrepo.ClassificationQualitySample{{
+			ID:                       101,
+			CreatedAt:                time.Date(2026, 7, 1, 1, 0, 0, 0, time.UTC),
+			Source:                   "api",
+			Title:                    "raw title",
+			DisplayTitle:             "classified sample",
+			EnrichmentStatus:         "done",
+			ClassificationConfidence: ptrext.Of(confidence),
+		}},
+	})
+	h := ptrext.Of(FeedbackHandler{repo: repo})
+
+	result, err := h.GetClassificationQualitySamples(qualityTestCtx(), ptrext.Of(attunev1.GetClassificationQualitySamplesRequest{
+		Ids: []int64{101, 102},
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.Status)
+	require.Equal(t, dispatchtest.TenantID, repo.qualityTenant)
+	require.Equal(t, []int64{101, 102}, repo.qualitySampleIDs)
+	require.Len(t, result.Body.GetSamples(), 1)
+	require.Equal(t, "classified sample", result.Body.GetSamples()[0].GetTitle())
+	require.InDelta(t, confidence, result.Body.GetSamples()[0].GetClassificationConfidence(), 0.001)
+}
+
+func TestGetClassificationQualitySamplesMapsRepoErrors(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(fakeFeedbackRepo{qualitySamplesErr: errors.New("query failed")})
+	h := ptrext.Of(FeedbackHandler{repo: repo})
+
+	result, err := h.GetClassificationQualitySamples(qualityTestCtx(), ptrext.Of(attunev1.GetClassificationQualitySamplesRequest{
+		Ids: []int64{101},
+	}))
+
+	require.Zero(t, result.Status)
+	typed := ptrext.Of((*dispatcher.Error)(nil))
+	require.ErrorAs(t, err, typed)
+	require.Equal(t, http.StatusInternalServerError, ptrext.Indirect(typed).Status)
+	require.Equal(t, attunev1.ErrorCode_INTERNAL, ptrext.Indirect(typed).Code)
 }
 
 func requireQualityQueryOpts(t *testing.T, opts feedbackrepo.ClassificationQualityQueryOpts) {

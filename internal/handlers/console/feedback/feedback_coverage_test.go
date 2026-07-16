@@ -259,6 +259,25 @@ func TestSetDrafter_WiresDrafter(t *testing.T) {
 	require.NotNil(t, h.drafter)
 }
 
+func TestNewFeedbackHandler_AllowsNilReposForWiring(t *testing.T) {
+	t.Parallel()
+
+	h := NewFeedbackHandler(nil, nil)
+
+	require.NotNil(t, h)
+	require.Nil(t, h.repo)
+	require.Nil(t, h.tenants)
+}
+
+func TestSetReplyDraftWorkflow_WiresWorkflow(t *testing.T) {
+	t.Parallel()
+
+	h := &FeedbackHandler{}
+	h.SetReplyDraftWorkflow(nil)
+
+	require.Nil(t, h.replyWorkflow)
+}
+
 func TestSetRegenLimiter_WiresLimiter(t *testing.T) {
 	t.Parallel()
 

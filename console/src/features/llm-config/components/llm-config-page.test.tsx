@@ -1,7 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import { defaultLLMChannelsList } from '@/testing/mocks/handlers'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 import { LLMConfigPage } from './llm-config-page'
 
 test('renders managed LLM config surfaces', async () => {
@@ -179,4 +179,149 @@ test('confirms channel deletion', async () => {
   await waitFor(() => {
     expect(deleted).toBe('11111111-1111-1111-1111-111111111111')
   })
+})
+
+test('updates an existing channel without replacing its api key', async () => {
+  let patched: unknown
+  server.use(
+    http.patch('/fb/v1/console/llm/channels/:id', async ({ request, params }) => {
+      patched = { id: params.id, body: await request.json() }
+      return HttpResponse.json({
+        ...defaultLLMChannelsList.items[0],
+        id: String(params.id),
+        name: 'Primary Edited',
+      })
+    }),
+  )
+  const { user } = renderWithProviders(<LLMConfigPage />)
+
+  await screen.findAllByText('Primary')
+  await user.click(screen.getAllByTitle('编辑')[0])
+  expect(await screen.findByRole('heading', { name: '编辑 LLM channel' })).toBeInTheDocument()
+  await user.clear(screen.getByLabelText('名称'))
+  await user.type(screen.getByLabelText('名称'), 'Primary Edited')
+  await user.click(screen.getByRole('button', { name: '保存' }))
+
+  await waitFor(() => expect(patched).toBeDefined())
+  expect(patched).toMatchObject({
+    id: '11111111-1111-1111-1111-111111111111',
+    body: {
+      name: 'Primary Edited',
+      protocol: 'openai-compat',
+      baseUrl: 'http://localhost:11434',
+      authMode: 'bearer',
+      status: 'enabled',
+      priority: 100,
+      weight: 1,
+      timeoutSeconds: 60,
+    },
+  })
+  expect(JSON.stringify(patched)).not.toContain('apiKey')
+})
+
+test('creates and deletes a selected channel ability', async () => {
+  let upserted: unknown
+  let deleted: unknown
+  server.use(
+    http.put('/fb/v1/console/llm/channels/:id/abilities', async ({ request, params }) => {
+      upserted = { channelId: params.id, body: await request.json() }
+      return HttpResponse.json({
+        id: 'ability-new',
+        channelId: String(params.id),
+        logicalModel: 'semantic-small',
+        providerModel: 'gpt-4.1-mini',
+        enabled: true,
+        priority: 0,
+        weight: 1,
+        createdAt: '2026-06-11T00:00:00Z',
+        updatedAt: '2026-06-11T00:00:00Z',
+      })
+    }),
+    http.post('/fb/v1/console/llm/channels/:id/abilities/delete', async ({ request, params }) => {
+      deleted = { channelId: params.id, body: await request.json() }
+      return new HttpResponse(null, { status: 204 })
+    }),
+  )
+  const { user } = renderWithProviders(<LLMConfigPage />)
+
+  await screen.findAllByText('Primary')
+  await user.click(screen.getByTitle('新增能力'))
+  await user.type(await screen.findByLabelText('Logical model'), 'semantic-small')
+  await user.selectOptions(screen.getByRole('combobox', { name: '选择 model' }), 'gpt-4.1-mini')
+  await user.click(screen.getByRole('button', { name: '保存' }))
+
+  await waitFor(() => expect(upserted).toBeDefined())
+  expect(upserted).toMatchObject({
+    channelId: '11111111-1111-1111-1111-111111111111',
+    body: {
+      logicalModel: 'semantic-small',
+      providerModel: 'gpt-4.1-mini',
+      enabled: true,
+      priority: 0,
+      weight: 1,
+    },
+  })
+
+  const abilityRow = screen.getByText('gpt-4o-mini').closest('tr')
+  if (!abilityRow) throw new Error('ability row not found')
+  await user.click(within(abilityRow).getByTitle('删除'))
+  expect(await screen.findByRole('heading', { name: '删除能力' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '删除' }))
+
+  await waitFor(() => expect(deleted).toBeDefined())
+  expect(deleted).toMatchObject({
+    channelId: '11111111-1111-1111-1111-111111111111',
+    body: { logicalModel: 'enrich-default' },
+  })
+})
+
+test('creates and deletes an LLM route', async () => {
+  let upserted: unknown
+  let deleted: unknown
+  server.use(
+    http.put('/fb/v1/console/llm/routes', async ({ request }) => {
+      upserted = await request.json()
+      return HttpResponse.json({
+        id: 'route-new',
+        tenantId: 'tenant-a',
+        purpose: 'semantic_search',
+        logicalModel: 'semantic-small',
+        enabled: true,
+        createdAt: '2026-06-11T00:00:00Z',
+        updatedAt: '2026-06-11T00:00:00Z',
+      })
+    }),
+    http.post('/fb/v1/console/llm/routes/delete', async ({ request }) => {
+      deleted = await request.json()
+      return new HttpResponse(null, { status: 204 })
+    }),
+  )
+  const { user } = renderWithProviders(<LLMConfigPage />)
+
+  await screen.findAllByText('Primary')
+  await user.click(screen.getByTitle('新增路由'))
+  expect(await screen.findByRole('heading', { name: 'LLM 路由' })).toBeInTheDocument()
+  await user.type(screen.getByLabelText('Tenant ID'), 'tenant-a')
+  await user.clear(screen.getByLabelText('用途'))
+  await user.type(screen.getByLabelText('用途'), 'semantic_search')
+  await user.clear(screen.getByLabelText('Logical model'))
+  await user.type(screen.getByLabelText('Logical model'), 'semantic-small')
+  await user.click(screen.getByRole('button', { name: '保存' }))
+
+  await waitFor(() => expect(upserted).toBeDefined())
+  expect(upserted).toMatchObject({
+    tenantId: 'tenant-a',
+    purpose: 'semantic_search',
+    logicalModel: 'semantic-small',
+    enabled: true,
+  })
+
+  const routeRow = screen.getByText('global').closest('tr')
+  if (!routeRow) throw new Error('route row not found')
+  await user.click(within(routeRow).getByTitle('删除'))
+  expect(await screen.findByRole('heading', { name: '删除路由' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '删除' }))
+
+  await waitFor(() => expect(deleted).toBeDefined())
+  expect(deleted).toMatchObject({ tenantId: '', purpose: 'enrich' })
 })

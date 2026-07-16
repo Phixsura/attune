@@ -164,6 +164,17 @@ func TestPruneIdempotencyKeysOnceLogsRepoError(t *testing.T) {
 	pruneIdempotencyKeysOnce(ctx, feedback.NewFeedback(newUnreachableServerPool(t)), time.Hour)
 }
 
+func TestPruneAuditOnceLogsSuccessAndRepoError(t *testing.T) {
+	ctx := context.Background()
+	repo := ptrext.Of(routerAdapterAuditRepo{pruneRows: 2})
+	pruneAuditOnce(ctx, auditlogsvc.New(repo), 24*time.Hour)
+	if repo.pruneCutoff.IsZero() {
+		t.Fatal("pruneAuditOnce did not call PruneBefore")
+	}
+
+	pruneAuditOnce(ctx, auditlogsvc.New(ptrext.Of(routerAdapterAuditRepo{pruneErr: errors.New("prune failed")})), 24*time.Hour)
+}
+
 func TestPruneMCPOnceLogsRepoErrors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

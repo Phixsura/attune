@@ -44,6 +44,7 @@ type fakeFeedbackRepo struct {
 	qualityValues      []feedbackrepo.ClassificationQualityValueAggregate
 	qualitySeries      []feedbackrepo.ClassificationQualitySeriesBucket
 	qualitySamples     []feedbackrepo.ClassificationQualitySample
+	qualitySamplesErr  error
 	qualityTenant      string
 	qualitySampleIDs   []int64
 	qualityAggOpts     []feedbackrepo.ClassificationQualityQueryOpts
@@ -118,7 +119,7 @@ func (f *fakeFeedbackRepo) ClassificationQualitySamples(
 ) ([]feedbackrepo.ClassificationQualitySample, error) {
 	f.qualityTenant = tenantID
 	f.qualitySampleIDs = append([]int64(nil), ids...)
-	return f.qualitySamples, nil
+	return f.qualitySamples, f.qualitySamplesErr
 }
 
 func (f *fakeFeedbackRepo) RetryEnrichment(
