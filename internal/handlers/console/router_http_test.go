@@ -36,6 +36,8 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
+	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
+	consolerequestnotification "github.com/Phixsura/attune/internal/handlers/console/requestnotification"
 	"github.com/Phixsura/attune/internal/handlers/console/system"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
@@ -63,34 +65,36 @@ func (passAdminReader) GetByID(_ context.Context, _ string) (admin.Admin, error)
 // middleware forwards requests to the handler closures.
 func dispatchRouter() *Router {
 	return ptrext.Of(Router{
-		login:              &auth.Handler{},
-		changePassword:     &auth.ChangePasswordHandler{},
-		me:                 &me.MeHandler{},
-		auditLog:           &consoleauditlog.Handler{},
-		apiKeys:            &apikey.APIKeysHandler{},
-		notifyTargets:      &notifytarget.NotifyTargetsHandler{},
-		digestSubscription: &digestsubscription.Handler{},
-		feedback:           &feedback.FeedbackHandler{},
-		feedbackBatch:      &feedback.BatchHandler{},
-		feedbackSearch:     &feedback.SearchHandler{},
-		qualityActions:     &feedback.QualityActionHandler{},
-		customerRequests:   &consolecustomerrequest.Handler{},
-		feedbackJob:        &feedbackjob.Handler{},
-		gdpr:               &consolegdpr.Handler{},
-		usage:              &usage.UsageHandler{},
-		enrichConfig:       &enrichconfig.Handler{},
-		enrichmentRuntime:  &consoleenrichmentruntime.Handler{},
-		externalSync:       &consoleexternalsync.Handler{},
-		guardPolicies:      &consoleguardpolicy.Handler{},
-		inbound:            &consoleinbound.Handler{},
-		llmConfig:          &consolellmconfig.Handler{},
-		clusters:           &clusters.ClustersHandler{},
-		outbox:             &consoleoutbox.Handler{},
-		tags:               &consoletag.Handler{},
-		tagAssignments:     &consoletagassignment.Handler{},
-		workflow:           &consoleworkflow.Handler{},
-		members:            &member.Handler{},
-		admins:             passAdminReader{},
+		login:                &auth.Handler{},
+		changePassword:       &auth.ChangePasswordHandler{},
+		me:                   &me.MeHandler{},
+		auditLog:             &consoleauditlog.Handler{},
+		apiKeys:              &apikey.APIKeysHandler{},
+		notifyTargets:        &notifytarget.NotifyTargetsHandler{},
+		digestSubscription:   &digestsubscription.Handler{},
+		feedback:             &feedback.FeedbackHandler{},
+		feedbackBatch:        &feedback.BatchHandler{},
+		feedbackSearch:       &feedback.SearchHandler{},
+		qualityActions:       &feedback.QualityActionHandler{},
+		customerRequests:     &consolecustomerrequest.Handler{},
+		publicVisibility:     &consolepublicvisibility.Handler{},
+		requestNotifications: &consolerequestnotification.Handler{},
+		feedbackJob:          &feedbackjob.Handler{},
+		gdpr:                 &consolegdpr.Handler{},
+		usage:                &usage.UsageHandler{},
+		enrichConfig:         &enrichconfig.Handler{},
+		enrichmentRuntime:    &consoleenrichmentruntime.Handler{},
+		externalSync:         &consoleexternalsync.Handler{},
+		guardPolicies:        &consoleguardpolicy.Handler{},
+		inbound:              &consoleinbound.Handler{},
+		llmConfig:            &consolellmconfig.Handler{},
+		clusters:             &clusters.ClustersHandler{},
+		outbox:               &consoleoutbox.Handler{},
+		tags:                 &consoletag.Handler{},
+		tagAssignments:       &consoletagassignment.Handler{},
+		workflow:             &consoleworkflow.Handler{},
+		members:              &member.Handler{},
+		admins:               passAdminReader{},
 	})
 }
 
@@ -619,6 +623,79 @@ func TestRouterHTTPDispatch_ExternalSync(t *testing.T) {
 	}
 }
 
+// ---------- mountPublicVisibility routes ----------
+
+func TestRouterHTTPDispatch_PublicVisibility(t *testing.T) {
+	t.Parallel()
+	r := dispatchRouter()
+	mux := newRecovererMux()
+	r.mountPublicVisibility(mux)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"GET /public-visibility/policy", http.MethodGet, "/public-visibility/policy", ""},
+		{"PUT /public-visibility/policy", http.MethodPut, "/public-visibility/policy", `{}`},
+		{"GET /public-visibility/moderation", http.MethodGet, "/public-visibility/moderation", ""},
+		{"GET /public-visibility/views", http.MethodGet, "/public-visibility/views", ""},
+		{"POST /public-visibility/views", http.MethodPost, "/public-visibility/views", `{}`},
+		{"PUT /public-visibility/views/{id}", http.MethodPut, "/public-visibility/views/view-1", `{}`},
+		{"DELETE /public-visibility/views/{id}", http.MethodDelete, "/public-visibility/views/view-1", ""},
+		{"GET /public-visibility/requests/{request_id}/profile", http.MethodGet, "/public-visibility/requests/" + id + "/profile", ""},
+		{"PUT /public-visibility/requests/{request_id}/profile", http.MethodPut, "/public-visibility/requests/" + id + "/profile", `{}`},
+		{"POST /public-visibility/moderation/{id}:approve", http.MethodPost, "/public-visibility/moderation/" + id + ":approve", `{}`},
+		{"POST /public-visibility/moderation/{id}:reject", http.MethodPost, "/public-visibility/moderation/" + id + ":reject", `{}`},
+		{"POST /public-visibility/moderation/{id}:hide", http.MethodPost, "/public-visibility/moderation/" + id + ":hide", `{}`},
+		{"POST /public-visibility/moderation/{id}:mark-spam", http.MethodPost, "/public-visibility/moderation/" + id + ":mark-spam", `{}`},
+		{"POST /public-visibility/moderation/{id}:restore", http.MethodPost, "/public-visibility/moderation/" + id + ":restore", `{}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serveAndAssertDispatched(t, mux, tc.method, tc.path, tc.body)
+		})
+	}
+}
+
+// ---------- mountRequestNotifications routes ----------
+
+func TestRouterHTTPDispatch_RequestNotifications(t *testing.T) {
+	t.Parallel()
+	r := dispatchRouter()
+	mux := newRecovererMux()
+	r.mountRequestNotifications(mux)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"GET /request-notifications/settings", http.MethodGet, "/request-notifications/settings", ""},
+		{"PUT /request-notifications/settings", http.MethodPut, "/request-notifications/settings", `{}`},
+		{"GET /request-notifications/sender", http.MethodGet, "/request-notifications/sender", ""},
+		{"PUT /request-notifications/sender", http.MethodPut, "/request-notifications/sender", `{}`},
+		{"POST /request-notifications/sender:verify", http.MethodPost, "/request-notifications/sender:verify", `{"id":"` + id + `"}`},
+		{"GET /request-notifications/webhook-targets", http.MethodGet, "/request-notifications/webhook-targets", ""},
+		{"POST /request-notifications/webhook-targets", http.MethodPost, "/request-notifications/webhook-targets", `{}`},
+		{"PATCH /request-notifications/webhook-targets/{id}", http.MethodPatch, "/request-notifications/webhook-targets/" + id, `{}`},
+		{"DELETE /request-notifications/webhook-targets/{id}", http.MethodDelete, "/request-notifications/webhook-targets/" + id, ""},
+		{"POST /request-notifications/webhook-targets/{id}:test", http.MethodPost, "/request-notifications/webhook-targets/" + id + ":test", `{}`},
+		{"POST /request-notifications/preview", http.MethodPost, "/request-notifications/preview", `{}`},
+		{"POST /request-notifications/publish", http.MethodPost, "/request-notifications/publish", `{}`},
+		{"GET /request-notifications/deliveries", http.MethodGet, "/request-notifications/deliveries?status=failed&limit=25&before_id=99&request_id=" + id + "&channel=webhook", ""},
+		{"POST /request-notifications/deliveries/{id}:retry", http.MethodPost, "/request-notifications/deliveries/1:retry", `{}`},
+		{"GET /request-notifications/requests/{request_id}/subscribers", http.MethodGet, "/request-notifications/requests/" + id + "/subscribers", ""},
+		{"POST /request-notifications/subscribers/{contact_id}:suppress", http.MethodPost, "/request-notifications/subscribers/" + id + ":suppress", `{}`},
+		{"POST /request-notifications/provider-events:suppress", http.MethodPost, "/request-notifications/provider-events:suppress", `{}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serveAndAssertDispatched(t, mux, tc.method, tc.path, tc.body)
+		})
+	}
+}
+
 // ---------- mountClusters routes ----------
 
 func TestRouterHTTPDispatch_Clusters(t *testing.T) {
@@ -983,6 +1060,30 @@ func TestRouterSetters(t *testing.T) {
 		r2.SetSSOCutoverHandler(&auth.SSOCutoverHandler{})
 		require.NotNil(t, r2.ssoCutover)
 	})
+	t.Run("SetQualityActionHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetQualityActionHandler(&feedback.QualityActionHandler{})
+		require.NotNil(t, r2.qualityActions)
+	})
+	t.Run("SetCustomerRequestHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetCustomerRequestHandler(&consolecustomerrequest.Handler{})
+		require.NotNil(t, r2.customerRequests)
+	})
+	t.Run("SetPublicVisibilityHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetPublicVisibilityHandler(&consolepublicvisibility.Handler{})
+		require.NotNil(t, r2.publicVisibility)
+	})
+	t.Run("SetRequestNotificationHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetRequestNotificationHandler(&consolerequestnotification.Handler{})
+		require.NotNil(t, r2.requestNotifications)
+	})
 }
 
 // ---------- nil-guard branches for optional handlers ----------
@@ -1010,6 +1111,8 @@ func TestRouterHTTPDispatch_NilGuards(t *testing.T) {
 	r.mountOIDC(mux)
 	r.mountExternalSync(mux)
 	r.mountBreakGlass(mux)
+	r.mountPublicVisibility(mux)
+	r.mountRequestNotifications(mux)
 
 	// Verify no routes were registered.
 	routeCount := 0

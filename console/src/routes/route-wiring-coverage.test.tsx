@@ -11,6 +11,9 @@ import { Route as ClassificationQualityRoute } from './_authed.analytics.classif
 import { Route as LLMUsageRoute } from './_authed.analytics.llm-usage'
 import { Route as SearchQualityRoute } from './_authed.analytics.search-quality'
 import { Route as UsageRoute } from './_authed.analytics.usage'
+import { Route as LegacyAPIKeysRoute } from './_authed.api-keys'
+import { Route as LegacyClassificationQualityRoute } from './_authed.classification-quality'
+import { Route as LegacyClustersRoute } from './_authed.clusters'
 import { Route as ClassificationRoute } from './_authed.configuration.classification'
 import { Route as EnrichmentRuntimeRoute } from './_authed.configuration.enrichment-runtime'
 import { Route as LLMConfigurationRoute } from './_authed.configuration.llm'
@@ -18,6 +21,9 @@ import { Route as TagsRoute } from './_authed.configuration.tags'
 import { Route as WorkflowRoute } from './_authed.configuration.workflow'
 import { Route as ControlTowerRoute } from './_authed.control-tower'
 import { Route as CustomerRequestsRoute } from './_authed.feedback.customer-requests'
+import { Route as LegacyGuardPoliciesRoute } from './_authed.guard-policies'
+import { Route as LegacyInboundSourcesRoute } from './_authed.inbound-sources'
+import { Route as AuthedIndexRoute } from './_authed.index'
 import { Route as APIKeysIntegrationRoute } from './_authed.integrations.api-keys'
 import { Route as DigestRoute } from './_authed.integrations.digests'
 import { Route as ExternalSyncRoute } from './_authed.integrations.external-sync'
@@ -26,6 +32,8 @@ import { Route as NotifyTargetsRoute } from './_authed.integrations.notify-targe
 import { Route as PublicVisibilityRoute } from './_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from './_authed.integrations.reply-send-hook'
 import { Route as RequestNotificationsRoute } from './_authed.integrations.request-notifications'
+import { Route as LegacyLLMConfigRoute } from './_authed.llm-config'
+import { Route as LegacyLLMUsageRoute } from './_authed.llm-usage'
 import { Route as MCPClientsRoute } from './_authed.mcp-clients'
 
 const requireRouteAccessMock = vi.hoisted(() => vi.fn())
@@ -40,6 +48,7 @@ vi.mock('@tanstack/react-router', async () => {
       id: path,
       options,
     }),
+    redirect: (options: Record<string, unknown>) => ({ redirect: options }),
   }
 })
 
@@ -131,5 +140,20 @@ describe('route wiring coverage', () => {
     })
 
     expect(ensureQueryData).toHaveBeenCalledTimes(4)
+  })
+
+  it.each([
+    [AuthedIndexRoute, '/control-tower'],
+    [LegacyAPIKeysRoute, '/integrations/api-keys'],
+    [LegacyClassificationQualityRoute, '/analytics/classification-quality'],
+    [LegacyClustersRoute, '/feedback/clusters'],
+    [LegacyGuardPoliciesRoute, '/administration/guard-policies'],
+    [LegacyInboundSourcesRoute, '/integrations/inbound-sources'],
+    [LegacyLLMConfigRoute, '/configuration/llm'],
+    [LegacyLLMUsageRoute, '/analytics/llm-usage'],
+  ])('redirects legacy route %s to %s', (route, to) => {
+    expect(() => routeOptions(route).beforeLoad?.({ context: {} })).toThrow(
+      expect.objectContaining({ redirect: { to } }),
+    )
   })
 })
