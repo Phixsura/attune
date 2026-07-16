@@ -75,6 +75,27 @@ func TestEventMaskAndRetryDelay(t *testing.T) {
 	if !eventAllowed(map[string]any{repo.EventTypeShipped: true}, repo.EventTypeShipped) {
 		t.Fatalf("true mask value should allow event")
 	}
+	if !statusAllowed(nil, "shipped") {
+		t.Fatalf("nil status policy should allow status")
+	}
+	if statusAllowed(map[string]any{"shipped": false}, "shipped") {
+		t.Fatalf("false status policy should deny status")
+	}
+	if !statusAllowed(map[string]any{"shipped": true}, " shipped ") {
+		t.Fatalf("true status policy should allow trimmed status")
+	}
+	blocked := notificationPolicyBlockReason(repo.Settings{
+		EnabledEventTypes: map[string]any{repo.EventTypeShipped: false},
+	}, repo.EventTypeShipped, "shipped")
+	if blocked != "event_type_disabled" {
+		t.Fatalf("notificationPolicyBlockReason(event disabled) = %q", blocked)
+	}
+	blocked = notificationPolicyBlockReason(repo.Settings{
+		StatusPolicy: map[string]any{"shipped": false},
+	}, repo.EventTypeShipped, "shipped")
+	if blocked != "status_policy_disabled" {
+		t.Fatalf("notificationPolicyBlockReason(status disabled) = %q", blocked)
+	}
 	if got := retryDelay(-1); got != 30*time.Second {
 		t.Fatalf("retryDelay(-1) = %s", got)
 	}

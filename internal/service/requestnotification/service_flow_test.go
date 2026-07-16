@@ -219,6 +219,28 @@ func TestPreviewAndStatusEventFlow(t *testing.T) {
 	}
 }
 
+func TestPreviewReportsDisabledEventPolicy(t *testing.T) {
+	ctx := context.Background()
+	fake, service, requestID, _ := newPreviewResolveFixture(t)
+	fake.settings.EnabledEventTypes = map[string]any{repo.EventTypeShipped: false}
+
+	preview, err := service.Preview(ctx, PublishInput{
+		TenantID:  "tenant-1",
+		RequestID: requestID,
+		Title:     "Shipped",
+		Body:      "CSV export is now available.",
+		Kind:      "shipped",
+		Channels:  []string{repo.ChannelEmail},
+	})
+	if err != nil {
+		t.Fatalf("Preview(disabled event type) error = %v", err)
+	}
+	if preview.EligibleRecipients != 0 || preview.ExcludedRecipients != 1 ||
+		preview.ExcludedByReason["event_type_disabled"] != 1 {
+		t.Fatalf("preview = %+v, want event policy exclusion", preview)
+	}
+}
+
 func TestResolveEventCreatesDeliveries(t *testing.T) {
 	ctx := context.Background()
 	fake, service, requestID, updateID := newPreviewResolveFixture(t)
@@ -238,6 +260,32 @@ func TestResolveEventCreatesDeliveries(t *testing.T) {
 		t.Fatalf("resolveEvent() error = %v", err)
 	}
 	assertResolveEventCreatedDeliveries(t, fake, service)
+}
+
+func TestResolveEventSkipsDisabledEventPolicy(t *testing.T) {
+	ctx := context.Background()
+	fake, service, requestID, updateID := newPreviewResolveFixture(t)
+	fake.settings.EnabledEventTypes = map[string]any{repo.EventTypeShipped: false}
+	eventID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	event := repo.Event{
+		ID:               eventID,
+		TenantID:         "tenant-1",
+		EventType:        repo.EventTypeShipped,
+		PrimaryRequestID: ptrext.Of(requestID),
+		UpdateID:         ptrext.Of(updateID),
+		RecipientSnapshot: map[string]any{
+			"channels": []any{repo.ChannelEmail, repo.ChannelWebhook},
+		},
+		CreatedAt: time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC),
+	}
+	if err := service.resolveEvent(ctx, event, "worker-1"); err != nil {
+		t.Fatalf("resolveEvent(disabled event type) error = %v", err)
+	}
+	if len(fake.inserted) != 0 || fake.resolvedSnapshot["email"] != 0 ||
+		fake.resolvedSnapshot["webhook"] != 0 ||
+		fake.resolvedSnapshot["suppressed_reason"] != "event_type_disabled" {
+		t.Fatalf("inserted=%+v snapshot=%+v, want resolved without deliveries", fake.inserted, fake.resolvedSnapshot)
+	}
 }
 
 func assertResolveEventCreatedDeliveries(t *testing.T, fake *flowRepo, service *Service) {
@@ -526,6 +574,50 @@ func TestPublishFlow(t *testing.T) {
 	}
 	if got := fake.createdEvents[len(fake.createdEvents)-1]; got.Kind != "shipped" || got.ActorID != "user-1" {
 		t.Fatalf("published input = %+v, want shipped user event", got)
+	}
+}
+
+func TestPublishRejectsDisabledEventPolicy(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	fake := &flowRepo{
+		settings: repo.Settings{
+			TenantID:          "tenant-1",
+			EnabledEventTypes: map[string]any{repo.EventTypeShipped: false},
+		},
+		request: repo.RequestSummary{ID: requestID, Title: "CSV export", Status: "shipped"},
+		tx:      &serviceTx{},
+	}
+	service := newFlowService(fake)
+	_, err := service.Publish(ctx, PublishInput{
+		TenantID:  "tenant-1",
+		RequestID: requestID,
+		Title:     "Shipped",
+		Body:      "CSV export is now live.",
+		Actor:     auditlogsvc.Actor{Type: "user", ID: "user-1"},
+	})
+	if !errors.Is(err, ErrDisabled) {
+		t.Fatalf("Publish(disabled event type) error = %v, want disabled", err)
+	}
+	if len(fake.createdEvents) != 0 || fake.tx.committed {
+		t.Fatalf("created events = %+v committed=%v, want no event", fake.createdEvents, fake.tx.committed)
+	}
+}
+
+func TestRecordStatusChangeSkipsDisabledStatusPolicy(t *testing.T) {
+	ctx := context.Background()
+	fake, service, requestID, _ := newPreviewResolveFixture(t)
+	fake.settings.StatusPolicy = map[string]any{"shipped": false}
+
+	err := service.RecordStatusChangeTx(ctx, nil, "tenant-1", requestID, "planned", "shipped", auditlogsvc.Actor{
+		Type: "user",
+		ID:   "user-1",
+	})
+	if err != nil {
+		t.Fatalf("RecordStatusChangeTx(disabled status policy) error = %v", err)
+	}
+	if len(fake.createdEvents) != 0 {
+		t.Fatalf("created events = %+v, want no status notification event", fake.createdEvents)
 	}
 }
 

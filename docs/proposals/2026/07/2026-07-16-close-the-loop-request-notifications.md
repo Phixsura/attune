@@ -964,6 +964,12 @@ For broad human request notifications, the request must be:
 - backed by a verified email sender for email delivery;
 - rendered from public profile/update content only.
 
+Implementation applies tenant event-type and status-policy gates before manual
+publication, before automatic status-change event creation, and again while a
+worker resolves queued events. If a queued event is no longer allowed, the
+worker resolves it without delivery rows and records a machine-readable
+suppression reason in the event snapshot.
+
 For webhook delivery, the active webhook target, `event_mask`, URL
 verification, and target-level identity settings are checked independently of
 human recipient gates.

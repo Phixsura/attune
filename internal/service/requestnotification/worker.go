@@ -128,6 +128,10 @@ func (s *Service) resolveEvent(ctx context.Context, event repo.Event, owner stri
 		return err
 	}
 	snapshot := map[string]any{"email": 0, "webhook": 0}
+	if reason := notificationPolicyBlockReason(settings, event.EventType, eventContext.Request.Status); reason != "" {
+		snapshot["suppressed_reason"] = reason
+		return s.repo.MarkEventResolved(ctx, event.ID, owner, snapshot)
+	}
 	if settings.EmailEnabled && eventChannelRequested(event, repo.ChannelEmail) {
 		count, err := s.createEmailDeliveries(ctx, event, eventContext, settings)
 		if err != nil {

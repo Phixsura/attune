@@ -32,6 +32,7 @@ func (s *Service) Preview(ctx context.Context, in PublishInput) (PreviewResult, 
 	if err != nil {
 		return PreviewResult{}, mapRepoError(err)
 	}
+	kind, eventType := publishEventKindAndType(in.Kind, request.Status)
 	recipients, err := s.repo.EligibleRequestRecipients(ctx, in.TenantID, in.RequestID)
 	if err != nil {
 		return PreviewResult{}, mapRepoError(err)
@@ -40,34 +41,17 @@ func (s *Service) Preview(ctx context.Context, in PublishInput) (PreviewResult, 
 	if err != nil {
 		return PreviewResult{}, mapRepoError(err)
 	}
-	excludedByReason := map[string]any{}
-	eligible := len(recipients)
-	excluded := 0
-	if channelRequested(channels, repo.ChannelEmail) && !settings.EmailEnabled {
-		excludedByReason["email_disabled"] = eligible
-		excluded = eligible
-		eligible = 0
-	}
-	if channelRequested(channels, repo.ChannelEmail) && settings.EmailEnabled {
-		result, err := s.previewEmailLimits(ctx, in.TenantID, recipients, settings)
-		if err != nil {
-			return PreviewResult{}, mapRepoError(err)
-		}
-		for reason, count := range result.ExcludedByReason {
-			if count > 0 {
-				excludedByReason[reason] = count
-			}
-		}
-		eligible = result.Eligible
-		excluded = result.Excluded
+	eligible, excluded, excludedByReason, err := s.previewRecipientCounts(ctx, in.TenantID, recipients, settings, channels, eventType, request.Status)
+	if err != nil {
+		return PreviewResult{}, mapRepoError(err)
 	}
 	var emailPayload map[string]any
 	if channelRequested(channels, repo.ChannelEmail) {
-		emailPayload = requestPayload(request, in.Title, in.Body, in.Kind)
+		emailPayload = requestPayload(request, in.Title, in.Body, kind)
 	}
 	var webhookPayload map[string]any
 	if channelRequested(channels, repo.ChannelWebhook) {
-		webhookPayload = requestPayload(request, in.Title, in.Body, in.Kind)
+		webhookPayload = requestPayload(request, in.Title, in.Body, kind)
 	}
 	return PreviewResult{
 		EligibleRecipients: eligible,
@@ -78,6 +62,40 @@ func (s *Service) Preview(ctx context.Context, in PublishInput) (PreviewResult, 
 	}, nil
 }
 
+func (s *Service) previewRecipientCounts(
+	ctx context.Context,
+	tenantID string,
+	recipients []repo.Subscriber,
+	settings repo.Settings,
+	channels []string,
+	eventType string,
+	status string,
+) (int, int, map[string]any, error) {
+	excludedByReason := map[string]any{}
+	eligible := len(recipients)
+	if reason := notificationPolicyBlockReason(settings, eventType, status); reason != "" {
+		excludedByReason[reason] = eligible
+		return 0, eligible, excludedByReason, nil
+	}
+	if channelRequested(channels, repo.ChannelEmail) && !settings.EmailEnabled {
+		excludedByReason["email_disabled"] = eligible
+		return 0, eligible, excludedByReason, nil
+	}
+	if eligible == 0 || !channelRequested(channels, repo.ChannelEmail) {
+		return eligible, 0, excludedByReason, nil
+	}
+	result, err := s.previewEmailLimits(ctx, tenantID, recipients, settings)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	for reason, count := range result.ExcludedByReason {
+		if count > 0 {
+			excludedByReason[reason] = count
+		}
+	}
+	return result.Eligible, result.Excluded, excludedByReason, nil
+}
+
 func (s *Service) Publish(ctx context.Context, in PublishInput) (repo.Event, error) {
 	if in.TenantID == "" || in.RequestID == uuid.Nil {
 		return repo.Event{}, ErrValidation
@@ -86,21 +104,20 @@ func (s *Service) Publish(ctx context.Context, in PublishInput) (repo.Event, err
 	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Body) == "" {
 		return repo.Event{}, ErrValidation
 	}
-	if err := s.requireLargeAudienceConfirmation(ctx, in, channels); err != nil {
-		return repo.Event{}, err
-	}
 	request, err := s.repo.GetRequestSummary(ctx, in.TenantID, in.RequestID)
 	if err != nil {
 		return repo.Event{}, mapRepoError(err)
 	}
-	eventType := repo.EventTypeStatusChanged
-	kind := strings.TrimSpace(in.Kind)
-	if kind == "" {
-		kind = "status_change"
+	settings, err := s.repo.GetSettings(ctx, in.TenantID)
+	if err != nil {
+		return repo.Event{}, mapRepoError(err)
 	}
-	if kind == "shipped" || request.Status == "shipped" {
-		kind = "shipped"
-		eventType = repo.EventTypeShipped
+	kind, eventType := publishEventKindAndType(in.Kind, request.Status)
+	if reason := notificationPolicyBlockReason(settings, eventType, request.Status); reason != "" {
+		return repo.Event{}, ErrDisabled
+	}
+	if err := s.requireLargeAudienceConfirmation(ctx, in, channels); err != nil {
+		return repo.Event{}, err
 	}
 	tx, err := s.repo.Begin(ctx)
 	if err != nil {
@@ -251,15 +268,19 @@ func (s *Service) RecordStatusChangeTx(
 	if tenantID == "" || requestID == uuid.Nil || strings.TrimSpace(oldStatus) == strings.TrimSpace(newStatus) {
 		return nil
 	}
-	request, err := s.repo.GetRequestSummary(ctx, tenantID, requestID)
+	oldStatus = strings.TrimSpace(oldStatus)
+	newStatus = strings.TrimSpace(newStatus)
+	kind, eventType := statusChangeEventKindAndType(newStatus)
+	settings, err := s.repo.GetSettings(ctx, tenantID)
 	if err != nil {
 		return mapRepoError(err)
 	}
-	kind := "status_change"
-	eventType := repo.EventTypeStatusChanged
-	if strings.TrimSpace(newStatus) == "shipped" {
-		kind = "shipped"
-		eventType = repo.EventTypeShipped
+	if reason := notificationPolicyBlockReason(settings, eventType, newStatus); reason != "" {
+		return nil
+	}
+	request, err := s.repo.GetRequestSummary(ctx, tenantID, requestID)
+	if err != nil {
+		return mapRepoError(err)
 	}
 	title := statusUpdateTitle(request.Title, newStatus)
 	body := statusUpdateBody(request.Title, oldStatus, newStatus)
@@ -302,6 +323,50 @@ func normalizeNotificationChannels(channels []string) []string {
 		return []string{repo.ChannelEmail, repo.ChannelWebhook}
 	}
 	return out
+}
+
+func publishEventKindAndType(kind string, requestStatus string) (string, string) {
+	out := strings.TrimSpace(kind)
+	if out == "" {
+		out = "status_change"
+	}
+	if out == "shipped" || strings.TrimSpace(requestStatus) == "shipped" {
+		return "shipped", repo.EventTypeShipped
+	}
+	return out, repo.EventTypeStatusChanged
+}
+
+func statusChangeEventKindAndType(newStatus string) (string, string) {
+	if strings.TrimSpace(newStatus) == "shipped" {
+		return "shipped", repo.EventTypeShipped
+	}
+	return "status_change", repo.EventTypeStatusChanged
+}
+
+func notificationPolicyBlockReason(settings repo.Settings, eventType string, status string) string {
+	if !eventAllowed(settings.EnabledEventTypes, eventType) {
+		return "event_type_disabled"
+	}
+	if statusPolicyApplies(eventType) && !statusAllowed(settings.StatusPolicy, status) {
+		return "status_policy_disabled"
+	}
+	return ""
+}
+
+func statusPolicyApplies(eventType string) bool {
+	return eventType == repo.EventTypeStatusChanged || eventType == repo.EventTypeShipped
+}
+
+func statusAllowed(policy map[string]any, status string) bool {
+	if len(policy) == 0 {
+		return true
+	}
+	value, ok := policy[strings.TrimSpace(status)]
+	if !ok {
+		return false
+	}
+	allowed, ok := value.(bool)
+	return ok && allowed
 }
 
 func channelRequested(channels []string, channel string) bool {
