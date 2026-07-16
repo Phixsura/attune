@@ -36,6 +36,7 @@ describe('PublicVisibilityPage', () => {
     let savedProfile: unknown
     server.use(
       http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
       http.get('/fb/v1/console/public-visibility/moderation', () =>
         HttpResponse.json({ subjects: moderationSubjects() }),
       ),
@@ -613,6 +614,7 @@ describe('PublicVisibilityPage', () => {
     let approvalBody: unknown
     server.use(
       http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
       http.get('/fb/v1/console/public-visibility/moderation', () =>
         HttpResponse.json({ subjects: moderationSubjects() }),
       ),
