@@ -217,14 +217,23 @@ func (s *Service) createEmailDeliveries(ctx context.Context, event repo.Event, e
 			}
 			continue
 		}
-		token, err := newToken()
+		requestToken, err := newToken()
 		if err != nil {
 			return count, err
 		}
-		if err := s.repo.CreateUnsubscribeToken(ctx, event.TenantID, recipient.ContactID, ec.Request.ID, tokenHash(token), time.Now().Add(90*24*time.Hour)); err != nil {
+		tenantToken, err := newToken()
+		if err != nil {
 			return count, err
 		}
-		payload, sensitive, err := s.emailDeliveryPayload(event, ec, recipient, sender, senderConfig, fromEmail, replyTo, toEmail, token)
+		requestID := ec.Request.ID
+		expiresAt := time.Now().Add(90 * 24 * time.Hour)
+		if err := s.repo.CreateUnsubscribeToken(ctx, event.TenantID, recipient.ContactID, ptrext.Of(requestID), repo.SubscriptionScopeRequest, tokenHash(requestToken), expiresAt); err != nil {
+			return count, err
+		}
+		if err := s.repo.CreateUnsubscribeToken(ctx, event.TenantID, recipient.ContactID, nil, repo.SubscriptionScopeTenantUpdates, tokenHash(tenantToken), expiresAt); err != nil {
+			return count, err
+		}
+		payload, sensitive, err := s.emailDeliveryPayload(event, ec, recipient, sender, senderConfig, fromEmail, replyTo, toEmail, requestToken, tenantToken)
 		if err != nil {
 			return count, err
 		}
@@ -257,7 +266,7 @@ func (s *Service) insertSuppressedEmailDelivery(
 	toEmail string,
 	reason string,
 ) error {
-	payload := notificationPayload(event, ec, ptrext.Of(recipient), "", true)
+	payload := notificationPayload(event, ec, ptrext.Of(recipient), "", "", true)
 	payload["recipient"] = map[string]any{
 		"contact_id": recipient.ContactID.String(),
 		"display":    recipient.DisplayName,
@@ -295,7 +304,7 @@ func (s *Service) createWebhookDeliveries(ctx context.Context, event repo.Event,
 		if err != nil {
 			return count, err
 		}
-		payload := notificationPayload(event, ec, nil, "", target.IncludeRecipientIdentity)
+		payload := notificationPayload(event, ec, nil, "", "", target.IncludeRecipientIdentity)
 		targetID := target.ID
 		if _, err := s.repo.InsertDelivery(ctx, repo.DeliveryInput{
 			TenantID:        event.TenantID,
@@ -420,10 +429,12 @@ func (s *Service) emailDeliveryPayload(
 	fromEmail string,
 	replyTo string,
 	toEmail string,
-	token string,
+	requestToken string,
+	tenantToken string,
 ) (map[string]any, []byte, error) {
-	unsubscribeURL := s.unsubscribeURL(ec.TenantSlug, token)
-	payload := notificationPayload(event, ec, ptrext.Of(recipient), unsubscribeURL, true)
+	unsubscribeURL := s.unsubscribeURL(ec.TenantSlug, requestToken)
+	listUnsubscribeURL := s.unsubscribeURL(ec.TenantSlug, tenantToken)
+	payload := notificationPayload(event, ec, ptrext.Of(recipient), unsubscribeURL, listUnsubscribeURL, true)
 	payload["recipient"] = map[string]any{
 		"contact_id": recipient.ContactID.String(),
 		"display":    recipient.DisplayName,
@@ -464,6 +475,7 @@ func notificationPayload(
 	ec repo.EventContext,
 	recipient *repo.Subscriber,
 	unsubscribeURL string,
+	listUnsubscribeURL string,
 	includeRecipient bool,
 ) map[string]any {
 	payload := map[string]any{
@@ -487,6 +499,9 @@ func notificationPayload(
 			"kind":   ec.UpdateKind,
 			"status": ec.Request.Status,
 		},
+	}
+	if listUnsubscribeURL != "" {
+		payload["list_unsubscribe_url"] = listUnsubscribeURL
 	}
 	if includeRecipient && recipient != nil {
 		payload["recipient"] = map[string]any{

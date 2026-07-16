@@ -800,6 +800,10 @@ func BindSubscribePublicCustomerRequest(r *http.Request, req *attunev1.Subscribe
 }
 
 func BindUnsubscribePublicCustomerRequest(r *http.Request, req *attunev1.UnsubscribePublicCustomerRequestRequest) error {
+	req.TenantSlug = strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+	if bound, err := bindFormUnsubscribe(r, req); bound || err != nil {
+		return err
+	}
 	if err := optionalProtoJSONBody(r, req); err != nil {
 		return err
 	}
@@ -808,6 +812,24 @@ func BindUnsubscribePublicCustomerRequest(r *http.Request, req *attunev1.Unsubsc
 		req.Token = strings.TrimSpace(r.URL.Query().Get("token"))
 	}
 	return nil
+}
+
+func bindFormUnsubscribe(r *http.Request, req *attunev1.UnsubscribePublicCustomerRequestRequest) (bool, error) {
+	contentType := strings.ToLower(strings.TrimSpace(r.Header.Get("Content-Type")))
+	if !strings.HasPrefix(contentType, "application/x-www-form-urlencoded") &&
+		!strings.HasPrefix(contentType, "multipart/form-data") {
+		return false, nil
+	}
+	if err := r.ParseForm(); err != nil {
+		return true, dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid unsubscribe form body")
+	}
+	if req.GetToken() == "" {
+		req.Token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	if req.GetToken() == "" {
+		req.Token = strings.TrimSpace(r.Form.Get("token"))
+	}
+	return true, nil
 }
 
 func BindConfirmPublicNotificationContact(r *http.Request, req *attunev1.ConfirmPublicNotificationContactRequest) error {

@@ -44,8 +44,9 @@ const (
 	ConsentOptedOut   = "opted_out"
 	ConsentSuppressed = "suppressed"
 
-	SubscriptionScopeRequest = "request"
-	SubscriptionStatusActive = "active"
+	SubscriptionScopeRequest       = "request"
+	SubscriptionScopeTenantUpdates = "tenant_updates"
+	SubscriptionStatusActive       = "active"
 
 	SourceSubmitter = "submitter"
 	SourceVoter     = "voter"

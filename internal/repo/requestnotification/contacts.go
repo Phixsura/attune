@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func (r *Repo) UpsertContact(ctx context.Context, contact Contact) (Contact, error) {
@@ -243,6 +244,15 @@ func (r *Repo) EligibleRequestRecipients(ctx context.Context, tenantID string, r
 		  AND c.bounced_at IS NULL
 		  AND c.complained_at IS NULL
 		  AND c.suppressed_at IS NULL
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM customer_request_subscriptions tenant_sub
+			WHERE tenant_sub.tenant_id = s.tenant_id
+			  AND tenant_sub.contact_id = s.contact_id
+			  AND tenant_sub.scope = 'tenant_updates'
+			  AND tenant_sub.request_id IS NULL
+			  AND tenant_sub.status IN ('unsubscribed', 'suppressed')
+		  )
 		ORDER BY s.created_at ASC`, tenantID, requestID)
 	if err != nil {
 		return nil, fmt.Errorf("list eligible request recipients: %w", err)
@@ -293,10 +303,11 @@ func scanContact(row pgx.Row) (Contact, error) {
 
 func scanSubscription(row pgx.Row) (Subscription, error) {
 	var s Subscription
+	var requestID pgtype.UUID
 	err := row.Scan(
 		&s.ID,
 		&s.TenantID,
-		&s.RequestID,
+		&requestID,
 		&s.ContactID,
 		&s.Scope,
 		&s.Source,
@@ -307,6 +318,9 @@ func scanSubscription(row pgx.Row) (Subscription, error) {
 	)
 	if err != nil {
 		return Subscription{}, mapNotFound(err)
+	}
+	if requestID.Valid {
+		s.RequestID = uuid.UUID(requestID.Bytes)
 	}
 	return s, nil
 }

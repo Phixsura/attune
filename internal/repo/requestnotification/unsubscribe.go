@@ -5,6 +5,7 @@ package requestnotification
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,18 +29,23 @@ func (r *Repo) CreateUnsubscribeToken(
 	ctx context.Context,
 	tenantID string,
 	contactID uuid.UUID,
-	requestID uuid.UUID,
+	requestID *uuid.UUID,
+	scope string,
 	tokenHash string,
 	expiresAt time.Time,
 ) error {
+	scope = normalizeUnsubscribeScope(scope)
+	if err := validateUnsubscribeTokenShape(scope, requestID); err != nil {
+		return err
+	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO customer_request_unsubscribe_tokens (
 			tenant_id, contact_id, request_id, scope, token_hash, expires_at
 		) VALUES (
-			$1, $2, $3, 'request', $4, $5
+			$1, $2, $3, $4, $5, $6
 		)
 		ON CONFLICT (token_hash) DO NOTHING`,
-		tenantID, contactID, requestID, tokenHash, expiresAt)
+		tenantID, contactID, requestID, scope, tokenHash, expiresAt)
 	if err != nil {
 		return fmt.Errorf("create unsubscribe token: %w", err)
 	}
@@ -66,7 +72,7 @@ func (r *Repo) UseUnsubscribeToken(ctx context.Context, tenantID string, tokenHa
 	if err := markUnsubscribeTokenUsed(ctx, tx, token.ID, userAgent); err != nil {
 		return Subscription{}, err
 	}
-	sub, err := unsubscribeRequestSubscriptions(ctx, tx, token)
+	sub, err := unsubscribeSubscriptions(ctx, tx, token)
 	if err != nil {
 		return Subscription{}, err
 	}
@@ -180,9 +186,20 @@ func markUnsubscribeTokenUsed(ctx context.Context, tx pgx.Tx, id uuid.UUID, user
 	return nil
 }
 
-func unsubscribeRequestSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeToken) (Subscription, error) {
-	if token.RequestID == nil {
+func unsubscribeSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeToken) (Subscription, error) {
+	switch token.Scope {
+	case SubscriptionScopeRequest:
+		return unsubscribeRequestSubscriptions(ctx, tx, token)
+	case SubscriptionScopeTenantUpdates:
+		return unsubscribeTenantSubscriptions(ctx, tx, token)
+	default:
 		return Subscription{}, ErrInvalidInput
+	}
+}
+
+func unsubscribeRequestSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeToken) (Subscription, error) {
+	if err := validateUnsubscribeTokenShape(SubscriptionScopeRequest, token.RequestID); err != nil {
+		return Subscription{}, err
 	}
 	row := tx.QueryRow(ctx, `
 		UPDATE customer_request_subscriptions
@@ -197,4 +214,58 @@ func unsubscribeRequestSubscriptions(ctx context.Context, tx pgx.Tx, token Unsub
 		 unsubscribed_at, created_at, updated_at`,
 		token.TenantID, ptrext.Indirect(token.RequestID), token.ContactID)
 	return scanSubscription(row)
+}
+
+func unsubscribeTenantSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeToken) (Subscription, error) {
+	if err := validateUnsubscribeTokenShape(SubscriptionScopeTenantUpdates, token.RequestID); err != nil {
+		return Subscription{}, err
+	}
+	row := tx.QueryRow(ctx, `
+		INSERT INTO customer_request_subscriptions (
+			tenant_id, request_id, contact_id, scope, source, status,
+			created_by, unsubscribed_at
+		) VALUES (
+			$1, NULL, $2, 'tenant_updates', 'manual', 'unsubscribed',
+			'unsubscribe', NOW()
+		)
+		ON CONFLICT (tenant_id, scope, contact_id, source)
+		WHERE request_id IS NULL AND account_key = ''
+		DO UPDATE SET
+			status = 'unsubscribed',
+			unsubscribed_at = NOW(),
+			updated_at = NOW()
+		RETURNING id, tenant_id, request_id, contact_id, scope, source, status,
+		 unsubscribed_at, created_at, updated_at`,
+		token.TenantID, token.ContactID)
+	return scanSubscription(row)
+}
+
+func normalizeUnsubscribeScope(scope string) string {
+	switch strings.TrimSpace(scope) {
+	case "":
+		return SubscriptionScopeRequest
+	case SubscriptionScopeRequest:
+		return SubscriptionScopeRequest
+	case SubscriptionScopeTenantUpdates:
+		return SubscriptionScopeTenantUpdates
+	default:
+		return strings.TrimSpace(scope)
+	}
+}
+
+func validateUnsubscribeTokenShape(scope string, requestID *uuid.UUID) error {
+	switch scope {
+	case SubscriptionScopeRequest:
+		if requestID == nil || ptrext.Indirect(requestID) == uuid.Nil {
+			return ErrInvalidInput
+		}
+		return nil
+	case SubscriptionScopeTenantUpdates:
+		if requestID != nil && ptrext.Indirect(requestID) != uuid.Nil {
+			return ErrInvalidInput
+		}
+		return nil
+	default:
+		return ErrInvalidInput
+	}
 }

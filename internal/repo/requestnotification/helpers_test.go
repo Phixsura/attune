@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -128,14 +129,44 @@ func TestScanContactSubscriptionAndSubscriberRows(t *testing.T) {
 	}
 
 	sub, err := scanSubscription(scanRow{
-		uuid.New(), "tenant-1", requestID, id, SubscriptionScopeRequest,
-		SourceVoter, SubscriptionStatusActive, (*time.Time)(nil), now, now,
+		uuid.New(),
+		"tenant-1",
+		pgtype.UUID{
+			Bytes: requestID,
+			Valid: true,
+		},
+		id,
+		SubscriptionScopeRequest,
+		SourceVoter,
+		SubscriptionStatusActive,
+		(*time.Time)(nil),
+		now,
+		now,
 	})
 	if err != nil {
 		t.Fatalf("scanSubscription() error = %v", err)
 	}
 	if sub.RequestID != requestID || sub.ContactID != id || sub.Source != SourceVoter {
 		t.Fatalf("subscription = %+v", sub)
+	}
+
+	tenantSub, err := scanSubscription(scanRow{
+		uuid.New(),
+		"tenant-1",
+		pgtype.UUID{},
+		id,
+		SubscriptionScopeTenantUpdates,
+		SourceManual,
+		"unsubscribed",
+		ptrext.Of(now),
+		now,
+		now,
+	})
+	if err != nil {
+		t.Fatalf("scanSubscription(tenant scope) error = %v", err)
+	}
+	if tenantSub.RequestID != uuid.Nil || tenantSub.Scope != SubscriptionScopeTenantUpdates {
+		t.Fatalf("tenant subscription = %+v", tenantSub)
 	}
 
 	subscriber, err := scanSubscriber(scanRow{

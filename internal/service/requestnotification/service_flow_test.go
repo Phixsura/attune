@@ -54,6 +54,7 @@ type flowRepo struct {
 	createdEvents     []repo.PublicUpdateInput
 	inserted          []repo.DeliveryInput
 	tokens            []string
+	tokenScopes       []string
 	resolvedSnapshot  map[string]any
 	deadDeliveries    []int64
 	failedDeliveries  []int64
@@ -236,17 +237,28 @@ func TestResolveEventCreatesDeliveries(t *testing.T) {
 	if err := service.resolveEvent(ctx, event, "worker-1"); err != nil {
 		t.Fatalf("resolveEvent() error = %v", err)
 	}
+	assertResolveEventCreatedDeliveries(t, fake, service)
+}
+
+func assertResolveEventCreatedDeliveries(t *testing.T, fake *flowRepo, service *Service) {
+	t.Helper()
 	if fake.resolvedSnapshot["email"] != 1 || fake.resolvedSnapshot["webhook"] != 1 {
 		t.Fatalf("resolved snapshot = %+v", fake.resolvedSnapshot)
 	}
 	if len(fake.inserted) != 2 || fake.inserted[0].Channel != repo.ChannelEmail || fake.inserted[1].Channel != repo.ChannelWebhook {
 		t.Fatalf("inserted deliveries = %+v", fake.inserted)
 	}
-	if len(fake.tokens) != 1 {
-		t.Fatalf("unsubscribe tokens = %d, want 1", len(fake.tokens))
+	if len(fake.tokens) != 2 || len(fake.tokenScopes) != 2 {
+		t.Fatalf("unsubscribe tokens = %d scopes=%+v, want request and tenant tokens", len(fake.tokens), fake.tokenScopes)
+	}
+	if fake.tokenScopes[0] != repo.SubscriptionScopeRequest || fake.tokenScopes[1] != repo.SubscriptionScopeTenantUpdates {
+		t.Fatalf("unsubscribe token scopes = %+v, want request then tenant updates", fake.tokenScopes)
 	}
 	if got := fake.inserted[0].Payload["unsubscribe_url"]; got == "" {
 		t.Fatalf("email payload missing unsubscribe url: %+v", fake.inserted[0].Payload)
+	}
+	if got := fake.inserted[0].Payload["list_unsubscribe_url"]; got == "" {
+		t.Fatalf("email payload missing list unsubscribe url: %+v", fake.inserted[0].Payload)
 	}
 	secret, err := service.decodeSensitive(fake.inserted[0].SensitivePayload)
 	if err != nil {
@@ -1028,8 +1040,9 @@ func (f *flowRepo) ActiveSender(context.Context, string) (repo.Sender, error) {
 	return f.sender, nil
 }
 
-func (f *flowRepo) CreateUnsubscribeToken(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, tokenHash string, _ time.Time) error {
+func (f *flowRepo) CreateUnsubscribeToken(_ context.Context, _ string, _ uuid.UUID, _ *uuid.UUID, scope string, tokenHash string, _ time.Time) error {
 	f.tokens = append(f.tokens, tokenHash)
+	f.tokenScopes = append(f.tokenScopes, scope)
 	return nil
 }
 

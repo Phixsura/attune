@@ -29,21 +29,22 @@ type channel struct{}
 func (c *channel) ID() string { return channelID }
 
 func (c *channel) RenderNotification(env *outbound.NotificationEnvelope, dst outbound.Target) (outbound.Rendered, error) {
-	messageHeaders := unsubscribeHeaders(env.UnsubscribeURL)
+	messageHeaders := unsubscribeHeaders(headerUnsubscribeURL(env))
 	body, err := json.Marshal(emailPayload{
-		Version:        env.Version,
-		EventID:        env.EventID,
-		EventType:      env.EventType,
-		TenantID:       env.TenantID,
-		FromName:       configString(dst.Config, "from_name"),
-		FromEmail:      configString(dst.Config, "from_email"),
-		ReplyTo:        configString(dst.Config, "reply_to"),
-		ToEmail:        configString(dst.Config, "to_email"),
-		Subject:        notificationSubject(env),
-		TextBody:       notificationText(env),
-		HTMLBody:       notificationHTML(env),
-		UnsubscribeURL: env.UnsubscribeURL,
-		Headers:        messageHeaders,
+		Version:            env.Version,
+		EventID:            env.EventID,
+		EventType:          env.EventType,
+		TenantID:           env.TenantID,
+		FromName:           configString(dst.Config, "from_name"),
+		FromEmail:          configString(dst.Config, "from_email"),
+		ReplyTo:            configString(dst.Config, "reply_to"),
+		ToEmail:            configString(dst.Config, "to_email"),
+		Subject:            notificationSubject(env),
+		TextBody:           notificationText(env),
+		HTMLBody:           notificationHTML(env),
+		UnsubscribeURL:     env.UnsubscribeURL,
+		ListUnsubscribeURL: env.ListUnsubscribeURL,
+		Headers:            messageHeaders,
 		Metadata: map[string]any{
 			"request":   env.Request,
 			"update":    env.Update,
@@ -80,20 +81,21 @@ func (c *channel) RenderNotification(env *outbound.NotificationEnvelope, dst out
 }
 
 type emailPayload struct {
-	Version        string         `json:"version"`
-	EventID        string         `json:"event_id"`
-	EventType      string         `json:"event_type"`
-	TenantID       string         `json:"tenant_id"`
-	FromName       string         `json:"from_name"`
-	FromEmail      string         `json:"from_email"`
-	ReplyTo        string         `json:"reply_to,omitempty"`
-	ToEmail        string         `json:"to_email"`
-	Subject        string         `json:"subject"`
-	TextBody       string         `json:"text_body"`
-	HTMLBody       string         `json:"html_body"`
-	UnsubscribeURL string         `json:"unsubscribe_url,omitempty"`
-	Headers        []emailHeader  `json:"headers,omitempty"`
-	Metadata       map[string]any `json:"metadata"`
+	Version            string         `json:"version"`
+	EventID            string         `json:"event_id"`
+	EventType          string         `json:"event_type"`
+	TenantID           string         `json:"tenant_id"`
+	FromName           string         `json:"from_name"`
+	FromEmail          string         `json:"from_email"`
+	ReplyTo            string         `json:"reply_to,omitempty"`
+	ToEmail            string         `json:"to_email"`
+	Subject            string         `json:"subject"`
+	TextBody           string         `json:"text_body"`
+	HTMLBody           string         `json:"html_body"`
+	UnsubscribeURL     string         `json:"unsubscribe_url,omitempty"`
+	ListUnsubscribeURL string         `json:"list_unsubscribe_url,omitempty"`
+	Headers            []emailHeader  `json:"headers,omitempty"`
+	Metadata           map[string]any `json:"metadata"`
 }
 
 type emailHeader struct {
@@ -170,6 +172,16 @@ func unsubscribeHeaders(unsubscribeURL string) []emailHeader {
 		{Name: "List-Unsubscribe", Value: "<" + unsubscribeURL + ">"},
 		{Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click"},
 	}
+}
+
+func headerUnsubscribeURL(env *outbound.NotificationEnvelope) string {
+	if env == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(env.ListUnsubscribeURL); value != "" {
+		return value
+	}
+	return strings.TrimSpace(env.UnsubscribeURL)
 }
 
 func mapString(values map[string]any, key string) string {

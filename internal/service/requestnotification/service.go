@@ -82,7 +82,7 @@ type repository interface {
 	UpsertSender(ctx context.Context, sender repo.Sender) (repo.Sender, error)
 	VerifySender(ctx context.Context, tenantID string, id uuid.UUID) (repo.Sender, error)
 	ActiveSender(ctx context.Context, tenantID string) (repo.Sender, error)
-	CreateUnsubscribeToken(ctx context.Context, tenantID string, contactID uuid.UUID, requestID uuid.UUID, tokenHash string, expiresAt time.Time) error
+	CreateUnsubscribeToken(ctx context.Context, tenantID string, contactID uuid.UUID, requestID *uuid.UUID, scope string, tokenHash string, expiresAt time.Time) error
 	UseUnsubscribeToken(ctx context.Context, tenantID string, tokenHash string, userAgent string) (repo.Subscription, error)
 	ConfirmContactToken(ctx context.Context, tenantID string, tokenHash string, userAgent string) (repo.Contact, error)
 }

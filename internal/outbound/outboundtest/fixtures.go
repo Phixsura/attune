@@ -163,12 +163,13 @@ func UnknownDigest() map[string]any {
 // by NotificationChannel conformance runs.
 func CanonicalNotification() *outbound.NotificationEnvelope {
 	return ptrext.Of(outbound.NotificationEnvelope{
-		Version:        "1",
-		Timestamp:      "2026-07-01T00:00:00Z",
-		EventID:        "event-conformance",
-		EventType:      "request.shipped",
-		TenantID:       "tenant-conformance",
-		UnsubscribeURL: "https://portal.example.test/unsubscribe/token",
+		Version:            "1",
+		Timestamp:          "2026-07-01T00:00:00Z",
+		EventID:            "event-conformance",
+		EventType:          "request.shipped",
+		TenantID:           "tenant-conformance",
+		UnsubscribeURL:     "https://portal.example.test/unsubscribe/request-token",
+		ListUnsubscribeURL: "https://portal.example.test/unsubscribe/tenant-token",
 		Request: map[string]any{
 			"id":          "request-conformance",
 			"display_id":  "REQ-42",

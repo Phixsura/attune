@@ -41,10 +41,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   email and webhook delivery adapters, retryable delivery logs, Console
   operations, and public update publishing for notifying request submitters,
   voters, commenters, and followers. Email deliveries now carry one-click
-  list-unsubscribe headers, enforce tenant-hourly and contact-daily send
-  limits with visible suppressed delivery records, require explicit
-  confirmation for large recipient audiences, and expose a Console provider
-  event endpoint for bounce, complaint, and suppression feedback.
+  list-unsubscribe headers backed by tenant-wide unsubscribe tokens, enforce
+  tenant-hourly and contact-daily send limits with visible suppressed delivery
+  records, require explicit confirmation for large recipient audiences, and
+  expose a Console provider event endpoint for bounce, complaint, and
+  suppression feedback.
 
 - **Reply-send-hook batch recovery tools.**
   The reply-send-hook delivery log now supports multi-select recovery actions

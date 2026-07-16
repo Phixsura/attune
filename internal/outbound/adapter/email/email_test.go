@@ -15,11 +15,12 @@ import (
 
 func TestRenderNotificationBuildsProviderRequest(t *testing.T) {
 	env := ptrext.Of(outbound.NotificationEnvelope{
-		Version:        "1",
-		EventID:        "event-1",
-		EventType:      "request.shipped",
-		TenantID:       "tenant-1",
-		UnsubscribeURL: "https://example.test/unsubscribe/token",
+		Version:            "1",
+		EventID:            "event-1",
+		EventType:          "request.shipped",
+		TenantID:           "tenant-1",
+		UnsubscribeURL:     "https://example.test/unsubscribe/request-token",
+		ListUnsubscribeURL: "https://example.test/unsubscribe/tenant-token",
 		Request: map[string]any{
 			"title": "Dark mode",
 			"state": "shipped",
@@ -75,7 +76,10 @@ func TestRenderNotificationBuildsProviderRequest(t *testing.T) {
 	if payload.UnsubscribeURL != env.UnsubscribeURL {
 		t.Fatalf("unsubscribe url = %q", payload.UnsubscribeURL)
 	}
-	assertOneClickHeaders(t, payload.Headers, env.UnsubscribeURL)
+	if payload.ListUnsubscribeURL != env.ListUnsubscribeURL {
+		t.Fatalf("list unsubscribe url = %q", payload.ListUnsubscribeURL)
+	}
+	assertOneClickHeaders(t, payload.Headers, env.ListUnsubscribeURL)
 	if payload.TextBody == "" || payload.HTMLBody == "" {
 		t.Fatalf("expected text and html bodies")
 	}

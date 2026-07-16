@@ -72,16 +72,17 @@ type Envelope struct {
 // to NotificationChannel.RenderNotification. Sensitive destination details stay
 // in Target; this envelope is the content sent to the configured channel.
 type NotificationEnvelope struct {
-	Version        string         `json:"version"`
-	Timestamp      string         `json:"timestamp"`
-	EventID        string         `json:"event_id"`
-	EventType      string         `json:"event_type"`
-	TenantID       string         `json:"tenant_id"`
-	Request        map[string]any `json:"request,omitempty"`
-	Update         map[string]any `json:"update,omitempty"`
-	Recipient      map[string]any `json:"recipient,omitempty"`
-	WebhookTarget  map[string]any `json:"webhook_target,omitempty"`
-	UnsubscribeURL string         `json:"unsubscribe_url,omitempty"`
+	Version            string         `json:"version"`
+	Timestamp          string         `json:"timestamp"`
+	EventID            string         `json:"event_id"`
+	EventType          string         `json:"event_type"`
+	TenantID           string         `json:"tenant_id"`
+	Request            map[string]any `json:"request,omitempty"`
+	Update             map[string]any `json:"update,omitempty"`
+	Recipient          map[string]any `json:"recipient,omitempty"`
+	WebhookTarget      map[string]any `json:"webhook_target,omitempty"`
+	UnsubscribeURL     string         `json:"unsubscribe_url,omitempty"`
+	ListUnsubscribeURL string         `json:"list_unsubscribe_url,omitempty"`
 
 	// DeliveryID identifies one request-notification delivery row. It is stable
 	// across retries of that row, so receivers can deduplicate replays on it.

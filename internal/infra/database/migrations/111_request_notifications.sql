@@ -130,6 +130,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_customer_request_subscriptions_account
 CREATE INDEX IF NOT EXISTS idx_customer_request_subscriptions_active_request
     ON customer_request_subscriptions (tenant_id, request_id, status, contact_id)
     WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_customer_request_subscriptions_tenant_unsubscribed
+    ON customer_request_subscriptions (tenant_id, contact_id, scope, status)
+    WHERE request_id IS NULL AND scope = 'tenant_updates'
+      AND status IN ('unsubscribed', 'suppressed');
 
 CREATE TABLE IF NOT EXISTS public_update_threads (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
