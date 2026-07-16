@@ -51,6 +51,7 @@ type repository interface {
 	UpsertContact(ctx context.Context, contact repo.Contact) (repo.Contact, error)
 	GetContact(ctx context.Context, tenantID string, contactID uuid.UUID) (repo.Contact, error)
 	SuppressContact(ctx context.Context, tenantID string, contactID uuid.UUID, reason string) (repo.Subscriber, error)
+	SuppressContactByEmailHash(ctx context.Context, tenantID string, emailHash string, reason string, kind string) (repo.Subscriber, error)
 	UpsertRequestSubscription(ctx context.Context, sub repo.Subscription) (repo.Subscription, error)
 	ListSubscribers(ctx context.Context, tenantID string, requestID uuid.UUID) ([]repo.Subscriber, error)
 	EligibleRequestRecipients(ctx context.Context, tenantID string, requestID uuid.UUID) ([]repo.Subscriber, error)
@@ -63,6 +64,8 @@ type repository interface {
 	MarkEventResolved(ctx context.Context, id uuid.UUID, owner string, snapshot map[string]any) error
 	MarkEventFailed(ctx context.Context, id uuid.UUID, owner string, errMsg string, delay time.Duration) error
 	InsertDelivery(ctx context.Context, delivery repo.DeliveryInput) (int64, error)
+	CountTenantEmailDeliveriesSince(ctx context.Context, tenantID string, since time.Time) (int, error)
+	CountContactEmailDeliveriesSince(ctx context.Context, tenantID string, contactID uuid.UUID, since time.Time) (int, error)
 	ClaimDeliveries(ctx context.Context, limit int, owner string) ([]repo.Delivery, error)
 	MarkDeliveryDelivered(ctx context.Context, id int64, owner string) (int64, error)
 	MarkDeliveryFailed(ctx context.Context, id int64, owner string, errMsg string, failureKind string, httpStatus int, delay time.Duration) (int64, error)
@@ -122,13 +125,14 @@ type SubscribeInput struct {
 }
 
 type PublishInput struct {
-	TenantID  string
-	RequestID uuid.UUID
-	Title     string
-	Body      string
-	Kind      string
-	Channels  []string
-	Actor     auditlogsvc.Actor
+	TenantID             string
+	RequestID            uuid.UUID
+	Title                string
+	Body                 string
+	Kind                 string
+	Channels             []string
+	ConfirmLargeAudience bool
+	Actor                auditlogsvc.Actor
 }
 
 type WebhookTargetInput struct {
@@ -154,6 +158,16 @@ type SenderInput struct {
 	ProviderURL    string
 	ProviderSecret string
 	ActorID        string
+}
+
+type ProviderSuppressionInput struct {
+	TenantID          string
+	Email             string
+	EventType         string
+	Reason            string
+	Provider          string
+	ProviderMessageID string
+	ActorID           string
 }
 
 type ProviderConfig struct {

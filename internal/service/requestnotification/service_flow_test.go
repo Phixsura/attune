@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,11 @@ type flowRepo struct {
 	confirmedHash     string
 	upsertedContact   repo.Contact
 	upsertedSub       repo.Subscription
+	tenantEmailCount  int
+	contactEmailCount map[uuid.UUID]int
+	suppressedHash    string
+	suppressedKind    string
+	suppressedReason  string
 }
 
 func newFlowService(f *flowRepo) *Service {
@@ -248,6 +254,61 @@ func TestResolveEventCreatesDeliveries(t *testing.T) {
 	}
 	if secret["to_email"] != "jane@example.test" || secret["provider_url"] != "https://mail.example.test/send" {
 		t.Fatalf("sensitive payload = %+v", secret)
+	}
+}
+
+func TestPreviewReportsRateLimitedRecipients(t *testing.T) {
+	ctx := context.Background()
+	fake, service, requestID, _ := newPreviewResolveFixture(t)
+	fake.settings.ContactDailySendLimit = 1
+	fake.contactEmailCount = map[uuid.UUID]int{
+		fake.recipients[0].ContactID: 1,
+	}
+
+	preview, err := service.Preview(ctx, PublishInput{
+		TenantID:  "tenant-1",
+		RequestID: requestID,
+		Title:     "Shipped",
+		Body:      "CSV export is now available.",
+		Channels:  []string{repo.ChannelEmail},
+	})
+	if err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	if preview.EligibleRecipients != 0 || preview.ExcludedRecipients != 1 {
+		t.Fatalf("preview counts = %+v, want contact excluded", preview)
+	}
+	if preview.ExcludedByReason["contact_daily_send_limit"] != 1 {
+		t.Fatalf("excluded reasons = %+v", preview.ExcludedByReason)
+	}
+}
+
+func TestResolveEventSuppressesRateLimitedEmails(t *testing.T) {
+	ctx := context.Background()
+	fake, service, requestID, updateID := newPreviewResolveFixture(t)
+	fake.settings.TenantHourlySendLimit = 1
+	fake.tenantEmailCount = 1
+	eventID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	event := repo.Event{
+		ID:               eventID,
+		TenantID:         "tenant-1",
+		EventType:        repo.EventTypeShipped,
+		PrimaryRequestID: ptrext.Of(requestID),
+		UpdateID:         ptrext.Of(updateID),
+		RecipientSnapshot: map[string]any{
+			"channels": []any{repo.ChannelEmail},
+		},
+		CreatedAt: time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC),
+	}
+	if err := service.resolveEvent(ctx, event, "worker-1"); err != nil {
+		t.Fatalf("resolveEvent() error = %v", err)
+	}
+	if fake.resolvedSnapshot["email"] != 0 {
+		t.Fatalf("resolved snapshot = %+v, want no queued email", fake.resolvedSnapshot)
+	}
+	if len(fake.inserted) != 1 || fake.inserted[0].Status != repo.DeliveryStatusSuppressed ||
+		fake.inserted[0].FailureKind != "rate_limited" {
+		t.Fatalf("inserted deliveries = %+v, want suppressed rate-limited delivery", fake.inserted)
 	}
 }
 
@@ -456,6 +517,78 @@ func TestPublishFlow(t *testing.T) {
 	}
 }
 
+func TestPublishRequiresLargeAudienceConfirmation(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	firstContact := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+	secondContact := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	fake := &flowRepo{
+		settings: repo.Settings{
+			TenantID:                    "tenant-1",
+			EmailEnabled:                true,
+			MaxRecipientsWithoutConfirm: 1,
+		},
+		request: repo.RequestSummary{ID: requestID, Title: "CSV export", Status: "planned"},
+		recipients: []repo.Subscriber{
+			{ContactID: firstContact, EmailPayload: []byte("one@example.test")},
+			{ContactID: secondContact, EmailPayload: []byte("two@example.test")},
+		},
+		tx: &serviceTx{},
+	}
+	service := newFlowService(fake)
+	input := PublishInput{
+		TenantID:  "tenant-1",
+		RequestID: requestID,
+		Title:     "Update",
+		Body:      "Body",
+		Channels:  []string{repo.ChannelEmail},
+		Actor:     auditlogsvc.Actor{Type: "user", ID: "user-1"},
+	}
+	if _, err := service.Publish(ctx, input); !errors.Is(err, ErrValidation) {
+		t.Fatalf("Publish(unconfirmed) error = %v, want validation", err)
+	}
+	input.ConfirmLargeAudience = true
+	if _, err := service.Publish(ctx, input); err != nil {
+		t.Fatalf("Publish(confirmed) error = %v", err)
+	}
+}
+
+func TestPublishLargeAudienceConfirmationUsesEligibleEmailCount(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	firstContact := uuid.MustParse("11111111-2222-3333-4444-555555555555")
+	secondContact := uuid.MustParse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	fake := &flowRepo{
+		settings: repo.Settings{
+			TenantID:                    "tenant-1",
+			EmailEnabled:                true,
+			MaxRecipientsWithoutConfirm: 1,
+			TenantHourlySendLimit:       1,
+		},
+		request: repo.RequestSummary{ID: requestID, Title: "CSV export", Status: "planned"},
+		recipients: []repo.Subscriber{
+			{ContactID: firstContact, EmailPayload: []byte("one@example.test")},
+			{ContactID: secondContact, EmailPayload: []byte("two@example.test")},
+		},
+		tx: &serviceTx{},
+	}
+	service := newFlowService(fake)
+	_, err := service.Publish(ctx, PublishInput{
+		TenantID:  "tenant-1",
+		RequestID: requestID,
+		Title:     "Update",
+		Body:      "Body",
+		Channels:  []string{repo.ChannelEmail},
+		Actor:     auditlogsvc.Actor{Type: "user", ID: "user-1"},
+	})
+	if err != nil {
+		t.Fatalf("Publish(rate-limited eligible audience) error = %v", err)
+	}
+	if !fake.tx.committed {
+		t.Fatalf("Publish(rate-limited eligible audience) did not commit")
+	}
+}
+
 func TestConfigurationPassThroughMethods(t *testing.T) {
 	ctx := context.Background()
 	senderID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
@@ -507,6 +640,32 @@ func TestListAndDeliveryPassThroughMethods(t *testing.T) {
 	}
 	if item, err := service.RetryDelivery(ctx, " tenant-1 ", 42, " user-1 "); err != nil || item.RetriedBy != "user-1" {
 		t.Fatalf("RetryDelivery() = %+v, %v", item, err)
+	}
+}
+
+func TestRecordProviderSuppression(t *testing.T) {
+	ctx := context.Background()
+	contactID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	fake := &flowRepo{contactID: contactID}
+	service := newFlowService(fake)
+	item, err := service.RecordProviderSuppression(ctx, ProviderSuppressionInput{
+		TenantID:          " tenant-1 ",
+		Email:             " Jane@Example.TEST ",
+		EventType:         "hard_bounce",
+		Reason:            "550 mailbox unavailable",
+		Provider:          "postmark",
+		ProviderMessageID: "msg-1",
+	})
+	if err != nil {
+		t.Fatalf("RecordProviderSuppression() error = %v", err)
+	}
+	if item.ContactID != contactID || fake.suppressedKind != "bounce" ||
+		fake.suppressedHash != repo.EmailHash("jane@example.test") ||
+		!strings.Contains(fake.suppressedReason, "provider=postmark") {
+		t.Fatalf("suppression item=%+v hash=%q kind=%q reason=%q", item, fake.suppressedHash, fake.suppressedKind, fake.suppressedReason)
+	}
+	if _, err := service.RecordProviderSuppression(ctx, ProviderSuppressionInput{TenantID: "tenant-1", Email: "bad", EventType: "bounce"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("RecordProviderSuppression(invalid email) error = %v, want validation", err)
 	}
 }
 
@@ -693,6 +852,13 @@ func (f *flowRepo) SuppressContact(_ context.Context, _ string, contactID uuid.U
 	return repo.Subscriber{ContactID: contactID, ConsentState: repo.ConsentSuppressed, SubscriptionStatus: reason}, nil
 }
 
+func (f *flowRepo) SuppressContactByEmailHash(_ context.Context, _ string, emailHash string, reason string, kind string) (repo.Subscriber, error) {
+	f.suppressedHash = emailHash
+	f.suppressedReason = reason
+	f.suppressedKind = kind
+	return repo.Subscriber{ContactID: f.contactID, ConsentState: repo.ConsentSuppressed, SubscriptionStatus: repo.DeliveryStatusSuppressed}, nil
+}
+
 func (f *flowRepo) UpsertRequestSubscription(_ context.Context, sub repo.Subscription) (repo.Subscription, error) {
 	f.upsertedSub = sub
 	return sub, nil
@@ -757,6 +923,17 @@ func (f *flowRepo) MarkEventFailed(context.Context, uuid.UUID, string, string, t
 func (f *flowRepo) InsertDelivery(_ context.Context, delivery repo.DeliveryInput) (int64, error) {
 	f.inserted = append(f.inserted, delivery)
 	return int64(len(f.inserted)), nil
+}
+
+func (f *flowRepo) CountTenantEmailDeliveriesSince(context.Context, string, time.Time) (int, error) {
+	return f.tenantEmailCount, nil
+}
+
+func (f *flowRepo) CountContactEmailDeliveriesSince(_ context.Context, _ string, contactID uuid.UUID, _ time.Time) (int, error) {
+	if f.contactEmailCount == nil {
+		return 0, nil
+	}
+	return f.contactEmailCount[contactID], nil
 }
 
 func (f *flowRepo) ClaimDeliveries(context.Context, int, string) ([]repo.Delivery, error) {

@@ -1594,6 +1594,9 @@ The PR is not mergeable until all of the following are true:
 - Email compliance tests for `List-Unsubscribe`,
   `List-Unsubscribe-Post`, prefetch-safe GET, one-click POST, bounce callbacks,
   complaint callbacks, and token-hash-only storage.
+- Unit coverage for one-click email headers, provider bounce/complaint
+  suppression, tenant-hourly and contact-daily rate-limit suppression, and
+  large-audience publish confirmation.
 - Webhook tests proving tenant targets receive signed public payloads, do not
   receive unsubscribe material, and do not receive recipient identity unless
   `include_recipient_identity` is enabled.

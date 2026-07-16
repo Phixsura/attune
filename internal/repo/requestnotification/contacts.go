@@ -127,6 +127,43 @@ func (r *Repo) SuppressContact(ctx context.Context, tenantID string, contactID u
 	return scanSubscriber(row)
 }
 
+func (r *Repo) SuppressContactByEmailHash(
+	ctx context.Context,
+	tenantID string,
+	emailHash string,
+	reason string,
+	kind string,
+) (Subscriber, error) {
+	row := r.pool.QueryRow(ctx, `
+		WITH updated_contact AS (
+			UPDATE customer_notification_contacts
+			 SET consent_state = 'suppressed',
+			     bounced_at = CASE
+			      WHEN $4 = 'bounce' THEN COALESCE(bounced_at, NOW())
+			      ELSE bounced_at
+			     END,
+			     complained_at = CASE
+			      WHEN $4 = 'complaint' THEN COALESCE(complained_at, NOW())
+			      ELSE complained_at
+			     END,
+			     suppressed_at = COALESCE(suppressed_at, NOW()),
+			     suppression_reason = $3,
+			     updated_at = NOW()
+			 WHERE tenant_id = $1 AND email_hash = $2
+			 RETURNING id, display_name, organization, email_payload,
+			  consent_state, created_at
+		), updated_sub AS (
+			UPDATE customer_request_subscriptions
+			 SET status = 'suppressed', updated_at = NOW()
+			 WHERE tenant_id = $1
+			   AND contact_id IN (SELECT id FROM updated_contact)
+		)
+		SELECT id, display_name, organization, email_payload, consent_state,
+		 'suppressed'::text, ARRAY[]::text[], created_at, NULL::timestamptz
+		FROM updated_contact`, tenantID, emailHash, reason, kind)
+	return scanSubscriber(row)
+}
+
 func (r *Repo) UpsertRequestSubscription(ctx context.Context, sub Subscription) (Subscription, error) {
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO customer_request_subscriptions (

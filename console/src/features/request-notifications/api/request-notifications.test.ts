@@ -12,6 +12,7 @@ import {
   requestNotificationWebhookTargetsQuery,
   requestNotificationWebhookTargetsQueryKey,
   useListRequestNotificationSubscribers,
+  useRecordRequestNotificationProviderEvent,
   useSuppressRequestNotificationSubscriber,
   useUpdateRequestNotificationWebhookTarget,
 } from './request-notifications'
@@ -219,5 +220,44 @@ describe('request notification API client', () => {
         body: { reason: 'manual' },
       },
     ])
+  })
+
+  it('records provider suppression events through the console endpoint', async () => {
+    let seenPath = ''
+    let seenBody: unknown
+    server.use(
+      http.post(
+        '/fb/v1/console/request-notifications/provider-events:suppress',
+        async ({ request }) => {
+          seenPath = new URL(request.url).pathname
+          seenBody = await request.json()
+          return HttpResponse.json({
+            contactId: 'contact-1',
+            emailRedacted: 'j***@example.test',
+            consentState: 'suppressed',
+            subscriptionStatus: 'suppressed',
+          })
+        },
+      ),
+    )
+    const hook = renderHook(() => useRecordRequestNotificationProviderEvent(), {
+      wrapper: wrapperFor(makeQueryClient()),
+    })
+
+    hook.result.current.mutate({
+      email: 'jane@example.test',
+      eventType: 'bounce',
+      reason: '550 mailbox unavailable',
+      provider: 'postmark',
+      providerMessageId: 'msg-1',
+    })
+    await waitFor(() => expect(hook.result.current.isSuccess).toBe(true))
+
+    expect(seenPath).toBe('/fb/v1/console/request-notifications/provider-events:suppress')
+    expect(seenBody).toMatchObject({
+      email: 'jane@example.test',
+      eventType: 'bounce',
+      providerMessageId: 'msg-1',
+    })
   })
 })

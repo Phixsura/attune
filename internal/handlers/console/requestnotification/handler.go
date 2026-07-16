@@ -53,6 +53,7 @@ type notificationService interface {
 	RetryDelivery(ctx context.Context, tenantID string, id int64, actorID string) (repo.Delivery, error)
 	ListSubscribers(ctx context.Context, tenantID string, requestID uuid.UUID) ([]repo.Subscriber, error)
 	SuppressSubscriber(ctx context.Context, tenantID string, contactID uuid.UUID, reason string) (repo.Subscriber, error)
+	RecordProviderSuppression(ctx context.Context, in svc.ProviderSuppressionInput) (repo.Subscriber, error)
 }
 
 func BindListDeliveries(r *http.Request, req *attunev1.ListRequestNotificationDeliveriesRequest) error {
@@ -316,6 +317,7 @@ func (h *Handler) Publish(
 	if err != nil {
 		return dispatcher.Fail[*attunev1.RequestNotificationEvent](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid notification publish")
 	}
+	input.ConfirmLargeAudience = req.GetConfirmLargeAudience()
 	event, err := h.service.Publish(ctx, input)
 	if err != nil {
 		return consoleError[*attunev1.RequestNotificationEvent](err, "request notification publish failed")
@@ -403,6 +405,27 @@ func (h *Handler) SuppressSubscriber(
 		return consoleError[*attunev1.RequestSubscriber](err, "request subscriber suppression failed")
 	}
 	_ = h.record(ctx, "request_notification.suppress_contact", "request_notification_contact", contactID.String(), "Suppressed request notification contact")
+	return dispatcher.OK(h.subscriberToProto(item))
+}
+
+func (h *Handler) RecordProviderEvent(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.RecordRequestNotificationProviderEventRequest,
+) (dispatcher.Result[*attunev1.RequestSubscriber], error) {
+	item, err := h.service.RecordProviderSuppression(ctx, svc.ProviderSuppressionInput{
+		TenantID:          ctx.Auth.TenantID,
+		Email:             req.GetEmail(),
+		EventType:         req.GetEventType(),
+		Reason:            req.GetReason(),
+		Provider:          req.GetProvider(),
+		ProviderMessageID: req.GetProviderMessageId(),
+		ActorID:           ctx.Auth.UserID,
+	})
+	if err != nil {
+		return consoleError[*attunev1.RequestSubscriber](err, "request notification provider event failed")
+	}
+	action := providerEventAuditAction(req.GetEventType())
+	_ = h.record(ctx, action, "request_notification_contact", item.ContactID.String(), "Recorded request notification provider event")
 	return dispatcher.OK(h.subscriberToProto(item))
 }
 
@@ -693,5 +716,16 @@ func channelToRepo(channel attunev1.RequestNotificationChannel) string {
 		return repo.ChannelWebhook
 	default:
 		return ""
+	}
+}
+
+func providerEventAuditAction(eventType string) string {
+	switch strings.TrimSpace(strings.ToLower(eventType)) {
+	case "bounce", "bounced", "hard_bounce", "permanent_bounce":
+		return "request_notification.bounce"
+	case "complaint", "spam_complaint", "abuse_complaint":
+		return "request_notification.complaint"
+	default:
+		return "request_notification.suppress_contact"
 	}
 }

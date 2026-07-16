@@ -277,6 +277,18 @@ export function RequestNotificationsPage() {
   }
 
   const handlePublish = () => {
+    const threshold = settings?.maxRecipientsWithoutConfirm ?? 0
+    const previewRecipients = preview.data?.eligibleRecipients ?? 0
+    const needsLargeAudienceConfirm = draft.email && threshold > 0 && previewRecipients > threshold
+    const confirmLargeAudience =
+      needsLargeAudienceConfirm &&
+      window.confirm(
+        t('request_notifications.publish.large_audience_confirm', {
+          count: previewRecipients,
+          limit: threshold,
+        }),
+      )
+    if (needsLargeAudienceConfirm && !confirmLargeAudience) return
     publish.mutate(
       {
         update: {
@@ -287,6 +299,7 @@ export function RequestNotificationsPage() {
           notifySubscribers: draft.notifySubscribers,
         },
         channels: selectedChannels,
+        confirmLargeAudience,
       },
       {
         onSuccess: () => {

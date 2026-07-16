@@ -274,6 +274,10 @@ type DeliveryInput struct {
 	DestinationHash  string
 	Payload          map[string]any
 	SensitivePayload []byte
+	Status           string
+	FailureKind      string
+	LastError        string
+	DeadReason       string
 	TraceID          string
 }
 

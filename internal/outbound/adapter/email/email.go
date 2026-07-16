@@ -29,6 +29,7 @@ type channel struct{}
 func (c *channel) ID() string { return channelID }
 
 func (c *channel) RenderNotification(env *outbound.NotificationEnvelope, dst outbound.Target) (outbound.Rendered, error) {
+	messageHeaders := unsubscribeHeaders(env.UnsubscribeURL)
 	body, err := json.Marshal(emailPayload{
 		Version:        env.Version,
 		EventID:        env.EventID,
@@ -42,6 +43,7 @@ func (c *channel) RenderNotification(env *outbound.NotificationEnvelope, dst out
 		TextBody:       notificationText(env),
 		HTMLBody:       notificationHTML(env),
 		UnsubscribeURL: env.UnsubscribeURL,
+		Headers:        messageHeaders,
 		Metadata: map[string]any{
 			"request":   env.Request,
 			"update":    env.Update,
@@ -90,7 +92,13 @@ type emailPayload struct {
 	TextBody       string         `json:"text_body"`
 	HTMLBody       string         `json:"html_body"`
 	UnsubscribeURL string         `json:"unsubscribe_url,omitempty"`
+	Headers        []emailHeader  `json:"headers,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
+}
+
+type emailHeader struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 func configString(config map[string]any, key string) string {
@@ -151,6 +159,17 @@ func notificationHTML(env *outbound.NotificationEnvelope) string {
 		"\n", "<br>",
 	).Replace(text)
 	return "<p>" + escaped + "</p>"
+}
+
+func unsubscribeHeaders(unsubscribeURL string) []emailHeader {
+	unsubscribeURL = strings.TrimSpace(unsubscribeURL)
+	if unsubscribeURL == "" {
+		return nil
+	}
+	return []emailHeader{
+		{Name: "List-Unsubscribe", Value: "<" + unsubscribeURL + ">"},
+		{Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click"},
+	}
 }
 
 func mapString(values map[string]any, key string) string {

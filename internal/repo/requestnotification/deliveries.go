@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -24,9 +25,12 @@ func (r *Repo) InsertDelivery(ctx context.Context, delivery DeliveryInput) (int6
 	err = r.pool.QueryRow(ctx, `
 		INSERT INTO customer_request_notification_deliveries (
 			tenant_id, event_id, subscription_id, contact_id, webhook_target_id,
-			channel, destination_hash, payload, sensitive_payload, trace_id
+			channel, destination_hash, payload, sensitive_payload, status,
+			failure_kind, last_error, dead_reason, trace_id
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+			$1, $2, $3, $4, $5, $6, $7, $8, $9,
+			COALESCE(NULLIF($10, ''), 'pending'),
+			$11, $12, $13, $14
 		)
 		ON CONFLICT DO NOTHING
 		RETURNING id`,
@@ -39,6 +43,10 @@ func (r *Repo) InsertDelivery(ctx context.Context, delivery DeliveryInput) (int6
 		delivery.DestinationHash,
 		payloadRaw,
 		nullableBytes(delivery.SensitivePayload),
+		delivery.Status,
+		delivery.FailureKind,
+		pgxutil.Truncate(delivery.LastError, 1000),
+		pgxutil.Truncate(delivery.DeadReason, 1000),
 		delivery.TraceID,
 	).Scan(&id)
 	if err == nil {
@@ -48,6 +56,42 @@ func (r *Repo) InsertDelivery(ctx context.Context, delivery DeliveryInput) (int6
 		return 0, nil
 	}
 	return 0, fmt.Errorf("insert request notification delivery: %w", err)
+}
+
+func (r *Repo) CountTenantEmailDeliveriesSince(ctx context.Context, tenantID string, since time.Time) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM customer_request_notification_deliveries
+		WHERE tenant_id = $1
+		  AND channel = 'email'
+		  AND status <> 'suppressed'
+		  AND created_at >= $2`, tenantID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count tenant request notification email deliveries: %w", err)
+	}
+	return count, nil
+}
+
+func (r *Repo) CountContactEmailDeliveriesSince(
+	ctx context.Context,
+	tenantID string,
+	contactID uuid.UUID,
+	since time.Time,
+) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM customer_request_notification_deliveries
+		WHERE tenant_id = $1
+		  AND contact_id = $2
+		  AND channel = 'email'
+		  AND status <> 'suppressed'
+		  AND created_at >= $3`, tenantID, contactID, since).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count contact request notification email deliveries: %w", err)
+	}
+	return count, nil
 }
 
 func (r *Repo) ClaimDeliveries(ctx context.Context, limit int, owner string) ([]Delivery, error) {

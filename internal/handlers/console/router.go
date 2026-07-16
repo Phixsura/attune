@@ -478,6 +478,7 @@ func (r *Router) mountRequestNotifications(m chi.Router) {
 		r.mountRequestNotificationPublishing(rn)
 		r.mountRequestNotificationDeliveries(rn)
 		r.mountRequestNotificationSubscribers(rn)
+		r.mountRequestNotificationProviderEvents(rn)
 	})
 }
 
@@ -666,6 +667,19 @@ func (r *Router) mountRequestNotificationSubscribers(rn chi.Router) {
 		),
 		r.requestNotifications.SuppressSubscriber,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SuppressRequestSubscriberRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountRequestNotificationProviderEvents(rn chi.Router) {
+	rn.With(r.requireDelegatedAdminStrict).Post("/provider-events:suppress", dispatcher.Bind(
+		"console.RequestNotificationHandler.RecordProviderEvent",
+		dispatcher.JSON(func() *attunev1.RecordRequestNotificationProviderEventRequest {
+			return ptrext.Of(attunev1.RecordRequestNotificationProviderEventRequest{})
+		}),
+		r.requestNotifications.RecordProviderEvent,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecordRequestNotificationProviderEventRequest) (*session.AuthCtx, error) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))

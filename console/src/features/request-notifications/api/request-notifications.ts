@@ -8,6 +8,7 @@ import type {
   PreviewRequestNotificationRequest,
   PreviewRequestNotificationResponse,
   PublishRequestUpdateRequest,
+  RecordRequestNotificationProviderEventRequest,
   RequestNotificationDelivery,
   RequestNotificationEvent,
   RequestNotificationSender,
@@ -257,5 +258,19 @@ export function useSuppressRequestNotificationSubscriber() {
         method: 'POST',
         body: { reason },
       }),
+  })
+}
+
+export function useRecordRequestNotificationProviderEvent() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: RecordRequestNotificationProviderEventRequest) =>
+      api<RequestSubscriber>(`${endpoint}/provider-events:suppress`, {
+        method: 'POST',
+        body,
+      }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: requestNotificationDeliveriesQueryKey })
+    },
   })
 }

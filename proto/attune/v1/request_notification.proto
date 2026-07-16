@@ -85,6 +85,12 @@ service RequestNotificationService {
       body: "*"
     };
   }
+  rpc RecordRequestNotificationProviderEvent(RecordRequestNotificationProviderEventRequest) returns (RequestSubscriber) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/provider-events:suppress"
+      body: "*"
+    };
+  }
 }
 
 service PublicRequestNotificationService {
@@ -264,6 +270,7 @@ message PreviewRequestNotificationResponse {
 message PublishRequestUpdateRequest {
   RequestNotificationUpdateDraft update = 1 [(google.api.field_behavior) = REQUIRED];
   repeated RequestNotificationChannel channels = 2;
+  bool confirm_large_audience = 3;
 }
 
 message RequestNotificationEvent {
@@ -339,6 +346,14 @@ message RequestSubscriber {
 message SuppressRequestSubscriberRequest {
   string contact_id = 1 [(google.api.field_behavior) = REQUIRED];
   string reason = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordRequestNotificationProviderEventRequest {
+  string email = 1 [(google.api.field_behavior) = REQUIRED];
+  string event_type = 2 [(google.api.field_behavior) = REQUIRED];
+  string reason = 3;
+  string provider = 4;
+  string provider_message_id = 5;
 }
 
 message SubscribePublicCustomerRequestRequest {

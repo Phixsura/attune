@@ -129,7 +129,7 @@ func (s *Service) resolveEvent(ctx context.Context, event repo.Event, owner stri
 	}
 	snapshot := map[string]any{"email": 0, "webhook": 0}
 	if settings.EmailEnabled && eventChannelRequested(event, repo.ChannelEmail) {
-		count, err := s.createEmailDeliveries(ctx, event, eventContext)
+		count, err := s.createEmailDeliveries(ctx, event, eventContext, settings)
 		if err != nil {
 			return err
 		}
@@ -175,7 +175,7 @@ func eventChannelRequested(event repo.Event, channel string) bool {
 	return false
 }
 
-func (s *Service) createEmailDeliveries(ctx context.Context, event repo.Event, ec repo.EventContext) (int, error) {
+func (s *Service) createEmailDeliveries(ctx context.Context, event repo.Event, ec repo.EventContext, settings repo.Settings) (int, error) {
 	sender, err := s.repo.ActiveSender(ctx, event.TenantID)
 	if errors.Is(err, repo.ErrNotFound) {
 		return 0, nil
@@ -191,11 +191,31 @@ func (s *Service) createEmailDeliveries(ctx context.Context, event repo.Event, e
 	if err != nil {
 		return 0, err
 	}
+	remaining, err := s.tenantEmailRemaining(ctx, event.TenantID, settings, time.Now().Add(-time.Hour))
+	if err != nil {
+		return 0, err
+	}
 	count := 0
 	for _, recipient := range recipients {
 		toEmail, err := s.decryptString(recipient.EmailPayload)
 		if err != nil {
 			return count, err
+		}
+		if remaining.Limited && remaining.Remaining <= 0 {
+			if err := s.insertSuppressedEmailDelivery(ctx, event, ec, recipient, toEmail, "tenant_hourly_send_limit"); err != nil {
+				return count, err
+			}
+			continue
+		}
+		contactLimited, err := s.contactEmailLimitReached(ctx, event.TenantID, recipient.ContactID, settings, time.Now().Add(-24*time.Hour))
+		if err != nil {
+			return count, err
+		}
+		if contactLimited {
+			if err := s.insertSuppressedEmailDelivery(ctx, event, ec, recipient, toEmail, "contact_daily_send_limit"); err != nil {
+				return count, err
+			}
+			continue
 		}
 		token, err := newToken()
 		if err != nil {
@@ -221,9 +241,44 @@ func (s *Service) createEmailDeliveries(ctx context.Context, event repo.Event, e
 		}); err != nil {
 			return count, err
 		}
+		if remaining.Limited {
+			remaining.Remaining--
+		}
 		count++
 	}
 	return count, nil
+}
+
+func (s *Service) insertSuppressedEmailDelivery(
+	ctx context.Context,
+	event repo.Event,
+	ec repo.EventContext,
+	recipient repo.Subscriber,
+	toEmail string,
+	reason string,
+) error {
+	payload := notificationPayload(event, ec, ptrext.Of(recipient), "", true)
+	payload["recipient"] = map[string]any{
+		"contact_id": recipient.ContactID.String(),
+		"display":    recipient.DisplayName,
+		"email":      redactedEmail(toEmail),
+	}
+	payload["suppression"] = map[string]any{"reason": reason}
+	contactID := recipient.ContactID
+	_, err := s.repo.InsertDelivery(ctx, repo.DeliveryInput{
+		TenantID:        event.TenantID,
+		EventID:         event.ID,
+		ContactID:       ptrext.Of(contactID),
+		Channel:         repo.ChannelEmail,
+		DestinationHash: repo.DestinationHash(toEmail),
+		Payload:         payload,
+		Status:          repo.DeliveryStatusSuppressed,
+		FailureKind:     "rate_limited",
+		LastError:       reason,
+		DeadReason:      reason,
+		TraceID:         event.ID.String(),
+	})
+	return err
 }
 
 func (s *Service) createWebhookDeliveries(ctx context.Context, event repo.Event, ec repo.EventContext) (int, error) {

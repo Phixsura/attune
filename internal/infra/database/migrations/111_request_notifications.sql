@@ -401,6 +401,12 @@ CREATE INDEX IF NOT EXISTS idx_customer_request_notification_deliveries_claim
     WHERE status IN ('pending', 'failed');
 CREATE INDEX IF NOT EXISTS idx_customer_request_notification_deliveries_tenant_status
     ON customer_request_notification_deliveries (tenant_id, status, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_customer_request_notification_deliveries_email_tenant_window
+    ON customer_request_notification_deliveries (tenant_id, channel, created_at DESC)
+    WHERE channel = 'email' AND status <> 'suppressed';
+CREATE INDEX IF NOT EXISTS idx_customer_request_notification_deliveries_email_contact_window
+    ON customer_request_notification_deliveries (tenant_id, contact_id, channel, created_at DESC)
+    WHERE channel = 'email' AND contact_id IS NOT NULL AND status <> 'suppressed';
 
 CREATE TABLE IF NOT EXISTS customer_request_unsubscribe_tokens (
     id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),

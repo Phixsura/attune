@@ -65,6 +65,10 @@ func TestRepoDatabaseMethodsReturnPoolErrors(t *testing.T) {
 		_, err := r.SuppressContact(ctx, "tenant-1", id, "manual")
 		return err
 	})
+	expectErr(t, "SuppressContactByEmailHash", func() error {
+		_, err := r.SuppressContactByEmailHash(ctx, "tenant-1", EmailHash("jane@example.test"), "provider_bounce", "bounce")
+		return err
+	})
 	expectErr(t, "UpsertRequestSubscription", func() error {
 		_, err := r.UpsertRequestSubscription(ctx, Subscription{
 			TenantID:  "tenant-1",
@@ -102,6 +106,14 @@ func TestRepoDeliveryEventTargetAndSenderMethodsReturnPoolErrors(t *testing.T) {
 			DestinationHash: DestinationHash("jane@example.test"),
 			Payload:         map[string]any{"version": "1"},
 		})
+		return err
+	})
+	expectErr(t, "CountTenantEmailDeliveriesSince", func() error {
+		_, err := r.CountTenantEmailDeliveriesSince(ctx, "tenant-1", time.Now().Add(-time.Hour))
+		return err
+	})
+	expectErr(t, "CountContactEmailDeliveriesSince", func() error {
+		_, err := r.CountContactEmailDeliveriesSince(ctx, "tenant-1", id, time.Now().Add(-24*time.Hour))
 		return err
 	})
 	expectErr(t, "ClaimDeliveries", func() error {

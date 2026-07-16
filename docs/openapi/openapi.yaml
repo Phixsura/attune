@@ -6201,6 +6201,30 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/provider-events:suppress:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_RecordRequestNotificationProviderEvent
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RecordRequestNotificationProviderEventRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestSubscriber'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/request-notifications/publish:
         post:
             tags:
@@ -15387,6 +15411,8 @@ components:
                             - REQUEST_NOTIFICATION_CHANNEL_WEBHOOK
                         type: string
                         format: enum
+                confirmLargeAudience:
+                    type: boolean
         QualifyExternalConnectionRequest:
             type: object
             properties:
@@ -15469,6 +15495,22 @@ components:
                 externalUpdatedAt:
                     type: string
                 syncError:
+                    type: string
+        RecordRequestNotificationProviderEventRequest:
+            required:
+                - email
+                - eventType
+            type: object
+            properties:
+                email:
+                    type: string
+                eventType:
+                    type: string
+                reason:
+                    type: string
+                provider:
+                    type: string
+                providerMessageId:
                     type: string
         RecordSearchEventRequest:
             type: object

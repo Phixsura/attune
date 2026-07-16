@@ -2821,7 +2821,8 @@
       "body": "正文",
       "notify": "通知订阅者",
       "preview": "预览",
-      "publish": "发布并通知"
+      "publish": "发布并通知",
+      "large_audience_confirm": "本次预览可发送 {{count}} 位订阅者，超过未确认上限 {{limit}}。确认继续发送？"
     },
     "preview": {
       "title": "发送预览",

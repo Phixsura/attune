@@ -397,9 +397,12 @@ func TestHandlerPublishDeliveryAndSubscriberEndpoints(t *testing.T) {
 		t.Fatalf("preview input = %+v", fake.last)
 	}
 
-	published, err := h.Publish(ctx, &attunev1.PublishRequestUpdateRequest{Update: draft})
+	published, err := h.Publish(ctx, &attunev1.PublishRequestUpdateRequest{Update: draft, ConfirmLargeAudience: true})
 	if err != nil || published.Status != http.StatusCreated || published.Body.GetId() != eventID.String() {
 		t.Fatalf("Publish() = %+v err=%v", published, err)
+	}
+	if !fake.last.(svc.PublishInput).ConfirmLargeAudience {
+		t.Fatalf("publish input = %+v, want large audience confirmation", fake.last)
 	}
 	deliveries, err := h.ListDeliveries(ctx, &attunev1.ListRequestNotificationDeliveriesRequest{
 		Limit:   10,
@@ -442,6 +445,38 @@ func TestHandlerSubscriberEndpoints(t *testing.T) {
 	})
 	if err != nil || suppressed.Body.GetConsentState() != repo.ConsentSuppressed {
 		t.Fatalf("SuppressSubscriber() = %+v err=%v", suppressed.Body, err)
+	}
+}
+
+func TestHandlerProviderEventEndpoint(t *testing.T) {
+	contactID := uuid.New()
+	fake := &fakeNotificationService{
+		subscriber: repo.Subscriber{
+			ContactID:          contactID,
+			EmailPayload:       []byte("jane@example.test"),
+			ConsentState:       repo.ConsentSuppressed,
+			SubscriptionStatus: repo.DeliveryStatusSuppressed,
+		},
+	}
+	audit := &fakeAudit{}
+	h := NewHandler(fake)
+	h.SetAuditLogger(audit)
+	result, err := h.RecordProviderEvent(requestNotificationContext(), &attunev1.RecordRequestNotificationProviderEventRequest{
+		Email:             "jane@example.test",
+		EventType:         "bounce",
+		Reason:            "550 mailbox unavailable",
+		Provider:          "postmark",
+		ProviderMessageId: "msg-1",
+	})
+	if err != nil || result.Body.GetContactId() != contactID.String() {
+		t.Fatalf("RecordProviderEvent() = %+v err=%v", result.Body, err)
+	}
+	input := fake.last.(svc.ProviderSuppressionInput)
+	if input.TenantID != "tenant-1" || input.ActorID != "user-1" || input.ProviderMessageID != "msg-1" {
+		t.Fatalf("provider input = %+v", input)
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != "request_notification.bounce" {
+		t.Fatalf("audit events = %+v", audit.events)
 	}
 }
 
@@ -538,6 +573,12 @@ func (f *fakeNotificationService) ListSubscribers(context.Context, string, uuid.
 
 func (f *fakeNotificationService) SuppressSubscriber(_ context.Context, _ string, contactID uuid.UUID, reason string) (repo.Subscriber, error) {
 	f.last = []any{contactID, reason}
+	f.subscriber.ConsentState = repo.ConsentSuppressed
+	return f.subscriber, nil
+}
+
+func (f *fakeNotificationService) RecordProviderSuppression(_ context.Context, in svc.ProviderSuppressionInput) (repo.Subscriber, error) {
+	f.last = in
 	f.subscriber.ConsentState = repo.ConsentSuppressed
 	return f.subscriber, nil
 }

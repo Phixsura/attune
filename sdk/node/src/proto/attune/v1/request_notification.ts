@@ -170,6 +170,7 @@ export interface PreviewRequestNotificationResponse {
 export interface PublishRequestUpdateRequest {
   update?: RequestNotificationUpdateDraft | undefined;
   channels: RequestNotificationChannel[];
+  confirmLargeAudience: boolean;
 }
 
 export interface RequestNotificationEvent {
@@ -247,6 +248,14 @@ export interface SuppressRequestSubscriberRequest {
   reason: string;
 }
 
+export interface RecordRequestNotificationProviderEventRequest {
+  email: string;
+  eventType: string;
+  reason: string;
+  provider: string;
+  providerMessageId: string;
+}
+
 export interface SubscribePublicCustomerRequestRequest {
   tenantSlug: string;
   publicSlug: string;
@@ -318,6 +327,9 @@ export interface RequestNotificationService {
   ): Promise<RequestNotificationDelivery>;
   ListRequestSubscribers(request: ListRequestSubscribersRequest): Promise<ListRequestSubscribersResponse>;
   SuppressRequestSubscriber(request: SuppressRequestSubscriberRequest): Promise<RequestSubscriber>;
+  RecordRequestNotificationProviderEvent(
+    request: RecordRequestNotificationProviderEventRequest,
+  ): Promise<RequestSubscriber>;
 }
 
 export interface PublicRequestNotificationService {

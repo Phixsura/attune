@@ -75,8 +75,25 @@ func TestRenderNotificationBuildsProviderRequest(t *testing.T) {
 	if payload.UnsubscribeURL != env.UnsubscribeURL {
 		t.Fatalf("unsubscribe url = %q", payload.UnsubscribeURL)
 	}
+	assertOneClickHeaders(t, payload.Headers, env.UnsubscribeURL)
 	if payload.TextBody == "" || payload.HTMLBody == "" {
 		t.Fatalf("expected text and html bodies")
+	}
+}
+
+func assertOneClickHeaders(t *testing.T, headers []emailHeader, unsubscribeURL string) {
+	t.Helper()
+	want := []emailHeader{
+		{Name: "List-Unsubscribe", Value: "<" + unsubscribeURL + ">"},
+		{Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click"},
+	}
+	if len(headers) != len(want) {
+		t.Fatalf("headers = %+v, want %+v", headers, want)
+	}
+	for i := range want {
+		if headers[i] != want[i] {
+			t.Fatalf("headers = %+v, want %+v", headers, want)
+		}
 	}
 }
 

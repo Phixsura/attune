@@ -47,6 +47,8 @@ var validActions = map[string]struct{}{
 	"request_notification.webhook_target_test":   {},
 	"request_notification.delivery_retry":        {},
 	"request_notification.suppress_contact":      {},
+	"request_notification.bounce":                {},
+	"request_notification.complaint":             {},
 	"request_notification.public_update_publish": {},
 	"moderation.approve":                         {},
 	"moderation.reject":                          {},
