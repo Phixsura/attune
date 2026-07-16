@@ -4,6 +4,7 @@ package gdpr
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -33,6 +34,84 @@ func TestRepoSubjectMethodsReturnPoolErrors(t *testing.T) {
 		_, err := r.queryJSONLines(ctx, `SELECT '{}'::jsonb`)
 		return err
 	})
+}
+
+func TestRepoExportHelpersReturnPoolErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r := newUnreachableGDPRRepo(t)
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "exportSubjectRows", call: func() error {
+			_, err := r.exportSubjectRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportFeedbackRows", call: func() error {
+			_, err := r.exportFeedbackRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportFeedbackTagRows", call: func() error {
+			_, err := r.exportFeedbackTagRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportFeedbackAuditRows", call: func() error {
+			_, err := r.exportFeedbackAuditRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportLLMAuditRows", call: func() error {
+			_, err := r.exportLLMAuditRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportReplyDraftRows", call: func() error {
+			_, err := r.exportReplyDraftRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportReplyDraftRevisionRows", call: func() error {
+			_, err := r.exportReplyDraftRevisionRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportReplyDraftEventRows", call: func() error {
+			_, err := r.exportReplyDraftEventRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+		{name: "exportReplyDeliveryAttemptRows", call: func() error {
+			_, err := r.exportReplyDeliveryAttemptRows(ctx, "tenant-1", "subject-1")
+			return err
+		}},
+	} {
+		expectGDPRErr(t, tc.name, tc.call)
+	}
+}
+
+func TestSubjectExportRowsCounts(t *testing.T) {
+	t.Parallel()
+
+	rows := subjectExportRows{
+		feedback:              make([]json.RawMessage, 2),
+		tags:                  make([]json.RawMessage, 3),
+		feedbackAudit:         make([]json.RawMessage, 4),
+		llmAudit:              make([]json.RawMessage, 5),
+		replyDrafts:           make([]json.RawMessage, 6),
+		replyDraftRevisions:   make([]json.RawMessage, 7),
+		replyDraftEvents:      make([]json.RawMessage, 8),
+		replyDeliveryAttempts: make([]json.RawMessage, 9),
+	}
+	counts := rows.counts()
+	if counts.FeedbackCount != 2 ||
+		counts.TagAssignmentCount != 3 ||
+		counts.FeedbackAuditCount != 4 ||
+		counts.LLMAuditCount != 5 ||
+		counts.ReplyDraftCount != 6 ||
+		counts.ReplyDraftRevisionCount != 7 ||
+		counts.ReplyDraftEventCount != 8 ||
+		counts.ReplyDeliveryAttemptCount != 9 {
+		t.Fatalf("counts = %+v; want lengths for every export bucket", counts)
+	}
 }
 
 func TestRepoRequestMethodsReturnPoolErrors(t *testing.T) {

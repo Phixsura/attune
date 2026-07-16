@@ -22,6 +22,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
+	consoleexternalsync "github.com/Phixsura/attune/internal/handlers/console/externalsync"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
@@ -79,6 +80,7 @@ func dispatchRouter() *Router {
 		usage:              &usage.UsageHandler{},
 		enrichConfig:       &enrichconfig.Handler{},
 		enrichmentRuntime:  &consoleenrichmentruntime.Handler{},
+		externalSync:       &consoleexternalsync.Handler{},
 		guardPolicies:      &consoleguardpolicy.Handler{},
 		inbound:            &consoleinbound.Handler{},
 		llmConfig:          &consolellmconfig.Handler{},
@@ -560,6 +562,63 @@ func TestRouterHTTPDispatch_Inbound(t *testing.T) {
 	}
 }
 
+// ---------- mountExternalSync routes ----------
+
+func TestRouterHTTPDispatch_ExternalSync(t *testing.T) {
+	t.Parallel()
+	r := dispatchRouter()
+	mux := newRecovererMux()
+	r.mountExternalSync(mux)
+
+	connectionID := "11111111-1111-4111-8111-111111111111"
+	mappingID := "22222222-2222-4222-8222-222222222222"
+	runID := "33333333-3333-4333-8333-333333333333"
+	failureID := "44444444-4444-4444-8444-444444444444"
+	conflictID := "55555555-5555-4555-8555-555555555555"
+	eventID := "66666666-6666-4666-8666-666666666666"
+
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"GET /external-sync/connections", http.MethodGet, "/external-sync/connections", ""},
+		{"POST /external-sync/connections", http.MethodPost, "/external-sync/connections", `{}`},
+		{"PATCH /external-sync/connections/{id}", http.MethodPatch, "/external-sync/connections/" + connectionID, `{}`},
+		{"DELETE /external-sync/connections/{id}", http.MethodDelete, "/external-sync/connections/" + connectionID, ""},
+		{"POST /external-sync/connections/{id}:test", http.MethodPost, "/external-sync/connections/" + connectionID + ":test", ""},
+		{"POST /external-sync/connections/{id}:resume", http.MethodPost, "/external-sync/connections/" + connectionID + ":resume", ""},
+		{"POST /external-sync/connections/{id}:qualify", http.MethodPost, "/external-sync/connections/" + connectionID + ":qualify", ""},
+		{"GET /external-sync/connections/{id}/schema", http.MethodGet, "/external-sync/connections/" + connectionID + "/schema", ""},
+		{"GET /external-sync/mappings", http.MethodGet, "/external-sync/mappings?connection_id=" + connectionID, ""},
+		{"PUT /external-sync/mappings/{id}", http.MethodPut, "/external-sync/mappings/" + mappingID, `{}`},
+		{"POST /external-sync/mappings/{id}:preview", http.MethodPost, "/external-sync/mappings/" + mappingID + ":preview", `{}`},
+		{"POST /external-sync/mappings/{id}:reset-cursor", http.MethodPost, "/external-sync/mappings/" + mappingID + ":reset-cursor", ""},
+		{"POST /external-sync/mappings/{id}:backfill", http.MethodPost, "/external-sync/mappings/" + mappingID + ":backfill", `{}`},
+		{"POST /external-sync/runs", http.MethodPost, "/external-sync/runs", `{}`},
+		{
+			"GET /external-sync/runs with filters",
+			http.MethodGet,
+			"/external-sync/runs?connection_id=" + connectionID + "&mapping_id=" + mappingID + "&status=failed&before_id=" + runID + "&limit=25",
+			"",
+		},
+		{"GET /external-sync/runs/{id}", http.MethodGet, "/external-sync/runs/" + runID, ""},
+		{"POST /external-sync/records:timeline", http.MethodPost, "/external-sync/records:timeline", `{}`},
+		{"POST /external-sync/runs/{id}:retry", http.MethodPost, "/external-sync/runs/" + runID + ":retry", ""},
+		{"POST /external-sync/failures/{id}:retry", http.MethodPost, "/external-sync/failures/" + failureID + ":retry", ""},
+		{"POST /external-sync/conflicts/{id}:resolve", http.MethodPost, "/external-sync/conflicts/" + conflictID + ":resolve", `{}`},
+		{"POST /external-sync/conflicts:batch-resolve", http.MethodPost, "/external-sync/conflicts:batch-resolve", `{}`},
+		{"GET /external-sync/events", http.MethodGet, "/external-sync/events?connection_id=" + connectionID + "&status=received&before_id=" + eventID + "&limit=25", ""},
+		{"GET /external-sync/events/{id}", http.MethodGet, "/external-sync/events/" + eventID, ""},
+		{"POST /external-sync/events/{id}:replay", http.MethodPost, "/external-sync/events/" + eventID + ":replay", ""},
+		{"GET /external-sync/health", http.MethodGet, "/external-sync/health", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serveAndAssertDispatched(t, mux, tc.method, tc.path, tc.body)
+		})
+	}
+}
+
 // ---------- mountClusters routes ----------
 
 func TestRouterHTTPDispatch_Clusters(t *testing.T) {
@@ -888,6 +947,42 @@ func TestRouterSetters(t *testing.T) {
 		r.SetPreflightHandler(h)
 		require.NotNil(t, r.preflight)
 	})
+	t.Run("SetExternalSyncHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetExternalSyncHandler(&consoleexternalsync.Handler{})
+		require.NotNil(t, r2.externalSync)
+	})
+	t.Run("SetRecoveryHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetRecoveryHandler(http.NotFoundHandler())
+		require.NotNil(t, r2.recovery)
+	})
+	t.Run("SetReleaseInfoHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetReleaseInfoHandler(http.NotFoundHandler())
+		require.NotNil(t, r2.releaseInfo)
+	})
+	t.Run("SetBreakGlassHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetBreakGlassHandler(&auth.BreakGlassHandler{})
+		require.NotNil(t, r2.breakglass)
+	})
+	t.Run("SetBreakGlassAPIHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetBreakGlassAPIHandler(&auth.BreakGlassAPIHandler{})
+		require.NotNil(t, r2.breakglassAPI)
+	})
+	t.Run("SetSSOCutoverHandler", func(t *testing.T) {
+		t.Parallel()
+		r2 := ptrext.Of(Router{})
+		r2.SetSSOCutoverHandler(&auth.SSOCutoverHandler{})
+		require.NotNil(t, r2.ssoCutover)
+	})
 }
 
 // ---------- nil-guard branches for optional handlers ----------
@@ -913,6 +1008,8 @@ func TestRouterHTTPDispatch_NilGuards(t *testing.T) {
 	r.mountPreflight(mux)
 	r.mountMCPClients(mux)
 	r.mountOIDC(mux)
+	r.mountExternalSync(mux)
+	r.mountBreakGlass(mux)
 
 	// Verify no routes were registered.
 	routeCount := 0

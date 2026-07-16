@@ -4,9 +4,12 @@ package workflowstate
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -91,6 +94,47 @@ func TestRepoMethodsReturnPoolErrors(t *testing.T) {
 	})
 }
 
+func TestRepoTxHelpersReturnWrappedErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	r := New(nil)
+	tx := failingWorkflowTx{err: errors.New("tx failed")}
+	state := WorkflowState{
+		TenantID:    "tenant-1",
+		Name:        "triage",
+		DisplayName: domain.I18nString{"en": "Triage"},
+		Color:       "#3366ff",
+		Category:    "active",
+	}
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "CheckTransitionTx", call: func() error {
+			_, err := r.CheckTransitionTx(ctx, tx, "tenant-1", "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb", "cccccccc-1111-2222-3333-dddddddddddd")
+			return err
+		}},
+		{name: "UpsertStateReturningID", call: func() error {
+			_, err := r.UpsertStateReturningID(ctx, tx, state)
+			return err
+		}},
+		{name: "InsertTransitionIgnoreConflict", call: func() error {
+			return r.InsertTransitionIgnoreConflict(ctx, tx, "tenant-1", "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb", "cccccccc-1111-2222-3333-dddddddddddd")
+		}},
+		{name: "GetCurrentStateForUpdate", call: func() error {
+			_, err := r.GetCurrentStateForUpdate(ctx, tx, "tenant-1", 42)
+			return err
+		}},
+		{name: "SetFeedbackState", call: func() error {
+			return r.SetFeedbackState(ctx, tx, 42, "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")
+		}},
+	} {
+		expectWorkflowStateErr(t, tc.name, tc.call)
+	}
+}
+
 func newUnreachableWorkflowStateRepo(t *testing.T) *Repo {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
@@ -105,6 +149,62 @@ func newUnreachableWorkflowStateRepo(t *testing.T) *Repo {
 	}
 	t.Cleanup(pool.Close)
 	return New(pool)
+}
+
+type failingWorkflowTx struct {
+	err error
+}
+
+func (f failingWorkflowTx) Begin(context.Context) (pgx.Tx, error) {
+	return nil, f.err
+}
+
+func (f failingWorkflowTx) Commit(context.Context) error {
+	return f.err
+}
+
+func (f failingWorkflowTx) Rollback(context.Context) error {
+	return nil
+}
+
+func (f failingWorkflowTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, f.err
+}
+
+func (f failingWorkflowTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults {
+	return nil
+}
+
+func (f failingWorkflowTx) LargeObjects() pgx.LargeObjects {
+	return pgx.LargeObjects{}
+}
+
+func (f failingWorkflowTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, f.err
+}
+
+func (f failingWorkflowTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, f.err
+}
+
+func (f failingWorkflowTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, f.err
+}
+
+func (f failingWorkflowTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return failingWorkflowRow(f)
+}
+
+func (f failingWorkflowTx) Conn() *pgx.Conn {
+	return nil
+}
+
+type failingWorkflowRow struct {
+	err error
+}
+
+func (r failingWorkflowRow) Scan(...any) error {
+	return r.err
 }
 
 func expectWorkflowStateErr(t *testing.T, name string, call func() error) {

@@ -78,6 +78,48 @@ func TestVerifierDatabaseFailureBranches(t *testing.T) {
 	}
 }
 
+func TestVerifierIntegrityAndFailureModeDatabaseErrors(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	pool := newUnreachableVerifierPool(t)
+
+	if got := gatherEncoding(ctx, pool); got.Status != StatusFail {
+		t.Fatalf("gatherEncoding() = %+v, want fail", got)
+	}
+	if got := gatherConstraints(ctx, pool, nil); got.Status != StatusFail {
+		t.Fatalf("gatherConstraints() = %+v, want fail", got)
+	}
+	if _, err := unvalidatedConstraintCount(ctx, pool); err == nil {
+		t.Fatal("unvalidatedConstraintCount() error = nil, want query error")
+	}
+	if _, err := BaselineUnvalidatedCount(ctx, pool); err == nil {
+		t.Fatal("BaselineUnvalidatedCount() error = nil, want query error")
+	}
+	if got := gatherSequences(ctx, pool); got.Status != StatusFail {
+		t.Fatalf("gatherSequences() = %+v, want fail", got)
+	}
+	if _, err := sequenceOwners(ctx, pool); err == nil {
+		t.Fatal("sequenceOwners() error = nil, want query error")
+	}
+	ok, behind := sequenceBehind(ctx, pool, seqRef{schema: "public", seq: "feedback_id_seq", tbl: "user_feedback", col: "id"})
+	if ok || behind {
+		t.Fatalf("sequenceBehind() = (%t, %t), want unreadable sequence", ok, behind)
+	}
+	if got := gatherExtensions(ctx, pool, []string{"vector"}); got.Status != StatusFail {
+		t.Fatalf("gatherExtensions() = %+v, want fail", got)
+	}
+	if _, err := extensionNames(ctx, pool); err == nil {
+		t.Fatal("extensionNames() error = nil, want query error")
+	}
+	if _, err := BaselineExtensions(ctx, pool); err == nil {
+		t.Fatal("BaselineExtensions() error = nil, want query error")
+	}
+	if got := gatherMatviews(ctx, pool); got.Status != StatusFail {
+		t.Fatalf("gatherMatviews() = %+v, want fail", got)
+	}
+}
+
 func TestCheckDecryptabilityRejectsMissingStoreAndReadErrors(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

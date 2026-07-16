@@ -41,10 +41,38 @@ describe('DimensionChips', () => {
     expect(container.querySelector('svg')).toBeInTheDocument()
   })
 
+  it('renders success enum badges with the smile icon', () => {
+    const { container } = renderWithProviders(<DimensionChips dim={toneDim()} value="positive" />)
+
+    expect(screen.getByText('Positive').closest('span')).toHaveClass('border-emerald-500/30')
+    expect(container.querySelector('svg')).toBeInTheDocument()
+  })
+
   it('falls back to the ordinary badge when renderer value is absent', () => {
     renderWithProviders(<DimensionChips dim={toneDim()} value="unknown" />)
 
     expect(screen.getByText('unknown')).toBeInTheDocument()
+  })
+
+  it.each([
+    ['warning', 'frown', 'border-amber-500/30', true],
+    ['muted', 'minus', 'text-muted-foreground', true],
+    ['custom', 'unknown', 'border-border', false],
+  ])('renders %s enum badge variants', (tone, icon, expectedClass, hasIcon) => {
+    const dim: Dimension = {
+      ...toneDim(),
+      taxonomy: [{ value: tone, displayName: { entries: { default: tone } }, examples: [] }],
+      renderer: {
+        kind: 'enum_badge',
+        values: {
+          [tone]: { icon, tone },
+        },
+      },
+    }
+    const { container } = renderWithProviders(<DimensionChips dim={dim} value={tone} />)
+
+    expect(screen.getByText(tone).closest('span')).toHaveClass(expectedClass)
+    expect(container.querySelector('svg') != null).toBe(hasIcon)
   })
 
   it('renders multi values as taxonomy chips and ignores non-string entries', () => {
@@ -85,6 +113,28 @@ describe('DimensionChips', () => {
     renderWithProviders(<DimensionChips dim={dim} value="positive" />)
 
     expect(screen.getByText('Positive')).toBeInTheDocument()
+  })
+
+  it('renders a dash for empty multi values', () => {
+    const dim: Dimension = {
+      ...toneDim(),
+      kind: 'multi',
+    }
+
+    renderWithProviders(<DimensionChips dim={dim} value={[]} />)
+
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+
+  it('can suppress the empty placeholder for non-string multi values', () => {
+    const dim: Dimension = {
+      ...toneDim(),
+      kind: 'multi',
+    }
+
+    renderWithProviders(<DimensionChips dim={dim} value={123} emptyDash={false} />)
+
+    expect(screen.queryByText('—')).not.toBeInTheDocument()
   })
 
   it('handles non-string single values without rendering a badge', () => {

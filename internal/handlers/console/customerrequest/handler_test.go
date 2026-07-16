@@ -520,6 +520,15 @@ func TestHandlerErrorMapping(t *testing.T) {
 				wantCode = attunev1.ErrorCode_BAD_REQUEST
 			}
 			assertDispatcherError(t, err, wantStatus, wantCode)
+
+			_, err = handler.scoringSettingsError(ctx, tc.err)
+			wantStatus = http.StatusInternalServerError
+			wantCode = attunev1.ErrorCode_INTERNAL
+			if errors.Is(tc.err, svc.ErrValidation) || errors.Is(tc.err, repo.ErrInvalidInput) {
+				wantStatus = http.StatusBadRequest
+				wantCode = attunev1.ErrorCode_VALIDATION
+			}
+			assertDispatcherError(t, err, wantStatus, wantCode)
 		})
 	}
 }
@@ -539,6 +548,56 @@ func TestEnumToProtoConversions(t *testing.T) {
 	}
 	for _, health := range []repo.DeliveryHealth{repo.DeliveryHealthNoLinks, repo.DeliveryHealthManual, repo.DeliveryHealthPending, repo.DeliveryHealthSynced, repo.DeliveryHealthStale, repo.DeliveryHealthFailed} {
 		_ = deliveryHealthToProto(health)
+	}
+}
+
+func TestSyncStateFromProtoConversions(t *testing.T) {
+	cases := []struct {
+		name string
+		in   attunev1.CustomerRequestIssueSyncState
+		want repo.IssueSyncState
+	}{
+		{
+			name: "unspecified defaults synced",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED,
+			want: repo.IssueSyncStateSynced,
+		},
+		{
+			name: "manual",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL,
+			want: repo.IssueSyncStateManual,
+		},
+		{
+			name: "pending",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING,
+			want: repo.IssueSyncStatePending,
+		},
+		{
+			name: "synced",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+			want: repo.IssueSyncStateSynced,
+		},
+		{
+			name: "stale",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE,
+			want: repo.IssueSyncStateStale,
+		},
+		{
+			name: "failed",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED,
+			want: repo.IssueSyncStateFailed,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := syncStateFromProto(tc.in)
+			if err != nil || got != tc.want {
+				t.Fatalf("syncStateFromProto(%v) = %q, %v; want %q", tc.in, got, err, tc.want)
+			}
+		})
+	}
+	if _, err := syncStateFromProto(attunev1.CustomerRequestIssueSyncState(99)); err == nil {
+		t.Fatal("syncStateFromProto(invalid) error = nil")
 	}
 }
 
