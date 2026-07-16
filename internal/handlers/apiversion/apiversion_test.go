@@ -125,6 +125,62 @@ func TestMiddleware_RejectsEmptyVersionValue(t *testing.T) {
 	require.Contains(t, body["message"], "must not be empty")
 }
 
+func TestMiddleware_RejectsCommaSeparatedVersionValue(t *testing.T) {
+	t.Parallel()
+
+	handler := Middleware(DefaultConfig())(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("next handler must not run on ambiguous versions")
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tags", nil)
+	req.Header.Set(HeaderName, CurrentVersion+", 2026-06-15")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	body := decodeBody(t, rec)
+	require.Equal(t, "BAD_REQUEST", body["code"])
+	require.Contains(t, body["message"], "must contain exactly one version")
+}
+
+func TestMiddleware_NormalizesEmptyAndDuplicateConfigVersions(t *testing.T) {
+	t.Parallel()
+
+	handler := Middleware(Config{
+		SupportedVersions: []string{"", CurrentVersion, " 2026-06-15 ", "2026-06-15"},
+	})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tags", nil)
+	req.Header.Set(HeaderName, "2026-06-15")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, "2026-06-15", rec.Header().Get(HeaderName))
+	require.Empty(t, rec.Header().Get(DeprecationHeader))
+	require.Empty(t, rec.Header().Get(SunsetHeader))
+}
+
+func TestMiddleware_ClearsStaleDeprecationHeadersForCurrentVersion(t *testing.T) {
+	t.Parallel()
+
+	handler := Middleware(DefaultConfig())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(DeprecationHeader, "stale")
+		w.Header().Set(SunsetHeader, "stale")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tags", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Empty(t, rec.Header().Get(DeprecationHeader))
+	require.Empty(t, rec.Header().Get(SunsetHeader))
+}
+
 func TestMiddleware_PreservesFlusher(t *testing.T) {
 	t.Parallel()
 
@@ -163,6 +219,26 @@ func TestMiddleware_PreservesReaderFrom(t *testing.T) {
 	require.True(t, varyContains(rec.Header(), HeaderName))
 }
 
+func TestMiddleware_FallsBackWhenReaderFromIsUnsupported(t *testing.T) {
+	t.Parallel()
+
+	handler := Middleware(DefaultConfig())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		readerFrom, ok := w.(io.ReaderFrom)
+		require.True(t, ok, "wrapped writer must expose io.ReaderFrom fallback")
+		n, err := readerFrom.ReadFrom(plainReader{r: strings.NewReader("fallback")})
+		require.NoError(t, err)
+		require.EqualValues(t, len("fallback"), n)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/gdpr/exports/job-1/download", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, "fallback", rec.Body.String())
+	require.Equal(t, CurrentVersion, rec.Header().Get(HeaderName))
+	require.True(t, varyContains(rec.Header(), HeaderName))
+}
+
 func TestMiddleware_PreservesHijacker(t *testing.T) {
 	t.Parallel()
 
@@ -177,6 +253,60 @@ func TestMiddleware_PreservesHijacker(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/mcp/clients", nil)
 	rec := newHijackRecorder(wantErr)
 	handler.ServeHTTP(rec, req)
+}
+
+func TestMiddleware_PreservesPusher(t *testing.T) {
+	t.Parallel()
+
+	handler := Middleware(DefaultConfig())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		pusher, ok := w.(http.Pusher)
+		require.True(t, ok, "wrapped writer must preserve http.Pusher")
+		err := pusher.Push("/assets/app.js", ptrext.Of(http.PushOptions{
+			Header: http.Header{"Accept": []string{"application/javascript"}},
+		}))
+		require.NoError(t, err)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tags", nil)
+	rec := newPushRecorder(nil)
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, "/assets/app.js", rec.target)
+	require.Equal(t, "application/javascript", rec.opts.Header.Get("Accept"))
+	require.Equal(t, CurrentVersion, rec.Header().Get(HeaderName))
+}
+
+func TestMiddleware_PusherReturnsUnsupportedWhenUnderlyingWriterCannotPush(t *testing.T) {
+	t.Parallel()
+
+	handler := Middleware(DefaultConfig())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		pusher, ok := w.(http.Pusher)
+		require.True(t, ok, "contract writer exposes http.Pusher")
+		err := pusher.Push("/assets/app.js", nil)
+		require.ErrorIs(t, err, http.ErrNotSupported)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tags", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+}
+
+func TestMiddleware_UnwrapReturnsUnderlyingWriter(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	handler := Middleware(DefaultConfig())(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		unwrapper, ok := w.(interface{ Unwrap() http.ResponseWriter })
+		require.True(t, ok)
+		require.Same(t, rec, unwrapper.Unwrap())
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/tags", nil)
+	handler.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	require.Equal(t, CurrentVersion, rec.Header().Get(HeaderName))
 }
 
 func decodeBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]string {
@@ -236,6 +366,23 @@ func newHijackRecorder(err error) *hijackRecorder {
 
 func (r *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, r.err
+}
+
+type pushRecorder struct {
+	*httptest.ResponseRecorder
+	target string
+	opts   *http.PushOptions
+	err    error
+}
+
+func newPushRecorder(err error) *pushRecorder {
+	return ptrext.Of(pushRecorder{ResponseRecorder: httptest.NewRecorder(), err: err})
+}
+
+func (r *pushRecorder) Push(target string, opts *http.PushOptions) error {
+	r.target = target
+	r.opts = opts
+	return r.err
 }
 
 type plainReader struct {
