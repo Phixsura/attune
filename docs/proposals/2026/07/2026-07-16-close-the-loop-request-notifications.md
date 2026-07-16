@@ -1501,6 +1501,9 @@ The PR is not mergeable until all of the following are true:
   selector, recipient preview, excluded-count breakdown, and payload preview.
 - Add notification settings screens for event types, consent mode, sender
   health, webhook targets, and send limits.
+- Surface event-type and request-status policy maps as explicit Console
+  toggles, preserving unknown boolean keys while defaulting known omitted keys
+  to enabled so operators can safely round-trip future policy extensions.
 - Add delivery operations screens for event detail, delivery list, failure
   detail, suppression reason, trace id, retry one, and retry all for an event.
 - Add portal-facing subscribe/unsubscribe/confirmation screens with

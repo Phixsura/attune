@@ -65,6 +65,81 @@ import {
   type RequestSubscriber,
 } from '@/proto/attune/v1/request_notification'
 
+type BooleanPolicy = Record<string, boolean>
+
+type PolicyOption = {
+  descriptionKey: string
+  key: string
+  labelKey: string
+  testId: string
+}
+
+const eventTypeOptions: PolicyOption[] = [
+  {
+    key: 'request.status_changed',
+    labelKey: 'request_notifications.events.status_changed',
+    descriptionKey: 'request_notifications.events.status_changed_help',
+    testId: 'rn-event-status-changed',
+  },
+  {
+    key: 'request.shipped',
+    labelKey: 'request_notifications.events.shipped',
+    descriptionKey: 'request_notifications.events.shipped_help',
+    testId: 'rn-event-shipped',
+  },
+  {
+    key: 'request.need_info_direct',
+    labelKey: 'request_notifications.events.need_info_direct',
+    descriptionKey: 'request_notifications.events.need_info_direct_help',
+    testId: 'rn-event-need-info-direct',
+  },
+  {
+    key: 'request.moderator_response',
+    labelKey: 'request_notifications.events.moderator_response',
+    descriptionKey: 'request_notifications.events.moderator_response_help',
+    testId: 'rn-event-moderator-response',
+  },
+  {
+    key: 'changelog.post_published',
+    labelKey: 'request_notifications.events.changelog_post_published',
+    descriptionKey: 'request_notifications.events.changelog_post_published_help',
+    testId: 'rn-event-changelog-post-published',
+  },
+]
+
+const statusPolicyOptions: PolicyOption[] = [
+  {
+    key: 'open',
+    labelKey: 'request_notifications.request_statuses.open',
+    descriptionKey: 'request_notifications.request_statuses.open_help',
+    testId: 'rn-status-open',
+  },
+  {
+    key: 'planned',
+    labelKey: 'request_notifications.request_statuses.planned',
+    descriptionKey: 'request_notifications.request_statuses.planned_help',
+    testId: 'rn-status-planned',
+  },
+  {
+    key: 'in_progress',
+    labelKey: 'request_notifications.request_statuses.in_progress',
+    descriptionKey: 'request_notifications.request_statuses.in_progress_help',
+    testId: 'rn-status-in-progress',
+  },
+  {
+    key: 'shipped',
+    labelKey: 'request_notifications.request_statuses.shipped',
+    descriptionKey: 'request_notifications.request_statuses.shipped_help',
+    testId: 'rn-status-shipped',
+  },
+  {
+    key: 'cancelled',
+    labelKey: 'request_notifications.request_statuses.cancelled',
+    descriptionKey: 'request_notifications.request_statuses.cancelled_help',
+    testId: 'rn-status-cancelled',
+  },
+]
+
 export function RequestNotificationsPage() {
   const { i18n, t } = useTranslation()
   useDocumentTitle(t('nav.request_notifications'))
@@ -99,6 +174,12 @@ export function RequestNotificationsPage() {
   const [maxRecipientsWithoutConfirm, setMaxRecipientsWithoutConfirm] = useState('500')
   const [tenantHourlySendLimit, setTenantHourlySendLimit] = useState('5000')
   const [contactDailySendLimit, setContactDailySendLimit] = useState('5')
+  const [enabledEventTypes, setEnabledEventTypes] = useState<BooleanPolicy>(() =>
+    defaultBooleanPolicy(eventTypeOptions),
+  )
+  const [statusPolicy, setStatusPolicy] = useState<BooleanPolicy>(() =>
+    defaultBooleanPolicy(statusPolicyOptions),
+  )
 
   const [senderForm, setSenderForm] = useState({
     fromName: '',
@@ -139,6 +220,8 @@ export function RequestNotificationsPage() {
     setMaxRecipientsWithoutConfirm(String(settings.maxRecipientsWithoutConfirm || 0))
     setTenantHourlySendLimit(String(settings.tenantHourlySendLimit || 0))
     setContactDailySendLimit(String(settings.contactDailySendLimit || 0))
+    setEnabledEventTypes(booleanPolicyFromSettings(settings.enabledEventTypes, eventTypeOptions))
+    setStatusPolicy(booleanPolicyFromSettings(settings.statusPolicy, statusPolicyOptions))
   }, [settings])
 
   useEffect(() => {
@@ -160,12 +243,22 @@ export function RequestNotificationsPage() {
   )
   const canDraft = Boolean(draft.requestId.trim() && draft.title.trim() && draft.body.trim())
 
+  const updateEnabledEventType = (key: string, checked: boolean) => {
+    setEnabledEventTypes((current) => ({ ...current, [key]: checked }))
+  }
+
+  const updateStatusPolicy = (key: string, checked: boolean) => {
+    setStatusPolicy((current) => ({ ...current, [key]: checked }))
+  }
+
   const handleSettingsSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     updateSettings.mutate(
       {
         emailEnabled,
         webhookEnabled,
+        enabledEventTypes,
+        statusPolicy,
         defaultConsentMode: consentMode,
         requirePublicUpdateForStatus: requirePublicUpdate,
         maxRecipientsWithoutConfirm: numberOrZero(maxRecipientsWithoutConfirm),
@@ -431,6 +524,20 @@ export function RequestNotificationsPage() {
                 label={t('request_notifications.settings.public_update')}
                 onCheckedChange={setRequirePublicUpdate}
                 testId="rn-require-public-update"
+              />
+              <PolicyToggleGroup
+                help={t('request_notifications.settings.event_types_help')}
+                onChange={updateEnabledEventType}
+                options={eventTypeOptions}
+                title={t('request_notifications.settings.event_types')}
+                values={enabledEventTypes}
+              />
+              <PolicyToggleGroup
+                help={t('request_notifications.settings.status_policy_help')}
+                onChange={updateStatusPolicy}
+                options={statusPolicyOptions}
+                title={t('request_notifications.settings.status_policy')}
+                values={statusPolicy}
               />
               <FormField
                 label={t('request_notifications.settings.consent_mode')}
@@ -916,6 +1023,43 @@ function ToggleRow({
   )
 }
 
+function PolicyToggleGroup({
+  help,
+  onChange,
+  options,
+  title,
+  values,
+}: {
+  help: string
+  onChange: (key: string, checked: boolean) => void
+  options: PolicyOption[]
+  title: string
+  values: BooleanPolicy
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-2 rounded-md border border-border/70 p-3">
+      <div className="space-y-0.5">
+        <Label>{title}</Label>
+        <p className="text-xs text-muted-foreground">{help}</p>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {options.map((option) => (
+          <ToggleRow
+            checked={policyEnabled(values, option.key)}
+            compact
+            description={t(option.descriptionKey)}
+            key={option.key}
+            label={t(option.labelKey)}
+            onCheckedChange={(checked) => onChange(option.key, checked)}
+            testId={option.testId}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function FormField({
   children,
   help,
@@ -1240,6 +1384,32 @@ export function channelList(email: boolean, webhook: boolean) {
     channels.push(RequestNotificationChannel.REQUEST_NOTIFICATION_CHANNEL_WEBHOOK)
   }
   return channels
+}
+
+export function defaultBooleanPolicy(options: PolicyOption[]): BooleanPolicy {
+  return Object.fromEntries(options.map((option) => [option.key, true]))
+}
+
+export function booleanPolicyFromSettings(
+  values: { [key: string]: unknown } | undefined,
+  options: PolicyOption[],
+): BooleanPolicy {
+  const out: BooleanPolicy = {}
+  for (const [key, value] of Object.entries(values ?? {})) {
+    if (typeof value === 'boolean') {
+      out[key] = value
+    }
+  }
+  for (const option of options) {
+    if (out[option.key] === undefined) {
+      out[option.key] = true
+    }
+  }
+  return out
+}
+
+export function policyEnabled(values: BooleanPolicy, key: string) {
+  return values[key] !== false
 }
 
 export function numberOrZero(value: string) {

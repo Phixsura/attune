@@ -47,7 +47,8 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   expose a Console provider event endpoint for bounce, complaint, and
   suppression feedback. Preview, publish, automatic status-change recording,
   and worker resolution now all enforce tenant event-type and status policies
-  before notification deliveries are created.
+  before notification deliveries are created, and Console settings expose the
+  same event-type and request-status policy controls.
 
 - **Reply-send-hook batch recovery tools.**
   The reply-send-hook delivery log now supports multi-select recovery actions

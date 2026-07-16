@@ -8,6 +8,7 @@ import {
   requestNotificationWebhookTargetsQueryKey,
 } from '@/features/request-notifications/api/request-notifications'
 import {
+  booleanPolicyFromSettings,
   canRetry,
   channelLabel,
   channelList,
@@ -15,6 +16,7 @@ import {
   formatTime,
   numberOrZero,
   optionalValue,
+  policyEnabled,
   RequestNotificationsPage,
   statusLabel,
   statusTone,
@@ -226,6 +228,23 @@ describe('request notification page helpers', () => {
     expect(numberOrZero('nan')).toBe(0)
     expect(optionalValue('  secret  ')).toBe('secret')
     expect(optionalValue('   ')).toBeUndefined()
+    const policy = booleanPolicyFromSettings({ known: false, future: true, invalid: 'yes' }, [
+      {
+        key: 'known',
+        labelKey: 'known',
+        descriptionKey: 'known_help',
+        testId: 'known',
+      },
+      {
+        key: 'missing',
+        labelKey: 'missing',
+        descriptionKey: 'missing_help',
+        testId: 'missing',
+      },
+    ])
+    expect(policy).toEqual({ known: false, future: true, missing: true })
+    expect(policyEnabled(policy, 'known')).toBe(false)
+    expect(policyEnabled(policy, 'missing')).toBe(true)
     expect(errorMessage(new Error('boom'), 'fallback')).toBe('boom')
     expect(errorMessage('boom', 'fallback')).toBe('fallback')
     expect(canRetry({ ...deliveryFixture, status: 'failed' })).toBe(true)
@@ -278,11 +297,29 @@ describe('RequestNotificationsPage', () => {
     expect(screen.getByText('n***@example.test')).toBeInTheDocument()
 
     await user.click(screen.getByTestId('rn-email-enabled'))
+    await user.click(screen.getByTestId('rn-event-shipped'))
+    await user.click(screen.getByTestId('rn-status-in-progress'))
     await user.clear(screen.getByTestId('rn-max-unconfirmed'))
     await user.type(screen.getByTestId('rn-max-unconfirmed'), '250')
     await user.click(screen.getByTestId('rn-settings-save'))
     await waitFor(() => expect(captures.settings).toMatchObject({ emailEnabled: false }))
     expect(captures.settings).toMatchObject({ maxRecipientsWithoutConfirm: 250 })
+    expect(captures.settings).toMatchObject({
+      enabledEventTypes: {
+        'request.status_changed': true,
+        'request.shipped': false,
+        'request.need_info_direct': true,
+        'request.moderator_response': true,
+        'changelog.post_published': true,
+      },
+      statusPolicy: {
+        open: true,
+        planned: true,
+        in_progress: false,
+        shipped: true,
+        cancelled: true,
+      },
+    })
 
     await user.clear(screen.getByTestId('rn-sender-from-email'))
     await user.type(screen.getByTestId('rn-sender-from-email'), 'notify@example.test')

@@ -2765,6 +2765,10 @@
       "webhook_help": "把同一份公开安全事件发送到配置的客户系统。",
       "public_update": "状态变更需要公开更新",
       "public_update_help": "状态变更会生成公开更新事件后再进入通知队列。",
+      "event_types": "事件类型",
+      "event_types_help": "关闭后，预览、发布和后台解析都会跳过这类通知。",
+      "status_policy": "状态策略",
+      "status_policy_help": "只为勾选状态创建状态变更和发货通知。",
       "consent_mode": "默认同意模式",
       "consent_mode_help": "控制新的公开订阅如何建立发送资格。",
       "max_unconfirmed": "未确认上限",
@@ -2775,6 +2779,30 @@
       "explicit_opt_in": "显式订阅",
       "existing_app_consent": "沿用应用同意",
       "disabled": "不自动订阅"
+    },
+    "events": {
+      "status_changed": "状态变更",
+      "status_changed_help": "需求从一个公开状态移动到另一个状态。",
+      "shipped": "已发货",
+      "shipped_help": "需求进入已发货状态或发布发货更新。",
+      "need_info_direct": "需要补充信息",
+      "need_info_direct_help": "面向单个提交者的私密跟进。",
+      "moderator_response": "管理员回应",
+      "moderator_response_help": "公开或定向的管理员正式回应。",
+      "changelog_post_published": "更新日志发布",
+      "changelog_post_published_help": "更新日志条目关联到需求后通知相关订阅者。"
+    },
+    "request_statuses": {
+      "open": "开放",
+      "open_help": "新收集、尚未进入路线图的需求。",
+      "planned": "已计划",
+      "planned_help": "已进入计划或路线图的需求。",
+      "in_progress": "进行中",
+      "in_progress_help": "团队已经开始处理的需求。",
+      "shipped": "已发货",
+      "shipped_help": "已经面向客户交付的需求。",
+      "cancelled": "已取消",
+      "cancelled_help": "不再推进或不适合公开承诺的需求。"
     },
     "sender": {
       "title": "邮件发件人",
