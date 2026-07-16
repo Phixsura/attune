@@ -5,6 +5,7 @@ package securityalert
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestNewService_EmptyURL(t *testing.T) {
@@ -84,6 +87,81 @@ func TestService_Send_WebhookCalled(t *testing.T) {
 	if receivedAlert.Actor != "admin@example.com" {
 		t.Errorf("Actor = %s, want admin@example.com", receivedAlert.Actor)
 	}
+}
+
+func TestServiceSendWebhookHandlesStatusBranches(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "success", status: http.StatusNoContent},
+		{name: "server error", status: http.StatusInternalServerError, body: "downstream failed"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var called atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called.Store(true)
+				if r.Header.Get("Content-Type") != "application/json" {
+					t.Errorf("Content-Type = %q, want application/json", r.Header.Get("Content-Type"))
+				}
+				w.WriteHeader(tt.status)
+				if tt.body != "" {
+					_, _ = w.Write([]byte(tt.body))
+				}
+			}))
+			defer server.Close()
+
+			NewService(server.URL).sendWebhook(context.Background(), Alert{
+				Type:    AlertBreakGlassUsed,
+				Actor:   "admin@example.com",
+				Summary: "branch test",
+			})
+
+			if !called.Load() {
+				t.Fatal("webhook was not called")
+			}
+		})
+	}
+}
+
+func TestServiceSendWebhookHandlesRequestAndClientErrors(t *testing.T) {
+	t.Parallel()
+
+	t.Run("bad url", func(t *testing.T) {
+		t.Parallel()
+		NewService(":// bad-url").sendWebhook(context.Background(), Alert{
+			Type:    AlertBreakGlassUsed,
+			Summary: "bad url",
+		})
+	})
+
+	t.Run("client error", func(t *testing.T) {
+		t.Parallel()
+		svc := NewService("https://alerts.example.test")
+		svc.httpClient = ptrext.Of(http.Client{
+			Transport: alertRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("network unavailable")
+			}),
+		})
+
+		svc.sendWebhook(context.Background(), Alert{
+			Type:    AlertBreakGlassUsed,
+			Summary: "client error",
+		})
+	})
+}
+
+type alertRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f alertRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func TestBreakGlassUsedAlert(t *testing.T) {

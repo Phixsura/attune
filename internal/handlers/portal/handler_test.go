@@ -1114,6 +1114,47 @@ func TestGetPublicSubmissionConfigReturnsPortalConfig(t *testing.T) {
 	}
 }
 
+func TestPortalSubmissionFieldToProtoMapsKindsAndCopiesOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		kind pvrepo.PortalSubmissionFieldKind
+		want attunev1.PortalSubmissionFieldKind
+	}{
+		{pvrepo.PortalSubmissionFieldKindText, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_TEXT},
+		{pvrepo.PortalSubmissionFieldKindTextarea, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA},
+		{pvrepo.PortalSubmissionFieldKindSelect, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_SELECT},
+		{pvrepo.PortalSubmissionFieldKindMultiSelect, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT},
+		{pvrepo.PortalSubmissionFieldKindBoolean, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN},
+		{pvrepo.PortalSubmissionFieldKind("unknown"), attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_UNSPECIFIED},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			options := []string{"low", "high"}
+			got := portalSubmissionFieldToProto(pvrepo.PortalSubmissionField{
+				Key:         "severity",
+				Label:       "Severity",
+				Kind:        tt.kind,
+				Required:    true,
+				Options:     options,
+				Placeholder: "Pick one",
+			})
+			options[0] = "mutated"
+
+			if got.GetKind() != tt.want {
+				t.Fatalf("kind = %v, want %v", got.GetKind(), tt.want)
+			}
+			if got.GetKey() != "severity" || got.GetLabel() != "Severity" || !got.GetRequired() || got.GetPlaceholder() != "Pick one" {
+				t.Fatalf("field = %#v, want mapped metadata", got)
+			}
+			if len(got.GetOptions()) != 2 || got.GetOptions()[0] != "low" || got.GetOptions()[1] != "high" {
+				t.Fatalf("options = %v, want copied low/high options", got.GetOptions())
+			}
+		})
+	}
+}
+
 func TestCreatePublicSubmissionMapsRequestAndResponse(t *testing.T) {
 	t.Parallel()
 
@@ -1194,6 +1235,46 @@ func TestCreatePublicSubmissionMapsRequestAndResponse(t *testing.T) {
 	}
 	if response.GetAcknowledgement() != "Thanks. We will review your submission." {
 		t.Fatalf("response acknowledgement = %q, want acknowledgement", response.GetAcknowledgement())
+	}
+}
+
+func TestBindVotePublicCustomerRequest(t *testing.T) {
+	t.Parallel()
+
+	body, err := protojson.Marshal(ptrext.Of(attunev1.VotePublicCustomerRequest{
+		TenantSlug:                     "body-tenant",
+		PublicSlug:                     "body-slug",
+		Email:                          ptrext.Of("jane@example.test"),
+		NotifyMe:                       true,
+		NotificationConsentTextVersion: "v1",
+		DisplayName:                    "Jane",
+		Organization:                   "Acme",
+		Locale:                         "en-US",
+		Timezone:                       "UTC",
+	}))
+	if err != nil {
+		t.Fatalf("marshal vote request: %v", err)
+	}
+	req := requestWithPortalSlug(http.MethodPost, "/v1/portal/acme/requests/pricing-api/votes", "acme", "pricing-api", bytes.NewReader(body))
+	got := ptrext.Of(attunev1.VotePublicCustomerRequest{})
+
+	if err := BindVotePublicCustomerRequest(req, got); err != nil {
+		t.Fatalf("BindVotePublicCustomerRequest() error = %v", err)
+	}
+	if got.GetTenantSlug() != "acme" || got.GetPublicSlug() != "pricing-api" {
+		t.Fatalf("bound route params = (%q, %q), want route tenant/public slugs", got.GetTenantSlug(), got.GetPublicSlug())
+	}
+	if got.GetEmail() != "jane@example.test" || !got.GetNotifyMe() || got.GetNotificationConsentTextVersion() != "v1" {
+		t.Fatalf("bound notification fields = %#v, want vote notification body", got)
+	}
+
+	emptyBodyReq := requestWithPortalSlug(http.MethodPost, "/v1/portal/acme/requests/pricing-api/votes", "acme", "pricing-api", strings.NewReader("  "))
+	emptyBody := ptrext.Of(attunev1.VotePublicCustomerRequest{})
+	if err := BindVotePublicCustomerRequest(emptyBodyReq, emptyBody); err != nil {
+		t.Fatalf("BindVotePublicCustomerRequest(empty body) error = %v", err)
+	}
+	if emptyBody.GetTenantSlug() != "acme" || emptyBody.GetPublicSlug() != "pricing-api" {
+		t.Fatalf("empty body route params = (%q, %q)", emptyBody.GetTenantSlug(), emptyBody.GetPublicSlug())
 	}
 }
 

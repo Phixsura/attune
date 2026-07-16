@@ -3,6 +3,7 @@
 package canary
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -291,4 +292,80 @@ func TestRelease_ShouldRollback_NoRollbackLowError(t *testing.T) {
 	shouldRollback, reason := r.ShouldRollback()
 	require.False(t, shouldRollback)
 	require.Empty(t, reason)
+}
+
+func TestController_AutoProgress_UnknownRelease(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+
+	err := c.AutoProgress(t.Context(), "missing", ProgressConfig{
+		Steps:    []int32{10, 100},
+		Interval: 0,
+	})
+
+	require.NoError(t, err)
+}
+
+func TestController_AutoProgress_CancelledContext(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+	r := NewRelease(ReleaseConfig{Name: "release", InitialPercent: 5})
+	c.Register(r)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := c.AutoProgress(ctx, "release", ProgressConfig{
+		Steps:    []int32{25},
+		Interval: time.Millisecond,
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, int32(5), r.Stats().TrafficPercent)
+}
+
+func TestController_AutoProgress_ProgressesThroughSteps(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+	r := NewRelease(ReleaseConfig{
+		Name:             "release",
+		InitialPercent:   5,
+		ErrorThreshold:   0.5,
+		LatencyThreshold: time.Second,
+		MinRequests:      1,
+	})
+	r.RecordRequest(TargetCanary, nil, time.Millisecond)
+	c.Register(r)
+
+	err := c.AutoProgress(t.Context(), "release", ProgressConfig{
+		Steps:    []int32{25, 100},
+		Interval: 0,
+	})
+
+	require.NoError(t, err)
+	stats := r.Stats()
+	require.Equal(t, int32(100), stats.TrafficPercent)
+	require.Equal(t, StateCompleted, stats.State)
+}
+
+func TestController_AutoProgress_RollsBackBeforeProgressingUnhealthyRelease(t *testing.T) {
+	t.Parallel()
+	c := NewController()
+	r := NewRelease(ReleaseConfig{
+		Name:           "release",
+		InitialPercent: 10,
+		ErrorThreshold: 0.1,
+		MinRequests:    1,
+	})
+	r.RecordRequest(TargetCanary, errors.New("boom"), time.Millisecond)
+	c.Register(r)
+
+	err := c.AutoProgress(t.Context(), "release", ProgressConfig{
+		Steps:    []int32{25, 100},
+		Interval: 0,
+	})
+
+	require.NoError(t, err)
+	stats := r.Stats()
+	require.Equal(t, int32(0), stats.TrafficPercent)
+	require.Equal(t, StateRolledBack, stats.State)
 }

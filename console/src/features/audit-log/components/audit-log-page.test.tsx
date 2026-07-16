@@ -1,10 +1,24 @@
 import { HttpResponse, http } from 'msw'
+import { toast } from 'sonner'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AuditLogPage } from '@/features/audit-log/components/audit-log-page'
 import type { AuditLogViewState, SavedAuditLogView } from '@/proto/attune/v1/audit'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+
+const triggerBlobDownloadMock = vi.hoisted(() => vi.fn())
+
+vi.mock('@/lib/blob-download', () => ({
+  triggerBlobDownload: triggerBlobDownloadMock,
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+  },
+}))
 
 vi.mock('@/features/session/hooks/use-permissions', () => ({
   usePermissions: () => ({
@@ -13,6 +27,9 @@ vi.mock('@/features/session/hooks/use-permissions', () => ({
 }))
 
 afterEach(() => {
+  triggerBlobDownloadMock.mockReset()
+  vi.mocked(toast.error).mockClear()
+  vi.mocked(toast.success).mockClear()
   vi.restoreAllMocks()
   window.history.replaceState({}, '', '/administration/audit-log')
 })
@@ -233,6 +250,166 @@ describe('AuditLogPage', () => {
     await waitFor(() => {
       expect(screen.getByText('当前选中视图：成员删除排查')).toBeInTheDocument()
     })
+  })
+
+  it('updates and deletes a selected investigation view', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const calls: Array<{ body?: unknown; method: string; path: string }> = []
+    let savedViews: SavedAuditLogView[] = [
+      {
+        id: 'view-1',
+        name: '成员删除排查',
+        state: {
+          actions: ['member.remove'],
+          actorId: '',
+          actorType: '',
+          from: '',
+          localQuery: '',
+          targetId: '',
+          targetType: '',
+          to: '',
+        },
+        createdAt: '2026-06-16T10:00:00Z',
+        updatedAt: '2026-06-16T10:00:00Z',
+      },
+    ]
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.remove',
+              targetType: 'member',
+              targetId: 'member-42',
+              summary: 'Removed member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/audit-log/views', () => HttpResponse.json({ items: savedViews })),
+      http.put('/fb/v1/console/audit-log/views/view-1', async ({ request }) => {
+        const body = await request.json()
+        calls.push({ body, method: 'PUT', path: new URL(request.url).pathname })
+        savedViews = [
+          {
+            ...savedViews[0],
+            name: (body as { name: string }).name,
+            state: (body as { state: AuditLogViewState }).state,
+            updatedAt: '2026-06-16T11:00:00Z',
+          },
+        ]
+        return HttpResponse.json({ view: savedViews[0] })
+      }),
+      http.delete('/fb/v1/console/audit-log/views/view-1', ({ request }) => {
+        calls.push({ method: 'DELETE', path: new URL(request.url).pathname })
+        savedViews = []
+        return HttpResponse.json({})
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^成员删除排查/ })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /^成员删除排查/ }))
+    await waitFor(() => {
+      expect(screen.getByText('当前选中视图：成员删除排查')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '保存当前' }))
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), '成员删除排查 v2')
+    await user.click(screen.getByRole('button', { name: '更新视图' }))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('已更新视图 成员删除排查 v2'))
+    expect(calls).toContainEqual({
+      body: expect.objectContaining({ name: '成员删除排查 v2' }),
+      method: 'PUT',
+      path: '/fb/v1/console/audit-log/views/view-1',
+    })
+
+    await user.click(screen.getByRole('button', { name: '删除视图 成员删除排查 v2' }))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('已删除视图 成员删除排查 v2'))
+    expect(confirmSpy).toHaveBeenCalledWith('确认删除“成员删除排查 v2”吗？')
+    expect(calls).toContainEqual({
+      method: 'DELETE',
+      path: '/fb/v1/console/audit-log/views/view-1',
+    })
+  })
+
+  it('surfaces saved view save and delete failures', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    server.use(
+      http.get('/fb/v1/console/audit-log', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.remove',
+              targetType: 'member',
+              targetId: 'member-42',
+              summary: 'Removed member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/audit-log/views', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 'view-1',
+              name: '成员删除排查',
+              state: {
+                actions: [],
+                actorId: '',
+                actorType: '',
+                from: '',
+                localQuery: '',
+                targetId: '',
+                targetType: '',
+                to: '',
+              },
+              createdAt: '2026-06-16T10:00:00Z',
+              updatedAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.post('/fb/v1/console/audit-log/views', () => HttpResponse.json({})),
+      http.delete('/fb/v1/console/audit-log/views/view-1', () =>
+        HttpResponse.json({ message: 'delete refused' }, { status: 409 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '保存当前' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '保存当前' }))
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), '坏响应视图')
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('保存视图失败'))
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '删除视图 成员删除排查' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('delete refused'))
+    expect(confirmSpy).toHaveBeenCalledWith('确认删除“成员删除排查”吗？')
   })
 
   it('applies a saved investigation view from the sidebar', async () => {
@@ -873,6 +1050,90 @@ describe('AuditLogPage', () => {
     expect(screen.getByRole('button', { name: /导出 CSV/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /导出证据包/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /复制当前视角/ })).toBeInTheDocument()
+  })
+
+  it('exports audit logs using the current server-side filters', async () => {
+    let exportUrl = ''
+    window.history.replaceState(
+      {},
+      '',
+      '/administration/audit-log?action=member.remove&targetId=member-42',
+    )
+    server.use(
+      http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/audit-log/views', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/audit-log/export.csv', ({ request }) => {
+        exportUrl = request.url
+        return HttpResponse.text('id,action\n1,member.remove\n', {
+          headers: {
+            'Content-Disposition': 'attachment; filename="audit-member.csv"',
+            'Content-Type': 'text/csv',
+          },
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '导出 CSV' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '导出 CSV' }))
+
+    await waitFor(() => expect(triggerBlobDownloadMock).toHaveBeenCalledTimes(1))
+    expect(exportUrl).toContain('action=member.remove')
+    expect(exportUrl).toContain('targetId=member-42')
+    const [, filename] = triggerBlobDownloadMock.mock.calls[0] ?? []
+    expect(filename).toBe('audit-member.csv')
+  })
+
+  it('surfaces export and copy failures from header actions', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/audit-log/views', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/audit-log/export.csv', () =>
+        HttpResponse.json({ message: 'export denied' }, { status: 403 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+    const writeSpy = vi
+      .spyOn(navigator.clipboard, 'writeText')
+      .mockRejectedValue(new Error('clipboard denied'))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '导出 CSV' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '导出 CSV' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('export denied'))
+
+    await user.click(screen.getByRole('button', { name: '复制当前视角' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('复制失败'))
+    expect(writeSpy).toHaveBeenCalledWith('/administration/audit-log')
+  })
+
+  it('copies the current investigation URL from the header', async () => {
+    window.history.replaceState({}, '', '/administration/audit-log?targetId=member-42')
+    server.use(
+      http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/audit-log/views', () => HttpResponse.json({ items: [] })),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+    const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '复制当前视角' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '复制当前视角' }))
+
+    await waitFor(() =>
+      expect(writeSpy).toHaveBeenCalledWith('/administration/audit-log?targetId=member-42'),
+    )
+    expect(toast.success).toHaveBeenCalledWith('当前排查视角已复制')
   })
 
   it('shows empty state when no audit records exist', async () => {

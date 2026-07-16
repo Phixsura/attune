@@ -163,6 +163,70 @@ func TestLexicalFields_MatchesTerms(t *testing.T) {
 	}
 }
 
+func TestNormalizeLexicalScore_ClampsToDisplayRange(t *testing.T) {
+	tests := []struct {
+		name  string
+		score float64
+		want  float64
+	}{
+		{"zero gets fallback relevance", 0, 0.1},
+		{"negative gets fallback relevance", -2, 0.1},
+		{"in range preserved", 0.42, 0.42},
+		{"above one capped", 1.7, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeLexicalScore(tt.score); got != tt.want {
+				t.Errorf("normalizeLexicalScore(%v) = %v, want %v", tt.score, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSearchTerms_TrimsAndDropsOneRuneSplitTerms(t *testing.T) {
+	got := searchTerms("  a checkout b flow  ")
+	want := []string{"a checkout b flow", "checkout", "flow"}
+	if len(got) != len(want) {
+		t.Fatalf("searchTerms length = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("searchTerms[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestSnippetAroundQuery_FallsBackWhenQueryDoesNotMatch(t *testing.T) {
+	got := snippetAroundQuery("checkout invoice flow is still loading", "missing", 12)
+	if got != "checkout ..." {
+		t.Errorf("snippetAroundQuery fallback = %q, want %q", got, "checkout ...")
+	}
+}
+
+func TestTruncateRunes_Boundaries(t *testing.T) {
+	tests := []struct {
+		name     string
+		text     string
+		maxRunes int
+		want     string
+	}{
+		{"non-positive max", "abcdef", 0, ""},
+		{"short text unchanged", "abc", 5, "abc"},
+		{"tiny max has no ellipsis", "abcdef", 3, "abc"},
+		{"long text gets ellipsis", "abcdef", 4, "a..."},
+		{"unicode counts runes", "你好世界abc", 5, "你好..."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := truncateRunes(tt.text, tt.maxRunes); got != tt.want {
+				t.Errorf("truncateRunes(%q, %d) = %q, want %q", tt.text, tt.maxRunes, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLikeContainsPattern_EscapesWildcards(t *testing.T) {
 	got := likeContainsPattern(`100%_done\ok`)
 	want := `%100\%\_done\\ok%`

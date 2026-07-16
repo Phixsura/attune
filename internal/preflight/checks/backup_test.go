@@ -1,12 +1,26 @@
 package checks
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/preflight"
 	"github.com/Phixsura/attune/internal/restoredrill"
 )
+
+func TestCheckRestoreDrillSkipsWithoutDatabasePool(t *testing.T) {
+	t.Parallel()
+
+	got := checkRestoreDrill(context.Background(), ptrext.Of(preflight.Environment{}))
+	if got.Name != "backup:restore_drill" || got.Category != preflight.CategoryBackup {
+		t.Fatalf("result identity = %#v, want backup restore-drill", got)
+	}
+	if got.Status != preflight.StatusSkipped || got.Message != "Database pool not available" {
+		t.Fatalf("result = %#v, want skipped missing pool", got)
+	}
+}
 
 func TestAssessLastRun(t *testing.T) {
 	const fresh = restoredrill.DefaultFreshnessWindow

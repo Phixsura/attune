@@ -135,6 +135,56 @@ func TestNormalizeHelpers(t *testing.T) {
 	}
 }
 
+func TestProviderShapeAssertionsAcceptValidProviderBodies(t *testing.T) {
+	target := stubTarget()
+	tests := []struct {
+		name  string
+		shape ProviderShape
+		body  string
+	}{
+		{
+			name:  "slack",
+			shape: ProviderShapeSlack,
+			body:  `{"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Checkout shipped"}}]}`,
+		},
+		{
+			name:  "discord",
+			shape: ProviderShapeDiscord,
+			body:  `{"embeds":[{"title":"Checkout shipped"}],"allowed_mentions":{"parse":[]}}`,
+		},
+		{
+			name:  "lark",
+			shape: ProviderShapeLark,
+			body:  `{"msg_type":"interactive","timestamp":"123","sign":"abc","card":{"header":{"title":{"tag":"plain_text","content":"Checkout shipped"}},"elements":[{"tag":"note","elements":[{"tag":"plain_text","content":"safe note"}]}]}}`,
+		},
+		{
+			name:  "github",
+			shape: ProviderShapeGitHubIssue,
+			body:  `{"title":"Checkout shipped","body":"Release details","labels":["attune","request-notification"]}`,
+		},
+		{
+			name:  "email",
+			shape: ProviderShapeEmail,
+			body:  `{"from_email":"attune@example.test","to_email":"customer@example.test","subject":"Checkout shipped","text_body":"Done","html_body":"<p>Done</p>","metadata":{"delivery_id":"d1"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertProviderShape(t, providerShapeRequest(t, tt.body), target, tt.shape)
+		})
+	}
+}
+
+func providerShapeRequest(t *testing.T, body string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, "https://hooks.example.com/provider", bytes.NewReader([]byte(body)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	return req
+}
+
 func TestFixturesExposeCanonicalShapes(t *testing.T) {
 	if !strings.Contains(MentionAttackText(), "@channel") {
 		t.Fatal("mention payload should include chat attack syntax")

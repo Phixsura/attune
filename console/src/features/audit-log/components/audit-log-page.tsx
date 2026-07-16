@@ -431,7 +431,7 @@ export function AuditLogPage() {
 
   const handleSaveDialogSubmit = () => {
     if (!saveDialogName.trim()) return
-    void saveViewMutation.mutateAsync({
+    saveViewMutation.mutate({
       id: saveDialogMode === 'update' ? selectedSavedView?.id : undefined,
       mode: saveDialogMode,
       name: saveDialogName.trim(),
@@ -456,7 +456,7 @@ export function AuditLogPage() {
     const confirmed = window.confirm(t('audit_log.saved_views_delete_confirm', { name: view.name }))
     if (!confirmed) return
     setDeletingViewId(view.id)
-    void deleteViewMutation.mutateAsync(view)
+    deleteViewMutation.mutate(view)
   }
 
   const handleClearLocalQuery = () => {

@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   enter their disabled spinner state while the matching mutation is pending,
   instead of staying disabled after a completed attempt.
 
+- Audit-log saved view save/delete actions no longer leave an unhandled
+  rejection when the server reports a mutation error.
+
 - Public visibility portal submission form normalization now clears boolean
   field options correctly while continuing to trim and validate submission
   field choices.

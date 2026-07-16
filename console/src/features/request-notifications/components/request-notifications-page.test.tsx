@@ -421,6 +421,16 @@ describe('RequestNotificationsPage', () => {
     await user.click(screen.getByTestId(`rn-target-test-${targetFixture.id}`))
     await user.click(screen.getByTestId(`rn-target-delete-${targetFixture.id}`))
     await waitFor(() => expect(captures.deletedTarget).toBe(targetFixture.id))
+  })
+
+  it('previews, publishes, retries deliveries, and suppresses subscribers', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: seededClient(),
+    })
+
+    expect(await screen.findByText('CRM')).toBeInTheDocument()
 
     await user.type(
       screen.getByTestId('rn-draft-request-id'),
