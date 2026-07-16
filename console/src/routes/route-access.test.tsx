@@ -3,17 +3,36 @@ import { isRedirect } from '@tanstack/react-router'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { Route as AdministrationRoute } from '@/routes/_authed.administration'
+import { Route as AuditLogRoute } from '@/routes/_authed.administration.audit-log'
 import { Route as DeadDeliveriesRoute } from '@/routes/_authed.administration.dead-deliveries'
 import { Route as GDPRRoute } from '@/routes/_authed.administration.gdpr'
+import { Route as GuardPoliciesAdminRoute } from '@/routes/_authed.administration.guard-policies'
 import { Route as MembersRoute } from '@/routes/_authed.administration.members'
 import { Route as ReliabilityRoute } from '@/routes/_authed.administration.reliability'
 import { Route as SecurityRoute } from '@/routes/_authed.administration.security'
+import { Route as SystemReadinessRoute } from '@/routes/_authed.administration.system-readiness'
+import { Route as AnalyticsRoute } from '@/routes/_authed.analytics'
+import { Route as AnalyticsClassificationQualityRoute } from '@/routes/_authed.analytics.classification-quality'
+import { Route as AnalyticsLLMUsageRoute } from '@/routes/_authed.analytics.llm-usage'
+import { Route as AnalyticsSearchQualityRoute } from '@/routes/_authed.analytics.search-quality'
+import { Route as AnalyticsUsageRoute } from '@/routes/_authed.analytics.usage'
+import { Route as LegacyApiKeysRoute } from '@/routes/_authed.api-keys'
+import { Route as LegacyChangePasswordRoute } from '@/routes/_authed.change-password'
 import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
 import { Route as EnrichmentRuntimeRoute } from '@/routes/_authed.configuration.enrichment-runtime'
 import { Route as LLMConfigRoute } from '@/routes/_authed.configuration.llm'
 import { Route as TagsRoute } from '@/routes/_authed.configuration.tags'
 import { Route as WorkflowRoute } from '@/routes/_authed.configuration.workflow'
+import { Route as ControlTowerRoute } from '@/routes/_authed.control-tower'
+import { Route as FeedbackRootRoute } from '@/routes/_authed.feedback'
+import { Route as FeedbackClustersRoute } from '@/routes/_authed.feedback.clusters'
+import { Route as CustomerRequestsRoute } from '@/routes/_authed.feedback.customer-requests'
+import { Route as FeedbackIndexRoute } from '@/routes/_authed.feedback.index'
+import { Route as FeedbackPortalRoute } from '@/routes/_authed.feedback.portal'
+import { Route as TerminalFailuresRoute } from '@/routes/_authed.feedback.terminal-failures'
+import { Route as LegacyGuardPoliciesRoute } from '@/routes/_authed.guard-policies'
 import { Route as InboundSourcesRoute } from '@/routes/_authed.inbound-sources'
+import { Route as AuthedIndexRoute } from '@/routes/_authed.index'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
 import { Route as DigestRoute } from '@/routes/_authed.integrations.digests'
@@ -23,6 +42,11 @@ import { Route as NotifyTargetsRoute } from '@/routes/_authed.integrations.notif
 import { Route as PublicVisibilityRoute } from '@/routes/_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
 import { Route as RequestNotificationsRoute } from '@/routes/_authed.integrations.request-notifications'
+import { Route as LegacyLLMConfigRoute } from '@/routes/_authed.llm-config'
+import { Route as MCPClientsRoute } from '@/routes/_authed.mcp-clients'
+import { Route as LegacyNotifyTargetsRoute } from '@/routes/_authed.notify-targets'
+import { Route as LegacyOutboxDeadRoute } from '@/routes/_authed.outbox-dead'
+import { Route as LegacySearchQualityRoute } from '@/routes/_authed.search-quality'
 import { Route as SettingsRoute } from '@/routes/_authed.settings'
 import { server } from '@/testing/mocks/server'
 
@@ -394,6 +418,12 @@ describe('route access guards', () => {
   it('redirects group root routes to the first page the role can access', async () => {
     mockMe('member')
 
+    const analytics = await callBeforeLoad(AnalyticsRoute.options.beforeLoad, {
+      location: { pathname: '/analytics' },
+    })
+    expect(isRedirect(analytics)).toBe(true)
+    expect((analytics as ThrownRedirect).options.to).toBe('/analytics/usage')
+
     const configuration = await callBeforeLoad(ConfigurationRoute.options.beforeLoad, {
       location: { pathname: '/configuration' },
     })
@@ -433,5 +463,132 @@ describe('route access guards', () => {
     })
     expect(isRedirect(administration)).toBe(true)
     expect((administration as ThrownRedirect).options.to).toBe('/administration/audit-log')
+  })
+
+  it('redirects legacy top-level routes to their grouped destinations', async () => {
+    const cases: Array<{ route: { options: { beforeLoad?: BeforeLoadFn } }; to: string }> = [
+      { route: AuthedIndexRoute, to: '/control-tower' },
+      { route: LegacyApiKeysRoute, to: '/integrations/api-keys' },
+      { route: LegacyGuardPoliciesRoute, to: '/administration/guard-policies' },
+      { route: LegacyLLMConfigRoute, to: '/configuration/llm' },
+      { route: LegacyNotifyTargetsRoute, to: '/integrations/notify-targets' },
+      { route: LegacyOutboxDeadRoute, to: '/administration/dead-deliveries' },
+      { route: LegacySearchQualityRoute, to: '/analytics/search-quality' },
+    ]
+
+    for (const { route, to } of cases) {
+      const thrown = await callBeforeLoad(route.options.beforeLoad)
+      expect(isRedirect(thrown)).toBe(true)
+      expect((thrown as ThrownRedirect).options.to).toBe(to)
+    }
+  })
+
+  it('covers additional leaf route access checks and components', async () => {
+    mockMe('member')
+    const adminOnlyRoutes = [
+      SystemReadinessRoute,
+      GuardPoliciesAdminRoute,
+      AnalyticsClassificationQualityRoute,
+      AnalyticsSearchQualityRoute,
+      AnalyticsUsageRoute,
+      AnalyticsLLMUsageRoute,
+      FeedbackClustersRoute,
+      FeedbackPortalRoute,
+      TerminalFailuresRoute,
+      FeedbackRootRoute,
+      FeedbackIndexRoute,
+      MCPClientsRoute,
+      LegacyChangePasswordRoute,
+    ]
+
+    for (const route of adminOnlyRoutes) {
+      expect(route.options.component).toBeTypeOf('function')
+    }
+
+    const systemReadiness = await callBeforeLoad(SystemReadinessRoute.options.beforeLoad)
+    expect(isRedirect(systemReadiness)).toBe(true)
+    expect((systemReadiness as ThrownRedirect).options.to).toBe('/feedback')
+
+    mockMe('viewer')
+    for (const route of [GuardPoliciesAdminRoute, AuditLogRoute]) {
+      const thrown = await callBeforeLoad(route.options.beforeLoad)
+      expect(isRedirect(thrown)).toBe(true)
+      expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+    }
+
+    mockMe('admin')
+    for (const route of [SystemReadinessRoute, GuardPoliciesAdminRoute, AuditLogRoute]) {
+      await expect(callBeforeLoad(route.options.beforeLoad)).resolves.toBeNull()
+    }
+
+    mockMe('viewer')
+    await expect(callBeforeLoad(CustomerRequestsRoute.options.beforeLoad)).resolves.toBeNull()
+
+    mockMe('member')
+    await expect(callBeforeLoad(CustomerRequestsRoute.options.beforeLoad)).resolves.toBeNull()
+    expect(CustomerRequestsRoute.options.component).toBeTypeOf('function')
+  })
+
+  it('preloads analytics, guard policy, control tower, and mcp route data', async () => {
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/classification-quality', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({})
+      }),
+      http.get('/fb/v1/console/feedback/search/quality', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({})
+      }),
+      http.get('/fb/v1/console/quality-actions', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ actions: [] })
+      }),
+      http.get('/fb/v1/console/usage', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({})
+      }),
+      http.get('/fb/v1/console/llm-usage', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({})
+      }),
+      http.get('/fb/v1/console/guard-policies', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ items: [] })
+      }),
+      http.get('/fb/v1/console/mcp/clients', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ clients: [] })
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const context = { queryClient }
+    const loaders = [
+      AnalyticsClassificationQualityRoute.options.loader,
+      AnalyticsSearchQualityRoute.options.loader,
+      AnalyticsUsageRoute.options.loader,
+      AnalyticsLLMUsageRoute.options.loader,
+      GuardPoliciesAdminRoute.options.loader,
+      MCPClientsRoute.options.loader,
+      ControlTowerRoute.options.loader,
+    ] as LoaderFn[]
+
+    for (const loader of loaders) {
+      await expect(loader({ context })).resolves.toBeDefined()
+    }
+    expect(seenPaths).toEqual(
+      new Set([
+        '/fb/v1/console/classification-quality',
+        '/fb/v1/console/feedback/search/quality',
+        '/fb/v1/console/quality-actions',
+        '/fb/v1/console/usage',
+        '/fb/v1/console/llm-usage',
+        '/fb/v1/console/guard-policies',
+        '/fb/v1/console/mcp/clients',
+      ]),
+    )
   })
 })
