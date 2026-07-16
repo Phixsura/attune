@@ -13,6 +13,7 @@ describe('llmConfigPageTestables', () => {
     expect(llmConfigPageTestables.errorText(new Error('plain'))).toBe('plain')
     expect(llmConfigPageTestables.errorText({})).toBe('')
     expect(llmConfigPageTestables.queryError(new Error('query failed'))).toBe('query failed')
+    expect(llmConfigPageTestables.queryError({})).toBe('')
   })
 
   it('describes delete targets by entity kind', () => {
@@ -74,7 +75,9 @@ describe('llmConfigPageTestables', () => {
     const spy = vi.spyOn(toast, 'error').mockImplementation(() => 0)
 
     llmConfigPageTestables.toastError(new Error('boom'))
+    llmConfigPageTestables.toastError({})
 
     expect(spy).toHaveBeenCalledWith('boom')
+    expect(spy).toHaveBeenCalledWith('failed')
   })
 })

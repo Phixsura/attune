@@ -30,6 +30,33 @@ func TestBootstrapAdminResult_SkipsWhenConsoleDisabled(t *testing.T) {
 	require.Contains(t, r.Message, "Console not enabled")
 }
 
+func TestBootstrapAdminResult_FailsWhenConfigMissing(t *testing.T) {
+	t.Parallel()
+
+	r := checkBootstrapAdmin(context.Background(), &preflight.Environment{})
+	require.Equal(t, preflight.StatusFail, r.Status)
+	require.Equal(t, "Config not loaded", r.Message)
+
+	r = bootstrapAdminResult(context.Background(), nil, fakeBootstrapAdminCounter{})
+	require.Equal(t, preflight.StatusFail, r.Status)
+	require.Equal(t, "Config not loaded", r.Message)
+}
+
+func TestBootstrapAdminResult_FailsWhenDatabaseUnavailable(t *testing.T) {
+	t.Parallel()
+
+	cfg := &config.Config{ConsoleSessionKey: "this-is-a-sufficiently-long-session-key-for-testing"}
+	r := checkBootstrapAdmin(context.Background(), &preflight.Environment{Cfg: cfg})
+	require.Equal(t, preflight.StatusFail, r.Status)
+	require.Contains(t, r.Message, "Database not available")
+	require.Contains(t, r.Remediation, "database.url")
+
+	r = bootstrapAdminResult(context.Background(), cfg, nil)
+	require.Equal(t, preflight.StatusFail, r.Status)
+	require.Contains(t, r.Message, "Database not available")
+	require.Contains(t, r.Remediation, "database.url")
+}
+
 func TestBootstrapAdminResult_FailsWhenFreshAndSeedMissing(t *testing.T) {
 	t.Parallel()
 
@@ -72,6 +99,17 @@ func TestBootstrapAdminResult_PassesWhenAdminsExist(t *testing.T) {
 	require.Equal(t, preflight.StatusWarn, r.Status)
 	require.Contains(t, r.Message, "bootstrap seed is still configured")
 	require.Contains(t, r.Remediation, "Remove console.bootstrap_admin")
+}
+
+func TestBootstrapAdminResult_WarnsWhenAdminsExistAndSeedCleared(t *testing.T) {
+	t.Parallel()
+
+	r := bootstrapAdminResult(context.Background(), &config.Config{
+		ConsoleSessionKey: "this-is-a-sufficiently-long-session-key-for-testing",
+	}, fakeBootstrapAdminCounter{count: 1})
+	require.Equal(t, preflight.StatusWarn, r.Status)
+	require.Equal(t, "1 admin(s) already exist", r.Message)
+	require.Empty(t, r.Remediation)
 }
 
 func TestBootstrapAdminResult_CountError(t *testing.T) {

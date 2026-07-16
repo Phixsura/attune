@@ -4,7 +4,10 @@ import {
   buildInstanceConditions,
   buildInstanceDisplayName,
   buildRuntimeConditions,
+  buildSpecDiffRows,
+  findLastKnownGoodEntry,
   formatRuntimeActorLabel,
+  partitionRuntimeInstances,
   validateRuntimeSpec,
 } from './enrichment-runtime-page'
 
@@ -105,6 +108,76 @@ describe('enrichment runtime helper coverage', () => {
     ).toBeNull()
   })
 
+  it('covers the remaining validation boundary errors', () => {
+    expect(validateRuntimeSpec({ ...baseSpec, workers: 0 })).toBe(
+      'settings.enrichment_runtime.errors.workers_positive',
+    )
+    expect(validateRuntimeSpec({ ...baseSpec, batchSize: 0 })).toBe(
+      'settings.enrichment_runtime.errors.batch_size_positive',
+    )
+  })
+
+  it('returns null when last known good metadata is absent, current, or missing from history', () => {
+    expect(findLastKnownGoodEntry(undefined)).toBeNull()
+    expect(
+      findLastKnownGoodEntry({
+        ...baseRuntime,
+        desiredRevision: { ...baseRuntime.desiredRevision, lastKnownGoodVersion: '' },
+      }),
+    ).toBeNull()
+    expect(
+      findLastKnownGoodEntry({
+        ...baseRuntime,
+        desiredRevision: { ...baseRuntime.desiredRevision, lastKnownGoodVersion: '9' },
+      }),
+    ).toBeNull()
+    expect(
+      findLastKnownGoodEntry({
+        ...baseRuntime,
+        desiredRevision: { ...baseRuntime.desiredRevision, lastKnownGoodVersion: '7' },
+        history: [],
+      }),
+    ).toBeNull()
+  })
+
+  it('builds diff rows for every changed runtime field and returns empty for identical specs', () => {
+    expect(buildSpecDiffRows(baseSpec, baseSpec)).toEqual([])
+    expect(
+      buildSpecDiffRows(baseSpec, {
+        queueLen: 11,
+        workers: 3,
+        batchSize: 6,
+        batchWindowSeconds: 2,
+        sweepIntervalSeconds: 6,
+        llmRateLimitEnabled: true,
+        llmMaxQps: 1,
+        llmBurst: 1,
+      }).map((row) => row.key),
+    ).toEqual([
+      'queueLen',
+      'workers',
+      'batchSize',
+      'batchWindowSeconds',
+      'sweepIntervalSeconds',
+      'llmRateLimitEnabled',
+      'llmMaxQps',
+      'llmBurst',
+    ])
+  })
+
+  it('describes healthy runtime states and single-instance limiter activation', () => {
+    expect(buildRuntimeConditions(baseRuntime)).toEqual([{ tone: 'good', label: 'Converged' }])
+    expect(
+      buildRuntimeConditions({
+        ...baseRuntime,
+        desiredSpec: { ...baseSpec, llmRateLimitEnabled: true, llmMaxQps: 2, llmBurst: 2 },
+      }),
+    ).toEqual([
+      { tone: 'good', label: 'Converged' },
+      { tone: 'good', label: 'Limiter active' },
+    ])
+  })
+
   it('describes converged, degraded, stale, expired, and partially applied runtime states', () => {
     const conditions = buildRuntimeConditions({
       ...baseRuntime,
@@ -180,6 +253,54 @@ describe('enrichment runtime helper coverage', () => {
         appliedSpec: baseSpec,
       }).map((condition) => condition.label),
     ).toEqual(['Applied', 'Degraded'])
+
+    expect(
+      buildInstanceConditions({
+        instanceId: 'i-3',
+        bootId: 'b-3',
+        desiredVersion: '9',
+        observedDesiredVersion: '9',
+        runnerEffectiveVersion: '9',
+        limiterEffectiveVersion: '8',
+        attemptedRunnerVersion: '9',
+        attemptedLimiterVersion: '9',
+        runnerApplyStatus: 'applied',
+        limiterApplyStatus: 'applying',
+        runnerLastApplyError: '',
+        limiterLastApplyError: '',
+        queueDepth: 0,
+        queueCapacityTarget: 10,
+        queueCapacityEffective: 10,
+        queueResizePending: false,
+        inFlight: 0,
+        degradedReason: '',
+        appliedSpec: baseSpec,
+      }).map((condition) => condition.label),
+    ).toEqual(['Reconciling'])
+
+    expect(
+      buildInstanceConditions({
+        instanceId: 'i-4',
+        bootId: 'b-4',
+        desiredVersion: '9',
+        observedDesiredVersion: '9',
+        runnerEffectiveVersion: '8',
+        limiterEffectiveVersion: '9',
+        attemptedRunnerVersion: '9',
+        attemptedLimiterVersion: '9',
+        runnerApplyStatus: 'failed',
+        limiterApplyStatus: 'applied',
+        runnerLastApplyError: 'boom',
+        limiterLastApplyError: '',
+        queueDepth: 0,
+        queueCapacityTarget: 10,
+        queueCapacityEffective: 10,
+        queueResizePending: false,
+        inFlight: 0,
+        degradedReason: '',
+        appliedSpec: baseSpec,
+      }).map((condition) => condition.label),
+    ).toEqual(['Degraded'])
   })
 
   it('formats runtime instance display names and actor labels', () => {
@@ -237,9 +358,94 @@ describe('enrichment runtime helper coverage', () => {
       ),
     ).toEqual({ primary: '运行节点 3', secondary: '' })
 
+    expect(
+      buildInstanceDisplayName(
+        {
+          instanceId: 'plain-worker',
+          bootId: 'boot-5',
+          desiredVersion: '9',
+          observedDesiredVersion: '9',
+          runnerEffectiveVersion: '9',
+          limiterEffectiveVersion: '9',
+          attemptedRunnerVersion: '9',
+          attemptedLimiterVersion: '9',
+          runnerApplyStatus: 'applied',
+          limiterApplyStatus: 'applied',
+          runnerLastApplyError: '',
+          limiterLastApplyError: '',
+          queueDepth: 0,
+          queueCapacityTarget: 10,
+          queueCapacityEffective: 10,
+          queueResizePending: false,
+          inFlight: 0,
+          degradedReason: '',
+          appliedSpec: baseSpec,
+        },
+        4,
+      ),
+    ).toEqual({ primary: 'plain-worker', secondary: 'plain-worker' })
+
     expect(formatRuntimeActorLabel('   ')).toBe('-')
     expect(formatRuntimeActorLabel('ops@example.com')).toBe('ops@example.com')
     expect(formatRuntimeActorLabel('04931811-7f6d-4fe4-8da9-09a672773d1f')).toBe('控制台管理员')
+    expect(formatRuntimeActorLabel('ops-user')).toBe('ops-user')
+  })
+
+  it('partitions runtime instances with clamped active counts and missing timestamps', () => {
+    const instances = [
+      {
+        instanceId: 'missing-time',
+        bootId: 'boot-1',
+        desiredVersion: '9',
+        observedDesiredVersion: '9',
+        runnerEffectiveVersion: '9',
+        limiterEffectiveVersion: '9',
+        attemptedRunnerVersion: '9',
+        attemptedLimiterVersion: '9',
+        runnerApplyStatus: 'applied',
+        limiterApplyStatus: 'applied',
+        runnerLastApplyError: '',
+        limiterLastApplyError: '',
+        queueDepth: 0,
+        queueCapacityTarget: 10,
+        queueCapacityEffective: 10,
+        queueResizePending: false,
+        inFlight: 0,
+        degradedReason: '',
+        appliedSpec: baseSpec,
+      },
+      {
+        instanceId: 'fresh',
+        bootId: 'boot-2',
+        desiredVersion: '9',
+        observedDesiredVersion: '9',
+        runnerEffectiveVersion: '9',
+        limiterEffectiveVersion: '9',
+        attemptedRunnerVersion: '9',
+        attemptedLimiterVersion: '9',
+        runnerApplyStatus: 'applied',
+        limiterApplyStatus: 'applied',
+        runnerLastApplyError: '',
+        limiterLastApplyError: '',
+        queueDepth: 0,
+        queueCapacityTarget: 10,
+        queueCapacityEffective: 10,
+        queueResizePending: false,
+        inFlight: 0,
+        degradedReason: '',
+        appliedSpec: baseSpec,
+        lastSeenAt: '2026-06-18T02:00:00Z',
+      },
+    ]
+
+    expect(partitionRuntimeInstances(instances, -1)).toEqual({
+      active: [],
+      historical: [instances[1], instances[0]],
+    })
+    expect(partitionRuntimeInstances(instances, 5)).toEqual({
+      active: [instances[1], instances[0]],
+      historical: [],
+    })
   })
 
   it('summarizes the remaining runtime change impact categories', () => {
@@ -258,5 +464,7 @@ describe('enrichment runtime helper coverage', () => {
       '扫队列间隔变化会改变 backlog 恢复节奏，过短更积极，过长更保守。',
       'LLM 限流策略变化会直接影响模型调用压力、成本和短时流量释放能力。',
     ])
+    expect(buildChangeImpactNotes([])).toEqual([])
+    expect(buildChangeImpactNotes([{ key: 'unknown', current: 'a', next: 'b' }])).toEqual([])
   })
 })

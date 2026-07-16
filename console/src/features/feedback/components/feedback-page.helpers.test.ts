@@ -4,6 +4,7 @@ import type { Dimension } from '@/proto/attune/v1/common'
 import { feedbackPageTestables } from './feedback-page'
 
 const t = (key: string) => key
+const fallbackT = (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key
 
 const urgentFeedback = {
   id: 'urgent',
@@ -48,6 +49,7 @@ const defaultFeedback = {
 
 describe('feedbackPageTestables', () => {
   it('derives sync keys, labels, and queue copy', () => {
+    expect(feedbackPageTestables.qualityFilterSyncKey(undefined)).toBe('')
     expect(
       feedbackPageTestables.qualityFilterSyncKey({
         ids: ['2', '1'],
@@ -62,6 +64,7 @@ describe('feedbackPageTestables', () => {
       '2,1\x1f0.5\x1f2026-06-16T00:00:00Z\x1f2026-06-17T00:00:00Z\x1f2026-06-18T00:00:00Z\x1f2026-06-19T00:00:00Z\x1foff_list',
     )
     expect(feedbackPageTestables.scopeFilterSyncKey('portal', 'bug')).toBe('portal\x1fbug')
+    expect(feedbackPageTestables.scopeFilterSyncKey('', '')).toBe('\x1f')
     expect(feedbackPageTestables.compactStatToneClass('default')).toBe(
       'border-border/60 bg-background',
     )
@@ -74,19 +77,32 @@ describe('feedbackPageTestables', () => {
     expect(feedbackPageTestables.sortModeLabel('urgent', t)).toBe('feedback.sort.urgent')
     expect(feedbackPageTestables.sortModeLabel('active', t)).toBe('feedback.sort.active')
     expect(feedbackPageTestables.sortModeLabel('newest', t)).toBe('feedback.sort.newest')
+    expect(feedbackPageTestables.queueModeLabel('urgent', t)).toBe('feedback.queue_mode.urgent')
+    expect(feedbackPageTestables.queueModeLabel('active', t)).toBe('feedback.queue_mode.active')
     expect(feedbackPageTestables.queueModeLabel('failed', t)).toBe('feedback.queue_mode.failed')
+    expect(feedbackPageTestables.queueModeLabel('terminal', t)).toBe('feedback.queue_mode.terminal')
+    expect(feedbackPageTestables.queueModeLabel('ready', t)).toBe('feedback.queue_mode.ready')
     expect(feedbackPageTestables.queueModeLabel('all', t)).toBe('feedback.queue_mode.all')
     expect(feedbackPageTestables.enrichmentStatusLabel('pending', t)).toBe(
       'feedback.status.pending',
     )
+    expect(feedbackPageTestables.enrichmentStatusLabel('enriching', t)).toBe(
+      'feedback.status.enriching',
+    )
     expect(feedbackPageTestables.enrichmentStatusLabel('done', t)).toBe('feedback.status.done')
+    expect(feedbackPageTestables.enrichmentStatusLabel('failed', t)).toBe('feedback.status.failed')
     expect(feedbackPageTestables.enrichmentStatusLabel('unknown', t)).toBe('unknown')
     expect(feedbackPageTestables.feedbackSourceLabel('portal', t)).toBe('feedback.source.portal')
+    expect(feedbackPageTestables.feedbackSourceLabel('custom-source', fallbackT)).toBe(
+      'custom-source',
+    )
     expect(feedbackPageTestables.feedbackSourceRowLabel('portal', t)).toBe(
       'feedback.row.portal_submission',
     )
+    expect(feedbackPageTestables.feedbackSourceRowLabel('portal', fallbackT)).toBe('portal')
     expect(feedbackPageTestables.feedbackSourceRowLabel('web', t)).toBe('feedback.source.web')
     expect(feedbackPageTestables.feedbackTypeLabel('bug', t)).toBe('feedback.type.bug')
+    expect(feedbackPageTestables.feedbackTypeLabel('incident', fallbackT)).toBe('incident')
     expect(feedbackPageTestables.feedbackSourceOptions(t)).toEqual([
       { value: 'api', label: 'feedback.source.api' },
       { value: 'web', label: 'feedback.source.web' },
@@ -102,8 +118,14 @@ describe('feedbackPageTestables', () => {
     expect(feedbackPageTestables.qualitySignalLabel('low_confidence', t)).toBe(
       'feedback.quality_filters.low_confidence',
     )
+    expect(feedbackPageTestables.qualitySignalLabel('off_list', t)).toBe(
+      'feedback.quality_filters.off_list',
+    )
     expect(feedbackPageTestables.qualitySignalLabel('parse_failure', t)).toBe(
       'feedback.quality_filters.parse_failure',
+    )
+    expect(feedbackPageTestables.qualitySignalLabel('terminal_failure', t)).toBe(
+      'feedback.quality_filters.terminal_failure',
     )
     expect(feedbackPageTestables.qualitySignalLabel('custom', t)).toBe('custom')
   })
@@ -111,6 +133,18 @@ describe('feedbackPageTestables', () => {
   it('covers queue posture and ai health branches', () => {
     expect(feedbackPageTestables.queuePrimaryActionLabel('urgent', 0, 0, 0, t)).toBe(
       'feedback.queue.actions.open_urgent',
+    )
+    expect(feedbackPageTestables.queuePrimaryActionLabel('active', 0, 0, 0, t)).toBe(
+      'feedback.queue.actions.open_active',
+    )
+    expect(feedbackPageTestables.queuePrimaryActionLabel('failed', 0, 0, 0, t)).toBe(
+      'feedback.queue.actions.open_failed',
+    )
+    expect(feedbackPageTestables.queuePrimaryActionLabel('terminal', 0, 0, 0, t)).toBe(
+      'feedback.queue.actions.open_terminal',
+    )
+    expect(feedbackPageTestables.queuePrimaryActionLabel('ready', 0, 0, 0, t)).toBe(
+      'feedback.queue.actions.open_ready',
     )
     expect(feedbackPageTestables.queuePrimaryActionLabel('all', 1, 0, 0, t)).toBe(
       'feedback.queue.actions.open_urgent',
@@ -129,6 +163,7 @@ describe('feedbackPageTestables', () => {
     expect(feedbackPageTestables.queuePostureTone('urgent', 3, 0, 0, 0, 0)).toBe('danger')
     expect(feedbackPageTestables.queuePostureTone('failed', 3, 0, 0, 0, 0)).toBe('danger')
     expect(feedbackPageTestables.queuePostureTone('active', 3, 0, 0, 0, 0)).toBe('success')
+    expect(feedbackPageTestables.queuePostureTone('ready', 3, 0, 0, 0, 0)).toBe('success')
     expect(feedbackPageTestables.queuePostureTone('all', 3, 1, 0, 0, 0)).toBe('danger')
     expect(feedbackPageTestables.queuePostureTone('all', 3, 0, 3, 0, 0)).toBe('danger')
     expect(feedbackPageTestables.queuePostureTone('all', 3, 0, 0, 3, 0)).toBe('success')
@@ -141,8 +176,17 @@ describe('feedbackPageTestables', () => {
     expect(feedbackPageTestables.queuePostureLabel('urgent', 3, 0, 0, 0, 0, t)).toBe(
       'feedback.queue.posture_urgent',
     )
+    expect(feedbackPageTestables.queuePostureLabel('failed', 3, 0, 0, 0, 0, t)).toBe(
+      'feedback.queue.posture_failure',
+    )
+    expect(feedbackPageTestables.queuePostureLabel('active', 3, 0, 0, 0, 0, t)).toBe(
+      'feedback.queue.posture_active',
+    )
     expect(feedbackPageTestables.queuePostureLabel('all', 3, 0, 3, 0, 0, t)).toBe(
       'feedback.queue.posture_failure',
+    )
+    expect(feedbackPageTestables.queuePostureLabel('all', 3, 0, 0, 3, 0, t)).toBe(
+      'feedback.queue.posture_ready',
     )
     expect(feedbackPageTestables.queuePostureLabel('ready', 3, 0, 0, 0, 0, t)).toBe(
       'feedback.queue.posture_ready',
@@ -160,14 +204,26 @@ describe('feedbackPageTestables', () => {
     expect(feedbackPageTestables.queuePostureHint('urgent', 3, 0, 0, 0, 0, t)).toBe(
       'feedback.queue.posture_urgent_hint',
     )
+    expect(feedbackPageTestables.queuePostureHint('failed', 3, 0, 0, 0, 0, t)).toBe(
+      'feedback.queue.posture_failure_hint',
+    )
+    expect(feedbackPageTestables.queuePostureHint('active', 3, 0, 0, 0, 0, t)).toBe(
+      'feedback.queue.posture_active_hint',
+    )
     expect(feedbackPageTestables.queuePostureHint('all', 3, 0, 3, 0, 0, t)).toBe(
       'feedback.queue.posture_failure_hint',
+    )
+    expect(feedbackPageTestables.queuePostureHint('all', 3, 0, 0, 3, 0, t)).toBe(
+      'feedback.queue.posture_ready_hint',
     )
     expect(feedbackPageTestables.queuePostureHint('ready', 3, 0, 0, 0, 0, t)).toBe(
       'feedback.queue.posture_ready_hint',
     )
     expect(feedbackPageTestables.queuePostureHint('all', 3, 0, 0, 0, 2, t)).toBe(
       'feedback.queue.posture_pending_hint',
+    )
+    expect(feedbackPageTestables.queuePostureHint('all', 3, 0, 0, 1, 0, t)).toBe(
+      'feedback.queue.posture_mixed_hint',
     )
 
     expect(feedbackPageTestables.queueAiHealthTone(0, 0, 0, 0)).toBe('default')
@@ -190,6 +246,9 @@ describe('feedbackPageTestables', () => {
       'feedback.queue.ai_health_pending',
     )
     expect(feedbackPageTestables.queueAiHealthLabel(3, 1, 0, 0, t)).toBe(
+      'feedback.queue.ai_health_mixed',
+    )
+    expect(feedbackPageTestables.queueAiHealthLabel(3, 0, 0, 0, t)).toBe(
       'feedback.queue.ai_health_mixed',
     )
 
@@ -237,6 +296,7 @@ describe('feedbackPageTestables', () => {
       feedbackPageTestables.filterFeedbackItemsByQueueMode(items, 'active').map((item) => item.id),
     ).toEqual(['active', 'urgent'])
     expect(feedbackPageTestables.filterFeedbackItemsByQueueMode(items, 'failed')).toEqual([])
+    expect(feedbackPageTestables.filterFeedbackItemsByQueueMode(items, 'all')).toEqual(items)
 
     const terminalItem = {
       ...defaultFeedback,
@@ -245,9 +305,21 @@ describe('feedbackPageTestables', () => {
       enrichmentAttempts: 5,
       enrichmentNextRetryAt: null,
     } as unknown as Feedback
+    const retryingFailure = {
+      ...defaultFeedback,
+      id: 'retrying-failure',
+      enrichmentStatus: 'failed',
+      enrichmentAttempts: 2,
+      enrichmentNextRetryAt: '2026-06-16T11:00:00Z',
+    } as unknown as Feedback
     expect(
       feedbackPageTestables
-        .filterFeedbackItemsByQueueMode([terminalItem], 'terminal')
+        .filterFeedbackItemsByQueueMode([terminalItem, retryingFailure], 'failed')
+        .map((item) => item.id),
+    ).toEqual(['terminal', 'retrying-failure'])
+    expect(
+      feedbackPageTestables
+        .filterFeedbackItemsByQueueMode([terminalItem, retryingFailure], 'terminal')
         .map((item) => item.id),
     ).toEqual(['terminal'])
     expect(
@@ -260,11 +332,23 @@ describe('feedbackPageTestables', () => {
               enrichmentStatus: 'done',
               enrichedTitle: 'AI title',
             } as unknown as Feedback,
+            {
+              ...defaultFeedback,
+              id: 'ready-confidence',
+              enrichmentStatus: 'done',
+              classificationConfidence: 0,
+            } as unknown as Feedback,
+            {
+              ...defaultFeedback,
+              id: 'ready-attrs',
+              enrichmentStatus: 'done',
+              enrichedAttrs: { tags: ['billing'] },
+            } as unknown as Feedback,
           ],
           'ready',
         )
         .map((item) => item.id),
-    ).toEqual(['ready'])
+    ).toEqual(['ready', 'ready-confidence', 'ready-attrs'])
 
     const dims: Dimension[] = [
       { name: 'region', kind: 'single' } as Dimension,
@@ -299,6 +383,7 @@ describe('feedbackPageTestables', () => {
       feedbackPageTestables.buildSemanticFilter({ attrs: [] } as FeedbackListFilters, dims),
     ).toBeUndefined()
     expect(feedbackPageTestables.semanticFilterCacheKey(filter)).toBe(JSON.stringify(filter))
+    expect(feedbackPageTestables.semanticFilterCacheKey(undefined)).toBe('{}')
 
     expect(
       feedbackPageTestables.semanticHitToFeedback({ feedback: { id: 7 } } as any),
@@ -316,6 +401,37 @@ describe('feedbackPageTestables', () => {
       tags: [],
       allowedNextStates: [],
     })
+    expect(
+      feedbackPageTestables.semanticHitToFeedback({
+        feedback: {
+          id: 'kept',
+          content: 'content',
+          source: 'portal',
+          type: 'bug',
+          userId: 'user',
+          pageUrl: 'https://example.com/page',
+          enrichedAttrs: { product: 'console' },
+          isUrgent: true,
+          enrichmentStatus: 'done',
+          createdAt: '2026-06-16T10:00:00Z',
+          tags: [{ id: 'tag-1', name: 'Tag' }],
+          allowedNextStates: [{ id: 'state-1', name: 'Next' }],
+        },
+      } as any),
+    ).toMatchObject({
+      id: 'kept',
+      content: 'content',
+      source: 'portal',
+      type: 'bug',
+      userId: 'user',
+      pageUrl: 'https://example.com/page',
+      enrichedAttrs: { product: 'console' },
+      isUrgent: true,
+      enrichmentStatus: 'done',
+      createdAt: '2026-06-16T10:00:00Z',
+      tags: [{ id: 'tag-1', name: 'Tag' }],
+      allowedNextStates: [{ id: 'state-1', name: 'Next' }],
+    })
     expect(feedbackPageTestables.semanticHitToFeedback({ feedback: {} } as any)).toBeNull()
 
     expect(
@@ -325,6 +441,12 @@ describe('feedbackPageTestables', () => {
       feedbackPageTestables.hasFilledClassificationAttrs({
         ...defaultFeedback,
         enrichedAttrs: { score: 1, tags: ['billing'], note: 'ok' },
+      }),
+    ).toBe(true)
+    expect(
+      feedbackPageTestables.hasFilledClassificationAttrs({
+        ...defaultFeedback,
+        enrichedAttrs: { score: false, tags: [], note: '' },
       }),
     ).toBe(true)
     expect(
@@ -358,6 +480,20 @@ describe('feedbackPageTestables', () => {
         ...defaultFeedback,
         enrichmentStatus: 'done',
         enrichedDisplayTitle: 'AI title',
+      }),
+    ).toBe(true)
+    expect(
+      feedbackPageTestables.isFeedbackReadyForTriage({
+        ...defaultFeedback,
+        enrichmentStatus: 'done',
+        classificationConfidence: 0,
+      }),
+    ).toBe(true)
+    expect(
+      feedbackPageTestables.isFeedbackReadyForTriage({
+        ...defaultFeedback,
+        enrichmentStatus: 'done',
+        enrichedAttrs: { note: 'classified' },
       }),
     ).toBe(true)
 
@@ -438,14 +574,29 @@ describe('feedbackPageTestables', () => {
     expect(feedbackPageTestables.toneForFeedbackRow(true, 'active', false, false)).toContain(
       'border-red-200',
     )
+    expect(feedbackPageTestables.toneForFeedbackRow(true, 'active', true, false)).toContain(
+      'border-red-200/90',
+    )
     expect(feedbackPageTestables.toneForFeedbackRow(false, 'active', true, false)).toContain(
       'amber',
+    )
+    expect(feedbackPageTestables.toneForFeedbackRow(false, 'active', false, true)).toContain(
+      'border-l-destructive/70',
+    )
+    expect(feedbackPageTestables.toneForFeedbackRow(false, 'active', true, true)).toContain(
+      'border-l-destructive',
     )
     expect(feedbackPageTestables.toneForFeedbackRow(false, 'active', false, false)).toContain(
       'amber',
     )
+    expect(feedbackPageTestables.toneForFeedbackRow(false, 'closed', true, false)).toContain(
+      'emerald',
+    )
     expect(feedbackPageTestables.toneForFeedbackRow(false, 'closed', false, false)).toContain(
       'emerald',
+    )
+    expect(feedbackPageTestables.toneForFeedbackRow(false, '', true, false)).toContain(
+      'border-slate',
     )
     expect(feedbackPageTestables.toneForFeedbackRow(false, '', false, false)).toContain(
       'border-border',

@@ -57,3 +57,36 @@ func TestAssessLastRun(t *testing.T) {
 		})
 	}
 }
+
+func TestGradeRestoreDrillWrapsAssessment(t *testing.T) {
+	t.Parallel()
+
+	got := gradeRestoreDrill(true, restoredrill.StatusPass, 2*time.Hour, restoreDrillFreshness)
+	if got.Name != "backup:restore_drill" || got.Category != preflight.CategoryBackup {
+		t.Fatalf("result identity = %#v, want backup restore-drill", got)
+	}
+	if got.Status != preflight.StatusPass {
+		t.Fatalf("status = %q, want pass; message=%s", got.Status, got.Message)
+	}
+
+	got = gradeRestoreDrill(false, "", 0, restoreDrillFreshness)
+	if got.Status != preflight.StatusWarn || got.Remediation == "" {
+		t.Fatalf("missing drill result = %#v, want warn with remediation", got)
+	}
+}
+
+func TestAgoString(t *testing.T) {
+	t.Parallel()
+
+	cases := map[time.Duration]string{
+		0:              "today",
+		23 * time.Hour: "today",
+		24 * time.Hour: "1 day ago",
+		72 * time.Hour: "3 days ago",
+	}
+	for age, want := range cases {
+		if got := agoString(age); got != want {
+			t.Fatalf("agoString(%s) = %q, want %q", age, got, want)
+		}
+	}
+}
