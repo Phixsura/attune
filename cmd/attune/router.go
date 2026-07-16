@@ -127,6 +127,7 @@ func buildRouter(
 		),
 		inboundSecrets,
 	)
+	portalHandler.SetNotificationService(buildRequestNotificationService(pool, inboundSecrets, cfg.ConsoleBaseURL))
 
 	r.Method(http.MethodGet, "/portal/{tenant_slug}", portal.NoStore(http.HandlerFunc(portalHandler.Page)))
 	r.Method(http.MethodGet, "/portal/{tenant_slug}/requests", portal.NoStore(http.HandlerFunc(portalHandler.RequestsPage)))

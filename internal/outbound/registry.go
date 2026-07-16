@@ -16,7 +16,8 @@ var (
 
 // Register — called from each adapter package's init(). Panics on
 // duplicate channel ID (compile-time-equivalent guarantee). The channel
-// must implement at least one of EventChannel or DigestChannel.
+// must implement at least one of EventChannel, DigestChannel, or
+// NotificationChannel.
 func Register(ch any) {
 	var id string
 	switch c := ch.(type) {
@@ -24,8 +25,10 @@ func Register(ch any) {
 		id = c.ID()
 	case DigestChannel:
 		id = c.ID()
+	case NotificationChannel:
+		id = c.ID()
 	default:
-		panic("outbound: Register requires EventChannel or DigestChannel")
+		panic("outbound: Register requires EventChannel, DigestChannel, or NotificationChannel")
 	}
 
 	mu.Lock()
@@ -62,11 +65,26 @@ func LookupDigest(destType string) DigestChannel {
 	return nil
 }
 
+// LookupNotification returns the NotificationChannel for the given destination
+// type, or nil if the channel is not registered or does not implement
+// NotificationChannel.
+func LookupNotification(destType string) NotificationChannel {
+	mu.RLock()
+	defer mu.RUnlock()
+	if ch, ok := channels[destType]; ok {
+		if nc, ok := ch.(NotificationChannel); ok {
+			return nc
+		}
+	}
+	return nil
+}
+
 // Entry — what Channels() returns. Named struct for consumable public API.
 type Entry struct {
-	ID             string
-	SupportsEvent  bool
-	SupportsDigest bool
+	ID                   string
+	SupportsEvent        bool
+	SupportsDigest       bool
+	SupportsNotification bool
 }
 
 // Channels — snapshot of registered channel IDs. Returns a sorted slice
@@ -82,6 +100,9 @@ func Channels() []Entry {
 		}
 		if _, ok := ch.(DigestChannel); ok {
 			entry.SupportsDigest = true
+		}
+		if _, ok := ch.(NotificationChannel); ok {
+			entry.SupportsNotification = true
 		}
 		out = append(out, entry)
 	}

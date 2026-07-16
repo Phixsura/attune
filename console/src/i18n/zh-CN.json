@@ -123,6 +123,7 @@
     "notify_targets": "通知目标",
     "external_sync": "外部同步",
     "public_visibility": "公开可见性",
+    "request_notifications": "需求通知",
     "reply_send_hook": "回复发送 Hook",
     "inbound_sources": "入站源",
     "guard_policies": "防护策略",
@@ -2734,6 +2735,145 @@
       "redeliver_failed": "重放仍失败，请查看最近投递",
       "copied": "secret 已复制",
       "copy_failed": "复制失败"
+    }
+  },
+  "request_notifications": {
+    "subtitle": "把公开需求状态、发货更新和运营回复安全地通知提交者、投票者和关注者。",
+    "refresh": "刷新",
+    "actions": "操作",
+    "summary": {
+      "email": "邮件",
+      "webhook": "Webhook",
+      "targets": "活动目标",
+      "failures": "异常投递"
+    },
+    "enabled": {
+      "enabled": "启用",
+      "disabled": "停用"
+    },
+    "channels": {
+      "email": "邮件",
+      "webhook": "Webhook",
+      "unknown": "未知"
+    },
+    "settings": {
+      "title": "通知策略",
+      "description": "控制租户级发送通道、订阅同意模式和基础限流。",
+      "email": "允许邮件通知",
+      "email_help": "给已订阅的提交者、投票者、评论者和关注者发送公开更新。",
+      "webhook": "允许 Webhook 通知",
+      "webhook_help": "把同一份公开安全事件发送到配置的客户系统。",
+      "public_update": "状态变更需要公开更新",
+      "public_update_help": "状态变更会生成公开更新事件后再进入通知队列。",
+      "consent_mode": "默认同意模式",
+      "consent_mode_help": "控制新的公开订阅如何建立发送资格。",
+      "max_unconfirmed": "未确认上限",
+      "tenant_hourly": "租户每小时",
+      "contact_daily": "联系人每日"
+    },
+    "consent": {
+      "explicit_opt_in": "显式订阅",
+      "existing_app_consent": "沿用应用同意",
+      "disabled": "不自动订阅"
+    },
+    "sender": {
+      "title": "邮件发件人",
+      "description": "配置邮件 provider 端点和发件人身份；敏感配置只写入、不回显。",
+      "empty_title": "还没有邮件发件人",
+      "empty_body": "保存发件人后，邮件通知 worker 才会创建邮件投递。",
+      "from_name": "发件人名称",
+      "from_email": "发件人邮箱",
+      "reply_to": "回复邮箱",
+      "provider": "Provider",
+      "provider_url": "Provider URL",
+      "provider_url_help": "Attune 会向这个 HTTPS 端点发送标准化邮件 JSON。",
+      "provider_secret": "Provider secret",
+      "verify": "验证",
+      "save": "保存发件人",
+      "current_from": "当前发件人",
+      "current_domain": "域名",
+      "current_provider": "Provider",
+      "current_status": "状态"
+    },
+    "webhooks": {
+      "title": "Webhook 目标",
+      "description": "配置用于客户系统同步的公开安全 JSON 事件目标。",
+      "name": "名称",
+      "url": "URL",
+      "secret": "签名 secret",
+      "identity": "包含订阅者身份",
+      "identity_help": "关闭后，Webhook payload 不包含单个收件人的可识别信息。",
+      "create": "添加目标",
+      "host": "主机",
+      "status": "状态",
+      "test": "测试",
+      "empty": "还没有 Webhook 目标。",
+      "delete_confirm": "删除这个 Webhook 目标？"
+    },
+    "publish": {
+      "title": "发布公开更新",
+      "description": "为一个公开需求生成更新，并按选择的通道通知订阅者。",
+      "request_id": "需求 ID",
+      "kind": "类型",
+      "kind_status": "状态更新",
+      "kind_shipped": "已发货",
+      "title_label": "标题",
+      "body": "正文",
+      "notify": "通知订阅者",
+      "preview": "预览",
+      "publish": "发布并通知"
+    },
+    "preview": {
+      "title": "发送预览",
+      "eligible": "可发送",
+      "excluded": "已排除",
+      "channels": "通道"
+    },
+    "deliveries": {
+      "title": "最近投递",
+      "description": "邮件和 Webhook 共用同一份投递日志，可对失败或死信记录人工重试。",
+      "empty": "还没有投递记录。",
+      "channel": "通道",
+      "status": "状态",
+      "attempts": "尝试",
+      "time": "时间",
+      "error": "错误"
+    },
+    "subscribers": {
+      "title": "订阅者治理",
+      "description": "按需求查看订阅者，并在投诉、退信或人工请求时压制联系人。",
+      "request_placeholder": "输入 customer request UUID",
+      "load": "载入",
+      "empty": "载入某个需求后会显示订阅者。",
+      "person": "联系人",
+      "email": "邮箱",
+      "status": "状态",
+      "suppress": "压制联系人"
+    },
+    "status": {
+      "active": "启用",
+      "dead": "死信",
+      "delivered": "已送达",
+      "disabled": "停用",
+      "failed": "失败",
+      "opted_in": "已订阅",
+      "opted_out": "已退订",
+      "pending": "待发送",
+      "suppressed": "已压制",
+      "unverified": "未验证",
+      "verified": "已验证"
+    },
+    "toast": {
+      "settings_saved": "通知策略已保存",
+      "sender_saved": "发件人已保存",
+      "sender_verified": "发件人已验证",
+      "webhook_saved": "Webhook 目标已保存",
+      "webhook_deleted": "Webhook 目标已删除",
+      "webhook_test_ok": "Webhook 测试成功",
+      "webhook_test_failed": "Webhook 测试失败",
+      "published": "公开更新已发布",
+      "delivery_retried": "投递已重新排队",
+      "subscriber_suppressed": "联系人已压制"
     }
   },
   "outbox_dead": {

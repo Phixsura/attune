@@ -21,9 +21,11 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	rnrepo "github.com/Phixsura/attune/internal/repo/requestnotification"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
+	rnsvc "github.com/Phixsura/attune/internal/service/requestnotification"
 )
 
 const publicRequestCacheControl = "no-store"
@@ -40,9 +42,10 @@ type readService interface {
 }
 
 type Handler struct {
-	read       readService
-	submission submissionService
-	secrets    visitorSecretStore
+	read          readService
+	submission    submissionService
+	notifications notificationService
+	secrets       visitorSecretStore
 }
 
 type submissionService interface {
@@ -52,6 +55,17 @@ type submissionService interface {
 
 func NewHandler(read readService, submission submissionService, secrets visitorSecretStore) *Handler {
 	return ptrext.Of(Handler{read: read, submission: submission, secrets: secrets})
+}
+
+type notificationService interface {
+	SubscribePublicRequest(ctx context.Context, in rnsvc.SubscribeInput) (rnrepo.Subscription, error)
+	Unsubscribe(ctx context.Context, tenantSlug string, token string, userAgent string) (rnrepo.Subscription, error)
+	ConfirmContact(ctx context.Context, tenantSlug string, token string, userAgent string) (rnrepo.Contact, error)
+	RedactedEmailPayload(payload []byte) string
+}
+
+func (h *Handler) SetNotificationService(service notificationService) {
+	h.notifications = service
 }
 
 func NoStore(next http.Handler) http.Handler {
@@ -188,6 +202,9 @@ func (h *Handler) VotePublicCustomerRequest(
 	if err != nil {
 		return portalVoteError[*attunev1.PublicCustomerRequestDetail](err)
 	}
+	if err := h.subscribeFromVote(ctx, req); err != nil {
+		return portalNotificationError[*attunev1.PublicCustomerRequestDetail](err)
+	}
 	ctx.SetHeader("X-Robots-Tag", "noindex")
 	return dispatcher.OK(publicRequestToProto(result))
 }
@@ -229,7 +246,70 @@ func (h *Handler) CreatePublicCustomerComment(
 	if err != nil {
 		return portalCommentError[*attunev1.PublicCustomerRequestDetail](err)
 	}
+	if err := h.subscribeFromComment(ctx, req); err != nil {
+		return portalNotificationError[*attunev1.PublicCustomerRequestDetail](err)
+	}
 	return dispatcher.OK(publicRequestToProto(result))
+}
+
+func (h *Handler) SubscribePublicCustomerRequest(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.SubscribePublicCustomerRequestRequest,
+) (dispatcher.Result[*attunev1.PublicRequestSubscription], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.notifications == nil {
+		return dispatcher.Fail[*attunev1.PublicRequestSubscription](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "request notifications not configured")
+	}
+	sub, err := h.notifications.SubscribePublicRequest(ctx, rnsvc.SubscribeInput{
+		TenantSlug:         req.GetTenantSlug(),
+		PublicSlug:         req.GetPublicSlug(),
+		Email:              req.GetEmail(),
+		NotifyMe:           req.GetNotifyMe(),
+		ConsentTextVersion: req.GetNotificationConsentTextVersion(),
+		DisplayName:        req.GetDisplayName(),
+		Organization:       req.GetOrganization(),
+		Locale:             req.GetLocale(),
+		Timezone:           req.GetTimezone(),
+		Source:             "follower",
+		CreatedBy:          "portal",
+	})
+	if err != nil {
+		return portalNotificationError[*attunev1.PublicRequestSubscription](err)
+	}
+	return dispatcher.OK(h.publicSubscriptionToProto(sub))
+}
+
+func (h *Handler) UnsubscribePublicCustomerRequest(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.UnsubscribePublicCustomerRequestRequest,
+) (dispatcher.Result[*attunev1.PublicRequestSubscription], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.notifications == nil {
+		return dispatcher.Fail[*attunev1.PublicRequestSubscription](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "request notifications not configured")
+	}
+	sub, err := h.notifications.Unsubscribe(ctx, req.GetTenantSlug(), req.GetToken(), userAgentFromRequest(ctx.Request()))
+	if err != nil {
+		return portalNotificationError[*attunev1.PublicRequestSubscription](err)
+	}
+	return dispatcher.OK(h.publicSubscriptionToProto(sub))
+}
+
+func (h *Handler) ConfirmPublicNotificationContact(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.ConfirmPublicNotificationContactRequest,
+) (dispatcher.Result[*attunev1.PublicNotificationContact], error) {
+	ctx.SetHeader("Cache-Control", publicRequestCacheControl)
+	ctx.SetHeader("X-Robots-Tag", "noindex")
+	if h.notifications == nil {
+		return dispatcher.Fail[*attunev1.PublicNotificationContact](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "request notifications not configured")
+	}
+	contact, err := h.notifications.ConfirmContact(ctx, req.GetTenantSlug(), req.GetToken(), userAgentFromRequest(ctx.Request()))
+	if err != nil {
+		return portalNotificationError[*attunev1.PublicNotificationContact](err)
+	}
+	return dispatcher.OK(h.publicContactToProto(contact))
 }
 
 func portalError[Resp proto.Message](err error) (dispatcher.Result[Resp], error) {
@@ -286,6 +366,59 @@ func portalSubmissionError[Resp proto.Message](err error) (dispatcher.Result[Res
 	}
 }
 
+func portalNotificationError[Resp proto.Message](err error) (dispatcher.Result[Resp], error) {
+	switch {
+	case errors.Is(err, rnsvc.ErrNotFound), errors.Is(err, rnrepo.ErrNotFound):
+		return dispatcher.Fail[Resp](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "request notification not found")
+	case errors.Is(err, rnsvc.ErrValidation), errors.Is(err, rnrepo.ErrInvalidInput):
+		return dispatcher.Fail[Resp](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid request notification")
+	case errors.Is(err, rnsvc.ErrDisabled):
+		return dispatcher.Fail[Resp](http.StatusForbidden, attunev1.ErrorCode_FORBIDDEN, "request notifications are disabled")
+	default:
+		return dispatcher.Fail[Resp](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "request notification failed")
+	}
+}
+
+func (h *Handler) subscribeFromVote(ctx context.Context, req *attunev1.VotePublicCustomerRequest) error {
+	if h.notifications == nil || !req.GetNotifyMe() || strings.TrimSpace(req.GetEmail()) == "" {
+		return nil
+	}
+	_, err := h.notifications.SubscribePublicRequest(ctx, rnsvc.SubscribeInput{
+		TenantSlug:         req.GetTenantSlug(),
+		PublicSlug:         req.GetPublicSlug(),
+		Email:              req.GetEmail(),
+		NotifyMe:           req.GetNotifyMe(),
+		ConsentTextVersion: req.GetNotificationConsentTextVersion(),
+		DisplayName:        req.GetDisplayName(),
+		Organization:       req.GetOrganization(),
+		Locale:             req.GetLocale(),
+		Timezone:           req.GetTimezone(),
+		Source:             "voter",
+		CreatedBy:          "portal",
+	})
+	return err
+}
+
+func (h *Handler) subscribeFromComment(ctx context.Context, req *attunev1.CreatePublicCustomerCommentRequest) error {
+	if h.notifications == nil || !req.GetNotifyMe() || strings.TrimSpace(req.GetEmail()) == "" {
+		return nil
+	}
+	_, err := h.notifications.SubscribePublicRequest(ctx, rnsvc.SubscribeInput{
+		TenantSlug:         req.GetTenantSlug(),
+		PublicSlug:         req.GetPublicSlug(),
+		Email:              req.GetEmail(),
+		NotifyMe:           req.GetNotifyMe(),
+		ConsentTextVersion: req.GetNotificationConsentTextVersion(),
+		DisplayName:        req.GetDisplayName(),
+		Organization:       req.GetOrganization(),
+		Locale:             req.GetLocale(),
+		Timezone:           req.GetTimezone(),
+		Source:             "commenter",
+		CreatedBy:          "portal",
+	})
+	return err
+}
+
 func publicRequestToProto(result pvsvc.PublicRequest) *attunev1.PublicCustomerRequestDetail {
 	out := ptrext.Of(attunev1.PublicCustomerRequestDetail{
 		Request:         publicRequestSummaryToProto(result),
@@ -305,6 +438,25 @@ func publicRequestToProto(result pvsvc.PublicRequest) *attunev1.PublicCustomerRe
 		out.SimilarRequests = append(out.SimilarRequests, publicRequestSummaryToProto(similar))
 	}
 	return out
+}
+
+func (h *Handler) publicSubscriptionToProto(sub rnrepo.Subscription) *attunev1.PublicRequestSubscription {
+	return ptrext.Of(attunev1.PublicRequestSubscription{
+		Id:            sub.ID.String(),
+		RequestId:     sub.RequestID.String(),
+		Status:        sub.Status,
+		Scope:         sub.Scope,
+		EmailRedacted: "",
+	})
+}
+
+func (h *Handler) publicContactToProto(contact rnrepo.Contact) *attunev1.PublicNotificationContact {
+	return ptrext.Of(attunev1.PublicNotificationContact{
+		Id:            contact.ID.String(),
+		EmailRedacted: h.notifications.RedactedEmailPayload(contact.EmailPayload),
+		ConsentState:  contact.ConsentState,
+		Verified:      contact.EmailVerifiedAt != nil,
+	})
 }
 
 func publicRequestListToProto(result pvsvc.PublicRequestList) *attunev1.ListPublicCustomerRequestsResponse {
@@ -625,6 +777,68 @@ func BindCreatePublicSubmissionRequest(r *http.Request, req *attunev1.CreatePubl
 	req.TenantSlug = strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
 	if headerKey := strings.TrimSpace(r.Header.Get("Idempotency-Key")); headerKey != "" && strings.TrimSpace(req.GetIdempotencyKey()) == "" {
 		req.IdempotencyKey = headerKey
+	}
+	return nil
+}
+
+func BindVotePublicCustomerRequest(r *http.Request, req *attunev1.VotePublicCustomerRequest) error {
+	if err := optionalProtoJSONBody(r, req); err != nil {
+		return err
+	}
+	req.TenantSlug = strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+	req.PublicSlug = strings.TrimSpace(chi.URLParam(r, "public_slug"))
+	return nil
+}
+
+func BindSubscribePublicCustomerRequest(r *http.Request, req *attunev1.SubscribePublicCustomerRequestRequest) error {
+	if err := dispatcher.JSONBody(r, req); err != nil {
+		return err
+	}
+	req.TenantSlug = strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+	req.PublicSlug = strings.TrimSpace(chi.URLParam(r, "public_slug"))
+	return nil
+}
+
+func BindUnsubscribePublicCustomerRequest(r *http.Request, req *attunev1.UnsubscribePublicCustomerRequestRequest) error {
+	if err := optionalProtoJSONBody(r, req); err != nil {
+		return err
+	}
+	req.TenantSlug = strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+	if req.GetToken() == "" {
+		req.Token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	return nil
+}
+
+func BindConfirmPublicNotificationContact(r *http.Request, req *attunev1.ConfirmPublicNotificationContactRequest) error {
+	if err := optionalProtoJSONBody(r, req); err != nil {
+		return err
+	}
+	req.TenantSlug = strings.TrimSpace(chi.URLParam(r, "tenant_slug"))
+	if req.GetToken() == "" {
+		req.Token = strings.TrimSpace(r.URL.Query().Get("token"))
+	}
+	return nil
+}
+
+func optionalProtoJSONBody(r *http.Request, req proto.Message) error {
+	if r.Body == nil {
+		return nil
+	}
+	const maxBody = 64 * 1024
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+	if err != nil {
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
+	}
+	body = []byte(strings.TrimSpace(string(body)))
+	if len(body) == 0 {
+		return nil
+	}
+	if len(body) > maxBody {
+		return dispatcher.NewError(http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE, "request body too large")
+	}
+	if err := createPublicSubmissionUnmarshal.Unmarshal(body, req); err != nil {
+		return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid json body")
 	}
 	return nil
 }

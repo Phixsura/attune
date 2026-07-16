@@ -212,6 +212,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
   {
     group: 'integrations',
+    icon: Bell,
+    labelKey: 'nav.request_notifications',
+    path: '/integrations/request-notifications',
+    adminOnly: true,
+    settingsAliases: ['request-notifications', 'request_notifications'],
+  },
+  {
+    group: 'integrations',
     icon: Send,
     labelKey: 'nav.reply_send_hook',
     path: '/integrations/reply-send-hook',

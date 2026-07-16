@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- **Close-the-loop request notifications.**
+  Added tenant-scoped request notification settings, sender configuration,
+  public request subscriptions, unsubscribe and contact-confirmation flows,
+  email and webhook delivery adapters, retryable delivery logs, Console
+  operations, and public update publishing for notifying request submitters,
+  voters, commenters, and followers.
+
 - **Reply-send-hook batch recovery tools.**
   The reply-send-hook delivery log now supports multi-select recovery actions
   on desktop and mobile, including batch redeliver, batch copy of selected
