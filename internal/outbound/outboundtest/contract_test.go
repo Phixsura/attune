@@ -43,6 +43,17 @@ func TestConformanceRunnersExerciseGoldenAndResponseProfiles(t *testing.T) {
 			{Name: "ok", Status: http.StatusNoContent, WantOK: true},
 		},
 	})
+
+	TestNotificationChannel(t, NotificationCase{
+		Channel:       channel,
+		Target:        target,
+		Golden:        filepath.Join(t.TempDir(), "notification.json"),
+		ProviderShape: ProviderShapeRawWebhook,
+		Capabilities:  stubCapabilities(),
+		ResponseCases: []ResponseCase{
+			{Name: "ok", Status: http.StatusOK, WantOK: true},
+		},
+	})
 }
 
 func TestValidateRenderCaseRequiresExecutableContractInputs(t *testing.T) {
@@ -85,6 +96,8 @@ func TestValidateRenderCaseRequiresExecutableContractInputs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := validateRenderCase(tc.mut(valid)); err == nil {
 				t.Fatal("misconfigured render case accepted")
+			} else if !strings.Contains(err.Error(), "outbound conformance misconfigured") {
+				t.Fatalf("misconfiguration error = %q", err.Error())
 			}
 		})
 	}
@@ -185,6 +198,10 @@ func (stubChannel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (out
 }
 
 func (stubChannel) RenderDigest(view any, dst outbound.Target) (outbound.Rendered, error) {
+	return stubRendered(dst.URL), nil
+}
+
+func (stubChannel) RenderNotification(env *outbound.NotificationEnvelope, dst outbound.Target) (outbound.Rendered, error) {
 	return stubRendered(dst.URL), nil
 }
 

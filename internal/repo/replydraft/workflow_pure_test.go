@@ -154,6 +154,32 @@ func TestWorkflowFingerprintsAndSQLHelpers(t *testing.T) {
 	}
 }
 
+func TestRollbackIgnoresRollbackErrors(t *testing.T) {
+	t.Parallel()
+
+	rollback(context.Background(), ptrext.Of(fakeTx{}))
+}
+
+func TestCreateTaskTxUsesTransactionAndWrapsErrors(t *testing.T) {
+	t.Parallel()
+
+	repo := DraftTaskRepo{}
+	ctx := context.Background()
+
+	tx := ptrext.Of(fakeTx{})
+	if err := repo.CreateTaskTx(ctx, tx, 42, "tenant-1", ptrext.Of(0.8), "trace-1"); err != nil {
+		t.Fatalf("CreateTaskTx returned error: %v", err)
+	}
+	if tx.execIdx != 1 {
+		t.Fatalf("CreateTaskTx execs = %d, want one enqueue statement", tx.execIdx)
+	}
+
+	boom := errors.New("insert failed")
+	if err := repo.CreateTaskTx(ctx, ptrext.Of(fakeTx{execErrs: []error{boom}}), 42, "tenant-1", nil, "trace-1"); err == nil {
+		t.Fatalf("CreateTaskTx error = nil, want wrapped exec error")
+	}
+}
+
 func TestScanDraftMapsNullableColumns(t *testing.T) {
 	t.Parallel()
 
@@ -799,6 +825,107 @@ func TestInsertAttemptHelpers(t *testing.T) {
 	}
 }
 
+func TestGeneratedDraftTransactionHelpers(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	repo := DraftTaskRepo{}
+	snapshot := testFeedbackSnapshot("Login fails", "web", "user-1", `{}`, "Login failure", "Cannot login", `{}`, "en", "completed")
+	baseDraft := testRepoDraft(StatusSuggested, now)
+	baseRevision := testRepoRevision(baseDraft, "22222222-2222-2222-2222-222222222222", 1, "ai", "Thanks for the report.", now)
+	generatedAt := now.Add(time.Minute)
+
+	tx := ptrext.Of(fakeTx{rows: []fakeRow{
+		feedbackSnapshotRow("Login fails", "web", "user-1", `{}`, "Login failure", "Cannot login", `{}`, "en", "completed"),
+		{err: pgx.ErrNoRows},
+		draftCycleRow(baseDraft),
+		revisionRow(baseRevision),
+		{scan: scanValues(generatedAt)},
+	}, execs: []pgconn.CommandTag{
+		pgconn.NewCommandTag("UPDATE 1"),
+		pgconn.NewCommandTag("INSERT 0 1"),
+	}})
+
+	gotGeneratedAt, err := repo.storeGeneratedDraftTx(context.Background(), tx, 42, "tenant-1", "Thanks for the report.", "system")
+	if err != nil {
+		t.Fatalf("storeGeneratedDraftTx returned error: %v", err)
+	}
+	if !gotGeneratedAt.Equal(generatedAt) {
+		t.Fatalf("generatedAt = %s, want %s", gotGeneratedAt, generatedAt)
+	}
+	if tx.execIdx != 2 {
+		t.Fatalf("storeGeneratedDraftTx execs = %d, want legacy sync and event insert", tx.execIdx)
+	}
+
+	existing, err := repo.ensureWritableDraftTx(context.Background(), ptrext.Of(fakeTx{
+		rows: []fakeRow{draftRow(baseDraft)},
+	}), "tenant-1", 42, snapshot)
+	if err != nil {
+		t.Fatalf("ensureWritableDraftTx editable returned error: %v", err)
+	}
+	if existing.ID != baseDraft.ID {
+		t.Fatalf("ensureWritableDraftTx editable = %+v, want existing draft", existing)
+	}
+
+	pendingDraft := baseDraft
+	pendingDraft.Status = StatusSendPending
+	_, err = repo.ensureWritableDraftTx(context.Background(), ptrext.Of(fakeTx{
+		rows: []fakeRow{draftRow(pendingDraft)},
+	}), "tenant-1", 42, snapshot)
+	if !errors.Is(err, ErrRequestInProgress) {
+		t.Fatalf("ensureWritableDraftTx pending error = %v, want ErrRequestInProgress", err)
+	}
+
+	sentDraft := baseDraft
+	sentDraft.Status = StatusSent
+	sentDraft.CycleNo = 3
+	newDraft := baseDraft
+	newDraft.CycleNo = 4
+	rolledTx := ptrext.Of(fakeTx{
+		rows:  []fakeRow{draftRow(sentDraft), draftCycleRow(newDraft)},
+		execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 1")},
+	})
+	rolledDraft, err := repo.ensureWritableDraftTx(context.Background(), rolledTx, "tenant-1", 42, snapshot)
+	if err != nil {
+		t.Fatalf("ensureWritableDraftTx sent returned error: %v", err)
+	}
+	if rolledDraft.CycleNo != 4 || rolledTx.execIdx != 1 {
+		t.Fatalf("rolled draft = %+v execs=%d, want archived cycle 4", rolledDraft, rolledTx.execIdx)
+	}
+}
+
+func TestGeneratedDraftLegacySyncFailures(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	repo := DraftTaskRepo{}
+	snapshot := feedbackSnapshot{Fingerprint: "source-fp", Metadata: []byte(`{}`)}
+	boom := errors.New("legacy failed")
+
+	_, err := repo.markGeneratedTx(context.Background(), ptrext.Of(fakeTx{
+		rows:     []fakeRow{{scan: scanValues(now)}},
+		execErrs: []error{boom},
+	}), "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "content", "system", snapshot)
+	if err == nil {
+		t.Fatalf("markGeneratedTx error = nil, want legacy sync error")
+	}
+
+	_, err = repo.markGeneratedTx(context.Background(), ptrext.Of(fakeTx{
+		rows:  []fakeRow{{scan: scanValues(now)}},
+		execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 0")},
+	}), "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "content", "system", snapshot)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("markGeneratedTx missing legacy row = %v, want ErrNotFound", err)
+	}
+
+	_, err = repo.markGeneratedTx(context.Background(), ptrext.Of(fakeTx{
+		rows: []fakeRow{{err: boom}},
+	}), "11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "content", "system", snapshot)
+	if err == nil {
+		t.Fatalf("markGeneratedTx update error = nil, want wrapped row error")
+	}
+}
+
 func TestLoadFreshDeliveryHookMarksStaleWhenApprovedHookDisappears(t *testing.T) {
 	t.Parallel()
 
@@ -1087,6 +1214,14 @@ func draftRow(d Draft) fakeRow {
 		nullTimeValue(d.GeneratedAt), d.GeneratedBy, nullTimeValue(d.EditedAt), d.EditedBy,
 		nullTimeValue(d.ApprovedAt), d.ApprovedBy, nullTimeValue(d.RejectedAt), d.RejectedBy,
 		nullTimeValue(d.SentAt), d.SentBy, d.Revision, d.CreatedAt, d.UpdatedAt,
+	)}
+}
+
+func draftCycleRow(d Draft) fakeRow {
+	return fakeRow{scan: scanValues(
+		d.ID, d.TenantID, d.FeedbackID, d.CycleNo, d.Status,
+		d.SourceFingerprint, d.LastBlocker, d.ExternalDeliveryStatus,
+		d.ExternalMessageID, d.Revision, d.CreatedAt, d.UpdatedAt,
 	)}
 }
 

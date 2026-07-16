@@ -299,11 +299,13 @@ export function RequestNotificationsPage() {
   }
 
   const handleVerifySender = () => {
-    if (!sender?.id) return
-    verifySender.mutate(sender.id, {
-      onSuccess: () => toast.success(t('request_notifications.toast.sender_verified')),
-      onError: (err) => toast.error(errorMessage(err, t('common.error'))),
-    })
+    const senderId = sender?.id
+    if (senderId) {
+      verifySender.mutate(senderId, {
+        onSuccess: () => toast.success(t('request_notifications.toast.sender_verified')),
+        onError: (err) => toast.error(errorMessage(err, t('common.error'))),
+      })
+    }
   }
 
   const handleTargetSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -773,11 +775,11 @@ export function RequestNotificationsPage() {
               </div>
             </form>
             <TargetList
-              deletingId={deleteTarget.variables ?? ''}
+              deletingId={deleteTarget.isPending ? (deleteTarget.variables ?? '') : ''}
               onDelete={handleDeleteTarget}
               onTest={handleTestTarget}
               targets={targets}
-              testingId={testTarget.variables ?? ''}
+              testingId={testTarget.isPending ? (testTarget.variables ?? '') : ''}
             />
           </CardContent>
         </Card>
@@ -944,7 +946,7 @@ export function RequestNotificationsPage() {
               deliveries={deliveries}
               locale={locale}
               onRetry={handleRetryDelivery}
-              retryingId={retryDelivery.variables ?? ''}
+              retryingId={retryDelivery.isPending ? (retryDelivery.variables ?? '') : ''}
             />
           </CardContent>
         </Card>

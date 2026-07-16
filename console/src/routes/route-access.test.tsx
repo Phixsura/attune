@@ -15,6 +15,7 @@ import { Route as ExternalSyncRoute } from '@/routes/_authed.integrations.extern
 import { Route as IntegrationsInboundSourcesRoute } from '@/routes/_authed.integrations.inbound-sources'
 import { Route as PublicVisibilityRoute } from '@/routes/_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
+import { Route as RequestNotificationsRoute } from '@/routes/_authed.integrations.request-notifications'
 import { Route as SettingsRoute } from '@/routes/_authed.settings'
 import { server } from '@/testing/mocks/server'
 
@@ -204,6 +205,58 @@ describe('route access guards', () => {
 
     mockMe('admin')
     expect(await callBeforeLoad(ReplySendHookRoute.options.beforeLoad)).toBeNull()
+  })
+
+  it('keeps request notifications admin-only and preloads notification settings', async () => {
+    mockMe('member')
+    const thrown = await callBeforeLoad(RequestNotificationsRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+
+    mockMe('admin')
+    expect(await callBeforeLoad(RequestNotificationsRoute.options.beforeLoad)).toBeNull()
+
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/request-notifications/settings', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          appNotificationsEnabled: true,
+          emailNotificationsEnabled: false,
+        })
+      }),
+      http.get('/fb/v1/console/request-notifications/sender', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ id: 'sender-1', fromEmail: 'updates@example.test' })
+      }),
+      http.get('/fb/v1/console/request-notifications/webhook-targets', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ targets: [] })
+      }),
+      http.get('/fb/v1/console/request-notifications/deliveries', ({ request }) => {
+        const url = new URL(request.url)
+        seenPaths.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json({ deliveries: [] })
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const loader = RequestNotificationsRoute.options.loader as (args: {
+      context: { queryClient: QueryClient }
+    }) => Promise<unknown>
+
+    await expect(loader({ context: { queryClient } })).resolves.toBeUndefined()
+    expect(RequestNotificationsRoute.options.component).toBeTypeOf('function')
+    expect(seenPaths).toEqual(
+      new Set([
+        '/fb/v1/console/request-notifications/settings',
+        '/fb/v1/console/request-notifications/sender',
+        '/fb/v1/console/request-notifications/webhook-targets',
+        '/fb/v1/console/request-notifications/deliveries?limit=25',
+      ]),
+    )
   })
 
   it('keeps external sync operational-only and preloads its console shell data', async () => {
