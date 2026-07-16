@@ -5,14 +5,21 @@ import { describe, expect, it } from 'vitest'
 import { Route as AdministrationRoute } from '@/routes/_authed.administration'
 import { Route as DeadDeliveriesRoute } from '@/routes/_authed.administration.dead-deliveries'
 import { Route as GDPRRoute } from '@/routes/_authed.administration.gdpr'
+import { Route as MembersRoute } from '@/routes/_authed.administration.members'
 import { Route as ReliabilityRoute } from '@/routes/_authed.administration.reliability'
 import { Route as SecurityRoute } from '@/routes/_authed.administration.security'
 import { Route as ConfigurationRoute } from '@/routes/_authed.configuration'
+import { Route as EnrichmentRuntimeRoute } from '@/routes/_authed.configuration.enrichment-runtime'
+import { Route as LLMConfigRoute } from '@/routes/_authed.configuration.llm'
+import { Route as TagsRoute } from '@/routes/_authed.configuration.tags'
+import { Route as WorkflowRoute } from '@/routes/_authed.configuration.workflow'
 import { Route as InboundSourcesRoute } from '@/routes/_authed.inbound-sources'
 import { Route as IntegrationsRoute } from '@/routes/_authed.integrations'
 import { Route as ApiKeysRoute } from '@/routes/_authed.integrations.api-keys'
+import { Route as DigestRoute } from '@/routes/_authed.integrations.digests'
 import { Route as ExternalSyncRoute } from '@/routes/_authed.integrations.external-sync'
 import { Route as IntegrationsInboundSourcesRoute } from '@/routes/_authed.integrations.inbound-sources'
+import { Route as NotifyTargetsRoute } from '@/routes/_authed.integrations.notify-targets'
 import { Route as PublicVisibilityRoute } from '@/routes/_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
 import { Route as RequestNotificationsRoute } from '@/routes/_authed.integrations.request-notifications'
@@ -20,6 +27,7 @@ import { Route as SettingsRoute } from '@/routes/_authed.settings'
 import { server } from '@/testing/mocks/server'
 
 type BeforeLoadFn = (...args: any[]) => unknown
+type LoaderFn = (args: { context: { queryClient: QueryClient } }) => Promise<unknown>
 
 interface ThrownRedirect {
   options: { to: string; statusCode?: number }
@@ -300,6 +308,68 @@ describe('route access guards', () => {
     expect(ExternalSyncRoute.options.component).toBeTypeOf('function')
     expect(seenPaths).toEqual(
       new Set(['/fb/v1/console/external-sync/health', '/fb/v1/console/external-sync/connections']),
+    )
+  })
+
+  it('allows admins into leaf configuration and integration routes', async () => {
+    mockMe('admin')
+
+    for (const route of [
+      MembersRoute,
+      TagsRoute,
+      WorkflowRoute,
+      LLMConfigRoute,
+      EnrichmentRuntimeRoute,
+      DigestRoute,
+      NotifyTargetsRoute,
+    ]) {
+      await expect(callBeforeLoad(route.options.beforeLoad)).resolves.toBeNull()
+      expect(route.options.component).toBeTypeOf('function')
+    }
+  })
+
+  it('preloads simple leaf route data', async () => {
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/members', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ members: [] })
+      }),
+      http.get('/fb/v1/console/tags', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ tags: [] })
+      }),
+      http.get('/fb/v1/console/workflow/states', ({ request }) => {
+        const url = new URL(request.url)
+        seenPaths.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json({ states: [] })
+      }),
+      http.get('/fb/v1/console/notify-targets', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ items: [] })
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const context = { queryClient }
+    const membersLoader = MembersRoute.options.loader as LoaderFn
+    const tagsLoader = TagsRoute.options.loader as LoaderFn
+    const workflowLoader = WorkflowRoute.options.loader as LoaderFn
+    const notifyTargetsLoader = NotifyTargetsRoute.options.loader as LoaderFn
+
+    await expect(membersLoader({ context })).resolves.toEqual([])
+    await expect(tagsLoader({ context })).resolves.toEqual([])
+    await expect(workflowLoader({ context })).resolves.toEqual([])
+    await expect(notifyTargetsLoader({ context })).resolves.toEqual([])
+    expect(seenPaths).toEqual(
+      new Set([
+        '/fb/v1/console/members',
+        '/fb/v1/console/tags',
+        '/fb/v1/console/workflow/states?include_archived=true',
+        '/fb/v1/console/notify-targets',
+      ]),
     )
   })
 

@@ -17,6 +17,11 @@ type BootstrapConfig struct {
 	Password string
 }
 
+type bootstrapAdminStore interface {
+	Count(ctx context.Context) (int, error)
+	Bootstrap(ctx context.Context, n admin.NewAdmin) error
+}
+
 // BootstrapAdmin runs at startup. If the admins table is empty AND the YAML
 // console.bootstrap_admin credentials are set, creates the first admin. If the
 // table is empty and credentials are absent, returns a fatal error so the
@@ -26,7 +31,7 @@ type BootstrapConfig struct {
 // On subsequent starts the table is non-empty: BootstrapAdmin logs the
 // skip and returns nil. Bootstrap is therefore idempotent and safe to call
 // unconditionally on every start.
-func BootstrapAdmin(ctx context.Context, repo *admin.Repo, cfg BootstrapConfig) error {
+func BootstrapAdmin(ctx context.Context, repo bootstrapAdminStore, cfg BootstrapConfig) error {
 	const where = "auth.BootstrapAdmin"
 	n, err := repo.Count(ctx)
 	if err != nil {

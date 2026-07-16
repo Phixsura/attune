@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -118,6 +119,52 @@ func TestConsoleSPAHandler(t *testing.T) {
 			t.Fatalf("dot path not handled: body = %q, want index.html", body)
 		}
 	})
+}
+
+func TestConsoleStaticDirAndMount(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+	dist := filepath.Join(root, "console", "dist")
+	if err := os.MkdirAll(dist, 0o755); err != nil {
+		t.Fatalf("mkdir console dist: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<!doctype html>mounted"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dist, "app.js"), []byte("console.log('mounted')"), 0o644); err != nil {
+		t.Fatalf("write app.js: %v", err)
+	}
+
+	dir, ok := consoleStaticDir()
+	if !ok {
+		t.Fatal("consoleStaticDir did not find console/dist")
+	}
+	if dir == "console/dist" {
+		r := chi.NewRouter()
+		mountConsoleStatic(context.Background(), r)
+
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/console", nil))
+		if rec.Code != http.StatusMovedPermanently {
+			t.Fatalf("/console status = %d, want %d", rec.Code, http.StatusMovedPermanently)
+		}
+		if got := rec.Header().Get("Location"); got != "/console/" {
+			t.Fatalf("Location = %q, want /console/", got)
+		}
+
+		rec = httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/console/app.js", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("/console/app.js status = %d, want %d", rec.Code, http.StatusOK)
+		}
+		body, err := io.ReadAll(rec.Result().Body)
+		if err != nil {
+			t.Fatalf("read app.js body: %v", err)
+		}
+		if got := string(body); got != "console.log('mounted')" {
+			t.Fatalf("app.js body = %q, want mounted asset", got)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
