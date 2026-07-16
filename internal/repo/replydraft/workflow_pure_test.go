@@ -926,6 +926,138 @@ func TestGeneratedDraftLegacySyncFailures(t *testing.T) {
 	}
 }
 
+func TestDraftWriteHelpersReturnErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repo := DraftTaskRepo{}
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	draft := testRepoDraft(StatusSuggested, now)
+	snapshot := feedbackSnapshot{Fingerprint: "source-fp", Metadata: []byte(`{}`)}
+	boom := errors.New("write failed")
+
+	if err := repo.archiveDraftTx(ctx, ptrext.Of(fakeTx{execErrs: []error{boom}}), draft.ID); err == nil {
+		t.Fatalf("archiveDraftTx error = nil, want wrapped exec error")
+	}
+	if _, err := repo.insertDraftCycleTx(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: boom}}}), draft.TenantID, draft.FeedbackID, 1, snapshot); err == nil {
+		t.Fatalf("insertDraftCycleTx error = nil, want wrapped row error")
+	}
+	if _, err := repo.insertRevisionTx(ctx, ptrext.Of(fakeTx{}), draft, "ai", " ", nil, "system"); !errors.Is(err, ErrInvalidDraftState) {
+		t.Fatalf("insertRevisionTx blank content = %v, want ErrInvalidDraftState", err)
+	}
+	if _, err := repo.insertRevisionTx(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: boom}}}), draft, "ai", "content", nil, "system"); err == nil {
+		t.Fatalf("insertRevisionTx row error = nil, want wrapped row error")
+	}
+	if err := repo.insertEventTx(ctx, ptrext.Of(fakeTx{execErrs: []error{boom}}), draft, draft.ActiveRevisionID, "", "edit", Actor{}, "", nil); err == nil {
+		t.Fatalf("insertEventTx error = nil, want wrapped exec error")
+	}
+}
+
+func TestEditDraftHelperPropagatesLegacySyncFailures(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repo := DraftTaskRepo{}
+	draftID := "11111111-1111-1111-1111-111111111111"
+	revisionID := "22222222-2222-2222-2222-222222222222"
+	boom := errors.New("legacy failed")
+
+	err := repo.markEditedTx(ctx, ptrext.Of(fakeTx{execErrs: []error{boom}}), draftID, revisionID, "content", Actor{ID: "admin-1"})
+	if err == nil {
+		t.Fatalf("markEditedTx update error = nil, want wrapped exec error")
+	}
+	err = repo.markEditedTx(ctx, ptrext.Of(fakeTx{execErrs: []error{nil, boom}}), draftID, revisionID, "content", Actor{ID: "admin-1"})
+	if err == nil {
+		t.Fatalf("markEditedTx legacy sync error = nil, want wrapped exec error")
+	}
+	err = repo.markEditedTx(ctx, ptrext.Of(fakeTx{execs: []pgconn.CommandTag{
+		pgconn.NewCommandTag("UPDATE 1"), pgconn.NewCommandTag("UPDATE 0"),
+	}}), draftID, revisionID, "content", Actor{ID: "admin-1"})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("markEditedTx missing legacy row = %v, want ErrNotFound", err)
+	}
+}
+
+func TestApproveDraftTxRejectsInvalidAndHookFailures(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	snapshot := testFeedbackSnapshot("Login fails", "web", "user-1", `{}`, "Login failure", "Cannot login", `{}`, "en", "completed")
+	repo := DraftTaskRepo{}
+
+	noRevision := testRepoDraft(StatusSuggested, now)
+	noRevision.ActiveRevisionID = ""
+	_, err := repo.approveDraftTx(context.Background(), ptrext.Of(fakeTx{rows: []fakeRow{draftRow(noRevision)}}), noRevision.TenantID, noRevision.FeedbackID, noRevision.Revision, Actor{})
+	if !errors.Is(err, ErrInvalidDraftState) {
+		t.Fatalf("approveDraftTx no active revision = %v, want ErrInvalidDraftState", err)
+	}
+
+	draft := testRepoDraft(StatusSuggested, now)
+	draft.SourceFingerprint = snapshot.Fingerprint
+	_, err = repo.approveDraftTx(context.Background(), ptrext.Of(fakeTx{rows: []fakeRow{
+		draftRow(draft),
+		feedbackSnapshotRow("Login fails", "web", "user-1", `{}`, "Login failure", "Cannot login", `{}`, "en", "completed"),
+		{err: pgx.ErrNoRows},
+	}}), draft.TenantID, draft.FeedbackID, draft.Revision, Actor{})
+	if !errors.Is(err, ErrHookNotFound) {
+		t.Fatalf("approveDraftTx missing hook = %v, want ErrHookNotFound", err)
+	}
+}
+
+func TestApproveDraftTxWriteFailures(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	snapshot := testFeedbackSnapshot("Login fails", "web", "user-1", `{}`, "Login failure", "Cannot login", `{}`, "en", "completed")
+	draft := testRepoDraft(StatusSuggested, now)
+	draft.SourceFingerprint = snapshot.Fingerprint
+	hook := testRepoHook(now)
+	repo := DraftTaskRepo{}
+	boom := errors.New("approve failed")
+
+	for _, execErrs := range [][]error{{boom}, {nil, boom}} {
+		_, err := repo.approveDraftTx(context.Background(), ptrext.Of(fakeTx{rows: []fakeRow{
+			draftRow(draft),
+			feedbackSnapshotRow("Login fails", "web", "user-1", `{}`, "Login failure", "Cannot login", `{}`, "en", "completed"),
+			hookRow(hook),
+		}, execErrs: execErrs}), draft.TenantID, draft.FeedbackID, draft.Revision, Actor{Type: "admin", ID: "admin-1"})
+		if err == nil {
+			t.Fatalf("approveDraftTx execErrs=%v returned nil, want error", execErrs)
+		}
+	}
+	_, err := repo.approveDraftTx(context.Background(), ptrext.Of(fakeTx{rows: []fakeRow{
+		draftRow(draft),
+		feedbackSnapshotRow("Login fails", "web", "user-1", `{}`, "Login failure", "Cannot login", `{}`, "en", "completed"),
+		hookRow(hook),
+		{err: boom},
+	}}), draft.TenantID, draft.FeedbackID, draft.Revision, Actor{Type: "admin", ID: "admin-1"})
+	if err == nil {
+		t.Fatalf("approveDraftTx reload error = nil, want wrapped row error")
+	}
+}
+
+func TestRejectDraftTxFailureBranches(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	repo := DraftTaskRepo{}
+	sent := testRepoDraft(StatusSent, now)
+	boom := errors.New("reject failed")
+
+	_, err := repo.rejectDraftTx(context.Background(), ptrext.Of(fakeTx{rows: []fakeRow{draftRow(sent)}}), sent.TenantID, sent.FeedbackID, sent.Revision, Actor{})
+	if !errors.Is(err, ErrInvalidDraftState) {
+		t.Fatalf("rejectDraftTx sent draft = %v, want ErrInvalidDraftState", err)
+	}
+
+	for _, execErrs := range [][]error{{boom}, {nil, boom}} {
+		draft := testRepoDraft(StatusSuggested, now)
+		_, err = repo.rejectDraftTx(context.Background(), ptrext.Of(fakeTx{rows: []fakeRow{draftRow(draft)}, execErrs: execErrs}), draft.TenantID, draft.FeedbackID, draft.Revision, Actor{Type: "admin", ID: "admin-1"})
+		if err == nil {
+			t.Fatalf("rejectDraftTx execErrs=%v returned nil, want error", execErrs)
+		}
+	}
+}
+
 func TestLoadFreshDeliveryHookMarksStaleWhenApprovedHookDisappears(t *testing.T) {
 	t.Parallel()
 
@@ -1108,7 +1240,10 @@ func (tx *fakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFr
 	return 0, nil
 }
 func (tx *fakeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (tx *fakeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+func (tx *fakeTx) LargeObjects() pgx.LargeObjects {
+	return pgx.LargeObjects{}
+}
+
 func (tx *fakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }

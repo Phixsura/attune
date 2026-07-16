@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Secret keyset parsing now correctly skips unknown AES-GCM key proto fields
+  instead of re-reading skipped bytes as field tags.
+
 - Request notification target test/delete and delivery retry buttons now only
   enter their disabled spinner state while the matching mutation is pending,
   instead of staying disabled after a completed attempt.

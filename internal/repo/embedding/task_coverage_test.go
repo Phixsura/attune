@@ -156,6 +156,34 @@ func TestCreateTaskTxUsesTransaction(t *testing.T) {
 	}
 }
 
+func TestClusterQueryBuildersReturnPoolErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r := newUnreachableTaskRepo(t)
+	clusterID := uuid.MustParse("aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb")
+	cursorTime := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	cursorID := uuid.MustParse("bbbbbbbb-1111-2222-3333-cccccccccccc")
+
+	expectRepoErr(t, "queryClusters latest", func() error {
+		_, err := r.queryClusters(ctx, "tenant-1", normalizeClusterOpts(ClusterListOpts{Limit: 10}), time.Time{}, uuid.Nil)
+		return err
+	})
+	expectRepoErr(t, "queryClusters count cursor query", func() error {
+		_, err := r.queryClusters(ctx, "tenant-1", normalizeClusterOpts(ClusterListOpts{Limit: 10, Sort: "count", Query: "billing"}), cursorTime, cursorID)
+		return err
+	})
+	expectRepoErr(t, "queryClusterMembers first page", func() error {
+		_, err := r.queryClusterMembers(ctx, "tenant-1", clusterID, 10, time.Time{}, 0)
+		return err
+	})
+	expectRepoErr(t, "queryClusterMembers cursor page", func() error {
+		_, err := r.queryClusterMembers(ctx, "tenant-1", clusterID, 10, cursorTime, 42)
+		return err
+	})
+}
+
 func newUnreachableTaskRepo(t *testing.T) *TaskRepo {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
