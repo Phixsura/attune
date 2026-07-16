@@ -104,14 +104,12 @@ func TestPublishInputAndChannelMappings(t *testing.T) {
 	}
 }
 
-func TestProtoMappersCoverOptionalFields(t *testing.T) {
+func TestSettingsAndEventMappersCoverOptionalFields(t *testing.T) {
 	now := time.Date(2026, 7, 16, 5, 0, 0, 0, time.UTC)
 	requestID := uuid.New()
 	updateID := uuid.New()
-	contactID := uuid.New()
-	targetID := uuid.New()
+	followupID := uuid.New()
 	h := NewHandler(svc.New(nil, handlerSecrets{}, nil, ""))
-
 	settings := h.settingsToProto(repo.Settings{
 		TenantID:                     "tenant-1",
 		EmailEnabled:                 true,
@@ -136,6 +134,7 @@ func TestProtoMappersCoverOptionalFields(t *testing.T) {
 		TenantID:         "tenant-1",
 		PrimaryRequestID: ptrext.Of(requestID),
 		UpdateID:         ptrext.Of(updateID),
+		DirectFollowupID: ptrext.Of(followupID),
 		EventType:        repo.EventTypeShipped,
 		Status:           repo.EventStatusPending,
 		DedupeKey:        "dedupe",
@@ -145,10 +144,17 @@ func TestProtoMappersCoverOptionalFields(t *testing.T) {
 		CreatedAt: now,
 	})
 	if event.GetEventType() != attunev1.RequestNotificationEventType_REQUEST_NOTIFICATION_EVENT_TYPE_SHIPPED ||
-		event.GetRequestId() != requestID.String() || event.GetUpdateId() != updateID.String() {
+		event.GetRequestId() != requestID.String() || event.GetUpdateId() != updateID.String() ||
+		event.GetDirectFollowupId() != followupID.String() {
 		t.Fatalf("event proto = %+v", event)
 	}
+}
 
+func TestDeliveryAndSubscriberMappersCoverOptionalFields(t *testing.T) {
+	now := time.Date(2026, 7, 16, 5, 0, 0, 0, time.UTC)
+	contactID := uuid.New()
+	targetID := uuid.New()
+	h := NewHandler(svc.New(nil, handlerSecrets{}, nil, ""))
 	delivery := deliveryToProto(repo.Delivery{
 		ID:                42,
 		TenantID:          "tenant-1",
@@ -190,6 +196,94 @@ func TestProtoMappersCoverOptionalFields(t *testing.T) {
 	if subscriber.GetContactId() != contactID.String() || subscriber.GetEmailRedacted() != "j***@example.test" ||
 		subscriber.GetCreatedAt() == "" || subscriber.GetUnsubscribedAt() == "" {
 		t.Fatalf("subscriber proto = %+v", subscriber)
+	}
+}
+
+func TestSenderAndWebhookMappersCoverOptionalTimes(t *testing.T) {
+	now := time.Date(2026, 7, 16, 5, 0, 0, 0, time.UTC)
+	targetID := uuid.New()
+	h := NewHandler(svc.New(nil, handlerSecrets{}, nil, ""))
+	verified := h.senderToProto(repo.Sender{
+		ID:               uuid.New(),
+		FromEmailPayload: []byte("notify@example.test"),
+		ReplyToPayload:   []byte("support@example.test"),
+		VerifiedAt:       ptrext.Of(now),
+	})
+	if verified.GetVerifiedAt() == "" {
+		t.Fatalf("sender proto missing verified_at: %+v", verified)
+	}
+	checked := h.webhookTargetToProto(repo.WebhookTarget{
+		ID:           targetID,
+		URLPayload:   []byte("https://hooks.example.test/notify"),
+		VerifiedAt:   ptrext.Of(now),
+		LastTestedAt: ptrext.Of(now),
+	})
+	if checked.GetVerifiedAt() == "" || checked.GetLastTestedAt() == "" {
+		t.Fatalf("webhook target proto missing optional times: %+v", checked)
+	}
+}
+
+func TestEventAndChannelMapperBranches(t *testing.T) {
+	if got := eventTypeToProto(repo.EventTypeStatusChanged); got != attunev1.RequestNotificationEventType_REQUEST_NOTIFICATION_EVENT_TYPE_STATUS_CHANGED {
+		t.Fatalf("eventTypeToProto(status) = %s", got)
+	}
+	if got := eventTypeToProto(repo.EventTypeNeedInfo); got != attunev1.RequestNotificationEventType_REQUEST_NOTIFICATION_EVENT_TYPE_NEED_INFO_DIRECT {
+		t.Fatalf("eventTypeToProto(need info) = %s", got)
+	}
+	if got := eventTypeToProto(repo.EventTypeModerator); got != attunev1.RequestNotificationEventType_REQUEST_NOTIFICATION_EVENT_TYPE_MODERATOR_RESPONSE {
+		t.Fatalf("eventTypeToProto(moderator) = %s", got)
+	}
+	if got := eventTypeToProto(repo.EventTypeChangelog); got != attunev1.RequestNotificationEventType_REQUEST_NOTIFICATION_EVENT_TYPE_CHANGELOG_POST_PUBLISHED {
+		t.Fatalf("eventTypeToProto(changelog) = %s", got)
+	}
+	if got := eventTypeToProto("unknown"); got != attunev1.RequestNotificationEventType_REQUEST_NOTIFICATION_EVENT_TYPE_UNSPECIFIED {
+		t.Fatalf("eventTypeToProto(unknown) = %s", got)
+	}
+	if got := channelToProto("unknown"); got != attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED {
+		t.Fatalf("channelToProto(unknown) = %s", got)
+	}
+	if got := channelToRepo(attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_EMAIL); got != repo.ChannelEmail {
+		t.Fatalf("channelToRepo(email) = %q", got)
+	}
+	if got := channelToRepo(attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_WEBHOOK); got != repo.ChannelWebhook {
+		t.Fatalf("channelToRepo(webhook) = %q", got)
+	}
+	if got := channelToRepo(attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED); got != "" {
+		t.Fatalf("channelToRepo(unspecified) = %q", got)
+	}
+}
+
+func TestUUIDAndTimeMapperBranches(t *testing.T) {
+	requestID := uuid.New()
+	if id, err := uuidOrNil(" "); err != nil || id != nil {
+		t.Fatalf("uuidOrNil(blank) = %+v, %v", id, err)
+	}
+	if id, err := uuidOrNil(requestID.String()); err != nil || id == nil || *id != requestID {
+		t.Fatalf("uuidOrNil(valid) = %+v, %v", id, err)
+	}
+	if _, err := uuidOrNil("bad"); err == nil {
+		t.Fatalf("uuidOrNil(bad) error = nil")
+	}
+	if got := timeString(time.Time{}); got != "" {
+		t.Fatalf("timeString(zero) = %q", got)
+	}
+}
+
+func TestAuditAndStructMapperBranches(t *testing.T) {
+	if got := providerEventAuditAction("hard_bounce"); got != "request_notification.bounce" {
+		t.Fatalf("providerEventAuditAction(hard_bounce) = %q", got)
+	}
+	if got := providerEventAuditAction("abuse_complaint"); got != "request_notification.complaint" {
+		t.Fatalf("providerEventAuditAction(abuse_complaint) = %q", got)
+	}
+	if got := providerEventAuditAction("suppressed"); got != "request_notification.suppress_contact" {
+		t.Fatalf("providerEventAuditAction(suppressed) = %q", got)
+	}
+	if got := structMap(nil); got != nil {
+		t.Fatalf("structMap(nil) = %+v", got)
+	}
+	if got := mapStruct(map[string]any{"bad": func() {}}).AsMap(); len(got) != 0 {
+		t.Fatalf("mapStruct(invalid) = %+v", got)
 	}
 }
 

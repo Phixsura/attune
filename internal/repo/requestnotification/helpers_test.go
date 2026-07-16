@@ -378,6 +378,110 @@ func TestCreatePublicUpdateEventTxBuildsUpdateChain(t *testing.T) {
 	}
 }
 
+func TestUnsubscribeTokenHelpersUseRequestAndTenantScopes(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
+	tokenID := uuid.New()
+	contactID := uuid.New()
+	requestID := uuid.New()
+	subID := uuid.New()
+
+	tx := ptrext.Of(eventTx{
+		rows: []pgx.Row{
+			scanRow{
+				tokenID, "tenant-1", contactID, ptrext.Of(requestID),
+				SubscriptionScopeRequest, ptrext.Of(now.Add(time.Hour)),
+				(*time.Time)(nil), now,
+			},
+			scanRow{
+				subID, "tenant-1",
+				pgtype.UUID{Bytes: requestID, Valid: true},
+				contactID, SubscriptionScopeRequest, SourceVoter,
+				SubscriptionStatusActive, ptrext.Of(now), now, now,
+			},
+		},
+	})
+	token, err := lockUnsubscribeToken(ctx, tx, "tenant-1", "hash")
+	if err != nil {
+		t.Fatalf("lockUnsubscribeToken() error = %v", err)
+	}
+	if token.ID != tokenID || ptrext.Indirect(token.RequestID) != requestID {
+		t.Fatalf("token = %+v", token)
+	}
+	if err := markUnsubscribeTokenUsed(ctx, tx, token.ID, "browser"); err != nil {
+		t.Fatalf("markUnsubscribeTokenUsed() error = %v", err)
+	}
+	sub, err := unsubscribeSubscriptions(ctx, tx, token)
+	if err != nil {
+		t.Fatalf("unsubscribeSubscriptions(request) error = %v", err)
+	}
+	if sub.ID != subID || sub.RequestID != requestID || tx.execIdx != 1 {
+		t.Fatalf("subscription = %+v execIdx=%d", sub, tx.execIdx)
+	}
+
+	tenantTx := ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
+		uuid.New(), "tenant-1",
+		pgtype.UUID{},
+		contactID,
+		SubscriptionScopeTenantUpdates, SourceManual,
+		"unsubscribed", ptrext.Of(now), now, now,
+	}}})
+	tenantSub, err := unsubscribeSubscriptions(ctx, tenantTx, UnsubscribeToken{
+		ID:        uuid.New(),
+		TenantID:  "tenant-1",
+		ContactID: contactID,
+		Scope:     SubscriptionScopeTenantUpdates,
+		CreatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("unsubscribeSubscriptions(tenant) error = %v", err)
+	}
+	if tenantSub.RequestID != uuid.Nil || tenantSub.Scope != SubscriptionScopeTenantUpdates {
+		t.Fatalf("tenant subscription = %+v", tenantSub)
+	}
+}
+
+func TestPreferenceTokenAndUnsubscribeValidationBranches(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
+	contactID := uuid.New()
+	requestID := uuid.New()
+	tx := ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
+		uuid.New(), "tenant-1", contactID, (*uuid.UUID)(nil),
+		SubscriptionScopeTenantUpdates, ptrext.Of(now.Add(time.Hour)),
+		(*time.Time)(nil), now,
+	}}})
+	token, err := lockPreferenceToken(ctx, tx, "tenant-1", "hash")
+	if err != nil {
+		t.Fatalf("lockPreferenceToken() error = %v", err)
+	}
+	if token.ContactID != contactID || token.RequestID != nil {
+		t.Fatalf("preference token = %+v", token)
+	}
+	if got := normalizeUnsubscribeScope(" "); got != SubscriptionScopeRequest {
+		t.Fatalf("normalizeUnsubscribeScope(blank) = %q", got)
+	}
+	if got := normalizeUnsubscribeScope("custom"); got != "custom" {
+		t.Fatalf("normalizeUnsubscribeScope(custom) = %q", got)
+	}
+	if err := validateUnsubscribeTokenShape(SubscriptionScopeRequest, nil); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("validate request nil error = %v, want invalid input", err)
+	}
+	zero := uuid.Nil
+	if err := validateUnsubscribeTokenShape(SubscriptionScopeRequest, ptrext.Of(zero)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("validate request zero error = %v, want invalid input", err)
+	}
+	if err := validateUnsubscribeTokenShape(SubscriptionScopeTenantUpdates, ptrext.Of(requestID)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("validate tenant with request error = %v, want invalid input", err)
+	}
+	if _, err := unsubscribeSubscriptions(ctx, ptrext.Of(eventTx{}), UnsubscribeToken{Scope: "custom"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unsubscribeSubscriptions(custom) error = %v, want invalid input", err)
+	}
+	if _, err := lockUnsubscribeToken(ctx, ptrext.Of(eventTx{rows: []pgx.Row{errScanRow{err: pgx.ErrNoRows}}}), "tenant-1", "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("lockUnsubscribeToken(no rows) error = %v, want not found", err)
+	}
+}
+
 type scanRow []any
 
 func (r scanRow) Scan(dest ...any) error {

@@ -47,31 +47,35 @@ type flowRepo struct {
 	target     repo.WebhookTarget
 	targets    []repo.WebhookTarget
 
-	upsertedSettings  repo.Settings
-	upsertedSender    repo.Sender
-	createdTarget     repo.WebhookTarget
-	updatedTarget     repo.WebhookTarget
-	createdEvents     []repo.PublicUpdateInput
-	inserted          []repo.DeliveryInput
-	tokens            []string
-	tokenScopes       []string
-	resolvedSnapshot  map[string]any
-	deadDeliveries    []int64
-	failedDeliveries  []int64
-	delivered         []int64
-	claimedEvents     []repo.Event
-	claimedDeliveries []repo.Delivery
-	tx                *serviceTx
-	tenantIDBySlug    string
-	usedTokenHash     string
-	confirmedHash     string
-	upsertedContact   repo.Contact
-	upsertedSub       repo.Subscription
-	tenantEmailCount  int
-	contactEmailCount map[uuid.UUID]int
-	suppressedHash    string
-	suppressedKind    string
-	suppressedReason  string
+	upsertedSettings   repo.Settings
+	upsertedSender     repo.Sender
+	createdTarget      repo.WebhookTarget
+	updatedTarget      repo.WebhookTarget
+	createdEvents      []repo.PublicUpdateInput
+	inserted           []repo.DeliveryInput
+	tokens             []string
+	tokenScopes        []string
+	resolvedSnapshot   map[string]any
+	deadDeliveries     []int64
+	failedDeliveries   []int64
+	delivered          []int64
+	claimedEvents      []repo.Event
+	claimedDeliveries  []repo.Delivery
+	tx                 *serviceTx
+	tenantIDBySlug     string
+	usedTokenHash      string
+	confirmedHash      string
+	upsertedContact    repo.Contact
+	upsertedSub        repo.Subscription
+	tenantEmailCount   int
+	contactEmailCount  map[uuid.UUID]int
+	suppressedHash     string
+	suppressedKind     string
+	suppressedReason   string
+	claimEventsErr     error
+	claimDeliveriesErr error
+	markDeliveredErr   error
+	markEventFailed    []uuid.UUID
 }
 
 func newFlowService(f *flowRepo) *Service {
@@ -126,7 +130,7 @@ func TestSettingsFlowNormalizesAndPersists(t *testing.T) {
 	}
 }
 
-func TestSenderAndWebhookConfigurationFlow(t *testing.T) {
+func TestSenderConfigurationFlow(t *testing.T) {
 	ctx := context.Background()
 	fake := &flowRepo{}
 	service := newFlowService(fake)
@@ -150,7 +154,12 @@ func TestSenderAndWebhookConfigurationFlow(t *testing.T) {
 	if got := service.RedactedEmailPayload(sender.FromEmailPayload); got != "n***@example.test" {
 		t.Fatalf("RedactedEmailPayload() = %q", got)
 	}
+}
 
+func TestWebhookConfigurationFlow(t *testing.T) {
+	ctx := context.Background()
+	fake := &flowRepo{}
+	service := newFlowService(fake)
 	target, err := service.CreateWebhookTarget(ctx, WebhookTargetInput{
 		TenantID:                 "tenant-1",
 		Name:                     " CRM ",
@@ -185,6 +194,75 @@ func TestSenderAndWebhookConfigurationFlow(t *testing.T) {
 	}
 	if len(updated.SecretPayload) != 0 {
 		t.Fatalf("updated target secret should be cleared")
+	}
+
+	updated, err = service.UpdateWebhookTarget(ctx, WebhookTargetInput{
+		TenantID:  "tenant-1",
+		ID:        target.ID,
+		URL:       "https://new-hooks.example.test/notify",
+		Secret:    "new-secret",
+		SecretSet: true,
+		EventMask: map[string]any{repo.EventTypeShipped: true},
+	})
+	if err != nil {
+		t.Fatalf("UpdateWebhookTarget(url+secret) error = %v", err)
+	}
+	if updated.URLHost != "new-hooks.example.test" || len(updated.SecretPayload) == 0 ||
+		updated.EventMask[repo.EventTypeShipped] != true {
+		t.Fatalf("updated target = %+v, want new url, secret, and event mask", updated)
+	}
+}
+
+func TestConfigurationRejectsInvalidInputs(t *testing.T) {
+	ctx := context.Background()
+	service := newFlowService(&flowRepo{})
+	if _, err := service.UpsertSender(ctx, SenderInput{
+		TenantID:    "tenant-1",
+		FromEmail:   "notify@example.test",
+		ReplyTo:     "bad",
+		ProviderURL: "https://mail.example.test/send",
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpsertSender(invalid reply-to) error = %v, want validation", err)
+	}
+	if _, err := service.UpsertSender(ctx, SenderInput{
+		TenantID:    "tenant-1",
+		FromEmail:   "notify@example.test",
+		ProviderURL: "http://mail.example.test/send",
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpsertSender(invalid provider url) error = %v, want validation", err)
+	}
+	if _, err := service.CreateWebhookTarget(ctx, WebhookTargetInput{
+		TenantID: "tenant-1",
+		URL:      "http://hooks.example.test/notify",
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("CreateWebhookTarget(invalid url) error = %v, want validation", err)
+	}
+	if err := validateOutboundURL("https://user:pass@hooks.example.test/notify"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("validateOutboundURL(user info) error = %v, want validation", err)
+	}
+	if err := validateOutboundURL("://bad"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("validateOutboundURL(parse error) error = %v, want validation", err)
+	}
+	if got := (&Service{}).RedactedEmailPayload([]byte("notify@example.test")); got != "" {
+		t.Fatalf("RedactedEmailPayload(no secret store) = %q", got)
+	}
+	if got := (&Service{}).WebhookTargetURL(repo.WebhookTarget{URLPayload: []byte("https://hooks.example.test/notify")}); got != "" {
+		t.Fatalf("WebhookTargetURL(no secret store) = %q", got)
+	}
+	if !errors.Is(mapRepoError(repo.ErrInvalidInput), ErrValidation) {
+		t.Fatalf("mapRepoError(invalid input) did not map to validation")
+	}
+	if got := defaultSource("submitter"); got != repo.SourceSubmitter {
+		t.Fatalf("defaultSource(submitter) = %q", got)
+	}
+	if got := defaultSource("unknown"); got != repo.SourceFollower {
+		t.Fatalf("defaultSource(unknown) = %q", got)
+	}
+	if got := defaultActor(" "); got != "portal" {
+		t.Fatalf("defaultActor(blank) = %q", got)
+	}
+	if got := defaultActor(" user-1 "); got != "user-1" {
+		t.Fatalf("defaultActor(user) = %q", got)
 	}
 }
 
@@ -285,6 +363,49 @@ func TestResolveEventSkipsDisabledEventPolicy(t *testing.T) {
 		fake.resolvedSnapshot["webhook"] != 0 ||
 		fake.resolvedSnapshot["suppressed_reason"] != "event_type_disabled" {
 		t.Fatalf("inserted=%+v snapshot=%+v, want resolved without deliveries", fake.inserted, fake.resolvedSnapshot)
+	}
+}
+
+func TestResolveEventSkipsMissingSenderAndMaskedWebhookTarget(t *testing.T) {
+	ctx := context.Background()
+	fake, service, requestID, updateID := newPreviewResolveFixture(t)
+	fake.sender = repo.Sender{}
+	fake.targets[0].EventMask = map[string]any{repo.EventTypeStatusChanged: true}
+	event := repo.Event{
+		ID:               uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+		TenantID:         "tenant-1",
+		EventType:        repo.EventTypeShipped,
+		PrimaryRequestID: ptrext.Of(requestID),
+		UpdateID:         ptrext.Of(updateID),
+		RecipientSnapshot: map[string]any{
+			"channels": []string{repo.ChannelEmail, repo.ChannelWebhook},
+		},
+		CreatedAt: time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC),
+	}
+	if err := service.resolveEvent(ctx, event, "worker-1"); err != nil {
+		t.Fatalf("resolveEvent() error = %v", err)
+	}
+	if fake.resolvedSnapshot["email"] != 0 || fake.resolvedSnapshot["webhook"] != 0 || len(fake.inserted) != 0 {
+		t.Fatalf("snapshot=%+v inserted=%+v, want skipped email and webhook", fake.resolvedSnapshot, fake.inserted)
+	}
+}
+
+func TestResolveEventReturnsSenderDecryptError(t *testing.T) {
+	ctx := context.Background()
+	_, service, requestID, updateID := newPreviewResolveFixture(t)
+	service.secrets = nil
+	event := repo.Event{
+		ID:               uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+		TenantID:         "tenant-1",
+		EventType:        repo.EventTypeShipped,
+		PrimaryRequestID: ptrext.Of(requestID),
+		UpdateID:         ptrext.Of(updateID),
+		RecipientSnapshot: map[string]any{
+			"channels": []string{repo.ChannelEmail},
+		},
+	}
+	if err := service.resolveEvent(ctx, event, "worker-1"); err == nil {
+		t.Fatalf("resolveEvent(no secret store) error = nil")
 	}
 }
 
@@ -489,6 +610,15 @@ func TestDeliveryTargetsAndWorkerTerminalFailure(t *testing.T) {
 	if len(fake.deadDeliveries) != 1 || fake.deadDeliveries[0] != 99 {
 		t.Fatalf("dead deliveries = %+v, want delivery 99", fake.deadDeliveries)
 	}
+}
+
+func TestWorkerRunReturnsWhenContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	worker := NewWorker(nil)
+	worker.Configure(time.Millisecond, 1, 1)
+	worker.Run(ctx)
 }
 
 func TestPublicSubscriptionTokenFlow(t *testing.T) {
@@ -771,6 +901,28 @@ func TestRecordProviderSuppression(t *testing.T) {
 	if _, err := service.RecordProviderSuppression(ctx, ProviderSuppressionInput{TenantID: "tenant-1", Email: "bad", EventType: "bounce"}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("RecordProviderSuppression(invalid email) error = %v, want validation", err)
 	}
+	if _, err := service.RecordProviderSuppression(ctx, ProviderSuppressionInput{
+		TenantID:  "tenant-1",
+		Email:     "jane@example.test",
+		EventType: "abuse_complaint",
+	}); err != nil {
+		t.Fatalf("RecordProviderSuppression(complaint alias) error = %v", err)
+	}
+	if fake.suppressedKind != "complaint" || fake.suppressedReason != "provider_complaint" {
+		t.Fatalf("complaint suppression kind=%q reason=%q", fake.suppressedKind, fake.suppressedReason)
+	}
+	if got := providerSuppressionReason("bounce", ProviderSuppressionInput{Reason: "hard bounce", ProviderMessageID: "msg-2"}); got != "hard bounce message_id=msg-2" {
+		t.Fatalf("providerSuppressionReason(message only) = %q", got)
+	}
+	if got := providerSuppressionReason("suppression", ProviderSuppressionInput{Provider: "postmark"}); got != "provider_suppression provider=postmark" {
+		t.Fatalf("providerSuppressionReason(provider only) = %q", got)
+	}
+	if _, err := normalizeProviderSuppressionKind("provider_suppression"); err != nil {
+		t.Fatalf("normalizeProviderSuppressionKind(provider_suppression) error = %v", err)
+	}
+	if _, err := normalizeProviderSuppressionKind("unknown"); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeProviderSuppressionKind(unknown) error = %v, want validation", err)
+	}
 }
 
 func TestWorkerSendsEmailAndWebhookDeliveries(t *testing.T) {
@@ -814,6 +966,91 @@ func TestWorkerSendsEmailAndWebhookDeliveries(t *testing.T) {
 	}
 }
 
+func TestWorkerHandlesClaimAndRetryableDeliveryFailures(t *testing.T) {
+	registerNotificationTestChannels(t)
+	ctx := context.Background()
+	targetID := uuid.MustParse("dededede-dede-dede-dede-dededededede")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	fake := &flowRepo{
+		claimEventsErr: errors.New("events unavailable"),
+		target: repo.WebhookTarget{
+			ID:            targetID,
+			TenantID:      "tenant-1",
+			URLPayload:    []byte(server.URL),
+			SecretPayload: []byte("hook-secret"),
+		},
+		claimedDeliveries: []repo.Delivery{{
+			ID:              201,
+			TenantID:        "tenant-1",
+			Channel:         repo.ChannelWebhook,
+			Payload:         notificationEnvelopePayload(),
+			WebhookTargetID: ptrext.Of(targetID),
+		}},
+	}
+	service := newFlowService(fake)
+	service.transport = notify.NewTransport(server.Client(), notify.NoRetry())
+	worker := NewWorker(service)
+	worker.Configure(time.Millisecond, 10, 3)
+	worker.ProcessOnce(ctx)
+	if len(fake.failedDeliveries) != 1 || fake.failedDeliveries[0] != 201 {
+		t.Fatalf("failed deliveries = %+v, want retryable delivery 201", fake.failedDeliveries)
+	}
+
+	fake.failedDeliveries = nil
+	fake.deadDeliveries = nil
+	fake.claimedDeliveries[0].Attempts = 2
+	worker.ProcessOnce(ctx)
+	if len(fake.deadDeliveries) != 1 || fake.deadDeliveries[0] != 201 {
+		t.Fatalf("dead deliveries = %+v, want exhausted delivery 201", fake.deadDeliveries)
+	}
+}
+
+func TestWorkerHandlesDeliveryClaimAndMarkDeliveredErrors(t *testing.T) {
+	registerNotificationTestChannels(t)
+	ctx := context.Background()
+	targetID := uuid.MustParse("fafafafa-fafa-fafa-fafa-fafafafafafa")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	fake := &flowRepo{
+		target: repo.WebhookTarget{
+			ID:            targetID,
+			TenantID:      "tenant-1",
+			URLPayload:    []byte(server.URL),
+			SecretPayload: []byte("hook-secret"),
+		},
+		claimedDeliveries: []repo.Delivery{{
+			ID:              301,
+			TenantID:        "tenant-1",
+			Channel:         repo.ChannelWebhook,
+			Payload:         notificationEnvelopePayload(),
+			WebhookTargetID: ptrext.Of(targetID),
+		}},
+		markDeliveredErr: errors.New("mark failed"),
+	}
+	service := newFlowService(fake)
+	service.transport = notify.NewTransport(server.Client(), notify.NoRetry())
+	worker := NewWorker(service)
+	worker.Configure(time.Millisecond, 10, 3)
+	worker.ProcessOnce(ctx)
+	if len(fake.delivered) != 1 || fake.delivered[0] != 301 {
+		t.Fatalf("delivered = %+v, want mark attempt despite repo error", fake.delivered)
+	}
+
+	fake.claimDeliveriesErr = errors.New("delivery claim failed")
+	fake.delivered = nil
+	worker.ProcessOnce(ctx)
+	if len(fake.delivered) != 0 {
+		t.Fatalf("delivered = %+v, want no sends when claim fails", fake.delivered)
+	}
+}
+
 func TestWebhookTargetConnectivity(t *testing.T) {
 	registerNotificationTestChannels(t)
 	ctx := context.Background()
@@ -838,10 +1075,40 @@ func TestWebhookTargetConnectivity(t *testing.T) {
 	if !result.OK || fake.target.LastTestedAt == nil {
 		t.Fatalf("result = %+v target = %+v", result, fake.target)
 	}
+
+	outbound.UnregisterForTest("raw-webhook")
+	if _, err := service.TestWebhookTarget(ctx, "tenant-1", targetID); !errors.Is(err, ErrValidation) {
+		t.Fatalf("TestWebhookTarget(no channel) error = %v, want validation", err)
+	}
 }
 
-func TestWorkerHelperBranches(t *testing.T) {
+func TestWebhookTargetConnectivityReportsSendFailure(t *testing.T) {
+	registerNotificationTestChannels(t)
 	ctx := context.Background()
+	targetID := uuid.MustParse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	fake := &flowRepo{target: repo.WebhookTarget{
+		ID:            targetID,
+		TenantID:      "tenant-1",
+		URLPayload:    []byte(server.URL),
+		SecretPayload: []byte("hook-secret"),
+	}}
+	service := newFlowService(fake)
+	service.transport = notify.NewTransport(server.Client(), notify.NoRetry())
+	result, err := service.TestWebhookTarget(ctx, " tenant-1 ", targetID)
+	if err != nil {
+		t.Fatalf("TestWebhookTarget(send failure) error = %v", err)
+	}
+	if result.OK || result.Message == "" {
+		t.Fatalf("result = %+v, want failed connectivity result", result)
+	}
+}
+
+func TestEventChannelRequestedBranches(t *testing.T) {
 	event := repo.Event{RecipientSnapshot: map[string]any{"channels": []string{repo.ChannelWebhook}}}
 	if eventChannelRequested(event, repo.ChannelEmail) {
 		t.Fatalf("eventChannelRequested(email) = true, want false")
@@ -850,11 +1117,68 @@ func TestWorkerHelperBranches(t *testing.T) {
 	if !eventChannelRequested(event, repo.ChannelEmail) {
 		t.Fatalf("eventChannelRequested(empty string) = false, want true")
 	}
+	event.RecipientSnapshot["channels"] = []string{}
+	if !eventChannelRequested(event, repo.ChannelEmail) {
+		t.Fatalf("eventChannelRequested(empty []string) = false, want true")
+	}
+	event.RecipientSnapshot["channels"] = 42
+	if eventChannelRequested(event, repo.ChannelEmail) {
+		t.Fatalf("eventChannelRequested(unknown type) = true, want false")
+	}
+}
+
+func TestWorkerNotificationCheckBranches(t *testing.T) {
+	ctx := context.Background()
 	check := wrapNotificationCheck(func(context.Context, int, []byte) error {
 		return outbound.ErrTerminal
 	})
 	if err := check(ctx, http.StatusBadRequest, nil); !errors.Is(err, notify.ErrTerminal) {
 		t.Fatalf("wrapped check error = %v, want notify terminal", err)
+	}
+	pass := wrapNotificationCheck(func(context.Context, int, []byte) error {
+		return errors.New("retry")
+	})
+	if err := pass(ctx, http.StatusInternalServerError, nil); err == nil || errors.Is(err, notify.ErrTerminal) {
+		t.Fatalf("wrapped retryable check error = %v, want retryable", err)
+	}
+}
+
+func TestWorkerURLAndSecretHelperBranches(t *testing.T) {
+	ctx := context.Background()
+	service := newFlowService(&flowRepo{})
+	if got := service.unsubscribeURL("", "raw token"); got != "https://portal.example.test/v1/portal//unsubscribe?token=raw+token" {
+		t.Fatalf("unsubscribeURL(empty tenant) = %q", got)
+	}
+	service.publicBase = ""
+	if got := service.unsubscribeURL("acme", "token"); got != "token" {
+		t.Fatalf("unsubscribeURL(no public base) = %q", got)
+	}
+	if _, _, err := service.deliveryTarget(ctx, repo.Delivery{Channel: repo.ChannelWebhook}); !errors.Is(err, notify.ErrTerminal) {
+		t.Fatalf("deliveryTarget(webhook without target) error = %v, want terminal", err)
+	}
+	if _, err := service.decodeSensitive([]byte("{")); err == nil {
+		t.Fatalf("decodeSensitive(invalid json) error = nil")
+	}
+	if _, err := (&Service{}).encryptString("secret"); err == nil {
+		t.Fatalf("encryptString(no store) error = nil")
+	}
+	if _, err := (&Service{}).decryptString([]byte("secret")); err == nil {
+		t.Fatalf("decryptString(no store) error = nil")
+	}
+}
+
+func TestWorkerStringHelperBranches(t *testing.T) {
+	if got := redactedEmail("a@example.test"); got != "a@example.test" {
+		t.Fatalf("redactedEmail(short local) = %q", got)
+	}
+	if got := emailDomain("missing-at"); got != "" {
+		t.Fatalf("emailDomain(missing-at) = %q", got)
+	}
+	if kind, eventType := statusChangeEventKindAndType("planned"); kind != "status_change" || eventType != repo.EventTypeStatusChanged {
+		t.Fatalf("statusChangeEventKindAndType(planned) = %q/%q", kind, eventType)
+	}
+	if got := statusUpdateTitle(" CSV export ", "planned"); got != "Update: CSV export" {
+		t.Fatalf("statusUpdateTitle(planned) = %q", got)
 	}
 }
 
@@ -1012,6 +1336,9 @@ func (f *flowRepo) CreatePublicUpdateEventTx(_ context.Context, _ pgx.Tx, in rep
 }
 
 func (f *flowRepo) ClaimEvents(context.Context, int, string) ([]repo.Event, error) {
+	if f.claimEventsErr != nil {
+		return nil, f.claimEventsErr
+	}
 	return f.claimedEvents, nil
 }
 
@@ -1021,6 +1348,7 @@ func (f *flowRepo) MarkEventResolved(_ context.Context, _ uuid.UUID, _ string, s
 }
 
 func (f *flowRepo) MarkEventFailed(context.Context, uuid.UUID, string, string, time.Duration) error {
+	f.markEventFailed = append(f.markEventFailed, uuid.New())
 	return nil
 }
 
@@ -1041,12 +1369,15 @@ func (f *flowRepo) CountContactEmailDeliveriesSince(_ context.Context, _ string,
 }
 
 func (f *flowRepo) ClaimDeliveries(context.Context, int, string) ([]repo.Delivery, error) {
+	if f.claimDeliveriesErr != nil {
+		return nil, f.claimDeliveriesErr
+	}
 	return f.claimedDeliveries, nil
 }
 
 func (f *flowRepo) MarkDeliveryDelivered(_ context.Context, id int64, _ string) (int64, error) {
 	f.delivered = append(f.delivered, id)
-	return id, nil
+	return id, f.markDeliveredErr
 }
 
 func (f *flowRepo) MarkDeliveryFailed(_ context.Context, id int64, _ string, _ string, _ string, _ int, _ time.Duration) (int64, error) {

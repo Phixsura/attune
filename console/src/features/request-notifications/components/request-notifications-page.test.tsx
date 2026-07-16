@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query'
 import { HttpResponse, http } from 'msw'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   requestNotificationDeliveriesQueryKey,
@@ -210,6 +211,8 @@ function installRequestHandlers(captures: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.error).mockClear()
 })
 
 describe('request notification page helpers', () => {
@@ -371,5 +374,91 @@ describe('RequestNotificationsPage', () => {
     expect(await screen.findByText('Jane Customer')).toBeInTheDocument()
     await user.click(screen.getByTestId(`rn-subscriber-suppress-${subscriberFixture.contactId}`))
     await waitFor(() => expect(captures.suppress).toEqual({ reason: 'operator_suppressed' }))
+  })
+
+  it('requires confirmation before publishing large email audiences', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: seededClient(),
+    })
+
+    await user.type(
+      screen.getByTestId('rn-draft-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.type(screen.getByTestId('rn-draft-title'), 'Shipped')
+    await user.type(screen.getByTestId('rn-draft-body'), 'CSV export is now available.')
+    await user.clear(screen.getByTestId('rn-max-unconfirmed'))
+    await user.type(screen.getByTestId('rn-max-unconfirmed'), '1')
+    await user.click(screen.getByTestId('rn-settings-save'))
+    await waitFor(() => expect(captures.settings).toMatchObject({ maxRecipientsWithoutConfirm: 1 }))
+
+    await user.click(screen.getByTestId('rn-preview'))
+    await screen.findByText('3')
+    await user.click(screen.getByTestId('rn-publish'))
+    expect(captures.publish).toBeUndefined()
+
+    await user.click(screen.getByTestId('rn-publish'))
+    await waitFor(() => expect(captures.publish).toMatchObject({ confirmLargeAudience: true }))
+    expect(confirm).toHaveBeenCalledTimes(2)
+  })
+
+  it('handles webhook test failures and cancelled deletes', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    server.use(
+      http.post(
+        `/fb/v1/console/request-notifications/webhook-targets/${targetFixture.id}:test`,
+        () => HttpResponse.json({ ok: false, latencyMs: '10', message: 'signature rejected' }),
+      ),
+    )
+    vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: seededClient(),
+    })
+
+    await screen.findByText('CRM')
+    await user.click(screen.getByTestId(`rn-target-test-${targetFixture.id}`))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('signature rejected'))
+    await user.click(screen.getByTestId(`rn-target-delete-${targetFixture.id}`))
+    expect(captures.deletedTarget).toBeUndefined()
+  })
+
+  it('surfaces mutation errors through toast fallbacks', async () => {
+    server.use(
+      http.get('/fb/v1/console/request-notifications/settings', () =>
+        HttpResponse.json(settingsFixture),
+      ),
+      http.get('/fb/v1/console/request-notifications/sender', () => HttpResponse.json(null)),
+      http.get('/fb/v1/console/request-notifications/webhook-targets', () =>
+        HttpResponse.json({ targets: [] }),
+      ),
+      http.get('/fb/v1/console/request-notifications/deliveries', () =>
+        HttpResponse.json({ deliveries: [] }),
+      ),
+      http.put('/fb/v1/console/request-notifications/settings', () =>
+        HttpResponse.json({ message: 'cannot save settings' }, { status: 500 }),
+      ),
+      http.post('/fb/v1/console/request-notifications/preview', () =>
+        HttpResponse.json({ message: 'cannot preview' }, { status: 500 }),
+      ),
+    )
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: seededClient(),
+    })
+
+    await user.click(await screen.findByTestId('rn-settings-save'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot save settings'))
+
+    await user.type(
+      screen.getByTestId('rn-draft-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.type(screen.getByTestId('rn-draft-title'), 'Shipped')
+    await user.type(screen.getByTestId('rn-draft-body'), 'CSV export is now available.')
+    await user.click(screen.getByTestId('rn-preview'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot preview'))
   })
 })
