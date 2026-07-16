@@ -5,7 +5,7 @@ import {
   CreateNotifyDialog,
   DeleteNotifyDialog,
 } from '@/features/notify-targets/components/dialogs'
-import { renderWithProviders, screen } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen } from '@/testing/test-utils'
 
 // CreateNotifyDialog builds the POST body; the audience select is the
 // digest delivery path's entry point (a target with audience=digest is
@@ -45,6 +45,51 @@ describe('CreateNotifyDialog', () => {
     expect((onSubmit.mock.calls[0][0] as NotifyTargetCreate).audience).toBe('digest')
   })
 
+  it('submits selected destination metadata with trimmed url, secret, and timeout', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateNotifyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    const comboboxes = screen.getAllByRole('combobox')
+    await user.click(comboboxes[0])
+    await user.click(screen.getByRole('option', { name: 'Slack' }))
+    expect(screen.getByText('Slack incoming webhook URL')).toBeInTheDocument()
+
+    const secretInput = document.querySelector<HTMLInputElement>('#nt-secret')
+    const timeoutInput = document.querySelector<HTMLInputElement>('#nt-timeout')
+    expect(secretInput).not.toBeNull()
+    expect(timeoutInput).not.toBeNull()
+
+    fireEvent.change(screen.getByTestId('create-notify-url'), {
+      target: { value: '  https://hooks.slack.test/TOKEN  ' },
+    })
+    fireEvent.change(secretInput as HTMLInputElement, { target: { value: '  not-used  ' } })
+    fireEvent.change(timeoutInput as HTMLInputElement, { target: { value: '30' } })
+    fireEvent.submit(screen.getByTestId('create-notify-submit').closest('form') as HTMLFormElement)
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      destinationType: 'slack',
+      url: 'https://hooks.slack.test/TOKEN',
+      audience: 'all',
+      timeoutSeconds: 30,
+      disabled: false,
+      secret: 'not-used',
+    })
+  })
+
+  it('keeps submit disabled for blank urls and disables controls while pending', () => {
+    const { rerender } = renderWithProviders(
+      <CreateNotifyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
+    )
+
+    expect(screen.getByTestId('create-notify-submit')).toBeDisabled()
+
+    rerender(<CreateNotifyDialog open onOpenChange={vi.fn()} onSubmit={vi.fn()} pending />)
+    expect(screen.getByTestId('create-notify-url')).toBeDisabled()
+    expect(screen.getByTestId('create-notify-submit')).toBeDisabled()
+  })
+
   it('does not mount the form while closed', () => {
     renderWithProviders(
       <CreateNotifyDialog open={false} onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
@@ -80,6 +125,26 @@ describe('DeleteNotifyDialog', () => {
     )
     await user.click(screen.getByTestId('delete-notify-confirm'))
     expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancel click closes the dialog and pending disables destructive action', async () => {
+    const onCancel = vi.fn()
+    const { user, rerender } = renderWithProviders(
+      <DeleteNotifyDialog
+        target={makeTarget()}
+        onCancel={onCancel}
+        onConfirm={vi.fn()}
+        pending={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Cancel|取消/ }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <DeleteNotifyDialog target={makeTarget()} onCancel={onCancel} onConfirm={vi.fn()} pending />,
+    )
+    expect(screen.getByTestId('delete-notify-confirm')).toBeDisabled()
   })
 
   it('renders nothing when target is null', () => {
