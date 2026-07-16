@@ -1,7 +1,9 @@
 package feedback
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -396,6 +398,153 @@ func TestQualityMergeHelpersDeduplicateAndCapSamples(t *testing.T) {
 	require.InDelta(t, 1.6, gotValue.ConfidenceSum, 0.001)
 	require.Equal(t, int64(1), gotValue.LowConfidenceCount)
 	require.Equal(t, []int64{1, 2, 3, 4, 5}, gotValue.SampleFeedbackIDs)
+}
+
+func TestQualityBucketWriteHelpersUseTransaction(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	opts := normalizeQualityRefreshOpts(ClassificationQualityRefreshOpts{
+		TenantID:    "tenant-1",
+		From:        time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+		To:          time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC),
+		BucketWidth: QualityBucketHour,
+	})
+	key := qualitySignalKey{
+		BucketStart:   opts.From,
+		BucketWidth:   opts.BucketWidth,
+		Source:        "api",
+		LogicalModel:  "classifier",
+		ProviderModel: "provider",
+		ChannelID:     "primary",
+	}
+	valueKey := qualityValueKey{
+		qualitySignalKey:   key,
+		DimensionName:      "severity",
+		DimensionValueHash: "hash-1",
+		ValueStatus:        QualityValueConfigured,
+	}
+	acc := qualityAccumulator{
+		signals: map[qualitySignalKey]*ClassificationQualitySignalAggregate{
+			key: {
+				ClassificationEventCount:         2,
+				FailedAttemptCount:               1,
+				ParseFailureCount:                1,
+				TerminalFailureCount:             1,
+				TerminalParseFailureCount:        1,
+				OffListCount:                     1,
+				UnknownDimensionCount:            1,
+				ConfidenceCount:                  2,
+				ConfidenceSum:                    1.1,
+				LowConfidenceCount:               1,
+				SampleFeedbackIDs:                []int64{101},
+				LowConfidenceSampleFeedbackIDs:   []int64{101},
+				OffListSampleFeedbackIDs:         []int64{101},
+				ParseFailureSampleFeedbackIDs:    []int64{202},
+				TerminalFailureSampleFeedbackIDs: []int64{202},
+			},
+		},
+		values: map[qualityValueKey]*ClassificationQualityValueAggregate{
+			valueKey: {
+				DimensionName:         "severity",
+				DimensionValueHash:    "hash-1",
+				DimensionValueDisplay: "bug",
+				ValueStatus:           QualityValueConfigured,
+				AppearanceCount:       2,
+				EventCount:            1,
+				ConfidenceCount:       1,
+				ConfidenceSum:         0.4,
+				LowConfidenceCount:    1,
+				SampleFeedbackIDs:     []int64{101},
+			},
+		},
+		maxRunID:     17,
+		maxFailureID: 23,
+	}
+	tx := ptrext.Of(fakeFeedbackBatchTx{})
+
+	require.NoError(t, lockQualityRefresh(ctx, tx, opts))
+	require.NoError(t, deleteQualityBuckets(ctx, tx, opts))
+	require.NoError(t, insertQualitySignals(ctx, tx, opts, acc.signals))
+	require.NoError(t, insertQualityValues(ctx, tx, opts, acc.values))
+	require.NoError(t, upsertQualityState(ctx, tx, opts, acc))
+	require.Equal(t, 6, tx.execIdx)
+}
+
+func TestQualityBucketWriteHelpersReturnExecErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	opts := normalizeQualityRefreshOpts(ClassificationQualityRefreshOpts{
+		TenantID:    "tenant-1",
+		From:        time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+		To:          time.Date(2026, 7, 3, 0, 0, 0, 0, time.UTC),
+		BucketWidth: QualityBucketDay,
+	})
+	boom := errors.New("boom")
+	signalKey := qualitySignalKey{BucketStart: opts.From, BucketWidth: opts.BucketWidth}
+	valueKey := qualityValueKey{
+		qualitySignalKey:   signalKey,
+		DimensionName:      "severity",
+		DimensionValueHash: "hash-1",
+		ValueStatus:        QualityValueConfigured,
+	}
+
+	tests := []struct {
+		name string
+		call func() error
+		want string
+	}{
+		{
+			name: "lock",
+			call: func() error {
+				return lockQualityRefresh(ctx, ptrext.Of(fakeFeedbackBatchTx{execErrs: []error{boom}}), opts)
+			},
+			want: "lock quality refresh",
+		},
+		{
+			name: "delete",
+			call: func() error {
+				return deleteQualityBuckets(ctx, ptrext.Of(fakeFeedbackBatchTx{execErrs: []error{nil, boom}}), opts)
+			},
+			want: "delete classification_quality_signal_buckets",
+		},
+		{
+			name: "insert signals",
+			call: func() error {
+				return insertQualitySignals(ctx, ptrext.Of(fakeFeedbackBatchTx{execErrs: []error{boom}}), opts, map[qualitySignalKey]*ClassificationQualitySignalAggregate{
+					signalKey: {},
+				})
+			},
+			want: "insert quality signal bucket",
+		},
+		{
+			name: "insert values",
+			call: func() error {
+				return insertQualityValues(ctx, ptrext.Of(fakeFeedbackBatchTx{execErrs: []error{boom}}), opts, map[qualityValueKey]*ClassificationQualityValueAggregate{
+					valueKey: {DimensionName: "severity", DimensionValueHash: "hash-1", ValueStatus: QualityValueConfigured},
+				})
+			},
+			want: "insert quality value bucket",
+		},
+		{
+			name: "upsert state",
+			call: func() error {
+				return upsertQualityState(ctx, ptrext.Of(fakeFeedbackBatchTx{execErrs: []error{boom}}), opts, qualityAccumulator{})
+			},
+			want: "upsert quality state",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.call()
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.want)
+		})
+	}
 }
 
 func newQualityTestAccumulator() *qualityAccumulator {

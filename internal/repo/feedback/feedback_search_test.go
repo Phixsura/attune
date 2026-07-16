@@ -1,8 +1,13 @@
 package feedback
 
 import (
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
@@ -163,6 +168,68 @@ func TestLexicalFields_MatchesTerms(t *testing.T) {
 	}
 }
 
+func TestSearchRowScannersHydrateNullableFields(t *testing.T) {
+	t.Parallel()
+
+	now := mustParseTime(t, "2026-07-02T00:00:00Z")
+	nextRetry := now.Add(time.Hour)
+	values := append(searchFeedbackValues(now, nextRetry), 0.92)
+
+	semanticRows := ptrext.Of(fakeSearchRows{values: values})
+	fb, similarity, err := scanSemanticSearchRow(semanticRows)
+	if err != nil {
+		t.Fatalf("scanSemanticSearchRow() error = %v", err)
+	}
+	if similarity != 0.92 || fb.ID != 123 || fb.Content != "checkout fails" {
+		t.Fatalf("scanSemanticSearchRow() = (%#v, %v), want search feedback", fb, similarity)
+	}
+	if ptrext.Indirect(fb.ClassificationConfidence) != 0.87 ||
+		ptrext.Indirect(fb.WorkflowStateID) != "state-1" ||
+		ptrext.Indirect(fb.ClusterID) != "cluster-1" ||
+		ptrext.Indirect(fb.ClusterLabel) != "Checkout" ||
+		ptrext.Indirect(fb.EnrichmentNextRetryAt) != nextRetry {
+		t.Fatalf("scanSemanticSearchRow() nullable fields = %#v, want hydrated pointers", fb)
+	}
+
+	lexicalRows := ptrext.Of(fakeSearchRows{values: append(searchFeedbackValues(now, nextRetry), 1.5)})
+	fb, score, err := scanLexicalSearchRow(lexicalRows)
+	if err != nil {
+		t.Fatalf("scanLexicalSearchRow() error = %v", err)
+	}
+	if score != 1.5 || fb.EnrichedDisplayTitle != "Checkout failure" {
+		t.Fatalf("scanLexicalSearchRow() = (%#v, %v), want lexical feedback", fb, score)
+	}
+}
+
+func TestSearchRowScannersPropagateScanErrors(t *testing.T) {
+	t.Parallel()
+
+	boom := errors.New("scan failed")
+	if _, _, err := scanSemanticSearchRow(ptrext.Of(fakeSearchRows{err: boom})); !errors.Is(err, boom) {
+		t.Fatalf("scanSemanticSearchRow(error) = %v, want %v", err, boom)
+	}
+	if _, _, err := scanLexicalSearchRow(ptrext.Of(fakeSearchRows{err: boom})); !errors.Is(err, boom) {
+		t.Fatalf("scanLexicalSearchRow(error) = %v, want %v", err, boom)
+	}
+}
+
+func TestHydrateSearchFeedbackNullsLeavesInvalidValuesNil(t *testing.T) {
+	t.Parallel()
+
+	fb := hydrateSearchFeedbackNulls(
+		SearchFeedback{ID: 123},
+		sql.NullFloat64{},
+		sql.NullString{},
+		sql.NullString{},
+		sql.NullString{},
+		sql.NullTime{},
+	)
+	if fb.ClassificationConfidence != nil || fb.WorkflowStateID != nil || fb.ClusterID != nil ||
+		fb.ClusterLabel != nil || fb.EnrichmentNextRetryAt != nil {
+		t.Fatalf("hydrateSearchFeedbackNulls() = %#v, want nil nullable pointers", fb)
+	}
+}
+
 func TestNormalizeLexicalScore_ClampsToDisplayRange(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -232,6 +299,20 @@ func TestLikeContainsPattern_EscapesWildcards(t *testing.T) {
 	want := `%100\%\_done\\ok%`
 	if got != want {
 		t.Errorf("likeContainsPattern = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeLexicalLimit_Bounds(t *testing.T) {
+	t.Parallel()
+
+	if got := normalizeLexicalLimit(-1); got != DefaultSearchLimit {
+		t.Fatalf("normalizeLexicalLimit(-1) = %d, want default", got)
+	}
+	if got := normalizeLexicalLimit(MaxSearchLimit + 1); got != MaxSearchLimit {
+		t.Fatalf("normalizeLexicalLimit(max+1) = %d, want max", got)
+	}
+	if got := normalizeLexicalLimit(7); got != 7 {
+		t.Fatalf("normalizeLexicalLimit(7) = %d, want 7", got)
 	}
 }
 
@@ -349,4 +430,85 @@ func TestEmbeddingStats_Calculation(t *testing.T) {
 	if s.EmbeddingPercent != expected {
 		t.Errorf("EmbeddingPercent = %f, want %f", s.EmbeddingPercent, expected)
 	}
+}
+
+func searchFeedbackValues(now time.Time, nextRetry time.Time) []any {
+	return []any{
+		int64(123),
+		"checkout fails",
+		"widget",
+		"bug",
+		"user-1",
+		"en",
+		"https://example.test/checkout",
+		"Checkout",
+		"Checkout failure",
+		"en-US",
+		[]byte(`{"severity":"high"}`),
+		"The checkout flow fails after payment",
+		true,
+		sql.NullFloat64{Float64: 0.87, Valid: true},
+		"done",
+		now,
+		sql.NullString{String: "state-1", Valid: true},
+		sql.NullString{String: "cluster-1", Valid: true},
+		sql.NullString{String: "Checkout", Valid: true},
+		2,
+		sql.NullTime{Time: nextRetry, Valid: true},
+		"provider_error",
+		"gpt-4.1-mini",
+		"channel-1",
+		"Support",
+		"fingerprint-1",
+		"reply-v1",
+	}
+}
+
+type fakeSearchRows struct {
+	values []any
+	err    error
+}
+
+func (r fakeSearchRows) Close() {}
+func (r fakeSearchRows) Err() error {
+	return nil
+}
+
+func (r fakeSearchRows) CommandTag() pgconn.CommandTag {
+	return pgconn.CommandTag{}
+}
+
+func (r fakeSearchRows) FieldDescriptions() []pgconn.FieldDescription {
+	return nil
+}
+
+func (r fakeSearchRows) Next() bool {
+	return false
+}
+
+func (r fakeSearchRows) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if len(dest) != len(r.values) {
+		return errors.New("scan destination count mismatch")
+	}
+	for i := range dest {
+		if err := assignFeedbackBatchScanValue(dest[i], r.values[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r fakeSearchRows) Values() ([]any, error) {
+	return r.values, nil
+}
+
+func (r fakeSearchRows) RawValues() [][]byte {
+	return nil
+}
+
+func (r fakeSearchRows) Conn() *pgx.Conn {
+	return nil
 }

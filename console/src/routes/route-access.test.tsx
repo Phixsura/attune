@@ -443,6 +443,21 @@ describe('route access guards', () => {
     expect((administration as ThrownRedirect).options.to).toBe('/administration/members')
   })
 
+  it('leaves group child routes alone', async () => {
+    for (const [route, pathname] of [
+      [AnalyticsRoute, '/analytics/usage'],
+      [ConfigurationRoute, '/configuration/classification'],
+      [IntegrationsRoute, '/integrations/inbound-sources'],
+      [AdministrationRoute, '/administration/members'],
+    ] as const) {
+      await expect(
+        callBeforeLoad(route.options.beforeLoad, {
+          location: { pathname },
+        }),
+      ).resolves.toBeNull()
+    }
+  })
+
   it('routes delegated admins to operational settings pages', async () => {
     mockMe('delegated_admin')
 

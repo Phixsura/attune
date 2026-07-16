@@ -44,6 +44,18 @@ func passthrough() inbound.SecretStore {
 	}
 }
 
+func TestAdapterShutdownTimeoutIsImmediate(t *testing.T) {
+	t.Parallel()
+
+	timeoutProvider, ok := NewAdapter().(interface{ ShutdownTimeout() time.Duration })
+	if !ok {
+		t.Fatal("NewAdapter() does not expose ShutdownTimeout")
+	}
+	if got := timeoutProvider.ShutdownTimeout(); got != 0 {
+		t.Fatalf("ShutdownTimeout() = %s, want immediate shutdown", got)
+	}
+}
+
 // ---------- parseConfig tests ----------
 
 func TestParseConfig_DecryptError(t *testing.T) {

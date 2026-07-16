@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/inbound/inboundtest"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -81,6 +82,29 @@ func TestBuildRotatedConfigSurfacesEncryptionErrors(t *testing.T) {
 	_, _, _, err = buildRotatedConfig(secrets, Config{})
 	if err == nil || !strings.Contains(err.Error(), "encrypt config") {
 		t.Fatalf("buildRotatedConfig(second encrypt) error = %v, want encrypt config", err)
+	}
+}
+
+func TestRotateSecretReturnsBeginErrors(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
+	if err != nil {
+		t.Fatalf("ParseConfig() error = %v", err)
+	}
+	cfg.ConnConfig.ConnectTimeout = 25 * time.Millisecond
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("NewWithConfig() error = %v", err)
+	}
+	t.Cleanup(pool.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, _, err = RotateSecret(ctx, pool, inboundtest.FakeSecrets{}, "source-1")
+	if err == nil || !strings.Contains(err.Error(), "rotate: begin") {
+		t.Fatalf("RotateSecret(begin error) = %v, want begin context", err)
 	}
 }
 

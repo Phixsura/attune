@@ -3,6 +3,7 @@
 package restoredrill
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,19 @@ func TestRestoreConn_NoPassword(t *testing.T) {
 	}
 	if !strings.Contains(uri, "user@host") {
 		t.Fatalf("URI = %q, want user@host preserved", uri)
+	}
+}
+
+func TestRunRestore_RejectsUnsafeInputsBeforeExec(t *testing.T) {
+	t.Parallel()
+
+	if err := runRestore(context.Background(), "host=localhost password=secret dbname=attune", "backup.sql", "psql"); err == nil {
+		t.Fatal("expected keyword/value DSN to be rejected")
+	}
+	if err := runRestore(context.Background(), "postgres://user:pass@host/db", "backup.sql", "mysql"); err == nil {
+		t.Fatal("expected unknown restore tool to be rejected")
+	} else if !strings.Contains(err.Error(), "unknown restore tool") {
+		t.Fatalf("runRestore error = %v, want unknown tool", err)
 	}
 }
 

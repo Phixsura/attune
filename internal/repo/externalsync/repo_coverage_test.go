@@ -84,6 +84,10 @@ func TestExternalSyncRepoMappingMethodsReturnPoolErrors(t *testing.T) {
 			_, err := r.ResolveRunMapping(ctx, tenantID, connectionID, nil)
 			return err
 		}},
+		{name: "loadMapping", call: func() error {
+			_, err := r.loadMapping(ctx, tenantID, mappingID)
+			return err
+		}},
 		{name: "UpdateMapping", call: func() error {
 			_, err := r.UpdateMapping(ctx, Mapping{
 				ID: mappingID, TenantID: tenantID, Direction: DirectionPull,
@@ -144,6 +148,10 @@ func TestExternalSyncRepoRunAndEventMethodsReturnPoolErrors(t *testing.T) {
 		}},
 		{name: "GetEvent", call: func() error {
 			_, err := r.GetEvent(ctx, tenantID, eventID)
+			return err
+		}},
+		{name: "getEventByDedupe", call: func() error {
+			_, err := r.getEventByDedupe(ctx, tenantID, connectionID, "github:issues:1")
 			return err
 		}},
 		{name: "ReplayEvent", call: func() error {

@@ -156,6 +156,21 @@ func TestDraftTaskRepoHookAndHealthMethodsReturnPoolErrors(t *testing.T) {
 			_, err := r.GetDeliveryAttempt(ctx, "tenant-1", "11111111-1111-4111-8111-111111111111")
 			return err
 		}},
+		{name: "insertHook", call: func() error {
+			_, err := r.insertHook(ctx, HookUpsert{
+				TenantID: "tenant-1", URLCiphertext: []byte("url"), URLKeyID: "url-key",
+				URLFingerprint: "url-fp", URLHost: "hooks.example.test", Enabled: true, ActorID: "user-1",
+			})
+			return err
+		}},
+		{name: "latestDeliveryAttempt", call: func() error {
+			_, err := r.latestDeliveryAttempt(ctx, "tenant-1", false)
+			return err
+		}},
+		{name: "latestProblemDeliveryAttempt", call: func() error {
+			_, err := r.latestDeliveryAttempt(ctx, "tenant-1", true)
+			return err
+		}},
 	} {
 		expectDraftTaskRepoError(t, tc.name, tc.call)
 	}

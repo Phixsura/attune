@@ -1,12 +1,19 @@
 import { within } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { toast } from 'sonner'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ReplySendHookPage } from '@/features/reply-send-hook/components/reply-send-hook-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
+
 describe('ReplySendHookPage', () => {
   beforeEach(() => {
+    vi.mocked(toast.success).mockClear()
+    vi.mocked(toast.error).mockClear()
     server.use(
       http.get('/fb/v1/console/reply-send-hook/health', () =>
         HttpResponse.json({
@@ -72,6 +79,79 @@ describe('ReplySendHookPage', () => {
     )
     expect(await screen.findByText('generated-secret-123456')).toBeInTheDocument()
     expect((await screen.findAllByText('hooks.example.test')).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('copies the generated secret and sample payload', async () => {
+    server.use(
+      http.get('/fb/v1/console/reply-send-hook', () =>
+        HttpResponse.json({ code: 'CONFLICT', message: 'not configured' }, { status: 409 }),
+      ),
+      http.put('/fb/v1/console/reply-send-hook', () =>
+        HttpResponse.json({
+          id: 'hook-copy',
+          name: 'Copy hook',
+          enabled: true,
+          urlHost: 'hooks.example.test',
+          urlFingerprint: 'abc123def456',
+          secretOnce: 'generated-secret-copy',
+          createdAt: '2026-07-03T10:00:00Z',
+          updatedAt: '2026-07-03T10:00:00Z',
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<ReplySendHookPage />)
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    await user.type(screen.getByLabelText('Webhook URL'), 'https://hooks.example.test/replies')
+    await user.click(screen.getByRole('button', { name: /保存/ }))
+    expect(await screen.findByText('generated-secret-copy')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '复制' }))
+    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('generated-secret-copy'))
+    expect(toast.success).toHaveBeenCalledWith('secret 已复制')
+
+    await user.click(screen.getByRole('button', { name: '复制 payload' }))
+    await waitFor(() =>
+      expect(writeText).toHaveBeenLastCalledWith(
+        expect.stringContaining('"event_type": "reply.send"'),
+      ),
+    )
+    expect(toast.success).toHaveBeenCalledWith('示例 payload 已复制')
+  })
+
+  it('shows copy failure toasts for secret and sample payload', async () => {
+    server.use(
+      http.get('/fb/v1/console/reply-send-hook', () =>
+        HttpResponse.json({ code: 'CONFLICT', message: 'not configured' }, { status: 409 }),
+      ),
+      http.put('/fb/v1/console/reply-send-hook', () =>
+        HttpResponse.json({
+          id: 'hook-copy-failure',
+          name: 'Copy hook',
+          enabled: true,
+          urlHost: 'hooks.example.test',
+          urlFingerprint: 'abc123def456',
+          secretOnce: 'generated-secret-copy',
+          createdAt: '2026-07-03T10:00:00Z',
+          updatedAt: '2026-07-03T10:00:00Z',
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<ReplySendHookPage />)
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'))
+
+    await user.type(screen.getByLabelText('Webhook URL'), 'https://hooks.example.test/replies')
+    await user.click(screen.getByRole('button', { name: /保存/ }))
+    expect(await screen.findByText('generated-secret-copy')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '复制' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('复制失败'))
+
+    vi.mocked(toast.error).mockClear()
+    await user.click(screen.getByRole('button', { name: '复制 payload' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('复制失败'))
   })
 
   it('refreshes delivery health and logs after saving a hook', async () => {
@@ -459,6 +539,108 @@ describe('ReplySendHookPage', () => {
     expect(secondRedeliver.querySelector('.animate-spin')).toBeNull()
     resolveRedelivery?.()
     await waitFor(() => expect(redelivered).toBe(true))
+  })
+
+  it('surfaces failed hook tests and failed redelivery attempts', async () => {
+    let tested = false
+    let redelivered = false
+    server.use(
+      http.get('/fb/v1/console/reply-send-hook', () =>
+        HttpResponse.json({
+          id: 'hook-1',
+          name: 'Reply hook',
+          enabled: true,
+          urlHost: 'hooks.example.test',
+          urlFingerprint: 'abcdef1234567890',
+          createdAt: '2026-07-03T10:00:00Z',
+          updatedAt: '2026-07-03T10:00:00Z',
+        }),
+      ),
+      http.get('/fb/v1/console/reply-send-hook/deliveries', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 'attempt-retry',
+              hookId: 'hook-1',
+              hookHost: 'hooks.example.test',
+              hookFingerprint: 'abcdef1234567890',
+              eventType: 'reply.send',
+              status: 'failed',
+              idempotencyKey: 'reply_send_retry',
+              httpStatus: 503,
+              attempts: 2,
+              maxAttempts: 8,
+              error: 'receiver unavailable',
+              requestedByType: 'admin',
+              requestedBy: 'admin-1',
+              requestedAt: '2026-07-03T10:00:00Z',
+              nextRetryAt: '2026-07-03T10:05:00Z',
+              createdAt: '2026-07-03T10:00:00Z',
+              updatedAt: '2026-07-03T10:01:00Z',
+              retryable: true,
+            },
+          ],
+        }),
+      ),
+      http.post('/fb/v1/console/reply-send-hook/test', () => {
+        tested = true
+        return HttpResponse.json({
+          id: 'attempt-test-failed',
+          hookId: 'hook-1',
+          hookHost: 'hooks.example.test',
+          hookFingerprint: 'abcdef1234567890',
+          eventType: 'reply.test',
+          status: 'failed',
+          idempotencyKey: 'reply_test_failed',
+          httpStatus: 500,
+          attempts: 1,
+          maxAttempts: 8,
+          error: 'test failed',
+          requestedByType: 'admin',
+          requestedBy: 'admin-1',
+          requestedAt: '2026-07-03T10:01:00Z',
+          createdAt: '2026-07-03T10:01:00Z',
+          updatedAt: '2026-07-03T10:01:00Z',
+          retryable: true,
+        })
+      }),
+      http.post('/fb/v1/console/reply-send-hook/deliveries/attempt-retry/redeliver', () => {
+        redelivered = true
+        return HttpResponse.json({
+          id: 'attempt-retry',
+          hookId: 'hook-1',
+          hookHost: 'hooks.example.test',
+          hookFingerprint: 'abcdef1234567890',
+          eventType: 'reply.send',
+          status: 'failed',
+          idempotencyKey: 'reply_send_retry',
+          httpStatus: 503,
+          attempts: 3,
+          maxAttempts: 8,
+          error: 'still unavailable',
+          requestedByType: 'admin',
+          requestedBy: 'admin-1',
+          requestedAt: '2026-07-03T10:05:00Z',
+          createdAt: '2026-07-03T10:00:00Z',
+          updatedAt: '2026-07-03T10:05:00Z',
+          retryable: true,
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<ReplySendHookPage />)
+
+    expect(await screen.findByText('receiver unavailable')).toBeInTheDocument()
+    expect(screen.getByText(/下次 07\/03/)).toBeInTheDocument()
+
+    await user.click(screen.getAllByRole('button', { name: '测试 Hook' })[0])
+    await waitFor(() => expect(tested).toBe(true))
+    expect(toast.error).toHaveBeenCalledWith('测试投递失败，请查看最近投递')
+
+    vi.mocked(toast.error).mockClear()
+    await user.click(screen.getByRole('button', { name: /重放投递 attempt-.*etry/ }))
+    await waitFor(() => expect(redelivered).toBe(true))
+    expect(toast.error).toHaveBeenCalledWith('重放仍失败，请查看最近投递')
   })
 
   it('shows the current hook and disables it', async () => {

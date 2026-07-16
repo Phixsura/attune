@@ -9,7 +9,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestTaskQueueMethodsReturnPoolErrors(t *testing.T) {
@@ -35,8 +39,24 @@ func TestTaskQueueMethodsReturnPoolErrors(t *testing.T) {
 		_, err := r.TryClaimWithOwner(ctx, time.Minute, "worker-1")
 		return err
 	})
+	expectRepoErr(t, "RefreshClaim", func() error {
+		_, err := r.RefreshClaim(ctx, 1, "worker-1")
+		return err
+	})
+	expectRepoErr(t, "MarkDone", func() error {
+		_, err := r.MarkDone(ctx, 1, "worker-1")
+		return err
+	})
 	expectRepoErr(t, "MarkFailed", func() error {
 		_, err := r.MarkFailed(ctx, 1, "worker-1", errors.New("failed"), 3)
+		return err
+	})
+	expectRepoErr(t, "ResetStaleClaims", func() error {
+		_, err := r.ResetStaleClaims(ctx, time.Minute)
+		return err
+	})
+	expectRepoErr(t, "QueueDepth", func() error {
+		_, err := r.QueueDepth(ctx, "tenant-1")
 		return err
 	})
 	expectRepoErr(t, "QueueDepthByTenant", func() error {
@@ -116,6 +136,26 @@ func TestEmbeddingListAndDigestMethodsReturnPoolErrors(t *testing.T) {
 	})
 }
 
+func TestCreateTaskTxUsesTransaction(t *testing.T) {
+	t.Parallel()
+
+	repo := TaskRepo{}
+	ctx := context.Background()
+	tx := ptrext.Of(fakeEmbeddingTx{})
+	if err := repo.CreateTaskTx(ctx, tx, 42, "tenant-1"); err != nil {
+		t.Fatalf("CreateTaskTx() error = %v", err)
+	}
+	if tx.execs != 1 {
+		t.Fatalf("CreateTaskTx() execs = %d, want 1", tx.execs)
+	}
+
+	boom := errors.New("insert failed")
+	err := repo.CreateTaskTx(ctx, ptrext.Of(fakeEmbeddingTx{execErr: boom}), 42, "tenant-1")
+	if !errors.Is(err, boom) {
+		t.Fatalf("CreateTaskTx(exec error) = %v, want %v", err, boom)
+	}
+}
+
 func newUnreachableTaskRepo(t *testing.T) *TaskRepo {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
@@ -137,4 +177,45 @@ func expectRepoErr(t *testing.T, name string, call func() error) {
 	if err := call(); err == nil {
 		t.Fatalf("%s() error = nil, want pool error", name)
 	}
+}
+
+type fakeEmbeddingTx struct {
+	execs   int
+	execErr error
+}
+
+func (tx *fakeEmbeddingTx) Begin(context.Context) (pgx.Tx, error) { return tx, nil }
+func (tx *fakeEmbeddingTx) Commit(context.Context) error          { return nil }
+func (tx *fakeEmbeddingTx) Rollback(context.Context) error        { return nil }
+func (tx *fakeEmbeddingTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (tx *fakeEmbeddingTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
+func (tx *fakeEmbeddingTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+
+func (tx *fakeEmbeddingTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+
+func (tx *fakeEmbeddingTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+	tx.execs++
+	if tx.execErr != nil {
+		return pgconn.CommandTag{}, tx.execErr
+	}
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+func (tx *fakeEmbeddingTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errors.New("unexpected Query call in fakeEmbeddingTx")
+}
+
+func (tx *fakeEmbeddingTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return fakeEmbeddingRow{}
+}
+func (tx *fakeEmbeddingTx) Conn() *pgx.Conn { return nil }
+
+type fakeEmbeddingRow struct{}
+
+func (fakeEmbeddingRow) Scan(...any) error {
+	return errors.New("unexpected QueryRow call in fakeEmbeddingTx")
 }

@@ -20,7 +20,11 @@ import { Route as LLMConfigurationRoute } from './_authed.configuration.llm'
 import { Route as TagsRoute } from './_authed.configuration.tags'
 import { Route as WorkflowRoute } from './_authed.configuration.workflow'
 import { Route as ControlTowerRoute } from './_authed.control-tower'
+import { Route as FeedbackRoute } from './_authed.feedback'
 import { Route as CustomerRequestsRoute } from './_authed.feedback.customer-requests'
+import { Route as FeedbackIndexRoute } from './_authed.feedback.index'
+import { Route as FeedbackPortalRoute } from './_authed.feedback.portal'
+import { Route as TerminalFailuresRoute } from './_authed.feedback.terminal-failures'
 import { Route as LegacyGuardPoliciesRoute } from './_authed.guard-policies'
 import { Route as LegacyInboundSourcesRoute } from './_authed.inbound-sources'
 import { Route as AuthedIndexRoute } from './_authed.index'
@@ -35,6 +39,12 @@ import { Route as RequestNotificationsRoute } from './_authed.integrations.reque
 import { Route as LegacyLLMConfigRoute } from './_authed.llm-config'
 import { Route as LegacyLLMUsageRoute } from './_authed.llm-usage'
 import { Route as MCPClientsRoute } from './_authed.mcp-clients'
+import { Route as LegacyNotifyTargetsRoute } from './_authed.notify-targets'
+import { Route as LegacyOutboxDeadRoute } from './_authed.outbox-dead'
+import { Route as LegacySearchQualityRoute } from './_authed.search-quality'
+import { Route as LegacySettingsRoute } from './_authed.settings'
+import { Route as LoginRoute } from './login'
+import { Route as LoginErrorRoute } from './login_.error'
 
 const requireRouteAccessMock = vi.hoisted(() => vi.fn())
 
@@ -62,6 +72,8 @@ type RouteLike = {
     loader?: (args: {
       context: { queryClient: { ensureQueryData: ReturnType<typeof vi.fn> } }
     }) => Promise<unknown> | unknown
+    component?: unknown
+    validateSearch?: (search: Record<string, unknown>) => unknown
   }
 }
 
@@ -151,9 +163,64 @@ describe('route wiring coverage', () => {
     [LegacyInboundSourcesRoute, '/integrations/inbound-sources'],
     [LegacyLLMConfigRoute, '/configuration/llm'],
     [LegacyLLMUsageRoute, '/analytics/llm-usage'],
+    [LegacyNotifyTargetsRoute, '/integrations/notify-targets'],
+    [LegacyOutboxDeadRoute, '/administration/dead-deliveries'],
+    [LegacySearchQualityRoute, '/analytics/search-quality'],
   ])('redirects legacy route %s to %s', (route, to) => {
     expect(() => routeOptions(route).beforeLoad?.({ context: {} })).toThrow(
       expect.objectContaining({ redirect: { to } }),
     )
+  })
+
+  it('exposes section route components', () => {
+    expect(routeOptions(FeedbackRoute).component).toBeTypeOf('function')
+    expect(routeOptions(FeedbackPortalRoute).component).toBeTypeOf('function')
+    expect(routeOptions(TerminalFailuresRoute).component).toBeTypeOf('function')
+  })
+
+  it('validates feedback search params defensively', () => {
+    expect(
+      routeOptions(FeedbackIndexRoute).validateSearch?.({
+        ids: '1,2',
+        quality_signal: 42,
+        confidence_lte: 0.75,
+        created_from: {},
+        created_to: '2026-07-01',
+        enriched_from: Number.NaN,
+        enriched_to: '2026-07-02',
+      }),
+    ).toEqual({
+      ids: '1,2',
+      quality_signal: 42,
+      confidence_lte: 0.75,
+      created_from: undefined,
+      created_to: '2026-07-01',
+      enriched_from: undefined,
+      enriched_to: '2026-07-02',
+    })
+  })
+
+  it('validates auth and legacy settings search params', () => {
+    expect(routeOptions(LoginRoute).validateSearch?.({ redirect: '/feedback', other: 1 })).toEqual({
+      redirect: '/feedback',
+    })
+    expect(routeOptions(LoginRoute).validateSearch?.({ redirect: 12 })).toEqual({
+      redirect: undefined,
+    })
+    expect(
+      routeOptions(LoginErrorRoute).validateSearch?.({
+        code: 'state_expired',
+        request_id: 'req-1',
+        trace_id: 'trace-1',
+        ignored: 1,
+      }),
+    ).toEqual({
+      code: 'state_expired',
+      request_id: 'req-1',
+      trace_id: 'trace-1',
+    })
+
+    const search = { tab: 'audit', section: 'members' }
+    expect(routeOptions(LegacySettingsRoute).validateSearch?.(search)).toBe(search)
   })
 })
