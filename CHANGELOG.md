@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Request notification worker email resolution now writes tenant-wide
+  unsubscribe tokens with the database token scope (`tenant`) instead of the
+  subscription scope (`tenant_updates`), so published updates can create email
+  deliveries instead of failing event resolution; resolved notification events
+  now also clear stale failure text after a successful retry.
+
 - Request notification sender config and delivery payload JSON construction is
   now deterministic and no longer depends on unreachable marshal fallbacks.
 

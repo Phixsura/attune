@@ -188,9 +188,9 @@ func markUnsubscribeTokenUsed(ctx context.Context, tx pgx.Tx, id uuid.UUID, user
 
 func unsubscribeSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeToken) (Subscription, error) {
 	switch token.Scope {
-	case SubscriptionScopeRequest:
+	case UnsubscribeScopeRequest:
 		return unsubscribeRequestSubscriptions(ctx, tx, token)
-	case SubscriptionScopeTenantUpdates:
+	case UnsubscribeScopeTenant:
 		return unsubscribeTenantSubscriptions(ctx, tx, token)
 	default:
 		return Subscription{}, ErrInvalidInput
@@ -198,7 +198,7 @@ func unsubscribeSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeT
 }
 
 func unsubscribeRequestSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeToken) (Subscription, error) {
-	if err := validateUnsubscribeTokenShape(SubscriptionScopeRequest, token.RequestID); err != nil {
+	if err := validateUnsubscribeTokenShape(UnsubscribeScopeRequest, token.RequestID); err != nil {
 		return Subscription{}, err
 	}
 	row := tx.QueryRow(ctx, `
@@ -217,7 +217,7 @@ func unsubscribeRequestSubscriptions(ctx context.Context, tx pgx.Tx, token Unsub
 }
 
 func unsubscribeTenantSubscriptions(ctx context.Context, tx pgx.Tx, token UnsubscribeToken) (Subscription, error) {
-	if err := validateUnsubscribeTokenShape(SubscriptionScopeTenantUpdates, token.RequestID); err != nil {
+	if err := validateUnsubscribeTokenShape(UnsubscribeScopeTenant, token.RequestID); err != nil {
 		return Subscription{}, err
 	}
 	row := tx.QueryRow(ctx, `
@@ -243,11 +243,11 @@ func unsubscribeTenantSubscriptions(ctx context.Context, tx pgx.Tx, token Unsubs
 func normalizeUnsubscribeScope(scope string) string {
 	switch strings.TrimSpace(scope) {
 	case "":
-		return SubscriptionScopeRequest
-	case SubscriptionScopeRequest:
-		return SubscriptionScopeRequest
-	case SubscriptionScopeTenantUpdates:
-		return SubscriptionScopeTenantUpdates
+		return UnsubscribeScopeRequest
+	case UnsubscribeScopeRequest:
+		return UnsubscribeScopeRequest
+	case UnsubscribeScopeTenant, SubscriptionScopeTenantUpdates:
+		return UnsubscribeScopeTenant
 	default:
 		return strings.TrimSpace(scope)
 	}
@@ -255,12 +255,12 @@ func normalizeUnsubscribeScope(scope string) string {
 
 func validateUnsubscribeTokenShape(scope string, requestID *uuid.UUID) error {
 	switch scope {
-	case SubscriptionScopeRequest:
+	case UnsubscribeScopeRequest:
 		if requestID == nil || ptrext.Indirect(requestID) == uuid.Nil {
 			return ErrInvalidInput
 		}
 		return nil
-	case SubscriptionScopeTenantUpdates:
+	case UnsubscribeScopeTenant:
 		if requestID != nil && ptrext.Indirect(requestID) != uuid.Nil {
 			return ErrInvalidInput
 		}

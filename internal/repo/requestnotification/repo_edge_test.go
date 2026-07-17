@@ -112,23 +112,23 @@ func TestUnsubscribeHelperErrorBranches(t *testing.T) {
 	ctx := context.Background()
 	boom := errors.New("boom")
 	requestID := uuid.New()
-	if normalizeUnsubscribeScope(SubscriptionScopeRequest) != SubscriptionScopeRequest {
+	if normalizeUnsubscribeScope(UnsubscribeScopeRequest) != UnsubscribeScopeRequest {
 		t.Fatalf("normalizeUnsubscribeScope(request) mismatch")
 	}
-	if normalizeUnsubscribeScope(SubscriptionScopeTenantUpdates) != SubscriptionScopeTenantUpdates {
+	if normalizeUnsubscribeScope(SubscriptionScopeTenantUpdates) != UnsubscribeScopeTenant {
 		t.Fatalf("normalizeUnsubscribeScope(tenant_updates) mismatch")
 	}
 	if err := markUnsubscribeTokenUsed(ctx, ptrext.Of(eventTx{execErr: boom}), uuid.New(), "ua"); !errors.Is(err, boom) {
 		t.Fatalf("markUnsubscribeTokenUsed(exec err) = %v, want boom", err)
 	}
 	if _, err := unsubscribeRequestSubscriptions(ctx, ptrext.Of(eventTx{}), UnsubscribeToken{
-		Scope: SubscriptionScopeRequest,
+		Scope: UnsubscribeScopeRequest,
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("unsubscribeRequestSubscriptions(invalid token) = %v, want invalid input", err)
 	}
 	if _, err := unsubscribeTenantSubscriptions(ctx, ptrext.Of(eventTx{}), UnsubscribeToken{
 		RequestID: ptrext.Of(requestID),
-		Scope:     SubscriptionScopeTenantUpdates,
+		Scope:     UnsubscribeScopeTenant,
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("unsubscribeTenantSubscriptions(invalid token) = %v, want invalid input", err)
 	}
@@ -319,7 +319,7 @@ func TestRepoFakePoolUnsubscribeTokenBranches(t *testing.T) {
 		"tenant-1",
 		contactID,
 		ptrext.Of(requestID),
-		SubscriptionScopeRequest,
+		UnsubscribeScopeRequest,
 		ptrext.Of(now.Add(time.Hour)),
 		(*time.Time)(nil),
 		now,
@@ -340,13 +340,13 @@ func TestRepoFakePoolUnsubscribeTokenBranches(t *testing.T) {
 		return edgeRepo(repoFakePool{beginTx: tx})
 	}
 
-	if err := edgeRepo(repoFakePool{}).CreateUnsubscribeToken(ctx, "tenant-1", contactID, ptrext.Of(requestID), SubscriptionScopeRequest, "hash", now); err != nil {
+	if err := edgeRepo(repoFakePool{}).CreateUnsubscribeToken(ctx, "tenant-1", contactID, ptrext.Of(requestID), UnsubscribeScopeRequest, "hash", now); err != nil {
 		t.Fatalf("CreateUnsubscribeToken() error = %v", err)
 	}
-	if err := edgeRepo(repoFakePool{}).CreateUnsubscribeToken(ctx, "tenant-1", contactID, nil, SubscriptionScopeRequest, "hash", now); !errors.Is(err, ErrInvalidInput) {
+	if err := edgeRepo(repoFakePool{}).CreateUnsubscribeToken(ctx, "tenant-1", contactID, nil, UnsubscribeScopeRequest, "hash", now); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("CreateUnsubscribeToken(invalid shape) = %v, want invalid input", err)
 	}
-	if err := edgeRepo(repoFakePool{execErr: errors.New("exec failed")}).CreateUnsubscribeToken(ctx, "tenant-1", contactID, ptrext.Of(requestID), SubscriptionScopeRequest, "hash", now); err == nil {
+	if err := edgeRepo(repoFakePool{execErr: errors.New("exec failed")}).CreateUnsubscribeToken(ctx, "tenant-1", contactID, ptrext.Of(requestID), UnsubscribeScopeRequest, "hash", now); err == nil {
 		t.Fatalf("CreateUnsubscribeToken(exec err) error = nil")
 	}
 	if _, err := repoWithTx(ptrext.Of(eventTx{rows: []pgx.Row{tokenRow, subRow}})).UseUnsubscribeToken(ctx, "tenant-1", "hash", "ua"); err != nil {
@@ -364,14 +364,14 @@ func TestRepoFakePoolUnsubscribeTokenBranches(t *testing.T) {
 	used := now
 	_, err = repoWithTx(ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
 		tokenID, "tenant-1", contactID, ptrext.Of(requestID),
-		SubscriptionScopeRequest, ptrext.Of(now.Add(time.Hour)), ptrext.Of(used), now,
+		UnsubscribeScopeRequest, ptrext.Of(now.Add(time.Hour)), ptrext.Of(used), now,
 	}}})).UseUnsubscribeToken(ctx, "tenant-1", "hash", "ua")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("UseUnsubscribeToken(used) = %v, want not found", err)
 	}
 	_, err = repoWithTx(ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
 		tokenID, "tenant-1", contactID, ptrext.Of(requestID),
-		SubscriptionScopeRequest, ptrext.Of(now.Add(-time.Hour)), (*time.Time)(nil), now,
+		UnsubscribeScopeRequest, ptrext.Of(now.Add(-time.Hour)), (*time.Time)(nil), now,
 	}}})).UseUnsubscribeToken(ctx, "tenant-1", "hash", "ua")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("UseUnsubscribeToken(expired) = %v, want not found", err)
@@ -397,7 +397,7 @@ func TestRepoFakePoolConfirmContactTokenBranches(t *testing.T) {
 	contactID := uuid.New()
 	tokenRow := scanRow{
 		tokenID, "tenant-1", contactID, (*uuid.UUID)(nil),
-		SubscriptionScopeTenantUpdates, ptrext.Of(now.Add(time.Hour)),
+		UnsubscribeScopeTenant, ptrext.Of(now.Add(time.Hour)),
 		(*time.Time)(nil), now,
 	}
 	contactRow := scanRow{
@@ -425,14 +425,14 @@ func TestRepoFakePoolConfirmContactTokenBranches(t *testing.T) {
 	used := now
 	_, err = repoWithTx(ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
 		tokenID, "tenant-1", contactID, (*uuid.UUID)(nil),
-		SubscriptionScopeTenantUpdates, ptrext.Of(now.Add(time.Hour)), ptrext.Of(used), now,
+		UnsubscribeScopeTenant, ptrext.Of(now.Add(time.Hour)), ptrext.Of(used), now,
 	}}})).ConfirmContactToken(ctx, "tenant-1", "hash", "ua")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ConfirmContactToken(used) = %v, want not found", err)
 	}
 	_, err = repoWithTx(ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
 		tokenID, "tenant-1", contactID, (*uuid.UUID)(nil),
-		SubscriptionScopeTenantUpdates, ptrext.Of(now.Add(-time.Hour)), (*time.Time)(nil), now,
+		UnsubscribeScopeTenant, ptrext.Of(now.Add(-time.Hour)), (*time.Time)(nil), now,
 	}}})).ConfirmContactToken(ctx, "tenant-1", "hash", "ua")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("ConfirmContactToken(expired) = %v, want not found", err)

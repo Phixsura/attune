@@ -231,10 +231,10 @@ func (s *Service) createEmailDeliveries(ctx context.Context, event repo.Event, e
 		}
 		requestID := ec.Request.ID
 		expiresAt := time.Now().Add(90 * 24 * time.Hour)
-		if err := s.repo.CreateUnsubscribeToken(ctx, event.TenantID, recipient.ContactID, ptrext.Of(requestID), repo.SubscriptionScopeRequest, tokenHash(requestToken), expiresAt); err != nil {
+		if err := s.repo.CreateUnsubscribeToken(ctx, event.TenantID, recipient.ContactID, ptrext.Of(requestID), repo.UnsubscribeScopeRequest, tokenHash(requestToken), expiresAt); err != nil {
 			return count, err
 		}
-		if err := s.repo.CreateUnsubscribeToken(ctx, event.TenantID, recipient.ContactID, nil, repo.SubscriptionScopeTenantUpdates, tokenHash(tenantToken), expiresAt); err != nil {
+		if err := s.repo.CreateUnsubscribeToken(ctx, event.TenantID, recipient.ContactID, nil, repo.UnsubscribeScopeTenant, tokenHash(tenantToken), expiresAt); err != nil {
 			return count, err
 		}
 		payload, sensitive, err := s.emailDeliveryPayload(event, ec, recipient, sender, senderConfig, fromEmail, replyTo, toEmail, requestToken, tenantToken)

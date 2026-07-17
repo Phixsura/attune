@@ -794,8 +794,8 @@ func assertResolveEventCreatedDeliveries(t *testing.T, fake *flowRepo, service *
 	if len(fake.tokens) != 2 || len(fake.tokenScopes) != 2 {
 		t.Fatalf("unsubscribe tokens = %d scopes=%+v, want request and tenant tokens", len(fake.tokens), fake.tokenScopes)
 	}
-	if fake.tokenScopes[0] != repo.SubscriptionScopeRequest || fake.tokenScopes[1] != repo.SubscriptionScopeTenantUpdates {
-		t.Fatalf("unsubscribe token scopes = %+v, want request then tenant updates", fake.tokenScopes)
+	if fake.tokenScopes[0] != repo.UnsubscribeScopeRequest || fake.tokenScopes[1] != repo.UnsubscribeScopeTenant {
+		t.Fatalf("unsubscribe token scopes = %+v, want request then tenant", fake.tokenScopes)
 	}
 	if got := fake.inserted[0].Payload["unsubscribe_url"]; got == "" {
 		t.Fatalf("email payload missing unsubscribe url: %+v", fake.inserted[0].Payload)

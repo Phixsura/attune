@@ -390,7 +390,7 @@ func TestUnsubscribeTokenHelpersUseRequestAndTenantScopes(t *testing.T) {
 		rows: []pgx.Row{
 			scanRow{
 				tokenID, "tenant-1", contactID, ptrext.Of(requestID),
-				SubscriptionScopeRequest, ptrext.Of(now.Add(time.Hour)),
+				UnsubscribeScopeRequest, ptrext.Of(now.Add(time.Hour)),
 				(*time.Time)(nil), now,
 			},
 			scanRow{
@@ -430,7 +430,7 @@ func TestUnsubscribeTokenHelpersUseRequestAndTenantScopes(t *testing.T) {
 		ID:        uuid.New(),
 		TenantID:  "tenant-1",
 		ContactID: contactID,
-		Scope:     SubscriptionScopeTenantUpdates,
+		Scope:     UnsubscribeScopeTenant,
 		CreatedAt: now,
 	})
 	if err != nil {
@@ -448,7 +448,7 @@ func TestPreferenceTokenAndUnsubscribeValidationBranches(t *testing.T) {
 	requestID := uuid.New()
 	tx := ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
 		uuid.New(), "tenant-1", contactID, (*uuid.UUID)(nil),
-		SubscriptionScopeTenantUpdates, ptrext.Of(now.Add(time.Hour)),
+		UnsubscribeScopeTenant, ptrext.Of(now.Add(time.Hour)),
 		(*time.Time)(nil), now,
 	}}})
 	token, err := lockPreferenceToken(ctx, tx, "tenant-1", "hash")
@@ -458,20 +458,20 @@ func TestPreferenceTokenAndUnsubscribeValidationBranches(t *testing.T) {
 	if token.ContactID != contactID || token.RequestID != nil {
 		t.Fatalf("preference token = %+v", token)
 	}
-	if got := normalizeUnsubscribeScope(" "); got != SubscriptionScopeRequest {
+	if got := normalizeUnsubscribeScope(" "); got != UnsubscribeScopeRequest {
 		t.Fatalf("normalizeUnsubscribeScope(blank) = %q", got)
 	}
 	if got := normalizeUnsubscribeScope("custom"); got != "custom" {
 		t.Fatalf("normalizeUnsubscribeScope(custom) = %q", got)
 	}
-	if err := validateUnsubscribeTokenShape(SubscriptionScopeRequest, nil); !errors.Is(err, ErrInvalidInput) {
+	if err := validateUnsubscribeTokenShape(UnsubscribeScopeRequest, nil); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("validate request nil error = %v, want invalid input", err)
 	}
 	zero := uuid.Nil
-	if err := validateUnsubscribeTokenShape(SubscriptionScopeRequest, ptrext.Of(zero)); !errors.Is(err, ErrInvalidInput) {
+	if err := validateUnsubscribeTokenShape(UnsubscribeScopeRequest, ptrext.Of(zero)); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("validate request zero error = %v, want invalid input", err)
 	}
-	if err := validateUnsubscribeTokenShape(SubscriptionScopeTenantUpdates, ptrext.Of(requestID)); !errors.Is(err, ErrInvalidInput) {
+	if err := validateUnsubscribeTokenShape(UnsubscribeScopeTenant, ptrext.Of(requestID)); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("validate tenant with request error = %v, want invalid input", err)
 	}
 	if _, err := unsubscribeSubscriptions(ctx, ptrext.Of(eventTx{}), UnsubscribeToken{Scope: "custom"}); !errors.Is(err, ErrInvalidInput) {

@@ -49,6 +49,9 @@ const (
 	SubscriptionScopeTenantUpdates = "tenant_updates"
 	SubscriptionStatusActive       = "active"
 
+	UnsubscribeScopeRequest = "request"
+	UnsubscribeScopeTenant  = "tenant"
+
 	SourceSubmitter = "submitter"
 	SourceVoter     = "voter"
 	SourceCommenter = "commenter"

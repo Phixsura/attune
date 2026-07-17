@@ -170,7 +170,8 @@ func (r *Repo) MarkEventResolved(ctx context.Context, id uuid.UUID, owner string
 		     resolved_at = NOW(),
 		     recipient_snapshot = $3,
 		     claimed_at = NULL,
-		     claimed_by = ''
+		     claimed_by = '',
+		     last_error = ''
 		 WHERE id = $1 AND claimed_by = $2`, id, owner, raw)
 	if err != nil {
 		return fmt.Errorf("mark request notification event resolved: %w", err)
