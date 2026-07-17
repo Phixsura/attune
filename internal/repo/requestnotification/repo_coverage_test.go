@@ -245,6 +245,10 @@ func TestRepoConfigurationMethodsReturnPoolErrors(t *testing.T) {
 		_, err := r.ActiveSender(ctx, "tenant-1")
 		return err
 	})
+	expectErr(t, "LatestSender", func() error {
+		_, err := r.LatestSender(ctx, "tenant-1")
+		return err
+	})
 	expectErr(t, "CreateUnsubscribeToken", func() error {
 		return r.CreateUnsubscribeToken(ctx, "tenant-1", id, ptrext.Of(id), SubscriptionScopeRequest, "hash", time.Now().Add(time.Hour))
 	})

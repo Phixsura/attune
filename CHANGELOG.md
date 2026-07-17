@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   deliveries instead of failing event resolution; resolved notification events
   now also clear stale failure text after a successful retry.
 
+- Request notification sender setup now keeps the pending sender visible in
+  Console after save, so administrators can verify it before the worker uses it.
+
 - Request notification sender config and delivery payload JSON construction is
   now deterministic and no longer depends on unreachable marshal fallbacks.
 

@@ -156,7 +156,7 @@ func (s *Service) UpsertSender(ctx context.Context, in SenderInput) (repo.Sender
 }
 
 func (s *Service) GetSender(ctx context.Context, tenantID string) (repo.Sender, error) {
-	out, err := s.repo.ActiveSender(ctx, strings.TrimSpace(tenantID))
+	out, err := s.repo.LatestSender(ctx, strings.TrimSpace(tenantID))
 	return out, mapRepoError(err)
 }
 

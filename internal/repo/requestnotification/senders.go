@@ -85,6 +85,19 @@ func (r *Repo) ActiveSender(ctx context.Context, tenantID string) (Sender, error
 	return scanSender(row)
 }
 
+func (r *Repo) LatestSender(ctx context.Context, tenantID string) (Sender, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, from_name, from_email_hash, from_email_payload,
+		 reply_to_hash, reply_to_payload, domain, dkim_status, spf_status,
+		 dmarc_status, provider, provider_config, status, verified_at,
+		 created_by, created_at, updated_at
+		FROM customer_notification_email_senders
+		WHERE tenant_id = $1
+		ORDER BY updated_at DESC, created_at DESC
+		LIMIT 1`, tenantID)
+	return scanSender(row)
+}
+
 func scanSender(row pgx.Row) (Sender, error) {
 	var s Sender
 	err := row.Scan(

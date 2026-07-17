@@ -197,6 +197,9 @@ func TestRepoFakePoolSenderBranches(t *testing.T) {
 	if _, err := edgeRepo(repoFakePool{rowQueue: []pgx.Row{senderRow}}).UpsertSender(ctx, Sender{}); err != nil {
 		t.Fatalf("UpsertSender() error = %v", err)
 	}
+	if _, err := edgeRepo(repoFakePool{rowQueue: []pgx.Row{senderRow}}).LatestSender(ctx, "tenant-1"); err != nil {
+		t.Fatalf("LatestSender() error = %v", err)
+	}
 }
 
 func TestRepoFakePoolContactBranches(t *testing.T) {

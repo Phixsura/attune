@@ -119,6 +119,7 @@ type flowRepo struct {
 	listActiveErr      error
 	insertDeliveryErr  error
 	activeSenderErr    error
+	latestSenderErr    error
 	createTokenErr     error
 	createTokenErrAt   int
 	createTokenCalls   int
@@ -1353,7 +1354,7 @@ func TestConfigurationPassThroughMethods(t *testing.T) {
 	senderID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 	targetID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
 	fake := &flowRepo{
-		sender:  repo.Sender{ID: senderID, TenantID: "tenant-1", Status: "verified"},
+		sender:  repo.Sender{ID: senderID, TenantID: "tenant-1", Status: "pending"},
 		targets: []repo.WebhookTarget{{ID: targetID, TenantID: "tenant-1", Name: "CRM"}},
 	}
 	service := newFlowService(fake)
@@ -2345,6 +2346,16 @@ func (f *flowRepo) VerifySender(_ context.Context, _ string, id uuid.UUID) (repo
 func (f *flowRepo) ActiveSender(context.Context, string) (repo.Sender, error) {
 	if f.activeSenderErr != nil {
 		return repo.Sender{}, f.activeSenderErr
+	}
+	if f.sender.ID == uuid.Nil {
+		return repo.Sender{}, repo.ErrNotFound
+	}
+	return f.sender, nil
+}
+
+func (f *flowRepo) LatestSender(context.Context, string) (repo.Sender, error) {
+	if f.latestSenderErr != nil {
+		return repo.Sender{}, f.latestSenderErr
 	}
 	if f.sender.ID == uuid.Nil {
 		return repo.Sender{}, repo.ErrNotFound
