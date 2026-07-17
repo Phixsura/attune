@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -54,6 +55,23 @@ func TestBootstrapAdminResult_FailsWhenDatabaseUnavailable(t *testing.T) {
 	r = bootstrapAdminResult(context.Background(), cfg, nil)
 	require.Equal(t, preflight.StatusFail, r.Status)
 	require.Contains(t, r.Message, "Database not available")
+	require.Contains(t, r.Remediation, "database.url")
+}
+
+func TestBootstrapAdmin_CheckFailsWhenRepoCannotCount(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	r := checkBootstrapAdmin(ctx, &preflight.Environment{
+		Cfg: &config.Config{
+			ConsoleSessionKey: "this-is-a-sufficiently-long-session-key-for-testing",
+		},
+		Pool: newUnreachablePreflightPool(t),
+	})
+	require.Equal(t, preflight.StatusFail, r.Status)
+	require.Equal(t, "Unable to inspect admins table", r.Message)
 	require.Contains(t, r.Remediation, "database.url")
 }
 

@@ -3,9 +3,11 @@
 package requestnotification
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/requestnotification"
 )
 
@@ -63,6 +65,22 @@ func TestRequestNotificationHelpers(t *testing.T) {
 	if err := validateOutboundURL("http://hooks.example.test/notify"); err == nil {
 		t.Fatalf("validateOutboundURL(non-https) error = nil")
 	}
+	if !errors.Is(mapRepoError(repo.ErrNotFound), ErrNotFound) {
+		t.Fatalf("mapRepoError(not found) did not map to service not found")
+	}
+	if got := tokenHash("token"); got == "" || got == tokenHash("other") {
+		t.Fatalf("tokenHash() = %q, want stable non-empty distinct digest", got)
+	}
+	token, err := newToken()
+	if err != nil {
+		t.Fatalf("newToken() error = %v", err)
+	}
+	if token == "" {
+		t.Fatalf("newToken() = empty string")
+	}
+	if got, err := ptrext.Of(Service{}).decryptString(nil); err != nil || got != "" {
+		t.Fatalf("decryptString(nil) = %q, %v; want empty nil-error", got, err)
+	}
 }
 
 func TestEventMaskAndRetryDelay(t *testing.T) {
@@ -83,6 +101,9 @@ func TestEventMaskAndRetryDelay(t *testing.T) {
 	}
 	if !statusAllowed(map[string]any{"shipped": true}, " shipped ") {
 		t.Fatalf("true status policy should allow trimmed status")
+	}
+	if statusAllowed(map[string]any{"shipped": "yes"}, "shipped") {
+		t.Fatalf("non-bool status policy value should deny status")
 	}
 	blocked := notificationPolicyBlockReason(repo.Settings{
 		EnabledEventTypes: map[string]any{repo.EventTypeShipped: false},

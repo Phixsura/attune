@@ -18,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 func TestNormalizePromoteDedupeAndDefaults(t *testing.T) {
@@ -637,6 +638,97 @@ func TestCompleteIdempotencyBranches(t *testing.T) {
 	}
 }
 
+func TestServiceMethodsRejectInvalidInputsBeforeRepoUse(t *testing.T) {
+	ctx := context.Background()
+	service := New(nil, nil, nil)
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
+	cases := map[string]func() error{
+		"list": func() error {
+			_, err := service.List(ctx, ListInput{})
+			return err
+		},
+		"get scoring settings": func() error {
+			_, err := service.GetScoringSettings(ctx, " ")
+			return err
+		},
+		"update scoring settings": func() error {
+			_, err := service.UpdateScoringSettings(ctx, ScoringSettingsInput{})
+			return err
+		},
+		"create": func() error {
+			_, err := service.Create(ctx, CreateInput{})
+			return err
+		},
+		"update": func() error {
+			_, err := service.Update(ctx, UpdateInput{})
+			return err
+		},
+		"promote feedback": func() error {
+			_, err := service.PromoteFeedback(ctx, PromoteInput{})
+			return err
+		},
+		"link feedback": func() error {
+			_, err := service.LinkFeedback(ctx, LinkFeedbackInput{})
+			return err
+		},
+		"unlink feedback": func() error {
+			_, err := service.UnlinkFeedback(ctx, "", requestID, 1, repoActor())
+			return err
+		},
+		"link customer": func() error {
+			_, err := service.LinkCustomer(ctx, LinkCustomerInput{TenantID: "tenant-a", RequestID: requestID})
+			return err
+		},
+		"unlink customer": func() error {
+			_, err := service.UnlinkCustomer(ctx, "tenant-a", uuid.Nil, linkID, repoActor())
+			return err
+		},
+		"add vote": func() error {
+			_, err := service.AddVote(ctx, VoteInput{TenantID: "tenant-a", RequestID: requestID, Weight: 101})
+			return err
+		},
+		"remove vote": func() error {
+			_, err := service.RemoveVote(ctx, "tenant-a", requestID, uuid.Nil, repoActor())
+			return err
+		},
+		"add note": func() error {
+			_, err := service.AddNote(ctx, NoteInput{TenantID: "tenant-a", RequestID: requestID})
+			return err
+		},
+		"delete note": func() error {
+			_, err := service.DeleteNote(ctx, "tenant-a", requestID, uuid.Nil, repoActor())
+			return err
+		},
+		"merge": func() error {
+			_, err := service.Merge(ctx, MergeInput{TenantID: "tenant-a", SourceID: requestID, TargetID: requestID, IdempotencyKey: "merge_key"})
+			return err
+		},
+		"link issue": func() error {
+			_, err := service.LinkIssue(ctx, LinkIssueInput{TenantID: "tenant-a", RequestID: requestID, Provider: "github", ExternalURL: "ftp://example.test/repo/issues/1"})
+			return err
+		},
+		"unlink issue": func() error {
+			_, err := service.UnlinkIssue(ctx, "tenant-a", requestID, uuid.Nil, repoActor())
+			return err
+		},
+		"record issue sync": func() error {
+			_, err := service.RecordIssueSync(ctx, IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, SyncState: repo.IssueSyncState("bad")})
+			return err
+		},
+	}
+
+	for name, call := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if !errors.Is(err, ErrValidation) && !errors.Is(err, ErrInvalidIssueURL) {
+				t.Fatalf("%s error = %v, want validation error", name, err)
+			}
+		})
+	}
+}
+
 func mustParseCustomerRequestIssueURL(t *testing.T, raw string) *url.URL {
 	t.Helper()
 	parsed, err := url.Parse(raw)
@@ -644,6 +736,10 @@ func mustParseCustomerRequestIssueURL(t *testing.T, raw string) *url.URL {
 		t.Fatalf("url.Parse(%q) error = %v", raw, err)
 	}
 	return parsed
+}
+
+func repoActor() auditlogsvc.Actor {
+	return auditlogsvc.Actor{ID: "actor-1"}
 }
 
 type fakeIdempotencyStore struct {

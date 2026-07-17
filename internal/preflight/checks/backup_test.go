@@ -22,6 +22,21 @@ func TestCheckRestoreDrillSkipsWithoutDatabasePool(t *testing.T) {
 	}
 }
 
+func TestCheckRestoreDrillSkipsWhenHistoryUnavailable(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	got := checkRestoreDrill(ctx, ptrext.Of(preflight.Environment{Pool: newUnreachablePreflightPool(t)}))
+	if got.Name != "backup:restore_drill" || got.Category != preflight.CategoryBackup {
+		t.Fatalf("result identity = %#v, want backup restore-drill", got)
+	}
+	if got.Status != preflight.StatusSkipped || got.Message != "Restore-drill history unavailable" {
+		t.Fatalf("result = %#v, want skipped unavailable history", got)
+	}
+}
+
 func TestAssessLastRun(t *testing.T) {
 	const fresh = restoredrill.DefaultFreshnessWindow
 	cases := []struct {

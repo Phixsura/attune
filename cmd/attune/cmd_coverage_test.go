@@ -183,9 +183,21 @@ func TestRunBreakglass_UsageAndEarlyValidation(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid TTL")
 
+	err = runBreakglassIssue([]string{"--bad"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "flag provided but not defined")
+
+	err = runBreakglassList([]string{"--bad"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "flag provided but not defined")
+
 	err = runBreakglassRevoke(nil)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "--id is required")
+
+	err = runBreakglassRevoke([]string{"--bad"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "flag provided but not defined")
 }
 
 func TestTruncate(t *testing.T) {

@@ -90,6 +90,38 @@ func TestCheckSSOIssuerReachable_EmptyIssuer(t *testing.T) {
 	}
 }
 
+func TestCheckSSOIssuerReachable_InvalidIssuerURL(t *testing.T) {
+	t.Parallel()
+	env := &preflight.Environment{
+		Cfg: &config.Config{
+			OIDC: config.OIDCConfig{Enabled: true, IssuerURL: "://bad"},
+		},
+	}
+	r := checkSSOIssuerReachable(context.Background(), env)
+	if r.Status != preflight.StatusFail {
+		t.Errorf("Status = %v, want Fail", r.Status)
+	}
+	if r.Message != "Invalid OIDC discovery URL" {
+		t.Errorf("Message = %q, want invalid discovery URL", r.Message)
+	}
+}
+
+func TestCheckSSOIssuerReachable_UnreachableIssuer(t *testing.T) {
+	t.Parallel()
+	env := &preflight.Environment{
+		Cfg: &config.Config{
+			OIDC: config.OIDCConfig{Enabled: true, IssuerURL: "http://127.0.0.1:1"},
+		},
+	}
+	r := checkSSOIssuerReachable(context.Background(), env)
+	if r.Status != preflight.StatusFail {
+		t.Errorf("Status = %v, want Fail", r.Status)
+	}
+	if r.Message != "OIDC discovery unreachable" {
+		t.Errorf("Message = %q, want unreachable discovery", r.Message)
+	}
+}
+
 func TestCheckSSOIssuerReachable_Success(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -176,6 +208,40 @@ func TestCheckRedirectURIMatch_EmptyConsoleBaseURL(t *testing.T) {
 	r := checkRedirectURIMatch(context.Background(), env)
 	if r.Status != preflight.StatusFail {
 		t.Errorf("Status = %v, want Fail", r.Status)
+	}
+}
+
+func TestCheckRedirectURIMatch_InvalidRedirectURI(t *testing.T) {
+	t.Parallel()
+	env := &preflight.Environment{
+		Cfg: &config.Config{
+			OIDC:           config.OIDCConfig{Enabled: true, RedirectURI: "://bad"},
+			ConsoleBaseURL: "https://console.example.com",
+		},
+	}
+	r := checkRedirectURIMatch(context.Background(), env)
+	if r.Status != preflight.StatusFail {
+		t.Errorf("Status = %v, want Fail", r.Status)
+	}
+	if r.Message == "" {
+		t.Error("expected invalid redirect_uri message")
+	}
+}
+
+func TestCheckRedirectURIMatch_InvalidConsoleBaseURL(t *testing.T) {
+	t.Parallel()
+	env := &preflight.Environment{
+		Cfg: &config.Config{
+			OIDC:           config.OIDCConfig{Enabled: true, RedirectURI: "https://console.example.com/auth/callback"},
+			ConsoleBaseURL: "://bad",
+		},
+	}
+	r := checkRedirectURIMatch(context.Background(), env)
+	if r.Status != preflight.StatusFail {
+		t.Errorf("Status = %v, want Fail", r.Status)
+	}
+	if r.Message == "" {
+		t.Error("expected invalid console.base_url message")
 	}
 }
 
