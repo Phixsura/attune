@@ -5,9 +5,10 @@ import { AuditLogPage } from '@/features/audit-log/components/audit-log-page'
 import type { AuditLogViewState, SavedAuditLogView } from '@/proto/attune/v1/audit'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { act, renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
 const triggerBlobDownloadMock = vi.hoisted(() => vi.fn())
+const canPermissionMock = vi.hoisted(() => vi.fn(() => true))
 
 vi.mock('@/lib/blob-download', () => ({
   triggerBlobDownload: triggerBlobDownloadMock,
@@ -22,12 +23,14 @@ vi.mock('sonner', () => ({
 
 vi.mock('@/features/session/hooks/use-permissions', () => ({
   usePermissions: () => ({
-    can: () => true,
+    can: canPermissionMock,
   }),
 }))
 
 afterEach(() => {
   triggerBlobDownloadMock.mockReset()
+  canPermissionMock.mockReset()
+  canPermissionMock.mockReturnValue(true)
   vi.mocked(toast.error).mockClear()
   vi.mocked(toast.success).mockClear()
   vi.restoreAllMocks()
@@ -42,6 +45,16 @@ async function expandFiltersIfCollapsed(user: { click: (element: Element) => Pro
 }
 
 describe('AuditLogPage', () => {
+  it('renders the permission empty state without audit-log actions', () => {
+    canPermissionMock.mockReturnValue(false)
+
+    renderWithProviders(<AuditLogPage />)
+
+    expect(screen.getByText('暂无审计记录')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '导出 CSV' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存当前' })).not.toBeInTheDocument()
+  })
+
   it('shows an explicit error state when the audit log request fails', async () => {
     server.use(
       http.get('/fb/v1/console/audit-log', () =>
@@ -55,6 +68,45 @@ describe('AuditLogPage', () => {
       expect(screen.getByText('加载审计记录失败')).toBeInTheDocument()
     })
     expect(screen.queryByText('暂无审计记录')).not.toBeInTheDocument()
+  })
+
+  it('retries the audit log request from the error state', async () => {
+    let attempts = 0
+    server.use(
+      http.get('/fb/v1/console/audit-log', () => {
+        attempts += 1
+        if (attempts === 1) {
+          return HttpResponse.json({ message: 'temporary outage' }, { status: 503 })
+        }
+        return HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member after retry',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('加载审计记录失败')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+    expect(attempts).toBe(2)
   })
 
   it('only refreshes filters after the user applies them', async () => {
@@ -183,6 +235,86 @@ describe('AuditLogPage', () => {
     ).toHaveValue('playwright')
   })
 
+  it('syncs filters from browser history popstate', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({
+          items: [
+            {
+              id: '2',
+              actorType: 'admin',
+              actorId: 'user-1',
+              actorUserAgent: 'playwright',
+              action: 'member.remove',
+              targetType: 'member',
+              targetId: 'member-42',
+              summary: 'Removed member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        })
+      }),
+      http.get('/fb/v1/console/audit-log/views', () => HttpResponse.json({ items: [] })),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(1)
+    })
+
+    window.history.replaceState(
+      {},
+      '',
+      '/administration/audit-log?action=member.remove&targetId=member-42&q=playwright',
+    )
+    act(() => {
+      window.dispatchEvent(new Event('popstate'))
+    })
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(2)
+    })
+    expect(urls[1]).toContain('action=member.remove')
+    expect(urls[1]).toContain('targetId=member-42')
+    await expandFiltersIfCollapsed(user)
+    expect(screen.getByLabelText('目标 ID')).toHaveValue('member-42')
+    expect(
+      screen.getByPlaceholderText('在已加载记录里继续搜索动作、摘要、操作者、目标或快照内容'),
+    ).toHaveValue('playwright')
+  })
+
+  it('applies a quick preset into the server-side audit filters', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ items: [] })
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(1)
+    })
+
+    await user.click(screen.getAllByRole('button', { name: '成员与权限' })[0] as HTMLElement)
+
+    await waitFor(() => {
+      expect(urls).toHaveLength(2)
+    })
+    const params = new URL(urls[1] as string).searchParams
+    expect(params.getAll('action')).toEqual([
+      'member.invite',
+      'member.remove',
+      'member.update_role',
+    ])
+    expect(screen.getByText('已应用 1 条筛选')).toBeInTheDocument()
+  })
+
   it('saves the current investigation view into the saved views sidebar', async () => {
     let savedViews: SavedAuditLogView[] = []
     let postedBody: { name: string; state?: AuditLogViewState } | null = null
@@ -250,6 +382,29 @@ describe('AuditLogPage', () => {
     await waitFor(() => {
       expect(screen.getByText('当前选中视图：成员删除排查')).toBeInTheDocument()
     })
+  })
+
+  it('surfaces save-as-new failures from the saved views card', async () => {
+    server.use(
+      http.get('/fb/v1/console/audit-log', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/audit-log/views', () => HttpResponse.json({ items: [] })),
+      http.post('/fb/v1/console/audit-log/views', () =>
+        HttpResponse.json({ message: 'save denied' }, { status: 503 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '另存为' })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '另存为' }))
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), '无法保存的视图')
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('save denied'))
   })
 
   it('updates and deletes a selected investigation view', async () => {
@@ -566,6 +721,57 @@ describe('AuditLogPage', () => {
     await user.keyboard('[Escape]')
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(openDetailsButton).toHaveFocus()
+  })
+
+  it('uses details actions to copy identifiers and narrow the investigation', async () => {
+    const urls: string[] = []
+    const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({
+          items: [
+            {
+              id: '1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.invite',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Invited member',
+              createdAt: '2026-06-16T10:00:00Z',
+            },
+          ],
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<AuditLogPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('邀请成员').length).toBeGreaterThan(0)
+    })
+
+    const detailButtons = screen.getAllByRole('button', { name: '查看详情' })
+    await user.click(detailButtons[detailButtons.length - 1] as HTMLElement)
+
+    await user.click(screen.getByRole('button', { name: '复制操作者 ID' }))
+    await user.click(screen.getByRole('button', { name: '复制目标 ID' }))
+
+    await waitFor(() => {
+      expect(writeSpy).toHaveBeenCalledWith('user-1')
+    })
+    expect(writeSpy).toHaveBeenCalledWith('member-1')
+
+    await user.click(screen.getByRole('button', { name: '只看这个动作' }))
+    await waitFor(() => {
+      expect(urls.at(-1)).toContain('action=member.invite')
+    })
+
+    await user.click(screen.getByRole('button', { name: '只看这个目标' }))
+    await waitFor(() => {
+      expect(urls.at(-1)).toContain('targetId=member-1')
+    })
   })
 
   it('preserves the current scope when opening the details drawer', async () => {

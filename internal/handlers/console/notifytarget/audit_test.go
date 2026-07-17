@@ -27,6 +27,20 @@ func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) e
 	return nil
 }
 
+func TestNewHandlerAndSetAuditLogger(t *testing.T) {
+	t.Parallel()
+
+	repo := ptrext.Of(fakeNotifyRepo{})
+	audit := ptrext.Of(fakeAuditRecorder{})
+	h := NewNotifyTargetsHandler(repo)
+
+	h.SetAuditLogger(audit)
+
+	require.NotNil(t, h)
+	require.Same(t, repo, h.repo)
+	require.Same(t, audit, h.audit)
+}
+
 func TestTestNotifyTargetRecordsAudit(t *testing.T) {
 	t.Parallel()
 

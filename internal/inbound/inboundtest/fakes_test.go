@@ -215,6 +215,12 @@ func TestFakeSecrets_DecryptEmpty(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestStringErr_Error(t *testing.T) {
+	t.Parallel()
+	require.Equal(t, "not found", errNotFound.Error())
+	require.Equal(t, "crypto", errCrypto.Error())
+}
+
 // -----------------------------------------------------------------------
 // FakeMetrics
 // -----------------------------------------------------------------------

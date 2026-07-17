@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Route as AdministrationRoute } from './_authed.administration'
 import { Route as AuditLogRoute } from './_authed.administration.audit-log'
 import { Route as DeadDeliveriesRoute } from './_authed.administration.dead-deliveries'
 import { Route as GDPRRoute } from './_authed.administration.gdpr'
@@ -7,6 +8,7 @@ import { Route as MembersRoute } from './_authed.administration.members'
 import { Route as ReliabilityRoute } from './_authed.administration.reliability'
 import { Route as SecurityRoute } from './_authed.administration.security'
 import { Route as SystemReadinessRoute } from './_authed.administration.system-readiness'
+import { Route as AnalyticsRoute } from './_authed.analytics'
 import { Route as ClassificationQualityRoute } from './_authed.analytics.classification-quality'
 import { Route as LLMUsageRoute } from './_authed.analytics.llm-usage'
 import { Route as SearchQualityRoute } from './_authed.analytics.search-quality'
@@ -14,6 +16,7 @@ import { Route as UsageRoute } from './_authed.analytics.usage'
 import { Route as LegacyAPIKeysRoute } from './_authed.api-keys'
 import { Route as LegacyClassificationQualityRoute } from './_authed.classification-quality'
 import { Route as LegacyClustersRoute } from './_authed.clusters'
+import { Route as ConfigurationRoute } from './_authed.configuration'
 import { Route as ClassificationRoute } from './_authed.configuration.classification'
 import { Route as EnrichmentRuntimeRoute } from './_authed.configuration.enrichment-runtime'
 import { Route as LLMConfigurationRoute } from './_authed.configuration.llm'
@@ -28,6 +31,7 @@ import { Route as TerminalFailuresRoute } from './_authed.feedback.terminal-fail
 import { Route as LegacyGuardPoliciesRoute } from './_authed.guard-policies'
 import { Route as LegacyInboundSourcesRoute } from './_authed.inbound-sources'
 import { Route as AuthedIndexRoute } from './_authed.index'
+import { Route as IntegrationsRoute } from './_authed.integrations'
 import { Route as APIKeysIntegrationRoute } from './_authed.integrations.api-keys'
 import { Route as DigestRoute } from './_authed.integrations.digests'
 import { Route as ExternalSyncRoute } from './_authed.integrations.external-sync'
@@ -47,6 +51,12 @@ import { Route as LoginRoute } from './login'
 import { Route as LoginErrorRoute } from './login_.error'
 
 const requireRouteAccessMock = vi.hoisted(() => vi.fn())
+const resolveGroupDefaultMock = vi.hoisted(() =>
+  vi.fn((group: string, role: string) => `/${group}/${role}-default`),
+)
+const resolveLegacySettingsRedirectMock = vi.hoisted(() =>
+  vi.fn((_search: Record<string, unknown>, role: string) => `/settings/${role}-default`),
+)
 
 vi.mock('@tanstack/react-router', async () => {
   const actual =
@@ -64,11 +74,17 @@ vi.mock('@tanstack/react-router', async () => {
 
 vi.mock('@/routes/-route-access', () => ({
   requireRouteAccess: requireRouteAccessMock,
+  resolveGroupDefault: resolveGroupDefaultMock,
+  resolveLegacySettingsRedirect: resolveLegacySettingsRedirectMock,
 }))
 
 type RouteLike = {
   options: {
-    beforeLoad?: (args: { context: unknown }) => unknown
+    beforeLoad?: (args: {
+      context: unknown
+      location?: { pathname: string }
+      search?: Record<string, unknown>
+    }) => unknown
     loader?: (args: {
       context: { queryClient: { ensureQueryData: ReturnType<typeof vi.fn> } }
     }) => Promise<unknown> | unknown
@@ -112,6 +128,38 @@ describe('route wiring coverage', () => {
     routeOptions(route).beforeLoad?.({ context })
 
     expect(requireRouteAccessMock).toHaveBeenLastCalledWith(context, access)
+  })
+
+  it.each([
+    [AdministrationRoute, '/administration', 'administration', { permission: 'nav:settings' }],
+    [AnalyticsRoute, '/analytics', 'analytics', { permission: 'usage:view' }],
+    [ConfigurationRoute, '/configuration', 'configuration', { permission: 'nav:settings' }],
+    [IntegrationsRoute, '/integrations', 'integrations', { permission: 'nav:settings' }],
+  ])('redirects %s group index to its role default', async (route, pathname, group, access) => {
+    const context = { queryClient: {} }
+    requireRouteAccessMock.mockResolvedValueOnce('admin')
+
+    await expect(
+      routeOptions(route).beforeLoad?.({ context, location: { pathname } }),
+    ).rejects.toEqual({
+      redirect: { to: `/${group}/admin-default` },
+    })
+
+    expect(requireRouteAccessMock).toHaveBeenLastCalledWith(context, access)
+    expect(resolveGroupDefaultMock).toHaveBeenLastCalledWith(group, 'admin')
+  })
+
+  it.each([
+    [AdministrationRoute, '/administration/members'],
+    [AnalyticsRoute, '/analytics/usage'],
+    [ConfigurationRoute, '/configuration/workflow'],
+    [IntegrationsRoute, '/integrations/api-keys'],
+  ])('leaves nested group route %s in place', async (route, pathname) => {
+    const context = { queryClient: {} }
+
+    await expect(
+      routeOptions(route).beforeLoad?.({ context, location: { pathname } }),
+    ).resolves.toBe(undefined)
   })
 
   it.each([
@@ -222,5 +270,21 @@ describe('route wiring coverage', () => {
 
     const search = { tab: 'audit', section: 'members' }
     expect(routeOptions(LegacySettingsRoute).validateSearch?.(search)).toBe(search)
+  })
+
+  it('redirects legacy settings searches through the IA resolver', async () => {
+    const context = { queryClient: {} }
+    const search = { section: 'workflow' }
+    requireRouteAccessMock.mockResolvedValueOnce('admin')
+    resolveLegacySettingsRedirectMock.mockReturnValueOnce('/configuration/workflow')
+
+    await expect(
+      routeOptions(LegacySettingsRoute).beforeLoad?.({ context, search }),
+    ).rejects.toEqual({
+      redirect: { to: '/configuration/workflow' },
+    })
+
+    expect(requireRouteAccessMock).toHaveBeenLastCalledWith(context, { permission: 'nav:settings' })
+    expect(resolveLegacySettingsRedirectMock).toHaveBeenLastCalledWith(search, 'admin')
   })
 })

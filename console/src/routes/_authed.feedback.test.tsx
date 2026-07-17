@@ -8,7 +8,7 @@ import { Route as PortalInboxRoute } from '@/routes/_authed.feedback.portal'
 import { Route as TerminalFailuresRoute } from '@/routes/_authed.feedback.terminal-failures'
 import { FeedbackRoutePage } from '@/routes/-feedback-route-page'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 vi.mock('@tanstack/react-router', async () => {
   const actual =
@@ -266,6 +266,59 @@ describe('_authed.feedback route — user flow smoke', () => {
     })
     expect(seen[seen.length - 1]?.searchParams.get('quality_signal')).toBe('parse_failure')
   }, 20_000)
+
+  it('updates source and type scope when the same route receives new scope props', async () => {
+    const seen: URL[] = []
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        seen.push(new URL(request.url))
+        return HttpResponse.json({ items: [itemFixture], nextCursor: undefined })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { rerender } = renderWithProviders(
+      <FeedbackRoutePage initialSourceFilter="portal" initialTypeFilter="bug" />,
+    )
+
+    await waitFor(() => {
+      expect(
+        seen.some(
+          (url) =>
+            url.searchParams.get('source') === 'portal' && url.searchParams.get('type') === 'bug',
+        ),
+      ).toBe(true)
+    })
+
+    rerender(<FeedbackRoutePage initialSourceFilter="web" initialTypeFilter="request" />)
+
+    await waitFor(() => {
+      expect(
+        seen.some(
+          (url) =>
+            url.searchParams.get('source') === 'web' && url.searchParams.get('type') === 'request',
+        ),
+      ).toBe(true)
+    })
+  })
 
   it('queue rail primary action opens the current highest-priority feedback', async () => {
     server.use(
@@ -1709,5 +1762,376 @@ describe('_authed.feedback route — user flow smoke', () => {
     expect(screen.getByText('排序 rrf.pgfts.v1.k60')).toBeInTheDocument()
     expect(screen.getAllByText('当前租户还没有可用向量')).toHaveLength(2)
     expect(screen.getByTitle(/关键词匹配/)).toHaveTextContent('关键词匹配 82%')
+  })
+
+  it('loads the next feedback page from the queue footer', async () => {
+    const seenCursors: Array<string | null> = []
+    const secondItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '第二页反馈',
+      enrichedTitle: 'Second page feedback',
+      isUrgent: false,
+      createdAt: '2026-06-06T08:30:00Z',
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor')
+        seenCursors.push(cursor)
+        return HttpResponse.json(
+          cursor === 'cur-2'
+            ? { items: [secondItem], nextCursor: null }
+            : { items: [itemFixture], nextCursor: 'cur-2' },
+        )
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '加载更多' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('第二页反馈')).toBeInTheDocument()
+    })
+    expect(seenCursors).toEqual([null, 'cur-2'])
+  })
+
+  it('wires selected-row tag updates and workflow transitions to batch mutations', async () => {
+    const assignedTag = {
+      id: 'tag-old',
+      name: 'Existing',
+      color: '#64748b',
+      archived: false,
+    }
+    const newTag = {
+      id: 'tag-new',
+      name: 'Escalation',
+      color: '#ef4444',
+      archived: false,
+    }
+    const workflowState = {
+      id: 'ws-2',
+      name: 'review',
+      displayName: { entries: { default: 'Review', zh: '待处理' } },
+      color: '#3b82f6',
+      category: 'active',
+      position: 1,
+      isDefault: false,
+      archived: false,
+      createdAt: '2026-06-07T00:00:00Z',
+      updatedAt: '2026-06-07T00:00:00Z',
+    }
+    const batchBodies: unknown[] = []
+    let transitionBody: unknown
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({
+          items: [{ ...itemFixture, tags: [assignedTag] }],
+          nextCursor: undefined,
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ states: [workflowState] }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [assignedTag, newTag] })),
+      http.post('/fb/v1/console/feedback/batch', async ({ request }) => {
+        batchBodies.push(await request.json())
+        return HttpResponse.json({ succeeded: 1, failed: [] })
+      }),
+      http.post('/fb/v1/console/feedback/transition/batch', async ({ request }) => {
+        transitionBody = await request.json()
+        return HttpResponse.json({ succeeded: 1, failed: [] })
+      }),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    await user.click(screen.getByRole('button', { name: '添加标签' }))
+    await user.click(screen.getByRole('option', { name: 'Escalation' }))
+    await waitFor(() => expect(batchBodies).toHaveLength(1))
+
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    await user.click(screen.getByRole('button', { name: '移除标签' }))
+    await user.click(screen.getByRole('option', { name: 'Existing' }))
+    await waitFor(() => expect(batchBodies).toHaveLength(2))
+
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    const transitionTrigger = screen.getByText('流转状态').closest('[role="combobox"]')
+    expect(transitionTrigger).not.toBeNull()
+    await user.click(transitionTrigger as HTMLElement)
+    await user.click(screen.getByRole('option', { name: '待处理' }))
+    await waitFor(() => expect(transitionBody).toBeTruthy())
+
+    expect(batchBodies).toEqual([
+      {
+        feedbackIds: ['101'],
+        dryRun: false,
+        operation: { tag: { addTagIds: ['tag-new'], removeTagIds: [] } },
+      },
+      {
+        feedbackIds: ['101'],
+        dryRun: false,
+        operation: { tag: { addTagIds: [], removeTagIds: ['tag-old'] } },
+      },
+    ])
+    expect(transitionBody).toEqual({
+      feedbackIds: ['101'],
+      toStateId: 'ws-2',
+      comment: '',
+    })
+  })
+
+  it('confirms selected feedback deletion through the page dialog', async () => {
+    let deleteBody: unknown
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.post('/fb/v1/console/feedback/batch', async ({ request }) => {
+        deleteBody = await request.json()
+        return HttpResponse.json({ affected_count: 1 })
+      }),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    await user.click(screen.getByRole('button', { name: '删除' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('永久删除反馈')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '删除' }))
+
+    await waitFor(() => {
+      expect(deleteBody).toEqual({
+        feedback_ids: [101],
+        operation: { delete: {} },
+      })
+    })
+  })
+
+  it('confirms selected terminal failure retry through the page dialog', async () => {
+    let retriedId = ''
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [terminalItemFixture], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.post('/fb/v1/console/feedback/:id/retry-enrichment', ({ params }) => {
+        retriedId = String(params.id)
+        return HttpResponse.json({
+          id: params.id,
+          enrichmentStatus: 'pending',
+          enrichmentAttempts: 0,
+        })
+      }),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('终态失败样本')).toBeInTheDocument()
+    })
+    await user.click(screen.getByLabelText('选择 终态失败样本'))
+    await user.click(screen.getByRole('button', { name: '重试富化' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText('重试 AI 富化')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '重试' }))
+
+    await waitFor(() => {
+      expect(retriedId).toBe('201')
+    })
+  })
+
+  it('shows a retryable semantic-search error state', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.post('/fb/v1/console/feedback/search', () =>
+        HttpResponse.json({ code: 'BAD_REQUEST', message: 'semantic exploded' }, { status: 400 }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '语义' }))
+    await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), 'billing')
+    await user.click(screen.getByRole('button', { name: '运行语义搜索' }))
+
+    await waitFor(() => {
+      expect(screen.getAllByText('semantic exploded').length).toBeGreaterThanOrEqual(1)
+    })
+    expect(screen.getByText('反馈列表暂时无法加载')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '重新加载' }).length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('shows the semantic-search empty state for a successful zero-hit response', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.post('/fb/v1/console/feedback/search', () =>
+        HttpResponse.json({
+          hits: [],
+          embeddingModel: 'text-embedding-3-small',
+          totalWithEmbeddings: 12,
+          usedKeywordFallback: false,
+          rankingVersion: 'rrf.pgfts.v1.k60',
+          coverage: {
+            totalLiveFeedback: 18,
+            totalWithEmbeddings: 12,
+            embeddingModel: 'text-embedding-3-small',
+          },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '语义' }))
+    await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), 'no semantic match')
+    await user.click(screen.getByRole('button', { name: '运行语义搜索' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('未找到语义匹配')).toBeInTheDocument()
+    })
+    expect(
+      screen.getByText('语义搜索返回 0 条结果，当前租户有 12 条反馈带向量。'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Unicode 密码登录失败')).toBeNull()
   })
 })

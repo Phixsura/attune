@@ -1335,6 +1335,98 @@ func TestCreatePublicSubmissionMapsErrors(t *testing.T) {
 	}
 }
 
+func TestPortalVoteErrorMapsExpectedFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		code    attunev1.ErrorCode
+		message string
+	}{
+		{name: "service not found", err: pvsvc.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "repo not found", err: pvrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "validation", err: pvsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_BAD_REQUEST, message: "invalid public request vote"},
+		{name: "disabled", err: pvsvc.ErrDisabled, status: http.StatusForbidden, code: attunev1.ErrorCode_FORBIDDEN, message: "public votes are disabled"},
+		{name: "default", err: errors.New("storage failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL, message: "public request vote failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := portalVoteError[*attunev1.PublicCustomerRequestDetail](tt.err)
+			assertDispatcherError(t, err, tt.status, tt.code, tt.message)
+		})
+	}
+}
+
+func TestPortalCommentErrorMapsExpectedFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		code    attunev1.ErrorCode
+		message string
+	}{
+		{name: "service not found", err: pvsvc.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "repo not found", err: pvrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "validation", err: pvsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_BAD_REQUEST, message: "invalid public request comment"},
+		{name: "disabled", err: pvsvc.ErrDisabled, status: http.StatusForbidden, code: attunev1.ErrorCode_FORBIDDEN, message: "public comments are disabled"},
+		{name: "default", err: errors.New("storage failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL, message: "public request comment failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := portalCommentError[*attunev1.PublicCustomerRequestDetail](tt.err)
+			assertDispatcherError(t, err, tt.status, tt.code, tt.message)
+		})
+	}
+}
+
+func TestPortalNotificationErrorMapsExpectedFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		code    attunev1.ErrorCode
+		message string
+	}{
+		{name: "service not found", err: rnsvc.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "request notification not found"},
+		{name: "repo not found", err: rnrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "request notification not found"},
+		{name: "service validation", err: rnsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_VALIDATION, message: "invalid request notification"},
+		{name: "repo validation", err: rnrepo.ErrInvalidInput, status: http.StatusBadRequest, code: attunev1.ErrorCode_VALIDATION, message: "invalid request notification"},
+		{name: "disabled", err: rnsvc.ErrDisabled, status: http.StatusForbidden, code: attunev1.ErrorCode_FORBIDDEN, message: "request notifications are disabled"},
+		{name: "default", err: errors.New("storage failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL, message: "request notification failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := portalNotificationError[*attunev1.PublicNotificationContact](tt.err)
+			assertDispatcherError(t, err, tt.status, tt.code, tt.message)
+		})
+	}
+}
+
+func assertDispatcherError(t *testing.T, err error, status int, code attunev1.ErrorCode, message string) {
+	t.Helper()
+
+	var dispatchErr *dispatcher.Error
+	if !errors.As(err, &dispatchErr) {
+		t.Fatalf("error = %T(%v), want *dispatcher.Error", err, err)
+	}
+	if dispatchErr.Status != status || dispatchErr.Code != code || dispatchErr.Message != message {
+		t.Fatalf("dispatcher error = (%d, %s, %q), want (%d, %s, %q)",
+			dispatchErr.Status, dispatchErr.Code, dispatchErr.Message, status, code, message)
+	}
+}
+
 func TestBindCreatePublicSubmissionRequest(t *testing.T) {
 	t.Parallel()
 

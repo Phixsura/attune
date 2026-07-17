@@ -3,6 +3,8 @@
 package main
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -66,4 +68,27 @@ func TestRunEvalScore_BadInputPath(t *testing.T) {
 	err := runEvalScore(nil, "tenant1", "/nonexistent/path/labels.csv", "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "open input")
+}
+
+func TestRunEvalConsistencyRejectsInvalidSinceBeforeEvaluatorUse(t *testing.T) {
+	err := runEvalConsistency(context.Background(), nil, "not-a-date", 1, "")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--since")
+}
+
+func TestRunEvalExportRejectsInvalidSinceBeforeEvaluatorUse(t *testing.T) {
+	err := runEvalExport(context.Background(), nil, "tenant1", "not-a-date", 1, "")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "--since")
+}
+
+func TestRunEvalExportReturnsOutputOpenErrorBeforeEvaluatorUse(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "missing", "labels.csv")
+
+	err := runEvalExport(context.Background(), nil, "tenant1", "2026-01-01", 1, output)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no such file")
 }

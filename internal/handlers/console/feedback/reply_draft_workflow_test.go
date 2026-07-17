@@ -164,6 +164,37 @@ func TestSendReplyDraft_UsesIdempotencyHeader(t *testing.T) {
 	require.Equal(t, int64(9), fake.gotRevision)
 }
 
+func TestRejectReplyDraft_HTTP(t *testing.T) {
+	fake := &fakeReplyWorkflow{snap: testReplySnapshot("rejected")}
+	audit := &fakeAuditRecorder{}
+	h := &FeedbackHandler{replyWorkflow: fake, audit: audit}
+	handler := dispatcher.Bind(
+		"console.FeedbackHandler.RejectReplyDraft",
+		dispatcher.Path(
+			func() *attunev1.RejectReplyDraftRequest {
+				return ptrext.Of(attunev1.RejectReplyDraftRequest{ExpectedRevision: 5})
+			},
+			dispatcher.ParamInt64("id", func(req *attunev1.RejectReplyDraftRequest, id int64) { req.Id = id }, "id must be an integer"),
+		),
+		h.RejectReplyDraft,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RejectReplyDraftRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	w := httptest.NewRecorder()
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/feedback/123/reply-draft/reject", "", dispatchtest.Param{Name: "id", Value: "123"}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(5), fake.gotRevision)
+	require.Equal(t, "admin", fake.gotActor.Type)
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "reply_draft.reject", audit.events[0].Action)
+	body, err := dispatchtest.DecodeJSON(w.Body)
+	require.NoError(t, err)
+	require.Equal(t, "rejected", body["workflow"].(map[string]any)["status"])
+}
+
 func TestSendReplyDraft_AuditsRequestAndSuccess(t *testing.T) {
 	fake := &fakeReplyWorkflow{snap: testReplySnapshot("sent")}
 	audit := &fakeAuditRecorder{}

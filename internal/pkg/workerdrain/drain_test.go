@@ -30,6 +30,17 @@ func TestDrainer_EnterLeave(t *testing.T) {
 	require.Equal(t, int64(0), d.InFlight())
 }
 
+func TestDrainer_SetTimeoutIgnoresNonPositiveDuration(t *testing.T) {
+	t.Parallel()
+	d := New("test-timeout-default")
+
+	d.SetTimeout(0)
+	require.Equal(t, DefaultTimeout, d.timeout)
+
+	d.SetTimeout(-time.Second)
+	require.Equal(t, DefaultTimeout, d.timeout)
+}
+
 func TestDrainer_DrainClean(t *testing.T) {
 	t.Parallel()
 	d := New("test-clean")

@@ -334,6 +334,16 @@ func (f *fakeSearchService) GetEmbedding(_ context.Context, _, _ string) ([]floa
 	return nil, "", nil
 }
 
+func TestNewSearchHandlerStoresService(t *testing.T) {
+	t.Parallel()
+
+	svc := ptrext.Of(fakeSearchService{})
+	h := NewSearchHandler(svc)
+
+	require.NotNil(t, h)
+	require.Same(t, svc, h.service)
+}
+
 type testSearchTagReader struct {
 	byFeedback map[int64][]feedbacktagassignment.TagInfo
 }

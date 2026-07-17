@@ -25,6 +25,17 @@ func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) e
 	return nil
 }
 
+func TestSetAuditLoggerStoresRecorder(t *testing.T) {
+	t.Parallel()
+
+	audit := ptrext.Of(fakeAuditRecorder{})
+	h := ptrext.Of(Handler{})
+
+	h.SetAuditLogger(audit)
+
+	require.Same(t, audit, h.audit)
+}
+
 func TestCreateStateRecordsAudit(t *testing.T) {
 	t.Parallel()
 
