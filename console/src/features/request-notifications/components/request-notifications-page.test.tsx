@@ -614,6 +614,12 @@ describe('RequestNotificationsPage', () => {
       }),
     )
     await waitFor(() => expect(screen.getAllByText('3').length).toBeGreaterThan(0))
+    expect(
+      await screen.findByText(
+        (content, element) =>
+          element?.tagName.toLowerCase() === 'pre' && content.includes('CSV export'),
+      ),
+    ).toHaveClass('max-w-full', 'whitespace-pre-wrap', 'break-words')
     await user.click(screen.getByTestId('rn-publish'))
     await waitFor(() =>
       expect(captures.publish).toMatchObject({ channels: ['REQUEST_NOTIFICATION_CHANNEL_EMAIL'] }),

@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Request notification previews now wrap long JSON fields inside the card,
+  preventing horizontal overflow in deployed Console pages on narrow viewports.
+
 - Request notification settings saves now normalize malformed consent-mode
   values before submitting them, preventing fresh Console loads from sending a
   backend-rejected value.

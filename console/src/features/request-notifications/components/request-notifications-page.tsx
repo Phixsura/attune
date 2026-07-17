@@ -917,7 +917,7 @@ export function RequestNotificationsPage() {
                       value={selectedChannels.length}
                     />
                   </div>
-                  <pre className="max-h-48 overflow-auto rounded-md bg-muted p-3 text-xs text-muted-foreground">
+                  <pre className="max-h-48 max-w-full overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs text-muted-foreground">
                     {JSON.stringify(
                       {
                         email: preview.data.emailPayload,
