@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Audit-log saved view save/delete actions no longer leave an unhandled
   rejection when the server reports a mutation error.
 
+- Guard-policy create/update failures now keep the active dialog open without
+  emitting an unhandled promise rejection after showing the error toast.
+
 - Public visibility portal submission form normalization now clears boolean
   field options correctly while continuing to trim and validate submission
   field choices.

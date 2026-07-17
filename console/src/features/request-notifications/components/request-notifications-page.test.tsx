@@ -137,6 +137,16 @@ const organizationSubscriberFixture: RequestSubscriber = {
   subscriptionStatus: 'pending',
 }
 
+const anonymousSubscriberFixture: RequestSubscriber = {
+  ...subscriberFixture,
+  contactId: '33333333-3333-3333-3333-555555555555',
+  displayName: '',
+  organization: '',
+  emailRedacted: '-',
+  consentState: '',
+  subscriptionStatus: 'pending',
+}
+
 function seededClient() {
   const qc = new QueryClient({
     defaultOptions: {
@@ -230,7 +240,14 @@ function installRequestHandlers(captures: Record<string, unknown>) {
     }),
     http.get(
       '/fb/v1/console/request-notifications/requests/55555555-5555-5555-5555-555555555555/subscribers',
-      () => HttpResponse.json({ subscribers: [subscriberFixture, organizationSubscriberFixture] }),
+      () =>
+        HttpResponse.json({
+          subscribers: [
+            subscriberFixture,
+            organizationSubscriberFixture,
+            anonymousSubscriberFixture,
+          ],
+        }),
     ),
     http.post(
       `/fb/v1/console/request-notifications/subscribers/${subscriberFixture.contactId}:suppress`,
@@ -279,6 +296,16 @@ describe('request notification page helpers', () => {
       },
     ])
     expect(policy).toEqual({ known: false, future: true, missing: true })
+    expect(
+      booleanPolicyFromSettings(undefined, [
+        {
+          key: 'fallback',
+          labelKey: 'fallback',
+          descriptionKey: 'fallback_help',
+          testId: 'fallback',
+        },
+      ]),
+    ).toEqual({ fallback: true })
     expect(policyEnabled(policy, 'known')).toBe(false)
     expect(policyEnabled(policy, 'missing')).toBe(true)
     expect(errorMessage(new Error('boom'), 'fallback')).toBe('boom')
@@ -335,7 +362,7 @@ describe('RequestNotificationsPage', () => {
         }),
       ),
       http.get('/fb/v1/console/request-notifications/sender', async () => {
-        await delay('infinite')
+        await delay(350)
         return HttpResponse.json(senderFixture)
       }),
       http.get('/fb/v1/console/request-notifications/webhook-targets', () =>
@@ -421,6 +448,34 @@ describe('RequestNotificationsPage', () => {
     await user.click(screen.getByTestId(`rn-target-test-${targetFixture.id}`))
     await user.click(screen.getByTestId(`rn-target-delete-${targetFixture.id}`))
     await waitFor(() => expect(captures.deletedTarget).toBe(targetFixture.id))
+  })
+
+  it('renders sender and subscriber fallback values', async () => {
+    installRequestHandlers({})
+    const qc = seededClient()
+    qc.setQueryData(requestNotificationSenderQueryKey, {
+      ...senderFixture,
+      fromEmailRedacted: '',
+      domain: '',
+      provider: '',
+      status: '',
+    })
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: qc,
+    })
+
+    expect(await screen.findByText('CRM')).toBeInTheDocument()
+    expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(3)
+
+    await user.type(
+      screen.getByTestId('rn-subscriber-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.click(screen.getByTestId('rn-subscribers-load'))
+
+    expect(await screen.findByText('Jane Customer')).toBeInTheDocument()
+    expect(screen.getByText('Example Org')).toBeInTheDocument()
+    expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(4)
   })
 
   it('previews, publishes, retries deliveries, and suppresses subscribers', async () => {
@@ -523,6 +578,128 @@ describe('RequestNotificationsPage', () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Webhook 测试失败'))
     await user.click(screen.getByTestId(`rn-target-delete-${targetFixture.id}`))
     expect(captures.deletedTarget).toBeUndefined()
+  })
+
+  it('shows pending indicators for long-running operator actions', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    server.use(
+      http.post('/fb/v1/console/request-notifications/sender:verify', async () => {
+        await delay(350)
+        return HttpResponse.json(senderFixture)
+      }),
+      http.post('/fb/v1/console/request-notifications/webhook-targets', async () => {
+        await delay(350)
+        return HttpResponse.json(targetFixture, { status: 201 })
+      }),
+      http.post(
+        `/fb/v1/console/request-notifications/webhook-targets/${targetFixture.id}:test`,
+        async () => {
+          await delay(350)
+          return HttpResponse.json({ ok: true })
+        },
+      ),
+      http.delete(
+        `/fb/v1/console/request-notifications/webhook-targets/${targetFixture.id}`,
+        async () => {
+          await delay(350)
+          return HttpResponse.json({})
+        },
+      ),
+      http.post('/fb/v1/console/request-notifications/preview', async () => {
+        await delay(350)
+        return HttpResponse.json({ eligibleRecipients: 0 })
+      }),
+      http.post('/fb/v1/console/request-notifications/publish', async () => {
+        await delay(350)
+        return HttpResponse.json({ id: 'event-1' })
+      }),
+      http.post('/fb/v1/console/request-notifications/deliveries/42:retry', async () => {
+        await delay(350)
+        return HttpResponse.json(deliveryFixture)
+      }),
+      http.post(
+        `/fb/v1/console/request-notifications/subscribers/${subscriberFixture.contactId}:suppress`,
+        async () => {
+          await delay(350)
+          return HttpResponse.json({ ...subscriberFixture, consentState: 'suppressed' })
+        },
+      ),
+    )
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: seededClient(),
+    })
+
+    await screen.findByText('CRM')
+
+    await user.click(screen.getByTestId('rn-sender-verify'))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('rn-sender-verify').querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
+
+    await user.type(screen.getByTestId('rn-target-name'), 'Escalations')
+    await user.type(screen.getByTestId('rn-target-url'), 'https://hooks.example.test/escalations')
+    await user.click(screen.getByTestId('rn-target-create'))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('rn-target-create').querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByTestId(`rn-target-test-${targetFixture.id}`))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`rn-target-test-${targetFixture.id}`).querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByTestId(`rn-target-delete-${targetFixture.id}`))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId(`rn-target-delete-${targetFixture.id}`).querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
+
+    await user.type(
+      screen.getByTestId('rn-draft-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.type(screen.getByTestId('rn-draft-title'), 'Shipped')
+    await user.type(screen.getByTestId('rn-draft-body'), 'CSV export is now available.')
+
+    await user.click(screen.getByTestId('rn-preview'))
+    await waitFor(() =>
+      expect(screen.getByTestId('rn-preview').querySelector('.animate-spin')).toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByTestId('rn-publish'))
+    await waitFor(() =>
+      expect(screen.getByTestId('rn-publish').querySelector('.animate-spin')).toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByTestId('rn-delivery-retry-42'))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('rn-delivery-retry-42').querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
+
+    await user.type(
+      screen.getByTestId('rn-subscriber-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.click(screen.getByTestId('rn-subscribers-load'))
+    expect(await screen.findByText('Jane Customer')).toBeInTheDocument()
+    await user.click(screen.getByTestId(`rn-subscriber-suppress-${subscriberFixture.contactId}`))
+    await waitFor(() =>
+      expect(
+        screen
+          .getByTestId(`rn-subscriber-suppress-${subscriberFixture.contactId}`)
+          .querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
   })
 
   it('surfaces mutation errors through toast fallbacks', async () => {

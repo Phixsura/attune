@@ -102,7 +102,6 @@ export function GuardPoliciesPage() {
       setCreateOpen(false)
     } catch (err) {
       toast.error(messageOf(err))
-      throw err
     }
   }
 
@@ -114,7 +113,6 @@ export function GuardPoliciesPage() {
       setEditing(null)
     } catch (err) {
       toast.error(messageOf(err))
-      throw err
     }
   }
 
@@ -883,6 +881,7 @@ export const guardPolicyPageTestables = {
   firstKnown,
   formFromPolicy,
   formatTarget,
+  messageOf,
   policyFromForm,
   splitCSV,
 }

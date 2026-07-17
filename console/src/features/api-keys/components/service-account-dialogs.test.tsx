@@ -60,7 +60,32 @@ describe('service account dialogs', () => {
     expect(screen.getByLabelText('名称')).toBeDisabled()
     expect(screen.getByLabelText('说明')).toBeDisabled()
     expect(screen.getByTestId('create-service-account-submit')).toBeDisabled()
+    expect(
+      screen.getByTestId('create-service-account-submit').querySelector('.animate-spin'),
+    ).toBeInTheDocument()
     expect(screen.getByTestId('create-service-account-cancel')).toBeDisabled()
+  })
+
+  it('cancels create dialog directly and resets fields when Radix closes it', async () => {
+    const onOpenChange = vi.fn()
+    const { user } = renderWithProviders(
+      <CreateServiceAccountDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        onSubmit={vi.fn()}
+        pending={false}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('名称'), 'ci-bot')
+    await user.type(screen.getByLabelText('说明'), 'temporary bot')
+    await user.click(screen.getByTestId('create-service-account-cancel'))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(screen.getByLabelText('名称')).toHaveValue('')
+    expect(screen.getByLabelText('说明')).toHaveValue('')
   })
 
   it('cancels and handles rejected delete confirmations without closing', async () => {
@@ -85,6 +110,43 @@ describe('service account dialogs', () => {
     expect(onOpenChange).toHaveBeenCalledTimes(1)
   })
 
+  it('closes delete dialog after a successful confirmation and shows pending state', async () => {
+    const pendingOpenChange = vi.fn()
+    renderWithProviders(
+      <ServiceAccountDeleteDialog
+        open={true}
+        onOpenChange={pendingOpenChange}
+        serviceAccountName="pending-bot"
+        onConfirm={vi.fn()}
+        pending={true}
+      />,
+    )
+    const pendingDelete = screen.getByRole('button', { name: '删除' })
+    expect(pendingDelete).toBeDisabled()
+    expect(pendingDelete.querySelector('.animate-spin')).toBeInTheDocument()
+
+    const onOpenChange = vi.fn()
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <ServiceAccountDeleteDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        serviceAccountName="ci-bot"
+        onConfirm={onConfirm}
+        pending={false}
+      />,
+    )
+
+    await user.click(
+      within(screen.getByRole('alertdialog', { name: '删除服务账号 ci-bot？' })).getByRole(
+        'button',
+        { name: '删除' },
+      ),
+    )
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  })
+
   it('renders pending enable state and handles rejected status confirmations', async () => {
     const pendingOpenChange = vi.fn()
     renderWithProviders(
@@ -100,7 +162,9 @@ describe('service account dialogs', () => {
     expect(
       screen.getByRole('alertdialog', { name: '启用服务账号 deploy-bot？' }),
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '启用' })).toBeDisabled()
+    const pendingEnable = screen.getByRole('button', { name: '启用' })
+    expect(pendingEnable).toBeDisabled()
+    expect(pendingEnable.querySelector('.animate-spin')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
 
     const onOpenChange = vi.fn()
@@ -120,5 +184,29 @@ describe('service account dialogs', () => {
     await user.click(within(disableDialog).getByRole('button', { name: '停用' }))
     await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce())
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it('cancels and closes status dialog after successful confirmation', async () => {
+    const onOpenChange = vi.fn()
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <ServiceAccountStatusDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        serviceAccountName="ci-bot"
+        nextActive={false}
+        onConfirm={onConfirm}
+        pending={false}
+      />,
+    )
+
+    const dialog = screen.getByRole('alertdialog', { name: '停用服务账号 ci-bot？' })
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    onOpenChange.mockClear()
+
+    await user.click(within(dialog).getByRole('button', { name: '停用' }))
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
   })
 })
