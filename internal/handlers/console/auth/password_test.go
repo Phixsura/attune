@@ -59,6 +59,9 @@ func TestVerifyOrDummy_TimingEquality(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping timing test in -short mode")
 	}
+	if raceEnabled {
+		t.Skip("skipping timing test under -race")
+	}
 	h, _ := auth.HashPassword("known-password")
 	const iters = 20
 	start := time.Now()
