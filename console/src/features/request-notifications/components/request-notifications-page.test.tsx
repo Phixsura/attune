@@ -15,6 +15,7 @@ import {
   channelList,
   errorMessage,
   formatTime,
+  normalizeConsentMode,
   numberOrZero,
   optionalValue,
   policyEnabled,
@@ -318,6 +319,9 @@ describe('request notification page helpers', () => {
     expect(numberOrZero('nan')).toBe(0)
     expect(optionalValue('  secret  ')).toBe('secret')
     expect(optionalValue('   ')).toBeUndefined()
+    expect(normalizeConsentMode('disabled')).toBe('disabled')
+    expect(normalizeConsentMode('', 'existing_app_consent')).toBe('existing_app_consent')
+    expect(normalizeConsentMode('unknown')).toBe('explicit_opt_in')
     const policy = booleanPolicyFromSettings({ known: false, future: true, invalid: 'yes' }, [
       {
         key: 'known',
@@ -439,6 +443,29 @@ describe('RequestNotificationsPage', () => {
     await user.type(screen.getByTestId('rn-subscriber-request-id'), 'bad-request')
     await user.click(screen.getByTestId('rn-subscribers-load'))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot load subscribers'))
+  })
+
+  it('normalizes malformed consent mode values before saving settings', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    server.use(
+      http.get('/fb/v1/console/request-notifications/settings', () =>
+        HttpResponse.json({
+          ...settingsFixture,
+          defaultConsentMode: 'legacy_mode',
+        }),
+      ),
+    )
+    const { user } = renderWithProviders(<RequestNotificationsPage />)
+
+    expect(await screen.findByText('CRM')).toBeInTheDocument()
+    await user.click(screen.getByTestId('rn-settings-save'))
+
+    await waitFor(() =>
+      expect(captures.settings).toMatchObject({
+        defaultConsentMode: 'explicit_opt_in',
+      }),
+    )
   })
 
   it('renders loaded notification state and drives the main operator mutations', async () => {

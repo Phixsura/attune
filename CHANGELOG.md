@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Request notification settings saves now normalize malformed consent-mode
+  values before submitting them, preventing fresh Console loads from sending a
+  backend-rejected value.
+
 - Request notification worker email resolution now writes tenant-wide
   unsubscribe tokens with the database token scope (`tenant`) instead of the
   subscription scope (`tenant_updates`), so published updates can create email

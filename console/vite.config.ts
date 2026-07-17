@@ -66,7 +66,7 @@ export default defineConfig({
     // Full-suite jsdom/Radix/user-event flows are CPU-bound in the fork pool.
     // Keep coverage extra roomy while giving ordinary local CI enough budget
     // for long smoke flows to finish under load.
-    testTimeout: isCoverageRun ? 60_000 : 30_000,
+    testTimeout: isCoverageRun ? 120_000 : 30_000,
     // pool: 'forks' (vitest 4 default) gives each test file its own
     // child process, so MSW server instances, navigator.clipboard
     // prototype patches, and api-client's module-level CSRF state

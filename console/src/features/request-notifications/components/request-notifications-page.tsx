@@ -74,6 +74,8 @@ type PolicyOption = {
   testId: string
 }
 
+const consentModeValues = new Set(['explicit_opt_in', 'existing_app_consent', 'disabled'])
+
 const eventTypeOptions: PolicyOption[] = [
   {
     key: 'request.status_changed',
@@ -215,7 +217,7 @@ export function RequestNotificationsPage() {
     if (!settings) return
     setEmailEnabled(settings.emailEnabled)
     setWebhookEnabled(settings.webhookEnabled)
-    setConsentMode(settings.defaultConsentMode || 'explicit_opt_in')
+    setConsentMode(normalizeConsentMode(settings.defaultConsentMode))
     setRequirePublicUpdate(settings.requirePublicUpdateForStatus)
     setMaxRecipientsWithoutConfirm(String(settings.maxRecipientsWithoutConfirm || 0))
     setTenantHourlySendLimit(String(settings.tenantHourlySendLimit || 0))
@@ -259,7 +261,7 @@ export function RequestNotificationsPage() {
         webhookEnabled,
         enabledEventTypes,
         statusPolicy,
-        defaultConsentMode: consentMode,
+        defaultConsentMode: normalizeConsentMode(consentMode, settings?.defaultConsentMode),
         requirePublicUpdateForStatus: requirePublicUpdate,
         maxRecipientsWithoutConfirm: numberOrZero(maxRecipientsWithoutConfirm),
         tenantHourlySendLimit: numberOrZero(tenantHourlySendLimit),
@@ -1409,6 +1411,14 @@ export function booleanPolicyFromSettings(
     }
   }
   return out
+}
+
+export function normalizeConsentMode(value: string | undefined, fallback?: string) {
+  const trimmed = (value ?? '').trim()
+  if (consentModeValues.has(trimmed)) return trimmed
+  const fallbackValue = (fallback ?? '').trim()
+  if (consentModeValues.has(fallbackValue)) return fallbackValue
+  return 'explicit_opt_in'
 }
 
 export function policyEnabled(values: BooleanPolicy, key: string) {
