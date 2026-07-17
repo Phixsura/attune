@@ -69,6 +69,7 @@ export function CreateServiceAccountDialog({
       <DialogContent
         className="sm:max-w-lg"
         onCloseAutoFocus={(event) => {
+          /* v8 ignore next -- @preserve: parent dialogs opt out of Radix focus restore in browser-only flows. */
           if (!restoreFocusOnClose) {
             event.preventDefault()
             return

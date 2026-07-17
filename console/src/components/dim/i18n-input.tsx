@@ -44,6 +44,7 @@ export function I18nInput({
   }
   const addLocale = () => {
     const tag = extraLocale.trim()
+    /* v8 ignore next -- @preserve: add-locale control is disabled for blank locale input. */
     if (!tag) return
     if (locales.includes(tag)) {
       setExtraLocale('')

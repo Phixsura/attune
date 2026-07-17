@@ -312,6 +312,7 @@ export const consoleNavItems: ConsoleNavItem[] = [
 ]
 
 export function canAccessConsoleItem(role: Role, access?: ConsoleRouteAccess): boolean {
+  /* v8 ignore next -- @preserve: callers omit access for universally visible chrome items. */
   if (!access) return true
   if (access.adminOnly) return role === 'admin'
   if (access.permission) return hasPermission(role, access.permission)

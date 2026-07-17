@@ -653,6 +653,30 @@ func TestSearchHandler_Search(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	t.Run("400 Bad Request for service query too long error", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{
+			err: semanticsearch.ErrQueryTooLong,
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"test"}`))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("400 Bad Request for service invalid query error", func(t *testing.T) {
+		handler := newSearchHandler(&fakeSearchService{
+			err: semanticsearch.ErrInvalidQuery,
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/search",
+			`{"q":"test"}`))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
 	t.Run("500 Internal Server Error", func(t *testing.T) {
 		handler := newSearchHandler(&fakeSearchService{
 			err: errors.New("database connection failed"),
@@ -939,4 +963,191 @@ func TestSearchHandler_RecordSearchEvent(t *testing.T) {
 		`{"run_id":"`+runID+`","feedback_id":77,"action":"delete","rank":2}`,
 	))
 	require.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestSearchHandler_GetSearchQualityEdges(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	t.Run("operations missing", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&SearchHandler{}).GetSearchQuality(ctx, ptrext.Of(attunev1.GetSearchQualityRequest{}))
+
+		requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	})
+
+	t.Run("validation", func(t *testing.T) {
+		t.Parallel()
+		h := &SearchHandler{operations: &fakeSearchOperations{}}
+
+		_, err := h.GetSearchQuality(ctx, ptrext.Of(attunev1.GetSearchQualityRequest{BucketWidth: "week"}))
+
+		requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+	})
+
+	t.Run("dashboard error", func(t *testing.T) {
+		t.Parallel()
+		h := &SearchHandler{operations: &fakeSearchOperations{dashboardErr: errors.New("dashboard failed")}}
+
+		_, err := h.GetSearchQuality(ctx, ptrext.Of(attunev1.GetSearchQualityRequest{}))
+
+		requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	})
+
+	t.Run("bind bad limit", func(t *testing.T) {
+		t.Parallel()
+		req := ptrext.Of(attunev1.GetSearchQualityRequest{})
+
+		err := BindSearchQualityRequest(httptest.NewRequest(http.MethodGet, "/search-quality?limit=nope", nil), req)
+
+		requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+	})
+}
+
+func TestSearchHandler_RecordSearchEventEdges(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	valid := ptrext.Of(attunev1.RecordSearchEventRequest{
+		RunId:      uuid.NewString(),
+		FeedbackId: 77,
+		Action:     "open",
+	})
+	t.Run("operations missing", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&SearchHandler{}).RecordSearchEvent(ctx, valid)
+
+		requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	})
+
+	t.Run("run not found", func(t *testing.T) {
+		t.Parallel()
+		h := &SearchHandler{operations: &fakeSearchOperations{eventErr: repofeedback.ErrSearchRunNotFound}}
+
+		_, err := h.RecordSearchEvent(ctx, valid)
+
+		requireDispatcherError(t, err, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND)
+	})
+
+	t.Run("insert error", func(t *testing.T) {
+		t.Parallel()
+		h := &SearchHandler{operations: &fakeSearchOperations{eventErr: errors.New("insert failed")}}
+
+		_, err := h.RecordSearchEvent(ctx, valid)
+
+		requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	})
+}
+
+func TestSearchHandlerRecordSearchRunEdges(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	auth := ctx.Auth
+	req := ptrext.Of(attunev1.SemanticSearchRequest{Filter: ptrext.Of(attunev1.FeedbackFilter{
+		Urgent: ptrext.Of(true),
+	})})
+	(&SearchHandler{}).recordSearchRun(ctx, auth, req, "query", "run-1", time.Second, nil)
+	(&SearchHandler{operations: &fakeSearchOperations{}}).recordSearchRun(ctx, auth, req, "query", "run-1", time.Second, nil)
+
+	ops := &fakeSearchOperations{runErr: errors.New("telemetry failed")}
+	h := &SearchHandler{operations: ops}
+	h.recordSearchRun(ctx, auth, req, "  Query  ", "run-2", 1500*time.Millisecond, &semanticsearch.SearchResponse{
+		Hits: []*semanticsearch.SearchHit{{
+			Feedback: ptrext.Of(repofeedback.SearchFeedback{ID: 1}),
+		}},
+		EmbeddingModel:      "text-embedding-3-small",
+		TotalWithEmbeddings: 3,
+		RankingVersion:      semanticsearch.RankingVersion,
+		UsedKeywordFallback: true,
+		FallbackReason:      "embedding_unavailable",
+	})
+
+	require.NotNil(t, ops.run)
+	require.Equal(t, "run-2", ops.run.RunID)
+	require.Equal(t, "Query", ops.run.QueryPreview)
+	require.Equal(t, 1, ops.run.ResultCount)
+	require.Equal(t, 0, ops.run.TotalLiveFeedback)
+	require.Equal(t, 3, ops.run.TotalWithEmbeddings)
+	require.InDelta(t, 1.0, ops.run.CoverageRatio, 0.001)
+	require.Equal(t, "embedding_unavailable", ops.run.FallbackReason)
+
+	okOps := &fakeSearchOperations{}
+	(&SearchHandler{operations: okOps}).recordSearchRun(
+		ctx,
+		auth,
+		ptrext.Of(attunev1.SemanticSearchRequest{}),
+		"query",
+		"run-3",
+		time.Millisecond,
+		&semanticsearch.SearchResponse{},
+	)
+	require.NotNil(t, okOps.run)
+	require.Empty(t, okOps.run.EmbeddingModel)
+
+	coverageOps := &fakeSearchOperations{}
+	(&SearchHandler{operations: coverageOps}).recordSearchRun(
+		ctx,
+		auth,
+		ptrext.Of(attunev1.SemanticSearchRequest{}),
+		"query",
+		"run-4",
+		time.Millisecond,
+		&semanticsearch.SearchResponse{
+			Coverage: &semanticsearch.SearchCoverage{
+				TotalLiveFeedback:   10,
+				TotalWithEmbeddings: 5,
+				EmbeddingModel:      "coverage-model",
+			},
+		},
+	)
+	require.NotNil(t, coverageOps.run)
+	require.Equal(t, "coverage-model", coverageOps.run.EmbeddingModel)
+	require.Equal(t, 10, coverageOps.run.TotalLiveFeedback)
+	require.Equal(t, 5, coverageOps.run.TotalWithEmbeddings)
+}
+
+func TestSearchResponseRowsAndProtoFeedbacksSkipNilEntries(t *testing.T) {
+	t.Parallel()
+
+	require.Nil(t, searchResponseRows(nil))
+	rows := searchResponseRows(&semanticsearch.SearchResponse{
+		Hits: []*semanticsearch.SearchHit{
+			nil,
+			{},
+			{Feedback: ptrext.Of(repofeedback.SearchFeedback{
+				ID:               42,
+				Content:          "login failed",
+				Source:           "api",
+				EnrichmentStatus: "done",
+				CreatedAt:        time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC),
+			})},
+		},
+	})
+	require.Len(t, rows, 1)
+	require.Equal(t, int64(42), rows[0].ID)
+
+	require.Nil(t, semanticSearchProtoFeedbacks(nil))
+	items := semanticSearchProtoFeedbacks(ptrext.Of(attunev1.SemanticSearchResponse{
+		Hits: []*attunev1.SemanticSearchHit{
+			nil,
+			{},
+			{Feedback: ptrext.Of(attunev1.Feedback{Id: 42})},
+		},
+	}))
+	require.Len(t, items, 1)
+	require.Equal(t, int64(42), items[0].GetId())
+}
+
+func TestSearchEvidenceToProtoSkipsEmptyEvidence(t *testing.T) {
+	t.Parallel()
+
+	got := searchEvidenceToProto([]semanticsearch.SearchEvidence{
+		{},
+		{Field: "content", Snippet: "needle"},
+	})
+
+	require.Len(t, got, 1)
+	require.Equal(t, "content", got[0].GetField())
+	require.Equal(t, "needle", got[0].GetSnippet())
 }

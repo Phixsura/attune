@@ -322,6 +322,13 @@ func TestFeedbackFilterSnapshot_EmptyFilter(t *testing.T) {
 	require.Nil(t, got)
 }
 
+func TestFeedbackFilterSnapshot_InvalidUTF8(t *testing.T) {
+	t.Parallel()
+	q := string([]byte{0xff})
+	got := feedbackFilterSnapshot(ptrext.Of(attunev1.FeedbackFilter{Q: ptrext.Of(q)}))
+	require.Nil(t, got)
+}
+
 func TestFeedbackFilterSnapshot_WithContent(t *testing.T) {
 	t.Parallel()
 	filter := ptrext.Of(attunev1.FeedbackFilter{

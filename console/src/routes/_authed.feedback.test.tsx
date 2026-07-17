@@ -1,6 +1,7 @@
 import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Route as FeedbackShellRoute } from '@/routes/_authed.feedback'
 import { Route as FeedbackClustersRoute } from '@/routes/_authed.feedback.clusters'
 import { Route as FeedbackIndexRoute } from '@/routes/_authed.feedback.index'
@@ -8,7 +9,9 @@ import { Route as PortalInboxRoute } from '@/routes/_authed.feedback.portal'
 import { Route as TerminalFailuresRoute } from '@/routes/_authed.feedback.terminal-failures'
 import { FeedbackRoutePage } from '@/routes/-feedback-route-page'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+
+const navigateMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@tanstack/react-router', async () => {
   const actual =
@@ -21,6 +24,7 @@ vi.mock('@tanstack/react-router', async () => {
         {children}
       </a>
     ),
+    useNavigate: () => navigateMock,
   }
 })
 
@@ -29,6 +33,8 @@ vi.mock('@/features/session/hooks/use-permissions', () => ({
     can: () => true,
   }),
 }))
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() } }))
 
 // Route-level smoke test for the feedback page. The unit tests cover
 // individual hooks + components in isolation; this test covers the
@@ -129,6 +135,13 @@ const terminalDetailFixture = {
 }
 
 describe('_authed.feedback route — user flow smoke', () => {
+  beforeEach(() => {
+    navigateMock.mockClear()
+    vi.mocked(toast.error).mockClear()
+    vi.mocked(toast.success).mockClear()
+    vi.mocked(toast.warning).mockClear()
+  })
+
   it('preserves numeric drilldown search params parsed by the router', () => {
     const validateSearch = FeedbackIndexRoute.options.validateSearch as (
       search: Record<string, unknown>,
@@ -180,6 +193,9 @@ describe('_authed.feedback route — user flow smoke', () => {
       http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
         HttpResponse.json({ entries: [], feedbackId: params.id }),
       ),
+      http.get('/fb/v1/console/customer-requests', () =>
+        HttpResponse.json({ items: [], nextCursor: undefined }),
+      ),
       http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
       http.get('/fb/v1/console/clusters', () =>
         HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
@@ -217,6 +233,11 @@ describe('_authed.feedback route — user flow smoke', () => {
       expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
     })
     expect(screen.getByText('Unicode normalization bug')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByText('Unicode normalization bug')).toBeNull()
+    })
   }, 20_000) // Route-level smoke composes lazy routes, queries, and sheet rendering.
 
   it('updates quality drilldown filters when the same route receives new search-derived props', async () => {
@@ -508,6 +529,42 @@ describe('_authed.feedback route — user flow smoke', () => {
     })
   }, 20_000)
 
+  it('shows the default empty workspace when the feedback queue has no rows', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '0',
+          dims: [],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    renderWithProviders(<FeedbackRoutePage />)
+
+    expect(await screen.findByText('还没有反馈')).toBeInTheDocument()
+    expect(screen.getByText('先签发 API key')).toBeInTheDocument()
+    expect(screen.getByText('校准 AI 分类')).toBeInTheDocument()
+    expect(screen.getByText('接通反馈入口')).toBeInTheDocument()
+    expect(screen.getByText('先用真实样本校准分类')).toBeInTheDocument()
+    expect(screen.getByText('补上通知和分发链路')).toBeInTheDocument()
+  }, 20_000)
+
   it('terminal workbench priority is reflected in the queue deck', async () => {
     server.use(
       http.get('/fb/v1/console/enrich-config', () =>
@@ -593,6 +650,79 @@ describe('_authed.feedback route — user flow smoke', () => {
 
     await waitFor(() => {
       expect(screen.getByText('终态失败的聚类样本')).toBeInTheDocument()
+    })
+  })
+
+  it('terminal workbench error state can retry the failed summary request', async () => {
+    let workbenchCalls = 0
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        const url = new URL(request.url)
+        const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
+        return HttpResponse.json({
+          items: terminalOnly ? [terminalItemFixture] : [itemFixture],
+          nextCursor: undefined,
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/terminal-failures', () => {
+        workbenchCalls += 1
+        if (workbenchCalls === 1) {
+          return HttpResponse.json({ code: 'INTERNAL', message: 'workbench down' }, { status: 500 })
+        }
+        return HttpResponse.json({
+          periodStart: '2026-06-01T00:00:00Z',
+          periodEnd: '2026-06-30T12:00:00Z',
+          totalTerminalFailures: '1',
+          oldestCreatedAt: '2026-06-01T00:00:00Z',
+          reasonClassClusters: [
+            {
+              key: 'llm_err',
+              label: 'LLM error',
+              count: '1',
+              oldestCreatedAt: '2026-06-01T00:00:00Z',
+              newestCreatedAt: '2026-06-01T00:00:00Z',
+              sampleFeedbackIds: ['201'],
+              remediationHint: 'Check the routed LLM channel and provider health.',
+            },
+          ],
+          modelChannelClusters: [],
+          configFingerprintClusters: [],
+          ageBucketClusters: [],
+        })
+      }),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <FeedbackRoutePage initialQueueMode="terminal" showTerminalWorkbench />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('终态失败工位暂时无法加载')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '打开样本 #201' })).toBeInTheDocument()
     })
   })
 
@@ -695,7 +825,204 @@ describe('_authed.feedback route — user flow smoke', () => {
     })
   })
 
+  it('queue lane actions open the priority feedback for each explicit subqueue', async () => {
+    const activeItem = {
+      ...itemFixture,
+      id: '102',
+      enrichedDisplayTitle: '处理中反馈',
+      enrichedTitle: 'Active feedback',
+      isUrgent: false,
+      workflowState: {
+        id: 'ws-active',
+        name: 'in_progress',
+        displayName: { entries: { default: 'In Progress', zh: '处理中' } },
+        color: '#f59e0b',
+        category: 'active',
+        position: 1,
+        isDefault: false,
+        archived: false,
+        createdAt: '2026-06-07T00:00:00Z',
+        updatedAt: '2026-06-07T00:00:00Z',
+      },
+    }
+    const failedItem = {
+      ...itemFixture,
+      id: '103',
+      enrichedDisplayTitle: '失败反馈',
+      enrichedTitle: 'Failed feedback',
+      enrichmentStatus: 'failed',
+      enrichmentAttempts: 1,
+      enrichmentNextRetryAt: '2099-06-07T10:00:00Z',
+      isUrgent: false,
+    }
+    const readyItem = {
+      ...itemFixture,
+      id: '104',
+      enrichedDisplayTitle: '已就绪反馈',
+      enrichedTitle: 'Ready feedback',
+      enrichedAttrs: { severity: 'P1' },
+      isUrgent: false,
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({
+          items: [itemFixture, activeItem, failedItem, readyItem],
+          nextCursor: undefined,
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '4',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/:id', ({ params }) =>
+        HttpResponse.json({ ...detailFixture, id: params.id }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
+        HttpResponse.json({ entries: [], feedbackId: params.id }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+    const clickLaneAction = async (title: string, action: string) => {
+      const titleNode = await screen.findByText(title)
+      const lane = titleNode.parentElement?.parentElement
+      expect(lane).toBeTruthy()
+      await user.click(within(lane as HTMLElement).getByRole('button', { name: action }))
+      await waitFor(() => {
+        expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
+      })
+      await user.keyboard('{Escape}')
+      await waitFor(() => {
+        expect(screen.queryByText('Unicode 规范化问题')).toBeNull()
+      })
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText('处理中反馈')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '处理中1' }))
+    await clickLaneAction('先推进这批处理中反馈', '打开处理中反馈')
+
+    await user.click(screen.getByRole('button', { name: /^富化失败\d+$/ }))
+    await clickLaneAction('先处理失败条目里的优先反馈', '打开失败条目')
+
+    await user.click(screen.getByRole('button', { name: /^AI 已就绪\d+$/ }))
+    await clickLaneAction('优先消费 AI 已就绪反馈', '打开 AI 已就绪反馈')
+
+    await user.click(screen.getByRole('button', { name: /^紧急\d+$/ }))
+    await clickLaneAction('继续处理这批紧急反馈', '打开紧急反馈')
+  })
+
+  it('queue lane all-mode actions open default and failed priorities', async () => {
+    const failedOnly = {
+      ...itemFixture,
+      id: '202',
+      enrichedDisplayTitle: '失败优先反馈',
+      enrichedTitle: 'Failed priority feedback',
+      enrichmentStatus: 'failed',
+      enrichmentAttempts: 1,
+      isUrgent: false,
+    }
+    const readyOnly = {
+      ...itemFixture,
+      id: '203',
+      enrichedDisplayTitle: '普通就绪反馈',
+      enrichedTitle: 'Ready priority feedback',
+      isUrgent: false,
+    }
+    let showFailure = false
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [showFailure ? failedOnly : readyOnly], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/:id', ({ params }) =>
+        HttpResponse.json({ ...detailFixture, id: params.id }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
+        HttpResponse.json({ entries: [], feedbackId: params.id }),
+      ),
+      http.get('/fb/v1/console/customer-requests', () =>
+        HttpResponse.json({ items: [], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const firstRender = renderWithProviders(<FeedbackRoutePage />)
+    const clickLaneAction = async (
+      user: ReturnType<typeof renderWithProviders>['user'],
+      title: string,
+      action: string,
+    ) => {
+      const titleNode = await screen.findByText(title)
+      const lane = titleNode.parentElement?.parentElement
+      expect(lane).toBeTruthy()
+      await user.click(within(lane as HTMLElement).getByRole('button', { name: action }))
+      await waitFor(() => {
+        expect(screen.getByText('Unicode 规范化问题')).toBeInTheDocument()
+      })
+      await user.keyboard('{Escape}')
+      await waitFor(() => {
+        expect(screen.queryByText('Unicode 规范化问题')).toBeNull()
+      })
+    }
+
+    await waitFor(() => {
+      expect(screen.getByText('普通就绪反馈')).toBeInTheDocument()
+    })
+    await clickLaneAction(firstRender.user, '先打开当前优先反馈', '打开当前优先反馈')
+
+    firstRender.unmount()
+    showFailure = true
+    const secondRender = renderWithProviders(<FeedbackRoutePage />)
+    await waitFor(() => {
+      expect(screen.getByText('失败优先反馈')).toBeInTheDocument()
+    })
+    await clickLaneAction(secondRender.user, '先处理失败条目里的优先反馈', '打开失败条目')
+  })
+
   it('active filter chips can be removed individually', async () => {
+    const assignedTag = {
+      id: 'tag-billing',
+      name: 'Billing',
+      color: '#06b6d4',
+      archived: false,
+    }
     const workflowState = {
       id: 'ws-1',
       name: 'open',
@@ -715,15 +1042,9 @@ describe('_authed.feedback route — user flow smoke', () => {
           config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
         }),
       ),
-      http.get('/fb/v1/console/feedback', ({ request }) => {
-        const url = new URL(request.url)
-        const hasSeverity = url.searchParams.get('severity') === 'P0'
-        const hasUrgent = url.searchParams.get('urgent') === 'true'
-        const hasQuery = url.searchParams.get('q') === 'unicode'
-        const hasWorkflow = url.searchParams.get('workflow_state') === 'ws-1'
+      http.get('/fb/v1/console/feedback', () => {
         return HttpResponse.json({
-          items:
-            hasSeverity || hasUrgent || hasQuery || hasWorkflow ? [itemFixture] : [itemFixture],
+          items: [{ ...itemFixture, tags: [assignedTag] }],
           nextCursor: undefined,
         })
       }),
@@ -739,28 +1060,80 @@ describe('_authed.feedback route — user flow smoke', () => {
       http.get('/fb/v1/console/workflow/states', () =>
         HttpResponse.json({ states: [workflowState] }),
       ),
-      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [assignedTag] })),
       http.get('/fb/v1/console/clusters', () =>
         HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
     )
 
-    const { user } = renderWithProviders(<FeedbackRoutePage />)
+    const { user } = renderWithProviders(
+      <FeedbackRoutePage
+        initialQualityFilters={{
+          ids: ['101', '102'],
+          qualitySignal: 'low_confidence',
+          confidenceLte: 0.5,
+        }}
+      />,
+    )
 
     await waitFor(() => {
       expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
     })
 
+    await user.click(screen.getByRole('button', { name: '关键词' }))
+    await user.click(screen.getByRole('button', { name: '终态失败0' }))
+    await waitFor(() => {
+      expect(screen.getByText('当前范围先回到更大的工作面')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '全部' }))
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
     await user.type(screen.getByRole('searchbox'), 'unicode')
     await user.click(screen.getByRole('button', { name: '仅看紧急' }))
+    await user.click(screen.getByRole('button', { name: '全部反馈' }))
+    await user.click(screen.getByRole('button', { name: '仅看紧急' }))
+    await user.click(screen.getByLabelText('来源'))
+    await user.click(screen.getByRole('option', { name: '网页' }))
+    await user.click(screen.getByLabelText('类型'))
+    await user.click(screen.getByRole('option', { name: '缺陷' }))
     await user.click(screen.getByLabelText('所有 Severity'))
     await user.click(screen.getByRole('option', { name: 'P0' }))
+    await user.click(screen.getByLabelText('所有标签'))
+    await user.click(screen.getByRole('option', { name: 'Billing' }))
     await user.click(screen.getByLabelText('所有状态'))
     await user.click(screen.getByRole('option', { name: '待处理' }))
+    await user.click(screen.getByLabelText('AI 富化状态'))
+    await user.click(screen.getByRole('option', { name: '已富化' }))
+    await user.click(screen.getByLabelText('分诊顺序'))
+    await user.click(screen.getByRole('option', { name: '紧急优先' }))
+    await user.click(screen.getByRole('button', { name: '紧急1' }))
+    await user.click(screen.getByRole('button', { name: '语义' }))
 
     await waitFor(() => {
       expect(screen.getByText('仅查看紧急反馈')).toBeInTheDocument()
     })
+
+    const chipLabels = [
+      'Severity P0',
+      '所有标签 Billing',
+      '工作流状态 待处理',
+      'AI 富化状态 已富化',
+      '来源 网页',
+      '类型 缺陷',
+      '质量样本 2 条反馈',
+      '质量信号 低置信度',
+      '置信度 ≤ 50%',
+      '搜索模式 语义',
+      '分诊顺序 紧急优先',
+      '当前子队列 紧急',
+    ]
+    for (const label of chipLabels) {
+      await user.click(screen.getByLabelText(label))
+      await waitFor(() => {
+        expect(screen.queryByLabelText(label)).toBeNull()
+      })
+    }
 
     await user.click(screen.getByLabelText('关键词搜索 unicode'))
     await waitFor(() => {
@@ -830,15 +1203,21 @@ describe('_authed.feedback route — user flow smoke', () => {
   })
 
   it('500 from /feedback renders a retryable error state instead of an empty list', async () => {
+    let listCalls = 0
+
     server.use(
       http.get('/fb/v1/console/enrich-config', () =>
         HttpResponse.json({
           config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: [] },
         }),
       ),
-      http.get('/fb/v1/console/feedback', () =>
-        HttpResponse.json({ code: 'INTERNAL', message: 'boom' }, { status: 500 }),
-      ),
+      http.get('/fb/v1/console/feedback', () => {
+        listCalls += 1
+        if (listCalls === 1) {
+          return HttpResponse.json({ code: 'INTERNAL', message: 'boom' }, { status: 500 })
+        }
+        return HttpResponse.json({ items: [itemFixture], nextCursor: undefined })
+      }),
       http.get('/fb/v1/console/feedback/stats', () =>
         HttpResponse.json({
           periodStart: '',
@@ -854,11 +1233,14 @@ describe('_authed.feedback route — user flow smoke', () => {
         HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
     )
-    renderWithProviders(<FeedbackRoutePage />)
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
     await waitFor(() => {
       expect(screen.getByText('反馈列表暂时无法加载')).toBeInTheDocument()
     })
-    expect(screen.getByRole('button', { name: '重新加载' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重新加载' }))
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
     expect(screen.queryByText('还没有反馈')).toBeNull()
   })
 
@@ -907,6 +1289,11 @@ describe('_authed.feedback route — user flow smoke', () => {
     expect(screen.getAllByRole('button', { name: '清空筛选' }).length).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText('还没有反馈')).toBeNull()
     expect(screen.queryByText('先签发 API key')).toBeNull()
+
+    await user.click(screen.getAllByRole('button', { name: '清空筛选' })[0])
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
   })
 
   it('quick urgent scope narrows the queue to urgent feedback only', async () => {
@@ -1479,6 +1866,7 @@ describe('_authed.feedback route — user flow smoke', () => {
 
   it('runs semantic search with supported feedback filters and uses the returned working set', async () => {
     let semanticRequest: unknown
+    let searchEventRequest: unknown
     const semanticItem = {
       ...itemFixture,
       id: '301',
@@ -1520,7 +1908,19 @@ describe('_authed.feedback route — user flow smoke', () => {
               ],
               rankingSignals: ['semantic', 'lexical', 'rrf'],
             },
+            {
+              feedback: {},
+              similarity: 0.12,
+              keywordScore: 0,
+              matchType: 'semantic',
+              semanticRank: 2,
+              lexicalRank: 0,
+              fusedScore: 0.001,
+              evidence: [],
+              rankingSignals: ['semantic'],
+            },
           ],
+          runId: 'semantic-run-1',
           embeddingModel: 'text-embedding-3-small',
           totalWithEmbeddings: 12,
           usedKeywordFallback: false,
@@ -1532,6 +1932,10 @@ describe('_authed.feedback route — user flow smoke', () => {
           },
         })
       }),
+      http.post('/fb/v1/console/feedback/search/events', async ({ request }) => {
+        searchEventRequest = await request.json()
+        return HttpResponse.json({ ok: true })
+      }),
       http.get('/fb/v1/console/feedback/stats', () =>
         HttpResponse.json({
           periodStart: '',
@@ -1542,6 +1946,12 @@ describe('_authed.feedback route — user flow smoke', () => {
         }),
       ),
       http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/feedback/:id', ({ params }) =>
+        HttpResponse.json({ ...detailFixture, ...semanticItem, id: params.id }),
+      ),
+      http.get('/fb/v1/console/feedback/:id/audit', ({ params }) =>
+        HttpResponse.json({ entries: [], feedbackId: params.id }),
+      ),
       http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
       http.get('/fb/v1/console/clusters', () =>
         HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
@@ -1576,12 +1986,23 @@ describe('_authed.feedback route — user flow smoke', () => {
     expect(body.filter?.attrs).toEqual([{ dim: 'severity', value: 'P0', multi: false }])
     expect(screen.queryByText('Unicode 密码登录失败')).toBeNull()
     expect(
-      screen.getByText('语义搜索返回 1 条结果，当前租户有 12 条反馈带向量。'),
+      screen.getByText('语义搜索返回 2 条结果，当前租户有 12 条反馈带向量。'),
     ).toBeInTheDocument()
     expect(screen.getByText('排序 rrf.pgfts.v1.k60')).toBeInTheDocument()
     expect(screen.getByText('匹配依据')).toBeInTheDocument()
     expect(screen.getByText('refund blocker needs support review')).toBeInTheDocument()
     expect(screen.getByTitle(/混合匹配/)).toHaveTextContent('混合匹配 91%')
+
+    await user.click(screen.getByText('发票结账失败'))
+    await waitFor(() => {
+      expect(searchEventRequest).toEqual({
+        runId: 'semantic-run-1',
+        feedbackId: '301',
+        action: 'open',
+        rank: 1,
+        matchType: 'hybrid',
+      })
+    })
   })
 
   it('keeps terminal failure scope when running semantic search from the terminal queue', async () => {
@@ -1671,6 +2092,145 @@ describe('_authed.feedback route — user flow smoke', () => {
     expect(body.q).toBe('llm exhausted')
     expect(body.filter?.enrichmentStatus).toBe('failed')
     expect(body.filter?.terminalFailedOnly).toBe(true)
+  })
+
+  it('does not submit semantic search without a query', async () => {
+    let searchCalls = 0
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.post('/fb/v1/console/feedback/search', () => {
+        searchCalls += 1
+        return HttpResponse.json({ hits: [] })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '语义' }))
+
+    const searchbox = screen.getByRole('searchbox', { name: '搜索反馈内容' })
+    const form = searchbox.closest('form')
+    expect(form).not.toBeNull()
+    fireEvent.submit(form as HTMLFormElement)
+
+    expect(searchCalls).toBe(0)
+    expect(screen.getByText('输入一句自然语言问题，再运行语义搜索。')).toBeInTheDocument()
+  })
+
+  it('keeps semantic results marked stale after the query changes', async () => {
+    const staleItem = {
+      ...itemFixture,
+      id: '303',
+      content: 'customers need billing export',
+      enrichedTitle: 'Billing export request',
+      enrichedDisplayTitle: '账单导出需求',
+      isUrgent: false,
+      tags: [],
+      allowedNextStates: [],
+    }
+    let releaseSearch: (() => void) | undefined
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [itemFixture], nextCursor: undefined }),
+      ),
+      http.post('/fb/v1/console/feedback/search', async () => {
+        await new Promise<void>((resolve) => {
+          releaseSearch = resolve
+        })
+        return HttpResponse.json({
+          hits: [
+            {
+              feedback: staleItem,
+              similarity: 0.88,
+              keywordScore: 0.2,
+              matchType: 'semantic',
+              semanticRank: 1,
+              lexicalRank: 0,
+              fusedScore: 0.0137,
+              evidence: [],
+              rankingSignals: ['semantic', 'rrf'],
+            },
+          ],
+          embeddingModel: 'text-embedding-3-small',
+          totalWithEmbeddings: 9,
+          usedKeywordFallback: false,
+          rankingVersion: 'rrf.pgfts.v1.k60',
+          coverage: {
+            totalLiveFeedback: 12,
+            totalWithEmbeddings: 9,
+            embeddingModel: 'text-embedding-3-small',
+          },
+        })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '语义' }))
+    await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), 'billing export')
+    await user.click(screen.getByRole('button', { name: '运行语义搜索' }))
+
+    expect(await screen.findByText('正在进行语义搜索...')).toBeInTheDocument()
+    releaseSearch?.()
+
+    await waitFor(() => {
+      expect(screen.getByText('账单导出需求')).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByRole('searchbox', { name: '搜索反馈内容' }), ' later')
+
+    await waitFor(() => {
+      expect(screen.getByText('查询或筛选已变化，请重新运行语义搜索。')).toBeInTheDocument()
+    })
+    expect(screen.getAllByRole('button', { name: '运行语义搜索' }).length).toBeGreaterThanOrEqual(1)
   })
 
   it('shows keyword fallback state when semantic search degrades', async () => {
@@ -1908,6 +2468,18 @@ describe('_authed.feedback route — user flow smoke', () => {
     await user.click(screen.getByRole('option', { name: '待处理' }))
     await waitFor(() => expect(transitionBody).toBeTruthy())
 
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    await user.click(screen.getByRole('button', { name: '从反馈提升' }))
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/feedback/customer-requests',
+      search: {
+        request_id: undefined,
+        merge_target_id: undefined,
+        promote_feedback_ids: '101',
+        feedback_id: undefined,
+      },
+    })
+
     expect(batchBodies).toEqual([
       {
         feedbackIds: ['101'],
@@ -1925,6 +2497,95 @@ describe('_authed.feedback route — user flow smoke', () => {
       toStateId: 'ws-2',
       comment: '',
     })
+  })
+
+  it('surfaces batch mutation errors without clearing the current selection', async () => {
+    const assignedTag = {
+      id: 'tag-old',
+      name: 'Existing',
+      color: '#64748b',
+      archived: false,
+    }
+    const newTag = {
+      id: 'tag-new',
+      name: 'Escalation',
+      color: '#ef4444',
+      archived: false,
+    }
+    const workflowState = {
+      id: 'ws-2',
+      name: 'review',
+      displayName: { entries: { default: 'Review', zh: '待处理' } },
+      color: '#3b82f6',
+      category: 'active',
+      position: 1,
+      isDefault: false,
+      archived: false,
+      createdAt: '2026-06-07T00:00:00Z',
+      updatedAt: '2026-06-07T00:00:00Z',
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({
+          items: [{ ...itemFixture, tags: [assignedTag] }],
+          nextCursor: undefined,
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ states: [workflowState] }),
+      ),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [assignedTag, newTag] })),
+      http.post('/fb/v1/console/feedback/batch', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'batch exploded' }, { status: 500 }),
+      ),
+      http.post('/fb/v1/console/feedback/transition/batch', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'transition exploded' }, { status: 500 }),
+      ),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+
+    await user.click(screen.getByRole('button', { name: '添加标签' }))
+    await user.click(screen.getByRole('option', { name: 'Escalation' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('batch exploded'))
+
+    await user.click(screen.getByRole('button', { name: '移除标签' }))
+    await user.click(screen.getByRole('option', { name: 'Existing' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('batch exploded'))
+
+    const transitionTrigger = screen.getByText('流转状态').closest('[role="combobox"]')
+    expect(transitionTrigger).not.toBeNull()
+    await user.click(transitionTrigger as HTMLElement)
+    await user.click(screen.getByRole('option', { name: '待处理' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('transition exploded'))
+
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('batch exploded'))
   })
 
   it('confirms selected feedback deletion through the page dialog', async () => {
@@ -1969,7 +2630,14 @@ describe('_authed.feedback route — user flow smoke', () => {
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('永久删除反馈')).toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: '删除' }))
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    const confirmDialog = await screen.findByRole('dialog')
+    await user.click(within(confirmDialog).getByRole('button', { name: '删除' }))
 
     await waitFor(() => {
       expect(deleteBody).toEqual({
@@ -2020,16 +2688,188 @@ describe('_authed.feedback route — user flow smoke', () => {
     await waitFor(() => {
       expect(screen.getByText('终态失败样本')).toBeInTheDocument()
     })
+    await user.click(screen.getByRole('button', { name: '查看终态失败' }))
+    await waitFor(() => {
+      expect(screen.getByLabelText('当前子队列 终态失败')).toBeInTheDocument()
+    })
     await user.click(screen.getByLabelText('选择 终态失败样本'))
     await user.click(screen.getByRole('button', { name: '重试富化' }))
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText('重试 AI 富化')).toBeInTheDocument()
-    await user.click(within(dialog).getByRole('button', { name: '重试' }))
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+
+    await user.click(screen.getByRole('button', { name: '重试富化' }))
+    const confirmDialog = await screen.findByRole('dialog')
+    await user.click(within(confirmDialog).getByRole('button', { name: '重试' }))
 
     await waitFor(() => {
       expect(retriedId).toBe('201')
     })
+  })
+
+  it('reports partial batch retry failures for selected terminal failures', async () => {
+    const secondTerminalItem = {
+      ...terminalItemFixture,
+      id: '202',
+      enrichedDisplayTitle: '第二个终态失败',
+      enrichedTitle: 'Second terminal failure',
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({
+          items: [terminalItemFixture, secondTerminalItem],
+          nextCursor: undefined,
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '2',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.post('/fb/v1/console/feedback/:id/retry-enrichment', ({ params }) => {
+        if (params.id === '202') {
+          return HttpResponse.json({ code: 'INTERNAL', message: 'retry failed' }, { status: 500 })
+        }
+        return HttpResponse.json({
+          id: params.id,
+          enrichmentStatus: 'pending',
+          enrichmentAttempts: 0,
+        })
+      }),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('终态失败样本')).toBeInTheDocument()
+      expect(screen.getByText('第二个终态失败')).toBeInTheDocument()
+    })
+    await user.click(screen.getByLabelText('选择 终态失败样本'))
+    await user.click(screen.getByLabelText('选择 第二个终态失败'))
+    await user.click(screen.getByRole('button', { name: /重试富化/ }))
+
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledWith('1 条成功，1 条失败'))
+  })
+
+  it('reports full batch retry failure when every selected terminal retry fails', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [terminalItemFixture], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.post('/fb/v1/console/feedback/:id/retry-enrichment', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'retry failed' }, { status: 500 }),
+      ),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('终态失败样本')).toBeInTheDocument()
+    })
+    await user.click(screen.getByLabelText('选择 终态失败样本'))
+    await user.click(screen.getByRole('button', { name: '重试富化' }))
+
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('重试失败'))
+  })
+
+  it('shows retry schedule and error preview for non-terminal enrichment failures', async () => {
+    const retryingFailure = {
+      ...itemFixture,
+      id: '203',
+      content: 'transient enrichment failure',
+      enrichedTitle: 'Transient enrichment failure',
+      enrichedDisplayTitle: '可自动重试失败',
+      enrichmentStatus: 'failed',
+      enrichmentAttempts: 2,
+      enrichmentNextRetryAt: '2099-06-07T10:00:00Z',
+      enrichmentError:
+        'provider returned a transient timeout while generating structured feedback attributes and should be retried automatically with the same routing policy',
+      enrichedAttrs: { severity: ['P0'] },
+      isUrgent: false,
+    }
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({ items: [retryingFailure], nextCursor: undefined }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('可自动重试失败')).toBeInTheDocument()
+    })
+    expect(screen.getByTitle(/等待下次自动重试/)).toHaveAttribute(
+      'title',
+      expect.stringContaining('下次重试：'),
+    )
+    expect(screen.getByTitle(/provider returned a transient timeout/)).toHaveAttribute(
+      'title',
+      expect.stringContaining('...'),
+    )
   })
 
   it('shows a retryable semantic-search error state', async () => {

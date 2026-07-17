@@ -279,21 +279,19 @@ export function buildInstanceConditions(item: EnrichmentRuntimeInstanceView) {
     tone: 'good' | 'warn' | 'bad'
     label: string
   }> = []
+  const runnerStatus = normalizeApplyStatus(item.runnerApplyStatus)
+  const limiterStatus = normalizeApplyStatus(item.limiterApplyStatus)
 
-  if (item.runnerApplyStatus === 'applied' && item.limiterApplyStatus === 'applied') {
+  if (runnerStatus === 'applied' && limiterStatus === 'applied') {
     conditions.push({ tone: 'good', label: 'Applied' })
   }
-  if (item.runnerApplyStatus === 'applying' || item.limiterApplyStatus === 'applying') {
+  if (runnerStatus === 'applying' || limiterStatus === 'applying') {
     conditions.push({ tone: 'warn', label: 'Reconciling' })
   }
   if (item.queueResizePending) {
     conditions.push({ tone: 'warn', label: 'Pending resize' })
   }
-  if (
-    item.runnerApplyStatus === 'failed' ||
-    item.limiterApplyStatus === 'failed' ||
-    item.degradedReason
-  ) {
+  if (runnerStatus === 'failed' || limiterStatus === 'failed' || item.degradedReason) {
     conditions.push({ tone: 'bad', label: 'Degraded' })
   }
   if (item.observedDesiredVersion !== item.desiredVersion) {
@@ -522,6 +520,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   }
 
   const submitUpdate = (afterSuccess?: () => void) => {
+    /* v8 ignore next -- @preserve: callers validate the parsed spec before submitting. */
     if (!parsedSpec.ok) return
     updateMutation.mutate(
       {
@@ -542,6 +541,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   }
 
   const handleSave = () => {
+    /* v8 ignore next -- @preserve: save is disabled unless editing an existing valid runtime draft. */
     if (!canEdit || !runtime || !parsedSpec.ok) return
     const errText = translateRuntimeValidationError(validateRuntimeSpec(parsedSpec.value), t)
     if (errText) {
@@ -556,6 +556,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   }
 
   const handleReset = () => {
+    /* v8 ignore next -- @preserve: reset controls are hidden/disabled without an editable runtime. */
     if (!runtime || !canEdit) return
     if (!resetAll && resetFields.length === 0) {
       toast.error(t('settings.enrichment_runtime.errors.reset_empty'))
@@ -585,6 +586,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   }
 
   const handleRollback = () => {
+    /* v8 ignore next -- @preserve: rollback confirmation only opens with a target and editable runtime. */
     if (!rollbackTarget || !runtime || !canEdit) return
     if (!ensureStepUp()) return
     rollbackMutation.mutate(
@@ -607,6 +609,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
   }
 
   const handleRollbackToLastKnownGood = () => {
+    /* v8 ignore next -- @preserve: the last-known-good action is disabled until an entry exists. */
     if (!lastKnownGoodEntry) return
     setRollbackTarget(lastKnownGoodEntry)
     setRollbackReason(
@@ -614,6 +617,22 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         ? `rollback to last known good ${runtime.desiredRevision.lastKnownGoodVersion}`
         : '',
     )
+  }
+
+  const handleResetDialogOpenChange = (open: boolean) => {
+    setResetOpen(open)
+    if (!open) {
+      setResetAll(false)
+      setResetFields([])
+      setResetReason('')
+    }
+  }
+
+  const handleRollbackDialogOpenChange = (open: boolean) => {
+    if (!open) {
+      setRollbackTarget(null)
+      setRollbackReason('')
+    }
   }
 
   const handleDismissBanner = () => {
@@ -639,6 +658,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
     )
   }
 
+  /* v8 ignore next -- @preserve: the runtime query success path always carries runtime data. */
   if (!runtime) return null
 
   return (
@@ -1488,17 +1508,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={resetOpen}
-        onOpenChange={(open) => {
-          setResetOpen(open)
-          if (!open) {
-            setResetAll(false)
-            setResetFields([])
-            setResetReason('')
-          }
-        }}
-      >
+      <Dialog open={resetOpen} onOpenChange={handleResetDialogOpenChange}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{t('settings.enrichment_runtime.reset_dialog_title')}</DialogTitle>
@@ -1555,7 +1565,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setResetOpen(false)}>
+            <Button variant="outline" onClick={() => handleResetDialogOpenChange(false)}>
               {t('common.cancel')}
             </Button>
             <Button onClick={handleReset} disabled={resetMutation.isPending}>
@@ -1566,15 +1576,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={rollbackTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setRollbackTarget(null)
-            setRollbackReason('')
-          }
-        }}
-      >
+      <Dialog open={rollbackTarget !== null} onOpenChange={handleRollbackDialogOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('settings.enrichment_runtime.rollback_dialog_title')}</DialogTitle>
@@ -1608,7 +1610,7 @@ export function EnrichmentRuntimePage({ canEdit }: { canEdit: boolean }) {
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRollbackTarget(null)}>
+            <Button variant="outline" onClick={() => handleRollbackDialogOpenChange(false)}>
               {t('common.cancel')}
             </Button>
             <Button onClick={handleRollback} disabled={rollbackMutation.isPending}>
@@ -1656,7 +1658,7 @@ function specToDraft(spec: EnrichmentRuntimeSpecView): DraftState {
   }
 }
 
-function draftToSpec(
+export function draftToSpec(
   draft: DraftState,
 ): { ok: true; value: EnrichmentRuntimeSpecView } | { ok: false } {
   const queueLen = Number(draft.queueLen)
@@ -1832,8 +1834,8 @@ function StatusPair({
   )
 }
 
-function formatStatus(value: string, t: TFunction): string {
-  const normalized = value.replace('RUNTIME_APPLY_STATUS_', '').toLowerCase()
+export function formatStatus(value: string, t: TFunction): string {
+  const normalized = normalizeApplyStatus(value)
   switch (normalized) {
     case 'applied':
       return t('settings.enrichment_runtime.status_labels.applied')
@@ -1846,7 +1848,11 @@ function formatStatus(value: string, t: TFunction): string {
   }
 }
 
-function localizeConditionLabel(value: string, t: TFunction): string {
+function normalizeApplyStatus(value: string): string {
+  return value.replace('RUNTIME_APPLY_STATUS_', '').toLowerCase()
+}
+
+export function localizeConditionLabel(value: string, t: TFunction): string {
   switch (value) {
     case 'Converged':
       return t('settings.enrichment_runtime.condition_labels.converged')
@@ -1889,7 +1895,7 @@ function localizeConditionLabel(value: string, t: TFunction): string {
   }
 }
 
-function localizeOperationType(value: string | undefined, t: TFunction): string {
+export function localizeOperationType(value: string | undefined, t: TFunction): string {
   switch (value) {
     case 'update':
       return t('settings.enrichment_runtime.operation_labels.update')
@@ -1902,7 +1908,7 @@ function localizeOperationType(value: string | undefined, t: TFunction): string 
   }
 }
 
-function localizeRiskLevel(value: string | undefined, t: TFunction): string {
+export function localizeRiskLevel(value: string | undefined, t: TFunction): string {
   switch (value) {
     case 'normal':
       return t('settings.enrichment_runtime.risk_labels.normal')
@@ -1915,7 +1921,7 @@ function localizeRiskLevel(value: string | undefined, t: TFunction): string {
   }
 }
 
-function localizeSpecLabel(key: string, fallback: string, t: TFunction): string {
+export function localizeSpecLabel(key: string, fallback: string, t: TFunction): string {
   switch (key) {
     case 'queueLen':
       return t('settings.enrichment_runtime.fields.queue_len')
@@ -1938,21 +1944,21 @@ function localizeSpecLabel(key: string, fallback: string, t: TFunction): string 
   }
 }
 
-function looksOpaqueId(value: string): boolean {
+export function looksOpaqueId(value: string): boolean {
   return (
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ||
     /^[a-z0-9_-]{24,}$/i.test(value)
   )
 }
 
-function formatRelative(value?: string): string {
+export function formatRelative(value?: string): string {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '-'
   return formatDistanceToNow(date, { addSuffix: true, locale: zhCN })
 }
 
-function formatTimestamp(value: string | undefined, t: TFunction): string {
+export function formatTimestamp(value: string | undefined, t: TFunction): string {
   if (!value) return t('common.never')
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return t('common.never')

@@ -79,6 +79,30 @@ func TestRetryEnrichment_Success(t *testing.T) {
 	require.Equal(t, float64(0), body["enrichmentAttempts"])
 }
 
+func TestRetryEnrichment_AuditsSuccess(t *testing.T) {
+	now := time.Now()
+	repo := &fakeRetryRepo{
+		fakeFeedbackRepo: &fakeFeedbackRepo{},
+		retryResult: &feedbackrepo.RetryResult{
+			ID:          123,
+			Status:      "pending",
+			Attempts:    0,
+			NextRetryAt: ptrext.Of(now),
+		},
+	}
+	audit := &fakeAuditRecorder{}
+	h := &FeedbackHandler{repo: repo, audit: audit}
+
+	w := httptest.NewRecorder()
+	retryHandler(h)(w, retryRequest())
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "retry_enrichment", audit.events[0].Action)
+	require.Equal(t, "feedback", audit.events[0].TargetType)
+	require.Equal(t, "123", audit.events[0].TargetID)
+}
+
 func TestRetryEnrichment_NotFound(t *testing.T) {
 	repo := &fakeRetryRepo{
 		fakeFeedbackRepo: &fakeFeedbackRepo{},

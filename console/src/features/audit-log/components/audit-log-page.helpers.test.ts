@@ -1,3 +1,4 @@
+import { zhCN } from 'date-fns/locale'
 import type { TFunction } from 'i18next'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { AuditLogEntry, AuditLogFilters } from '@/features/audit-log/api/list-audit-log'
@@ -181,6 +182,13 @@ describe('auditLogPageTestables', () => {
     expect(auditLogPageTestables.formatDateChip('2026-06-16T10:00:00Z')).toMatch(
       /^\d{2}-\d{2} \d{2}:\d{2}$/,
     )
+    const today = new Date()
+    const yesterday = new Date(today)
+    yesterday.setDate(today.getDate() - 1)
+    expect(auditLogPageTestables.formatDayLabel(today)).toBe('Today')
+    expect(auditLogPageTestables.formatDayLabel(today, zhCN)).toBe('今天')
+    expect(auditLogPageTestables.formatDayLabel(yesterday)).toBe('Yesterday')
+    expect(auditLogPageTestables.formatDayLabel(yesterday, zhCN)).toBe('昨天')
     expect(auditLogPageTestables.localDateTimeToISO('2026-06-16T10:00')).toMatch(/Z$/)
     expect(auditLogPageTestables.isoToLocalDateTimeInput('2026-06-16T10:00:00Z')).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/,
@@ -244,5 +252,50 @@ describe('auditLogPageTestables', () => {
         localQuery: '',
       }),
     ).toContain('/administration/audit-log')
+  })
+
+  it('covers defensive helper fallbacks for missing state, invalid dates, and empty diffs', () => {
+    expect(auditLogPageTestables.savedViewStateToFilters(undefined)).toEqual({})
+    expect(auditLogPageTestables.savedViewToAuditUrlState(undefined)).toEqual({
+      filters: {},
+      inspectedEntryId: null,
+      localQuery: '',
+    })
+    expect(
+      auditLogPageTestables.findBurstContextForEntry(
+        [
+          {
+            blocks: [{ item: baseEntry, kind: 'item' }],
+            items: [baseEntry],
+            key: '2026-06-16',
+            label: '2026-06-16',
+          },
+        ],
+        baseEntry.id,
+      ),
+    ).toBeNull()
+    expect(
+      auditLogPageTestables.findBurstContextForEntry(
+        [
+          {
+            blocks: [{ burstKey: 'missing', item: baseEntry, kind: 'item' }],
+            items: [baseEntry],
+            key: '2026-06-16',
+            label: '2026-06-16',
+          },
+        ],
+        baseEntry.id,
+      ),
+    ).toBeNull()
+    expect(
+      auditLogPageTestables.describeAuditChanges({ ...baseEntry, afterJson: baseEntry.beforeJson }),
+    ).toBeNull()
+    expect(auditLogPageTestables.safeParseJson()).toBeUndefined()
+    expect(auditLogPageTestables.formatJson('not-json')).toBe('not-json')
+    expect(auditLogPageTestables.localDateTimeToISO('not-a-date')).toBeUndefined()
+    expect(auditLogPageTestables.isoToLocalDateTimeInput('not-a-date')).toBe('')
+    expect(auditLogPageTestables.describeLocalAuditMatch(baseEntry, 'nested.x')).toContain(
+      'changePath',
+    )
   })
 })

@@ -106,6 +106,7 @@ export function GuardPoliciesPage() {
   }
 
   const updatePolicy = async (policy: GuardPolicy) => {
+    /* v8 ignore next -- @preserve: edit dialogs only submit after a policy target is selected. */
     if (!editing?.id) return
     try {
       await patch.mutateAsync({ id: editing.id, policy })
@@ -117,6 +118,7 @@ export function GuardPoliciesPage() {
   }
 
   const deletePolicy = async () => {
+    /* v8 ignore next -- @preserve: delete dialogs only confirm after a policy target is selected. */
     if (!deleting?.id) return
     try {
       await del.mutateAsync(deleting.id)

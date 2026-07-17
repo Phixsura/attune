@@ -1,9 +1,10 @@
 import { HttpResponse, http } from 'msw'
 import { createElement } from 'react'
+import { toast } from 'sonner'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EnrichmentRuntimePage } from '@/features/settings/components/enrichment-runtime-page'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 import {
   buildChangeImpactNotes,
   buildInstanceConditions,
@@ -51,6 +52,9 @@ afterEach(() => {
   localStorage.clear()
   sessionStorage.clear()
   resetBlocker()
+  vi.mocked(toast.error).mockClear()
+  vi.mocked(toast.success).mockClear()
+  vi.unstubAllGlobals()
 })
 
 const baseRuntimeResponse = {
@@ -207,13 +211,17 @@ const verifiedOperations = {
 
 function mockRuntimePage(options?: {
   operations?: typeof verifiedOperations
+  onRead?: () => void
   onUpdate?: (body: unknown) => void
   onReset?: (body: unknown) => void
   onRollback?: (body: unknown) => void
   onVerify?: (body: unknown) => void
 }) {
   server.use(
-    http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+    http.get('/fb/v1/console/enrichment-runtime', () => {
+      options?.onRead?.()
+      return HttpResponse.json(baseRuntimeResponse)
+    }),
     http.get('/fb/v1/console/gdpr/operations', () =>
       HttpResponse.json(options?.operations ?? verifiedOperations),
     ),
@@ -734,10 +742,19 @@ describe('partitionRuntimeInstances', () => {
 
 describe('EnrichmentRuntimePage', () => {
   it('renders operator-facing runtime state, hides raw ids by default, and expands historical nodes on demand', async () => {
-    mockRuntimePage()
+    let runtimeReads = 0
+    mockRuntimePage({
+      onRead: () => {
+        runtimeReads += 1
+      },
+    })
     const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
 
     expect(await screen.findByText('富化运行时控制面')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '刷新状态' }))
+    await waitFor(() => {
+      expect(runtimeReads).toBeGreaterThan(1)
+    })
     expect(screen.getByText('phjdeMacBook-Pro')).toBeInTheDocument()
     expect(
       screen.queryByText('attune-c43e0420-6bcf-4ef1-9584-5759bdb271aa'),
@@ -778,9 +795,30 @@ describe('EnrichmentRuntimePage', () => {
     await user.clear(queueInput)
     await user.type(queueInput, '0')
     expect(await screen.findByText('队列容量必须大于 0')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 's', ctrlKey: true })
+    expect(toast.error).toHaveBeenCalledWith('队列容量必须大于 0')
 
     await user.clear(queueInput)
     await user.type(queueInput, '1008')
+    const workersInput = screen.getByLabelText('工作协程数')
+    await user.clear(workersInput)
+    await user.type(workersInput, '4')
+    const batchSizeInput = screen.getByLabelText('批处理大小')
+    await user.clear(batchSizeInput)
+    await user.type(batchSizeInput, '12')
+    const batchWindowInput = screen.getByLabelText('批处理窗口')
+    await user.clear(batchWindowInput)
+    await user.type(batchWindowInput, '7')
+    const sweepIntervalInput = screen.getByLabelText('扫队列间隔')
+    await user.clear(sweepIntervalInput)
+    await user.type(sweepIntervalInput, '45')
+    await user.click(screen.getByRole('checkbox', { name: '启用 LLM 限流' }))
+    const llmMaxQpsInput = screen.getByLabelText('LLM 最大 QPS')
+    await user.clear(llmMaxQpsInput)
+    await user.type(llmMaxQpsInput, '2')
+    const llmBurstInput = screen.getByLabelText('LLM Burst')
+    await user.clear(llmBurstInput)
+    await user.type(llmBurstInput, '5')
     await user.type(screen.getByLabelText('变更说明'), 'raise queue')
     await user.click(screen.getByRole('button', { name: '保存' }))
 
@@ -790,13 +828,13 @@ describe('EnrichmentRuntimePage', () => {
         updateReason: 'raise queue',
         spec: {
           queueLen: 1008,
-          workers: 3,
-          batchSize: 10,
-          batchWindow: '5s',
-          sweepInterval: '30s',
-          llmRateLimitEnabled: false,
-          llmMaxQps: 0,
-          llmBurst: 0,
+          workers: 4,
+          batchSize: 12,
+          batchWindow: '7s',
+          sweepInterval: '45s',
+          llmRateLimitEnabled: true,
+          llmMaxQps: 2,
+          llmBurst: 5,
         },
       })
     })
@@ -824,8 +862,15 @@ describe('EnrichmentRuntimePage', () => {
 
     expect(await screen.findByText('需要二次验证')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '完成二次验证' }))
-    const stepUpDialog = await screen.findByRole('dialog', { name: '确认运行时敏感操作' })
+    let stepUpDialog = await screen.findByRole('dialog', { name: '确认运行时敏感操作' })
     expect(within(stepUpDialog).getByText(/运行时保存、重置和回滚操作/)).toBeInTheDocument()
+    await user.click(within(stepUpDialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '确认运行时敏感操作' })).toBeNull()
+    })
+
+    await user.click(screen.getByRole('button', { name: '完成二次验证' }))
+    stepUpDialog = await screen.findByRole('dialog', { name: '确认运行时敏感操作' })
     await user.type(within(stepUpDialog).getByLabelText('当前密码'), 'correct horse battery staple')
     await user.click(within(stepUpDialog).getByRole('button', { name: '验证并继续' }))
     await waitFor(() => {
@@ -833,15 +878,47 @@ describe('EnrichmentRuntimePage', () => {
     })
   }, 20_000) // Full-page runtime smoke covers dialogs, step-up auth, and mutation refetches.
 
+  it('requires recent step-up before saving runtime edits', async () => {
+    let updateBody: unknown
+    mockRuntimePage({
+      operations: {
+        stepUp: {
+          satisfied: false,
+          passwordAllowed: true,
+          method: 'password',
+          ttlSeconds: 900,
+          verifiedAt: '',
+          expiresAt: '',
+        },
+      },
+      onUpdate: (body) => {
+        updateBody = body
+      },
+    })
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('需要二次验证')).toBeInTheDocument()
+    const queueInput = screen.getByLabelText('队列容量')
+    await user.clear(queueInput)
+    await user.type(queueInput, '1008')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('请先完成运行时二次验证')
+    })
+    expect(updateBody).toBeUndefined()
+    expect(await screen.findByRole('dialog', { name: '确认运行时敏感操作' })).toBeInTheDocument()
+  }, 20_000)
+
   it('submits reset and rollback actions when recent auth is already satisfied', async () => {
-    let resetBody: unknown
-    let rollbackBody: unknown
+    const resetBodies: unknown[] = []
+    const rollbackBodies: unknown[] = []
     mockRuntimePage({
       onReset: (body) => {
-        resetBody = body
+        resetBodies.push(body)
       },
       onRollback: (body) => {
-        rollbackBody = body
+        rollbackBodies.push(body)
       },
     })
     const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
@@ -849,13 +926,34 @@ describe('EnrichmentRuntimePage', () => {
     expect(await screen.findByText('目标策略')).toBeInTheDocument()
     expect(screen.getAllByText('二次验证已通过')).not.toHaveLength(0)
 
+    await user.click(screen.getByRole('button', { name: '恢复全部默认' }))
+    const resetAllDialog = await screen.findByRole('dialog', { name: '重置运行时配置' })
+    expect(
+      within(resetAllDialog).getByRole('checkbox', { name: '恢复全部字段到启动默认值' }),
+    ).toBeChecked()
+    await user.click(within(resetAllDialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '重置运行时配置' })).toBeNull()
+    })
+
     await user.click(screen.getByRole('button', { name: '按字段重置' }))
     const resetDialog = await screen.findByRole('dialog', { name: '重置运行时配置' })
-    await user.click(within(resetDialog).getByRole('checkbox', { name: '工作协程数' }))
+    await user.click(within(resetDialog).getByRole('button', { name: '执行重置' }))
+    expect(toast.error).toHaveBeenCalledWith('请至少选择一个要重置的字段')
+    const resetAllToggle = within(resetDialog).getByRole('checkbox', {
+      name: '恢复全部字段到启动默认值',
+    })
+    await user.click(resetAllToggle)
+    expect(within(resetDialog).queryByRole('checkbox', { name: '工作协程数' })).toBeNull()
+    await user.click(resetAllToggle)
+    const workersReset = within(resetDialog).getByRole('checkbox', { name: '工作协程数' })
+    await user.click(workersReset)
+    await user.click(workersReset)
+    await user.click(workersReset)
     await user.type(within(resetDialog).getByLabelText('变更说明'), 'reset workers')
     await user.click(within(resetDialog).getByRole('button', { name: '执行重置' }))
     await waitFor(() => {
-      expect(resetBody).toEqual({
+      expect(resetBodies.at(-1)).toEqual({
         expectedVersion: '14',
         fields: ['workers'],
         resetAll: false,
@@ -868,19 +966,192 @@ describe('EnrichmentRuntimePage', () => {
     expect(
       within(rollbackDialog).getByDisplayValue('rollback to last known good 13'),
     ).toBeInTheDocument()
-    await user.clear(within(rollbackDialog).getByLabelText('变更说明'))
-    await user.type(within(rollbackDialog).getByLabelText('变更说明'), 'rollback for stability')
-    await user.click(within(rollbackDialog).getByRole('button', { name: '确认回滚' }))
+    await user.click(within(rollbackDialog).getByRole('button', { name: '取消' }))
     await waitFor(() => {
-      expect(rollbackBody).toEqual({
+      expect(screen.queryByRole('dialog', { name: '回滚到历史版本' })).toBeNull()
+    })
+
+    await user.click(screen.getByRole('button', { name: '回滚到已知良好版本' }))
+    const confirmRollbackDialog = await screen.findByRole('dialog', { name: '回滚到历史版本' })
+    await user.clear(within(confirmRollbackDialog).getByLabelText('变更说明'))
+    await user.type(
+      within(confirmRollbackDialog).getByLabelText('变更说明'),
+      'rollback for stability',
+    )
+    await user.click(within(confirmRollbackDialog).getByRole('button', { name: '确认回滚' }))
+    await waitFor(() => {
+      expect(rollbackBodies.at(-1)).toEqual({
         expectedVersion: '14',
         targetVersion: '13',
         updateReason: 'rollback for stability',
       })
     })
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '回滚到历史版本' })).toBeNull()
+    })
+    await user.click(screen.getByRole('button', { name: '回滚' }))
+    const historyRollbackDialog = await screen.findByRole('dialog', { name: '回滚到历史版本' })
+    await user.type(within(historyRollbackDialog).getByLabelText('变更说明'), 'rollback from table')
+    await user.click(within(historyRollbackDialog).getByRole('button', { name: '确认回滚' }))
+    await waitFor(() => {
+      expect(rollbackBodies.at(-1)).toEqual({
+        expectedVersion: '14',
+        targetVersion: '13',
+        updateReason: 'rollback from table',
+      })
+    })
   }, 20_000) // Full-page runtime smoke covers multiple guarded action dialogs.
 
+  it('requires recent step-up before reset and rollback mutations', async () => {
+    let resetBody: unknown
+    let rollbackBody: unknown
+    mockRuntimePage({
+      operations: {
+        stepUp: {
+          satisfied: false,
+          passwordAllowed: true,
+          method: 'password',
+          ttlSeconds: 900,
+          verifiedAt: '',
+          expiresAt: '',
+        },
+      },
+      onReset: (body) => {
+        resetBody = body
+      },
+      onRollback: (body) => {
+        rollbackBody = body
+      },
+    })
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('需要二次验证')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '按字段重置' }))
+    const resetDialog = await screen.findByRole('dialog', { name: '重置运行时配置' })
+    await user.click(within(resetDialog).getByRole('checkbox', { name: '工作协程数' }))
+    await user.click(within(resetDialog).getByRole('button', { name: '执行重置' }))
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('请先完成运行时二次验证')
+    })
+    expect(resetBody).toBeUndefined()
+    const resetStepUpDialog = await screen.findByRole('dialog', { name: '确认运行时敏感操作' })
+    await user.click(within(resetStepUpDialog).getByRole('button', { name: '取消' }))
+    await user.click(within(resetDialog).getByRole('button', { name: '取消' }))
+
+    await user.click(screen.getByRole('button', { name: '回滚到已知良好版本' }))
+    const rollbackDialog = await screen.findByRole('dialog', { name: '回滚到历史版本' })
+    await user.click(within(rollbackDialog).getByRole('button', { name: '确认回滚' }))
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('请先完成运行时二次验证')
+    })
+    expect(rollbackBody).toBeUndefined()
+  }, 20_000)
+
+  it('surfaces step-up verification errors', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+      http.get('/fb/v1/console/gdpr/operations', () =>
+        HttpResponse.json({
+          stepUp: {
+            satisfied: false,
+            passwordAllowed: true,
+            method: 'password',
+            ttlSeconds: 900,
+            verifiedAt: '',
+            expiresAt: '',
+          },
+        }),
+      ),
+      http.post('/fb/v1/console/gdpr/step-up/verify', () =>
+        HttpResponse.json(
+          { code: 'GDPR_STEP_UP_FAILED', message: 'step-up rejected' },
+          { status: 403 },
+        ),
+      ),
+    )
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('需要二次验证')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '完成二次验证' }))
+    const stepUpDialog = await screen.findByRole('dialog', { name: '确认运行时敏感操作' })
+    await user.type(within(stepUpDialog).getByLabelText('当前密码'), 'wrong password')
+    await user.click(within(stepUpDialog).getByRole('button', { name: '验证并继续' }))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('step-up rejected')
+    })
+  }, 20_000)
+
+  it('surfaces reset and rollback mutation errors without closing the dialogs', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
+      http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
+      http.post('/fb/v1/console/enrichment-runtime/reset', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'reset exploded' }, { status: 500 }),
+      ),
+      http.post('/fb/v1/console/enrichment-runtime/rollback', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'rollback exploded' }, { status: 500 }),
+      ),
+    )
+    const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+    expect(await screen.findByText('目标策略')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '按字段重置' }))
+    const resetDialog = await screen.findByRole('dialog', { name: '重置运行时配置' })
+    await user.click(within(resetDialog).getByRole('checkbox', { name: '工作协程数' }))
+    await user.click(within(resetDialog).getByRole('button', { name: '执行重置' }))
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('reset exploded')
+    })
+    expect(screen.getByRole('dialog', { name: '重置运行时配置' })).toBeInTheDocument()
+    await user.click(within(resetDialog).getByRole('button', { name: '取消' }))
+
+    await user.click(screen.getByRole('button', { name: '回滚到已知良好版本' }))
+    const rollbackDialog = await screen.findByRole('dialog', { name: '回滚到历史版本' })
+    await user.click(within(rollbackDialog).getByRole('button', { name: '确认回滚' }))
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('rollback exploded')
+    })
+    expect(screen.getByRole('dialog', { name: '回滚到历史版本' })).toBeInTheDocument()
+  }, 20_000)
+
   describe('draft durability (#172)', () => {
+    it('refetches runtime state when another tab clears the draft', async () => {
+      const channels: MockBroadcastChannel[] = []
+      class MockBroadcastChannel {
+        onmessage: ((event: MessageEvent) => void) | null = null
+        readonly name: string
+
+        constructor(name: string) {
+          this.name = name
+          channels.push(this)
+        }
+
+        postMessage = vi.fn()
+        close = vi.fn()
+      }
+      vi.stubGlobal('BroadcastChannel', MockBroadcastChannel)
+
+      let runtimeReads = 0
+      mockRuntimePage({
+        onRead: () => {
+          runtimeReads += 1
+        },
+      })
+      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+
+      await screen.findByText('目标策略')
+      expect(channels).toHaveLength(1)
+      channels[0]?.onmessage?.({
+        data: { type: 'draft-cleared', key: 'enrichment-runtime' },
+      } as MessageEvent)
+
+      await waitFor(() => {
+        expect(runtimeReads).toBeGreaterThan(1)
+      })
+    })
+
     it('restores draft from localStorage on mount', async () => {
       const storedDraft = {
         queueLen: '200',
@@ -919,10 +1190,12 @@ describe('EnrichmentRuntimePage', () => {
         JSON.stringify({ _v: 1, _ts: Date.now(), data: storedDraft }),
       )
       mockRuntimePage()
-      renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
+      const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
       await waitFor(() => {
         expect(screen.getByText('检测到未保存的草稿')).toBeInTheDocument()
       })
+      await user.click(screen.getByRole('button', { name: '保留草稿' }))
+      expect(screen.queryByText('检测到未保存的草稿')).not.toBeInTheDocument()
     })
 
     it('clears localStorage on successful save', async () => {
@@ -979,7 +1252,7 @@ describe('EnrichmentRuntimePage', () => {
         http.get('/fb/v1/console/enrichment-runtime', () => HttpResponse.json(baseRuntimeResponse)),
         http.get('/fb/v1/console/gdpr/operations', () => HttpResponse.json(verifiedOperations)),
         http.put('/fb/v1/console/enrichment-runtime', () =>
-          HttpResponse.json({ error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 }),
+          HttpResponse.json({ code: 'INTERNAL', message: 'save exploded' }, { status: 500 }),
         ),
       )
       const { user } = renderWithProviders(createElement(EnrichmentRuntimePage, { canEdit: true }))
@@ -994,6 +1267,7 @@ describe('EnrichmentRuntimePage', () => {
       await waitFor(() => {
         expect(localStorage.getItem('attune:draft:enrichment-runtime')).not.toBeNull()
       })
+      expect(toast.error).toHaveBeenCalledWith('save exploded')
       vi.useRealTimers()
     })
 

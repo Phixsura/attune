@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 import { ServiceAccountDeleteDialog } from './service-account-delete-dialog'
 import { CreateServiceAccountDialog } from './service-account-dialog'
 import { ServiceAccountStatusDialog } from './service-account-status-dialog'
@@ -45,6 +45,24 @@ describe('service account dialogs', () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
     expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  })
+
+  it('ignores defensive create submits without a service account name', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    renderWithProviders(
+      <CreateServiceAccountDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+        pending={false}
+      />,
+    )
+
+    const form = screen.getByTestId('create-service-account-submit').closest('form')
+    expect(form).not.toBeNull()
+    fireEvent.submit(form as HTMLFormElement)
+
+    expect(onSubmit).not.toHaveBeenCalled()
   })
 
   it('disables create controls while pending', () => {
@@ -203,6 +221,10 @@ describe('service account dialogs', () => {
     const dialog = screen.getByRole('alertdialog', { name: '停用服务账号 ci-bot？' })
     await user.click(within(dialog).getByRole('button', { name: '取消' }))
     expect(onOpenChange).toHaveBeenCalledWith(false)
+    onOpenChange.mockClear()
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
     onOpenChange.mockClear()
 
     await user.click(within(dialog).getByRole('button', { name: '停用' }))

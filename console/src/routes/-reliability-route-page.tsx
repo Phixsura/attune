@@ -177,6 +177,19 @@ function joinSemanticLabels<T extends { label: string }>(items: T[]) {
   return items.map((item) => item.label).join(' · ')
 }
 
+export const reliabilityRoutePageTestables = {
+  formatCount,
+  formatRecoveryDuration,
+  formatRecoveryWindow,
+  joinSemanticLabels,
+  lifecycleHint,
+  lifecycleLabel,
+  recoveryHint,
+  safeErrorMessage,
+  statusLabel,
+  statusTone,
+}
+
 export function ReliabilityRoutePage() {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()

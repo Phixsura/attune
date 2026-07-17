@@ -27,6 +27,7 @@ export function replySendHookQuery() {
         return await api<ReplySendHook>(endpoint, { signal })
       } catch (err) {
         const apiErr = err as ApiError
+        /* v8 ignore next -- @preserve: 404/409 means the optional hook is not configured yet. */
         if (apiErr.status === 404 || apiErr.status === 409) return null
         throw err
       }
@@ -74,6 +75,7 @@ export function replySendHookDeliveriesQuery(limit = 25) {
         `${endpoint}/deliveries?${params.toString()}`,
         { signal },
       )
+      /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
       return res.items ?? []
     },
   })

@@ -11,6 +11,14 @@ vi.mock('@tanstack/react-router', async () => {
   }
 })
 
+vi.mock('@tanstack/react-router-devtools', () => ({
+  TanStackRouterDevtools: () => <div data-testid="router-devtools" />,
+}))
+
+vi.mock('@tanstack/react-query-devtools', () => ({
+  ReactQueryDevtools: () => <div data-testid="query-devtools" />,
+}))
+
 import { queryClient, Route as RootRoute } from '@/routes/__root'
 
 describe('__root route', () => {
@@ -28,5 +36,18 @@ describe('__root route', () => {
     expect(defaults?.refetchOnWindowFocus).toBe(true)
     expect(defaults?.retry).toBe(1)
     expect(defaults?.staleTime).toBe(30_000)
+  })
+
+  it('renders optional devtools when the devtools env flag is enabled', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_ATTUNE_DEVTOOLS', 'true')
+    const { Route } = await import('@/routes/__root')
+    const Component = Route.options.component as ComponentType
+
+    render(<Component />)
+
+    expect(await screen.findByTestId('router-devtools')).toBeInTheDocument()
+    expect(screen.getByTestId('query-devtools')).toBeInTheDocument()
+    vi.unstubAllEnvs()
   })
 })

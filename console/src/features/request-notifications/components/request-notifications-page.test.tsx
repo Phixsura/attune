@@ -22,6 +22,7 @@ import {
   statusLabel,
   statusTone,
 } from '@/features/request-notifications/components/request-notifications-page'
+import i18n from '@/i18n'
 import type {
   RequestNotificationDelivery,
   RequestNotificationSender,
@@ -117,6 +118,15 @@ const deliveryDeadFixture: RequestNotificationDelivery = {
   createdAt: '',
 }
 
+const deliveryQuietFixture: RequestNotificationDelivery = {
+  ...deliveryFixture,
+  id: '44',
+  status: 'delivered',
+  attempts: 1,
+  lastError: '',
+  deadReason: '',
+}
+
 const subscriberFixture: RequestSubscriber = {
   contactId: '33333333-3333-3333-3333-333333333333',
   displayName: 'Jane Customer',
@@ -159,7 +169,7 @@ function seededClient() {
   qc.setQueryData(requestNotificationWebhookTargetsQueryKey, [targetFixture, targetFallbackFixture])
   qc.setQueryData(
     [...requestNotificationDeliveriesQueryKey, 25],
-    [deliveryFixture, deliveryDeadFixture],
+    [deliveryFixture, deliveryDeadFixture, deliveryQuietFixture],
   )
   return qc
 }
@@ -259,6 +269,33 @@ function installRequestHandlers(captures: Record<string, unknown>) {
   )
 }
 
+function withI18nLocale(resolvedLanguage: string, language: string) {
+  const originalResolvedLanguage = i18n.resolvedLanguage
+  const originalLanguage = i18n.language
+  Object.defineProperty(i18n, 'resolvedLanguage', {
+    configurable: true,
+    value: resolvedLanguage,
+    writable: true,
+  })
+  Object.defineProperty(i18n, 'language', {
+    configurable: true,
+    value: language,
+    writable: true,
+  })
+  return () => {
+    Object.defineProperty(i18n, 'resolvedLanguage', {
+      configurable: true,
+      value: originalResolvedLanguage,
+      writable: true,
+    })
+    Object.defineProperty(i18n, 'language', {
+      configurable: true,
+      value: originalLanguage,
+      writable: true,
+    })
+  }
+}
+
 beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(toast.success).mockClear()
@@ -346,6 +383,24 @@ describe('RequestNotificationsPage', () => {
     expect(screen.getByTestId('rn-preview')).toBeDisabled()
     expect(screen.getByTestId('rn-publish')).toBeDisabled()
     expect(screen.getByTestId('rn-sender-verify')).toBeDisabled()
+  })
+
+  it('renders with language and undefined locale fallbacks', async () => {
+    let restore = withI18nLocale('', 'en-US')
+    const languageFallback = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: emptyStateClient(),
+    })
+    expect(await screen.findByTestId('rn-deliveries-empty')).toBeInTheDocument()
+    languageFallback.unmount()
+    restore()
+
+    restore = withI18nLocale('', '')
+    const undefinedFallback = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: emptyStateClient(),
+    })
+    expect(await screen.findByTestId('rn-deliveries-empty')).toBeInTheDocument()
+    undefinedFallback.unmount()
+    restore()
   })
 
   it('renders loading and API fallback shapes from fresh queries', async () => {
@@ -455,6 +510,7 @@ describe('RequestNotificationsPage', () => {
     const qc = seededClient()
     qc.setQueryData(requestNotificationSenderQueryKey, {
       ...senderFixture,
+      fromName: '',
       fromEmailRedacted: '',
       domain: '',
       provider: '',
@@ -466,6 +522,7 @@ describe('RequestNotificationsPage', () => {
 
     expect(await screen.findByText('CRM')).toBeInTheDocument()
     expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(3)
+    expect(screen.getByTestId('rn-sender-from-name')).toHaveValue('')
 
     await user.type(
       screen.getByTestId('rn-subscriber-request-id'),
@@ -476,6 +533,32 @@ describe('RequestNotificationsPage', () => {
     expect(await screen.findByText('Jane Customer')).toBeInTheDocument()
     expect(screen.getByText('Example Org')).toBeInTheDocument()
     expect(screen.getAllByText('-').length).toBeGreaterThanOrEqual(4)
+  })
+
+  it('publishes while settings and preview data are still absent', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    server.use(
+      http.get('/fb/v1/console/request-notifications/settings', async () => {
+        await delay(5000)
+        return HttpResponse.json(settingsFixture)
+      }),
+    )
+    const { user } = renderWithProviders(<RequestNotificationsPage />)
+
+    await user.type(
+      screen.getByTestId('rn-draft-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.type(screen.getByTestId('rn-draft-title'), 'Shipped')
+    await user.type(screen.getByTestId('rn-draft-body'), 'CSV export is now available.')
+    await user.click(screen.getByTestId('rn-publish'))
+
+    await waitFor(() =>
+      expect(captures.publish).toMatchObject({
+        confirmLargeAudience: false,
+      }),
+    )
   })
 
   it('previews, publishes, retries deliveries, and suppresses subscribers', async () => {
@@ -712,7 +795,7 @@ describe('RequestNotificationsPage', () => {
         HttpResponse.json({ targets: [] }),
       ),
       http.get('/fb/v1/console/request-notifications/deliveries', () =>
-        HttpResponse.json({ deliveries: [] }),
+        HttpResponse.json({ deliveries: [deliveryQuietFixture] }),
       ),
       http.put('/fb/v1/console/request-notifications/settings', () =>
         HttpResponse.json({ message: 'cannot save settings' }, { status: 500 }),
@@ -727,6 +810,7 @@ describe('RequestNotificationsPage', () => {
 
     await user.click(await screen.findByTestId('rn-settings-save'))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot save settings'))
+    expect(screen.getAllByText('-').length).toBeGreaterThan(0)
 
     await user.type(
       screen.getByTestId('rn-draft-request-id'),
@@ -837,5 +921,101 @@ describe('RequestNotificationsPage', () => {
     expect(await screen.findByText('Jane Customer')).toBeInTheDocument()
     await user.click(screen.getByTestId(`rn-subscriber-suppress-${subscriberFixture.contactId}`))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot suppress subscriber'))
+  })
+
+  it('shows pending indicators for settings, sender, subscriber loading, and id fallbacks', async () => {
+    const undefinedTarget = {
+      ...targetFixture,
+      id: undefined as unknown as string,
+      name: 'No identifier target',
+    }
+    const undefinedDelivery = {
+      ...deliveryFixture,
+      id: undefined as unknown as string,
+      lastError: '',
+      deadReason: '',
+    }
+    server.use(
+      http.get('/fb/v1/console/request-notifications/settings', () =>
+        HttpResponse.json(settingsFixture),
+      ),
+      http.get('/fb/v1/console/request-notifications/sender', () =>
+        HttpResponse.json(senderFixture),
+      ),
+      http.get('/fb/v1/console/request-notifications/webhook-targets', () =>
+        HttpResponse.json({ targets: [undefinedTarget] }),
+      ),
+      http.get('/fb/v1/console/request-notifications/deliveries', () =>
+        HttpResponse.json({ deliveries: [undefinedDelivery] }),
+      ),
+      http.put('/fb/v1/console/request-notifications/settings', async () => {
+        await delay(350)
+        return HttpResponse.json(settingsFixture)
+      }),
+      http.put('/fb/v1/console/request-notifications/sender', async () => {
+        await delay(350)
+        return HttpResponse.json(senderFixture)
+      }),
+      http.post('/fb/v1/console/request-notifications/webhook-targets/undefined:test', async () => {
+        await delay(350)
+        return HttpResponse.json({ ok: true })
+      }),
+      http.delete('/fb/v1/console/request-notifications/webhook-targets/undefined', async () => {
+        await delay(350)
+        return HttpResponse.json({})
+      }),
+      http.post('/fb/v1/console/request-notifications/deliveries/undefined:retry', async () => {
+        await delay(350)
+        return HttpResponse.json(undefinedDelivery)
+      }),
+      http.get(
+        '/fb/v1/console/request-notifications/requests/55555555-5555-5555-5555-555555555555/subscribers',
+        async () => {
+          await delay(350)
+          return HttpResponse.json({ subscribers: [subscriberFixture] })
+        },
+      ),
+    )
+    const { user } = renderWithProviders(<RequestNotificationsPage />)
+
+    expect(await screen.findByText('No identifier target')).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('rn-settings-save'))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('rn-settings-save').querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
+
+    await user.type(screen.getByTestId('rn-sender-from-email'), 'notify@example.test')
+    await user.click(screen.getByTestId('rn-sender-save'))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('rn-sender-save').querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByTestId('rn-target-test-undefined'))
+    await delay(25)
+    expect(screen.getByTestId('rn-target-test-undefined')).toBeEnabled()
+
+    await user.click(screen.getByTestId('rn-target-delete-undefined'))
+    await delay(25)
+    expect(screen.getByTestId('rn-target-delete-undefined')).toBeEnabled()
+
+    await user.click(screen.getByTestId('rn-delivery-retry-undefined'))
+    await delay(25)
+    expect(screen.getByTestId('rn-delivery-retry-undefined')).toBeEnabled()
+
+    await user.type(
+      screen.getByTestId('rn-subscriber-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.click(screen.getByTestId('rn-subscribers-load'))
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('rn-subscribers-load').querySelector('.animate-spin'),
+      ).toBeInTheDocument(),
+    )
   })
 })

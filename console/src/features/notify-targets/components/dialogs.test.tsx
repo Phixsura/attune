@@ -90,6 +90,31 @@ describe('CreateNotifyDialog', () => {
     expect(screen.getByTestId('create-notify-submit')).toBeDisabled()
   })
 
+  it('ignores blank form submits and reports dialog close changes', async () => {
+    const onOpenChange = vi.fn()
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateNotifyDialog open onOpenChange={onOpenChange} onSubmit={onSubmit} pending={false} />,
+    )
+
+    fireEvent.submit(screen.getByTestId('create-notify-submit').closest('form') as HTMLFormElement)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    await user.type(screen.getByTestId('create-notify-url'), 'https://hook.example.com')
+    await user.keyboard('{Escape}')
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  it('calls onOpenChange when the cancel button is clicked', async () => {
+    const onOpenChange = vi.fn()
+    const { user } = renderWithProviders(
+      <CreateNotifyDialog open onOpenChange={onOpenChange} onSubmit={vi.fn()} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Cancel|取消/ }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it('does not mount the form while closed', () => {
     renderWithProviders(
       <CreateNotifyDialog open={false} onOpenChange={vi.fn()} onSubmit={vi.fn()} pending={false} />,
@@ -145,6 +170,21 @@ describe('DeleteNotifyDialog', () => {
       <DeleteNotifyDialog target={makeTarget()} onCancel={onCancel} onConfirm={vi.fn()} pending />,
     )
     expect(screen.getByTestId('delete-notify-confirm')).toBeDisabled()
+  })
+
+  it('calls onCancel when the dialog itself requests close', async () => {
+    const onCancel = vi.fn()
+    const { user } = renderWithProviders(
+      <DeleteNotifyDialog
+        target={makeTarget()}
+        onCancel={onCancel}
+        onConfirm={vi.fn()}
+        pending={false}
+      />,
+    )
+
+    await user.keyboard('{Escape}')
+    expect(onCancel).toHaveBeenCalledTimes(1)
   })
 
   it('renders nothing when target is null', () => {

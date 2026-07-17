@@ -89,6 +89,7 @@ export function StateFormDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
+    /* v8 ignore next -- @preserve: submit is disabled until the state key is valid. */
     if (!keyValid) return
     onSubmit({ name: name.trim(), displayName, color, category })
   }

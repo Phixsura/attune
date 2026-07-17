@@ -1,4 +1,5 @@
 import { HttpResponse, http } from 'msw'
+import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 import { PublicVisibilityPage } from '@/features/public-visibility/components/public-visibility-page'
 import {
@@ -15,7 +16,7 @@ import {
   PublicWriteMode,
 } from '@/proto/attune/v1/public_visibility'
 import { server } from '@/testing/mocks/server'
-import { fireEvent, renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -34,12 +35,18 @@ describe('PublicVisibilityPage', () => {
     let savedPolicy: unknown
     let loadedProfilePath = ''
     let savedProfile: unknown
+    let policyReads = 0
+    let moderationReads = 0
     server.use(
-      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/policy', () => {
+        policyReads += 1
+        return HttpResponse.json(policyFixture())
+      }),
       http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
-      http.get('/fb/v1/console/public-visibility/moderation', () =>
-        HttpResponse.json({ subjects: moderationSubjects() }),
-      ),
+      http.get('/fb/v1/console/public-visibility/moderation', () => {
+        moderationReads += 1
+        return HttpResponse.json({ subjects: moderationSubjects() })
+      }),
       http.put('/fb/v1/console/public-visibility/policy', async ({ request }) => {
         savedPolicy = await request.json()
         return HttpResponse.json({ ...policyFixture(), ...(savedPolicy as object) })
@@ -83,6 +90,14 @@ describe('PublicVisibilityPage', () => {
     expect(screen.getAllByLabelText('公开列名称')).toHaveLength(5)
     expect(screen.getAllByLabelText('列顺序')).toHaveLength(5)
 
+    const initialPolicyReads = policyReads
+    const initialModerationReads = moderationReads
+    await user.click(screen.getByRole('button', { name: '刷新' }))
+    await waitFor(() => {
+      expect(policyReads).toBeGreaterThan(initialPolicyReads)
+      expect(moderationReads).toBeGreaterThan(initialModerationReads)
+    })
+
     await user.click(await screen.findByRole('combobox', { name: '入口访问' }))
     await user.click(await screen.findByRole('option', { name: '关闭' }))
     await user.click(screen.getByRole('combobox', { name: '需求默认状态' }))
@@ -98,6 +113,11 @@ describe('PublicVisibilityPage', () => {
     await user.click(screen.getByRole('combobox', { name: '提交者身份' }))
     await user.click(await screen.findByRole('option', { name: '组织名' }))
     await user.click(await screen.findByRole('checkbox', { name: '公开需求' }))
+    await user.click(screen.getByRole('checkbox', { name: '公开评论' }))
+    await user.click(screen.getByRole('checkbox', { name: '公开路线图' }))
+    await user.click(screen.getByRole('checkbox', { name: '公开更新日志' }))
+    await user.click(screen.getByRole('checkbox', { name: '允许搜索索引' }))
+    await user.click(screen.getByRole('checkbox', { name: '隐藏公开时间' }))
     await user.click(screen.getByRole('checkbox', { name: '显示投票数' }))
     await user.click(screen.getByRole('checkbox', { name: '显示评论数' }))
     await user.click(screen.getByRole('checkbox', { name: '显示提交者' }))
@@ -112,6 +132,11 @@ describe('PublicVisibilityPage', () => {
         voteWriteMode: PublicWriteMode.PUBLIC_WRITE_MODE_DISABLED,
         submitterIdentityMode: PublicIdentityMode.PUBLIC_IDENTITY_MODE_ORGANIZATION,
         requestsEnabled: false,
+        commentsEnabled: false,
+        roadmapEnabled: false,
+        changelogEnabled: true,
+        searchIndexingEnabled: false,
+        hidePublicTimestamps: true,
         showVoteCount: false,
         showCommentCount: false,
         showSubmitterDisplay: false,
@@ -202,6 +227,11 @@ describe('PublicVisibilityPage', () => {
     await user.type(screen.getByPlaceholderText('面向客户展示的标题'), 'Improved billing export')
     await user.clear(screen.getByPlaceholderText('只写可以公开展示的信息'))
     await user.type(screen.getByPlaceholderText('只写可以公开展示的信息'), 'Export invoices safely')
+    await user.clear(screen.getByPlaceholderText('planned / in progress / shipped'))
+    await user.type(screen.getByPlaceholderText('planned / in progress / shipped'), 'Beta')
+    await user.clear(screen.getByPlaceholderText('按公开策略展示'))
+    await user.type(screen.getByPlaceholderText('按公开策略展示'), 'ACME Labs')
+    await user.click(screen.getByRole('checkbox', { name: '进入公开入口' }))
     await user.click(screen.getByRole('checkbox', { name: '进入公开路线图' }))
     await user.click(screen.getByRole('button', { name: '保存资料' }))
     await waitFor(() => {
@@ -210,9 +240,10 @@ describe('PublicVisibilityPage', () => {
         publicSlug: 'billing-export',
         publicTitle: 'Improved billing export',
         publicSummary: 'Export invoices safely',
-        includedInPortal: true,
+        publicState: 'Beta',
+        includedInPortal: false,
         includedInRoadmap: false,
-        submittedByDisplay: 'Jane Customer',
+        submittedByDisplay: 'ACME Labs',
       })
     })
   }, 60_000)
@@ -245,6 +276,16 @@ describe('PublicVisibilityPage', () => {
     expect(screen.getAllByLabelText('公开列名称')[0]).toHaveValue('under consideration')
     expect(screen.getAllByLabelText('列顺序')[0]).toHaveValue(1)
 
+    await user.clear(screen.getByLabelText('门户标题'))
+    await user.type(screen.getByLabelText('门户标题'), 'Feedback inbox')
+    await user.clear(screen.getByLabelText('按钮文案'))
+    await user.type(screen.getByLabelText('按钮文案'), 'Send feedback')
+    await user.clear(screen.getByLabelText('门户说明'))
+    await user.type(screen.getByLabelText('门户说明'), 'Tell us what would help.')
+    await user.clear(screen.getByLabelText('提交后说明'))
+    await user.type(screen.getByLabelText('提交后说明'), 'Thanks for the signal.')
+    await user.click(screen.getByRole('checkbox', { name: '显示页面 URL' }))
+
     await user.click(screen.getByRole('button', { name: '添加字段' }))
 
     const fieldLabels = screen.getAllByLabelText('字段名称')
@@ -255,7 +296,11 @@ describe('PublicVisibilityPage', () => {
     await user.clear(fieldPlaceholders[0])
     await user.type(fieldPlaceholders[0], 'Choose severity')
 
+    await user.click(screen.getAllByRole('combobox', { name: '字段类型' })[0])
+    await user.click(await screen.findByRole('option', { name: '勾选框' }))
+    await user.click(screen.getAllByRole('checkbox', { name: '必填' })[0])
     await user.click(screen.getAllByRole('button', { name: '下移' })[0])
+    await user.click(screen.getAllByRole('button', { name: '下移' })[1])
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
 
     expect(screen.getAllByLabelText('字段名称')).toHaveLength(1)
@@ -292,6 +337,10 @@ describe('PublicVisibilityPage', () => {
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
     await waitFor(() => expect(screen.getByText('保存的视图')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: '门户投稿' }))
+    await user.click(screen.getByRole('button', { name: '清除' }))
+    await user.click(screen.getByRole('button', { name: '门户投稿' }))
+    await user.click(screen.getByRole('button', { name: '门户投稿' }))
     await user.click(screen.getByRole('button', { name: '门户投稿' }))
     await user.click(screen.getByRole('button', { name: '已公开 (1)' }))
     await user.click(screen.getByRole('button', { name: '保存视图' }))
@@ -391,6 +440,15 @@ describe('PublicVisibilityPage', () => {
       expect(screen.getByText('当前筛选与该保存视图一致。')).toBeInTheDocument()
     })
 
+    await user.click(screen.getByRole('combobox', { name: '保存的视图' }))
+    await user.click(await screen.findByRole('option', { name: '当前筛选' }))
+    await waitFor(() => {
+      expect(screen.getByText('当前筛选未绑定保存视图')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('combobox', { name: '保存的视图' }))
+    await user.click(await screen.findByRole('option', { name: 'Approved portal requests' }))
+
     await user.click(screen.getByRole('button', { name: '待审 (1)' }))
     expect(screen.getByText('当前筛选已修改，尚未保存到该视图。')).toBeInTheDocument()
 
@@ -423,6 +481,111 @@ describe('PublicVisibilityPage', () => {
     })
     expect(screen.getByRole('button', { name: '删除保存视图' })).toBeDisabled()
   })
+
+  it('surfaces policy, profile, moderation, and saved-view mutation failures', async () => {
+    mockMe('admin')
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () =>
+        HttpResponse.json({
+          views: [
+            {
+              id: 'view-1',
+              name: 'Approved portal requests',
+              state: {
+                queueView: 'approved',
+                surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+              },
+              createdAt: '2026-07-10T00:00:00Z',
+              updatedAt: '2026-07-10T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({ subjects: moderationSubjects() }),
+      ),
+      http.put('/fb/v1/console/public-visibility/policy', () =>
+        HttpResponse.json({ message: 'policy denied' }, { status: 500 }),
+      ),
+      http.get('/fb/v1/console/public-visibility/requests/:requestId/profile', () =>
+        HttpResponse.json({ message: 'profile missing' }, { status: 404 }),
+      ),
+      http.put('/fb/v1/console/public-visibility/requests/:requestId/profile', () =>
+        HttpResponse.json({ message: 'profile denied' }, { status: 500 }),
+      ),
+      http.post('/fb/v1/console/public-visibility/moderation/moderation-pending\\:reject', () =>
+        HttpResponse.json({ message: 'reject denied' }, { status: 409 }),
+      ),
+      http.post('/fb/v1/console/public-visibility/views', () =>
+        HttpResponse.json({ message: 'create denied' }, { status: 500 }),
+      ),
+      http.put('/fb/v1/console/public-visibility/views/:id', () =>
+        HttpResponse.json({ message: 'update denied' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/public-visibility/views/:id', () =>
+        HttpResponse.json({ message: 'delete denied' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存策略' })).toBeEnabled())
+
+    await user.click(screen.getByRole('button', { name: '保存策略' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('policy denied'))
+
+    await user.type(screen.getByPlaceholderText('粘贴 customer request UUID'), currentRequestID)
+    await user.click(screen.getByRole('button', { name: '载入' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('profile missing'))
+
+    await user.type(screen.getByPlaceholderText('pricing-api'), 'public-slug')
+    await user.type(screen.getByPlaceholderText('面向客户展示的标题'), 'Public title')
+    await user.click(screen.getByRole('button', { name: '保存资料' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('profile denied'))
+
+    await user.click(screen.getByRole('button', { name: '拒绝' }))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: '拒绝审核项' })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '提交审核' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('reject denied'))
+    await user.keyboard('{Escape}')
+
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    await user.click(
+      within(screen.getByRole('dialog', { name: '保存当前筛选' })).getByRole('button', {
+        name: '取消',
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), 'Broken create')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('create denied'))
+    await user.click(
+      within(screen.getByRole('dialog', { name: '保存当前筛选' })).getByRole('button', {
+        name: '取消',
+      }),
+    )
+
+    await user.click(screen.getByRole('combobox', { name: '保存的视图' }))
+    await user.click(await screen.findByRole('option', { name: 'Approved portal requests' }))
+    await user.click(screen.getByRole('button', { name: '保存视图' }))
+    await user.clear(screen.getByLabelText('视图名称'))
+    await user.type(screen.getByLabelText('视图名称'), 'Broken update')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('update denied'))
+    await user.click(
+      within(screen.getByRole('dialog', { name: '保存当前筛选' })).getByRole('button', {
+        name: '取消',
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: '删除保存视图' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('delete denied'))
+  }, 60_000)
 
   it('keeps similar requests locked until the publication is public', async () => {
     mockMe('admin')
@@ -588,6 +751,8 @@ describe('PublicVisibilityPage', () => {
       target: { value: ' alpha\n\n beta \n gamma ' },
     })
 
+    await user.click(screen.getAllByRole('combobox', { name: '字段类型' })[0])
+    await user.click(await screen.findByRole('option', { name: '单行文本' }))
     await user.click(screen.getAllByRole('button', { name: '上移' })[1])
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
 
@@ -599,10 +764,10 @@ describe('PublicVisibilityPage', () => {
             {
               key: 'severity',
               label: 'Severity',
-              kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_SELECT,
+              kind: PortalSubmissionFieldKind.PORTAL_SUBMISSION_FIELD_KIND_TEXT,
               required: true,
               placeholder: 'Choose a severity',
-              options: ['alpha', 'beta', 'gamma'],
+              options: [],
             },
           ],
         },
@@ -642,18 +807,24 @@ describe('PublicVisibilityPage', () => {
     expect(screen.getByText('profile-approved')).toBeInTheDocument()
     expect(screen.queryByText('profile-pending')).not.toBeInTheDocument()
 
+    await user.click(screen.getByRole('button', { name: '全部 (3)' }))
+    expect(screen.getByText('profile-pending')).toBeInTheDocument()
+    expect(screen.getByText('profile-approved')).toBeInTheDocument()
+
     await user.click(screen.getByRole('button', { name: '待审 (1)' }))
     await user.click(screen.getByRole('button', { name: '批准' }))
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: '批准审核项' })).toBeInTheDocument()
     })
     expect(screen.getAllByText('profile-pending').length).toBeGreaterThanOrEqual(1)
+    await user.click(screen.getByRole('combobox', { name: '原因代码' }))
+    await user.click(await screen.findByRole('option', { name: '符合公开策略' }))
     await user.type(screen.getByPlaceholderText(/可选；只写处理背景/), 'Reviewed public copy')
     await user.click(screen.getByRole('button', { name: '提交审核' }))
 
     await waitFor(() => {
       expect(approvalBody).toEqual({
-        reasonCode: 'operator.approved',
+        reasonCode: 'policy.safe',
         reasonNote: 'Reviewed public copy',
       })
     })

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -259,10 +260,7 @@ func insertNotificationEvent(ctx context.Context, tx pgx.Tx, updateID uuid.UUID,
 	if dedupeKey == "" {
 		dedupeKey = "public-update:" + updateID.String()
 	}
-	snapshot, err := jsonObject(map[string]any{"channels": in.Channels})
-	if err != nil {
-		return Event{}, err
-	}
+	snapshot := channelsSnapshot(in.Channels)
 	row := tx.QueryRow(ctx, `
 		INSERT INTO customer_request_notification_events (
 			tenant_id, primary_request_id, update_id, event_type,
@@ -289,6 +287,19 @@ func insertNotificationEvent(ctx context.Context, tx pgx.Tx, updateID uuid.UUID,
 		snapshot,
 	)
 	return scanEvent(row)
+}
+
+func channelsSnapshot(channels []string) []byte {
+	var b strings.Builder
+	b.WriteString(`{"channels":[`)
+	for idx, channel := range channels {
+		if idx > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Quote(channel))
+	}
+	b.WriteString(`]}`)
+	return []byte(b.String())
 }
 
 func scanEvents(rows pgx.Rows) ([]Event, error) {

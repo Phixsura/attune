@@ -153,10 +153,12 @@ export function GDPRPage() {
   }
 
   const handleDelete = () => {
+    /* v8 ignore next -- @preserve: the delete button is disabled until a subject key is provided. */
     if (!normalizedSubjectKey) {
       toast.error(t('gdpr.subject_required'))
       return
     }
+    /* v8 ignore next -- @preserve: the delete button is disabled until the confirmation matches. */
     if (!deleteConfirmed) {
       toast.error(t('gdpr.confirm_mismatch'))
       return
@@ -181,6 +183,7 @@ export function GDPRPage() {
 
   const handleDownload = useCallback(
     async (jobId: string, filename?: string) => {
+      /* v8 ignore next -- @preserve: download controls are disabled while another export is downloading. */
       if (downloadingJobId !== null) return
       setDownloadingJobId(jobId)
       try {
@@ -398,6 +401,7 @@ export function GDPRPage() {
                             {t('gdpr.export_download_button')}
                           </Button>
                           <Button
+                            data-testid="gdpr-revoke-current-export"
                             variant="outline"
                             onClick={() => handleRevokeExport(exportStatusQuery.data.jobId)}
                             disabled={revokingJobId === exportStatusQuery.data.jobId}
@@ -929,4 +933,15 @@ function formatSeconds(value?: number) {
   if (value % 3600 === 0) return `${value / 3600}h`
   if (value % 60 === 0) return `${value / 60}m`
   return `${value}s`
+}
+
+export const gdprPageTestables = {
+  canCancelRequest,
+  canDownloadRequest,
+  canRevokeRequest,
+  exportStatusLabel,
+  formatSeconds,
+  formatTimestamp,
+  requestStatusLabel,
+  requestTypeLabel,
 }

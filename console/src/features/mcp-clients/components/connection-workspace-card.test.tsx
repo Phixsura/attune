@@ -1,7 +1,20 @@
-import { describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MCPClient, MCPConnectionProfile } from '@/features/mcp-clients/api/types'
 import { ConnectionWorkspaceCard } from '@/features/mcp-clients/components/connection-workspace-card'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { act, renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+  },
+}))
+
+afterEach(() => {
+  vi.useRealTimers()
+  vi.clearAllMocks()
+})
 
 const client: MCPClient = {
   id: 'client-123',
@@ -62,6 +75,38 @@ describe('ConnectionWorkspaceCard', () => {
       (screen.getByLabelText('复制到宿主配置文件或终端命令即可使用。') as HTMLTextAreaElement)
         .value,
     ).toContain("curl -fsSL 'https://mcp.example.test/.well-known/oauth-protected-resource'")
+  })
+
+  it('copies template snippets and clears the copied state after the timeout', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const writeSpy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <ConnectionWorkspaceCard client={client} connection={connection} />,
+    )
+
+    const snippetCopyButton = screen.getAllByRole('button', { name: '复制' }).at(-1) as HTMLElement
+    await user.click(snippetCopyButton)
+
+    await waitFor(() => expect(writeSpy).toHaveBeenCalledWith(expect.stringContaining('claude')))
+    expect(snippetCopyButton).toHaveTextContent('已复制')
+
+    act(() => {
+      vi.advanceTimersByTime(1500)
+    })
+
+    await waitFor(() => expect(snippetCopyButton).toHaveTextContent('复制'))
+    vi.useRealTimers()
+  })
+
+  it('shows a copy failure toast when clipboard write fails', async () => {
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValue(new Error('denied'))
+    const { user } = renderWithProviders(
+      <ConnectionWorkspaceCard client={client} connection={connection} />,
+    )
+
+    await user.click(screen.getAllByRole('button', { name: '复制' })[0])
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('复制失败'))
   })
 
   it('shows revoked copy guidance instead of a snippet textarea', () => {

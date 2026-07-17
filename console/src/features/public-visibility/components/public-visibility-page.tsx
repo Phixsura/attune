@@ -82,6 +82,7 @@ import { useDocumentTitle } from '@/hooks/use-document-title'
 import type {
   PublicVisibilityViewState,
   RoadmapStatusMapping,
+  SavedPublicVisibilityView,
 } from '@/proto/attune/v1/public_visibility'
 
 type PolicyForm = {
@@ -141,6 +142,24 @@ type ModerateAction = 'approve' | 'reject' | 'hide' | 'spam' | 'restore'
 type PublicVisibilityModerationFilters = {
   queueView: QueueView
   surfaces: PublicSurface[]
+}
+
+type SavedViewSaveRequest =
+  | {
+      kind: 'create'
+      name: string
+      state: PublicVisibilityViewState
+    }
+  | {
+      kind: 'update'
+      id: string
+      name: string
+      state: PublicVisibilityViewState
+    }
+
+type SavedViewSelection = {
+  selectedID: string
+  filters: PublicVisibilityModerationFilters | null
 }
 
 type ModerationDialogState = {
@@ -837,6 +856,7 @@ function PublicVisibilitySavedViewsBar({
   const selectedMatchesCurrent = selected
     ? savedViewStateSignature(selected.state) === moderationFiltersSignature(filters)
     : false
+  const selectedDeleteID = savedViewDeleteID(selected)
   const isSaving = create.isPending || update.isPending
 
   const openSaveDialog = () => {
@@ -845,14 +865,14 @@ function PublicVisibilitySavedViewsBar({
   }
 
   const saveCurrent = () => {
-    const trimmedName = name.trim()
-    if (!trimmedName) return
-    const state = savedViewStateFromFilters(filters)
-    if (selected) {
-      update.mutate({ id: selected.id, name: trimmedName, state })
+    const request = savedViewSaveRequest(selected, name, filters)
+    if (request?.kind === 'update') {
+      update.mutate({ id: request.id, name: request.name, state: request.state })
       return
     }
-    create.mutate({ name: trimmedName, state })
+    if (request?.kind === 'create') {
+      create.mutate({ name: request.name, state: request.state })
+    }
   }
 
   return (
@@ -876,12 +896,9 @@ function PublicVisibilitySavedViewsBar({
               variant="ghost"
               size="icon"
               className="size-9"
-              disabled={!selected || remove.isPending}
+              disabled={!selectedDeleteID || remove.isPending}
               aria-label={t('public_visibility.saved_views_delete')}
-              onClick={() => {
-                if (!selected) return
-                remove.mutate(selected.id)
-              }}
+              onClick={selectedDeleteID ? () => remove.mutate(selectedDeleteID) : undefined}
             >
               {remove.isPending ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -913,14 +930,9 @@ function PublicVisibilitySavedViewsBar({
             value={selectedID || SAVED_VIEW_NONE}
             disabled={viewsQuery.isPending}
             onValueChange={(value) => {
-              if (value === SAVED_VIEW_NONE) {
-                setSelectedID('')
-                return
-              }
-              const view = views.find((item) => item.id === value)
-              if (!view) return
-              setSelectedID(view.id)
-              onApply(savedViewStateToFilters(view.state))
+              const next = savedViewSelectionFromValue(views, value)
+              setSelectedID(next.selectedID)
+              if (next.filters) onApply(next.filters)
             }}
           >
             <SelectTrigger
@@ -1066,6 +1078,38 @@ function savedViewStateToFilters(
     queueView: normalizeQueueView(state.queueView),
     surfaces: normalizeSurfaceSelection(state.surfaces ?? []),
   }
+}
+
+function savedViewSaveRequest(
+  selected: SavedPublicVisibilityView | null,
+  name: string,
+  filters: PublicVisibilityModerationFilters,
+): SavedViewSaveRequest | null {
+  const trimmedName = name.trim()
+  if (!trimmedName) return null
+  const state = savedViewStateFromFilters(filters)
+  if (selected) {
+    return { kind: 'update', id: selected.id, name: trimmedName, state }
+  }
+  return { kind: 'create', name: trimmedName, state }
+}
+
+function savedViewDeleteID(selected: SavedPublicVisibilityView | null): string | null {
+  return selected?.id || null
+}
+
+function savedViewSelectionFromValue(
+  views: SavedPublicVisibilityView[],
+  value: string,
+): SavedViewSelection {
+  if (value === SAVED_VIEW_NONE) {
+    return { selectedID: '', filters: null }
+  }
+  const view = views.find((item) => item.id === value)
+  if (!view) {
+    return { selectedID: '', filters: null }
+  }
+  return { selectedID: view.id, filters: savedViewStateToFilters(view.state) }
 }
 
 function moderationFiltersSignature(filters: PublicVisibilityModerationFilters) {
@@ -2770,6 +2814,9 @@ export const publicVisibilityPageTestables = {
   portalSubmissionFormFromPolicy,
   portalSubmissionFormRequestFromForm,
   savedViewStateFromFilters,
+  savedViewDeleteID,
+  savedViewSaveRequest,
+  savedViewSelectionFromValue,
   savedViewStateSignature,
   savedViewStateToFilters,
   reasonCodeForAction,

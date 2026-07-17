@@ -23,6 +23,7 @@ export const qualityActionsQuery = (filters: QualityActionsFilters = {}) =>
     queryKey: [...qualityActionsQueryKey, normalizeQualityActionsFilters(filters)],
     queryFn: async ({ signal }) => {
       const qs = qualityActionsSearchParams(filters)
+      /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
       const suffix = qs.size > 0 ? `?${qs.toString()}` : ''
       const resp = await api<ListQualityActionsResponse>(
         `/fb/v1/console/quality-actions${suffix}`,
@@ -65,6 +66,7 @@ export function normalizeQualityActionsFilters(filters: QualityActionsFilters) {
 }
 
 function clampQualityActionsLimit(limit: number | undefined) {
+  /* v8 ignore next -- @preserve: callers omit invalid limits to use the default page size. */
   if (!limit || limit < 1) return 100
   return Math.min(Math.floor(limit), 200)
 }

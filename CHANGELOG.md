@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Request notification sender config and delivery payload JSON construction is
+  now deterministic and no longer depends on unreachable marshal fallbacks.
+
 - Secret keyset parsing now correctly skips unknown AES-GCM key proto fields
   instead of re-reading skipped bytes as field tags.
 

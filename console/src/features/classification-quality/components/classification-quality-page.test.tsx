@@ -157,3 +157,135 @@ test('sends advanced filters and clears them without changing the base range', a
   })
   expect(screen.queryByRole('button', { name: '清除高级筛选' })).not.toBeInTheDocument()
 })
+
+test('updates select filters and maps quality reasons to feedback links', async () => {
+  const seen: URL[] = []
+  server.use(
+    http.get('/fb/v1/console/classification-quality', ({ request }) => {
+      seen.push(new URL(request.url))
+      return HttpResponse.json({
+        ...defaultClassificationQuality,
+        summary: {
+          classificationEvents: '42',
+          failedAttempts: '1',
+          averageConfidence: 0.91,
+          lowConfidenceRate: 0.06,
+          offListRate: 0.01,
+          unknownDimensionRate: 0,
+          parseFailureRate: 0.01,
+          terminalFailureRate: 0,
+          worstSeverity: 'insufficient_data',
+        },
+        warnings: [
+          {
+            reason: 'dimension_distribution_drift',
+            severity: 'insufficient_data',
+            dimensionName: 'priority',
+            value: 0.04,
+            sampleFeedbackIds: ['fb-drift'],
+          },
+          {
+            reason: 'off_list_rate_spike',
+            severity: 'watch',
+            dimensionName: 'topic',
+            value: 0.03,
+            sampleFeedbackIds: ['fb-off-list'],
+          },
+          {
+            reason: 'parse_failure_rate_spike',
+            severity: 'alert',
+            dimensionName: '',
+            value: 0.02,
+            sampleFeedbackIds: ['fb-parse'],
+          },
+          {
+            reason: 'terminal_failure_rate_spike',
+            severity: 'alert',
+            dimensionName: '',
+            value: 0.01,
+            sampleFeedbackIds: ['fb-terminal'],
+          },
+        ],
+        dimensions: [
+          {
+            dimensionName: 'topic',
+            severity: 'watch',
+            currentCount: '42',
+            baselineCount: '40',
+            jsDistance: 0.03,
+            psi: 0.04,
+            lowConfidenceRate: 0.06,
+            offListRate: 0.01,
+            values: [
+              {
+                valueHash: 'new-topic',
+                valueDisplay: 'New topic',
+                valueStatus: 'custom_status',
+                shareDeltaPp: 2.5,
+              },
+            ],
+          },
+        ],
+        samples: [
+          {
+            id: 'fb-parse',
+            title: 'Parser could not read JSON',
+            createdAt: '2026-07-01T08:30:00Z',
+            source: 'api',
+            classificationConfidence: 0.73,
+            enrichmentStatus: 'failed',
+            signalReason: 'parse_failure_rate_spike',
+          },
+          {
+            id: 'fb-terminal',
+            title: 'Classification terminal failure',
+            createdAt: '2026-07-01T09:30:00Z',
+            source: 'api',
+            classificationConfidence: 0.81,
+            enrichmentStatus: 'failed',
+            signalReason: 'terminal_failure_rate_spike',
+          },
+        ],
+      })
+    }),
+  )
+
+  const { user } = renderWithProviders(<ClassificationQualityPage />)
+
+  expect(await screen.findByText('维度分布漂移')).toBeInTheDocument()
+  expect(screen.getByText('越界值升高')).toBeInTheDocument()
+  expect(screen.getByText('解析失败升高')).toBeInTheDocument()
+  expect(screen.getByText('终态失败升高')).toBeInTheDocument()
+  expect(screen.getAllByText('数据不足').length).toBeGreaterThan(0)
+  expect(screen.getByText('custom_status')).toBeInTheDocument()
+
+  await user.click(screen.getAllByRole('combobox')[1])
+  await user.click(await screen.findByRole('option', { name: '按小时' }))
+  await waitFor(() => {
+    expect(seen.some((url) => url.searchParams.get('bucket_width') === 'hour')).toBe(true)
+  })
+
+  await user.click(screen.getAllByRole('combobox')[2])
+  await user.click(await screen.findByRole('option', { name: '关注' }))
+  await waitFor(() => {
+    expect(seen.at(-1)?.searchParams.get('severity')).toBe('watch')
+  })
+
+  await user.click(screen.getAllByRole('combobox')[0])
+  await user.click(await screen.findByRole('option', { name: '30 天' }))
+  await waitFor(() => {
+    expect(seen.at(-1)?.searchParams.get('bucket_width')).toBe('day')
+  })
+
+  const feedbackLinks = screen.getAllByRole('link', { name: '查看反馈' })
+  expect(
+    feedbackLinks.some((link) =>
+      link.getAttribute('href')?.includes('quality_signal=parse_failure'),
+    ),
+  ).toBe(true)
+  expect(
+    feedbackLinks.some((link) =>
+      link.getAttribute('href')?.includes('quality_signal=terminal_failure'),
+    ),
+  ).toBe(true)
+})

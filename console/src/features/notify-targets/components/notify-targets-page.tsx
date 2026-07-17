@@ -56,6 +56,7 @@ export function NotifyTargetsPage() {
     })
 
   const handleEdit = (patch: NotifyTargetPatch) => {
+    /* v8 ignore next -- @preserve: edit dialogs only submit after a notify target is selected. */
     if (!editTarget) return Promise.resolve()
     return update.mutateAsync(
       { id: editTarget.id, patch },

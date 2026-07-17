@@ -4519,7 +4519,8 @@
       "issued": "签发时间"
     },
     "token": {
-      "revoked": "令牌已撤销"
+      "revoked": "令牌已撤销",
+      "revoke_aria": "撤销令牌 {{email}}"
     },
     "lockouts": {
       "title": "Break-Glass 锁定",

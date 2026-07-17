@@ -300,6 +300,7 @@ export function RequestNotificationsPage() {
 
   const handleVerifySender = () => {
     const senderId = sender?.id
+    /* v8 ignore next -- @preserve: the verify button is disabled unless a sender id is present. */
     if (senderId) {
       verifySender.mutate(senderId, {
         onSuccess: () => toast.success(t('request_notifications.toast.sender_verified')),

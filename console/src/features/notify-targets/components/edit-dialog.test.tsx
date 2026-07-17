@@ -103,6 +103,32 @@ describe('EditNotifyDialog sparse PATCH diff', () => {
     expect(patch).toEqual({ disabled: true })
   })
 
+  it('audience change → patch contains ONLY { audience }', async () => {
+    const target = makeTarget({ audience: 'all' })
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <EditNotifyDialog target={target} onClose={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('combobox'))
+    await user.click(screen.getByRole('option', { name: 'digest' }))
+    await user.click(screen.getByTestId('edit-notify-save'))
+
+    const patch = onSubmit.mock.calls[0][0] as NotifyTargetPatch
+    expect(patch).toEqual({ audience: 'digest' })
+  })
+
+  it('calls onClose when the dialog requests close', async () => {
+    const target = makeTarget()
+    const onClose = vi.fn()
+    const { user } = renderWithProviders(
+      <EditNotifyDialog target={target} onClose={onClose} onSubmit={vi.fn()} pending={false} />,
+    )
+
+    await user.keyboard('{Escape}')
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('clear-then-type resets the cleared bit → patch.secret = typed value (not empty)', async () => {
     // Real "typed wins over cleared" requires CLEARING FIRST, then typing —
     // because the input's onChange handler resets secretCleared on every

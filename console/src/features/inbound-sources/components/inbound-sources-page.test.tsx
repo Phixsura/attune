@@ -2,7 +2,7 @@ import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { InboundSourcesPage } from '@/features/inbound-sources/components/inbound-sources-page'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
+import { act, renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 
 const baseSources = [
   {
@@ -47,7 +47,7 @@ const baseSources = [
 ]
 
 describe('InboundSourcesPage', () => {
-  it('renders the empty registry and opens creation from the empty detail panel', async () => {
+  it('renders the empty registry and opens creation from the empty-state actions', async () => {
     server.use(
       http.get('/fb/v1/console/inbound/sources', () =>
         HttpResponse.json({
@@ -61,9 +61,60 @@ describe('InboundSourcesPage', () => {
     expect(await screen.findByText('还没有入站源')).toBeInTheDocument()
     expect(screen.getByText('选择一个入站源')).toBeInTheDocument()
 
-    await user.click(screen.getAllByRole('button', { name: '+ 添加入站源' })[0])
+    await user.click(screen.getAllByRole('button', { name: '+ 添加入站源' })[1] as HTMLElement)
+    expect(await screen.findByRole('heading', { name: '添加入站源' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: '添加入站源' })).not.toBeInTheDocument()
+    })
+
+    await user.click(screen.getAllByRole('button', { name: '+ 添加入站源' }).at(-1) as HTMLElement)
 
     expect(await screen.findByRole('heading', { name: '添加入站源' })).toBeInTheDocument()
+  })
+
+  it('shows detail refresh state while the selected source is refetching', async () => {
+    server.use(
+      http.get('/fb/v1/console/inbound/sources', () =>
+        HttpResponse.json({
+          items: [baseSources[0]],
+        }),
+      ),
+      http.get('/fb/v1/console/inbound/sources/:id', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80))
+        return HttpResponse.json(baseSources[0])
+      }),
+    )
+
+    renderWithProviders(<InboundSourcesPage />)
+
+    expect(await screen.findByText('Main App')).toBeInTheDocument()
+    expect(await screen.findByText('刷新中')).toBeInTheDocument()
+    expect(await screen.findByText('src-1')).toBeInTheDocument()
+  })
+
+  it('clears a stale selected source when the registry is emptied externally', async () => {
+    server.use(
+      http.get('/fb/v1/console/inbound/sources', () =>
+        HttpResponse.json({
+          items: [baseSources[0]],
+        }),
+      ),
+      http.get('/fb/v1/console/inbound/sources/:id', () => HttpResponse.json(baseSources[0])),
+    )
+
+    const { queryClient } = renderWithProviders(<InboundSourcesPage />)
+
+    expect(await screen.findByText('src-1')).toBeInTheDocument()
+
+    act(() => {
+      queryClient.setQueryData(['console', 'inbound-sources'], [])
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('选择一个入站源')).toBeInTheDocument()
+    })
   })
 
   it('renders hero metrics, governance card, and a selectable source detail panel', async () => {
@@ -255,5 +306,122 @@ describe('InboundSourcesPage', () => {
       expect(deleteCalls).toBe(1)
       expect(screen.queryByText('Main App')).not.toBeInTheDocument()
     })
+  })
+
+  it('keeps dialogs open or returns control when source mutations fail', async () => {
+    let createCalls = 0
+    let rotateCalls = 0
+    let pauseCalls = 0
+    let resumeCalls = 0
+    let deleteCalls = 0
+
+    server.use(
+      http.get('/fb/v1/console/inbound/sources', () =>
+        HttpResponse.json({
+          items: baseSources.slice(0, 2),
+        }),
+      ),
+      http.get('/fb/v1/console/inbound/sources/:id', ({ params }) => {
+        const source = baseSources.find((item) => item.id === params.id)
+        if (!source) {
+          throw new Error(`missing source ${String(params.id)}`)
+        }
+        return HttpResponse.json(source)
+      }),
+      http.post('/fb/v1/console/inbound/sources', () => {
+        createCalls += 1
+        return HttpResponse.json({ message: 'create denied' }, { status: 500 })
+      }),
+      http.post('/fb/v1/console/inbound/sources/:id/rotate-secret', () => {
+        rotateCalls += 1
+        return HttpResponse.json(
+          {
+            code: 'ROTATION_IN_GRACE_WINDOW',
+            message: 'rotation still in grace window',
+          },
+          { status: 409 },
+        )
+      }),
+      http.post('/fb/v1/console/inbound/sources/:id/pause', () => {
+        pauseCalls += 1
+        return HttpResponse.json({ message: 'pause denied' }, { status: 500 })
+      }),
+      http.post('/fb/v1/console/inbound/sources/:id/resume', () => {
+        resumeCalls += 1
+        return HttpResponse.json({ message: 'resume denied' }, { status: 500 })
+      }),
+      http.delete('/fb/v1/console/inbound/sources/:id', () => {
+        deleteCalls += 1
+        return HttpResponse.json({ message: 'delete denied' }, { status: 500 })
+      }),
+    )
+
+    const { user } = renderWithProviders(<InboundSourcesPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Main App')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '+ 添加入站源' }))
+    await user.type(screen.getByLabelText('名称'), 'Broken Source')
+    await user.click(screen.getByRole('button', { name: '新建' }))
+    await waitFor(() => {
+      expect(createCalls).toBe(1)
+    })
+    expect(screen.getByRole('heading', { name: '添加入站源' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    await user.click(screen.getByTitle('轮换 secret'))
+    expect(await screen.findByText('轮换 webhook secret？')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByText('轮换 webhook secret？')).not.toBeInTheDocument()
+    })
+
+    await user.click(screen.getByTitle('轮换 secret'))
+    await user.click(screen.getByRole('button', { name: '轮换' }))
+    await waitFor(() => {
+      expect(rotateCalls).toBe(1)
+    })
+    expect(screen.getByText('轮换 webhook secret？')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/:id/rotate-secret', () => {
+        rotateCalls += 1
+        return HttpResponse.json({ message: 'rotate denied' }, { status: 500 })
+      }),
+    )
+    await user.click(screen.getByTitle('轮换 secret'))
+    await user.click(screen.getByRole('button', { name: '轮换' }))
+    await waitFor(() => {
+      expect(rotateCalls).toBe(2)
+    })
+    expect(screen.getByText('轮换 webhook secret？')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    await user.click(screen.getAllByTitle('暂停')[0])
+    await waitFor(() => {
+      expect(pauseCalls).toBe(1)
+    })
+
+    await user.click(screen.getAllByTitle('恢复')[0])
+    await waitFor(() => {
+      expect(resumeCalls).toBe(1)
+    })
+
+    await user.click(screen.getAllByTitle('删除')[0])
+    expect(await screen.findByText('删除这个入站源？')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByText('删除这个入站源？')).not.toBeInTheDocument()
+    })
+
+    await user.click(screen.getAllByTitle('删除')[0])
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+    await waitFor(() => {
+      expect(deleteCalls).toBe(1)
+    })
+    expect(screen.getByText('删除这个入站源？')).toBeInTheDocument()
   })
 })

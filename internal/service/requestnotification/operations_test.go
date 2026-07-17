@@ -11,6 +11,15 @@ import (
 	repo "github.com/Phixsura/attune/internal/repo/requestnotification"
 )
 
+func withRandomRead(t *testing.T, read func([]byte) (int, error)) {
+	t.Helper()
+	previous := randomRead
+	randomRead = read
+	t.Cleanup(func() {
+		randomRead = previous
+	})
+}
+
 func TestNormalizeNotificationChannelsDefaultsAndDeduplicates(t *testing.T) {
 	got := normalizeNotificationChannels([]string{
 		repo.ChannelWebhook,
@@ -83,6 +92,16 @@ func TestRequestNotificationHelpers(t *testing.T) {
 	}
 }
 
+func TestNewTokenReturnsRandomSourceError(t *testing.T) {
+	readErr := errors.New("entropy unavailable")
+	withRandomRead(t, func([]byte) (int, error) {
+		return 0, readErr
+	})
+	if _, err := newToken(); !errors.Is(err, readErr) {
+		t.Fatalf("newToken() error = %v, want random source error", err)
+	}
+}
+
 func TestEventMaskAndRetryDelay(t *testing.T) {
 	if !eventAllowed(nil, repo.EventTypeShipped) {
 		t.Fatalf("nil mask should allow events")
@@ -104,6 +123,9 @@ func TestEventMaskAndRetryDelay(t *testing.T) {
 	}
 	if statusAllowed(map[string]any{"shipped": "yes"}, "shipped") {
 		t.Fatalf("non-bool status policy value should deny status")
+	}
+	if statusAllowed(map[string]any{"planned": true}, "shipped") {
+		t.Fatalf("missing status policy value should deny status")
 	}
 	blocked := notificationPolicyBlockReason(repo.Settings{
 		EnabledEventTypes: map[string]any{repo.EventTypeShipped: false},

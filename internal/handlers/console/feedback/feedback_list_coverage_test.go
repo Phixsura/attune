@@ -120,12 +120,44 @@ func TestConsoleListOptsFromRequestMapsAllFields(t *testing.T) {
 func TestConsoleListOptsFromRequestRejectsInvalidTime(t *testing.T) {
 	t.Parallel()
 
-	req := &attunev1.ListFeedbackRequest{
-		CreatedFrom: ptrext.Of("not-a-time"),
+	tests := []struct {
+		name string
+		req  *attunev1.ListFeedbackRequest
+	}{
+		{
+			name: "created from",
+			req: &attunev1.ListFeedbackRequest{
+				CreatedFrom: ptrext.Of("not-a-time"),
+			},
+		},
+		{
+			name: "created to",
+			req: &attunev1.ListFeedbackRequest{
+				CreatedTo: ptrext.Of("not-a-time"),
+			},
+		},
+		{
+			name: "enriched from",
+			req: &attunev1.ListFeedbackRequest{
+				EnrichedFrom: ptrext.Of("not-a-time"),
+			},
+		},
+		{
+			name: "enriched to",
+			req: &attunev1.ListFeedbackRequest{
+				EnrichedTo: ptrext.Of("not-a-time"),
+			},
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	_, err := consoleListOptsFromRequest(req, nil)
-	require.Error(t, err)
+			_, err := consoleListOptsFromRequest(tt.req, nil)
+
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestOptionalListTimeAndParseListTime(t *testing.T) {

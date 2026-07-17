@@ -130,6 +130,7 @@ export function MCPClientsPage() {
   })
 
   const handleSaveGovernance = async () => {
+    /* v8 ignore next -- @preserve: governance controls are disabled until a client is selected. */
     if (!selectedClientId) return
     try {
       await updateClient.mutateAsync({
@@ -147,6 +148,7 @@ export function MCPClientsPage() {
   }
 
   const handleSaveToolPolicies = async () => {
+    /* v8 ignore next -- @preserve: tool policy controls are disabled until a client detail is selected. */
     if (!selectedClientId || !detail.data) return
 
     const policies = detail.data.tools
@@ -176,6 +178,7 @@ export function MCPClientsPage() {
   }
 
   const handleRevokeSession = async (sessionId: string) => {
+    /* v8 ignore next -- @preserve: session revoke buttons only render inside a selected client detail. */
     if (!selectedClientId) return
     try {
       await revokeSession.mutateAsync({ clientId: selectedClientId, sessionId })
@@ -186,6 +189,7 @@ export function MCPClientsPage() {
   }
 
   const handleRevokeGrant = async (grantId: string) => {
+    /* v8 ignore next -- @preserve: grant revoke buttons only render inside a selected client detail. */
     if (!selectedClientId) return
     try {
       await revokeGrant.mutateAsync({ clientId: selectedClientId, grantId })
@@ -1025,4 +1029,12 @@ function formatPolicyMode(
   return mode === 'allow_list'
     ? t('mcp_clients.governance.mode.allow_list')
     : t('mcp_clients.governance.mode.legacy_allow_all')
+}
+
+export const mcpClientsPageTestables = {
+  emptyDraft,
+  formatPolicyMode,
+  parseNullableInt,
+  truncateAgent,
+  truncateMiddle,
 }

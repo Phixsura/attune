@@ -4,7 +4,6 @@ package requestnotification
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -122,14 +121,11 @@ func (s *Service) UpsertSender(ctx context.Context, in SenderInput) (repo.Sender
 	if err := validateOutboundURL(in.ProviderURL); err != nil {
 		return repo.Sender{}, err
 	}
-	configRaw, err := json.Marshal(ProviderConfig{
-		URL:    strings.TrimSpace(in.ProviderURL),
-		Secret: strings.TrimSpace(in.ProviderSecret),
-	})
-	if err != nil {
-		return repo.Sender{}, err
+	configFields := map[string]string{"url": strings.TrimSpace(in.ProviderURL)}
+	if secret := strings.TrimSpace(in.ProviderSecret); secret != "" {
+		configFields["secret"] = secret
 	}
-	configPayload, err := s.encryptString(string(configRaw))
+	configPayload, err := s.encryptString(jsonStringObject(configFields))
 	if err != nil {
 		return repo.Sender{}, err
 	}

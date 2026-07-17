@@ -444,7 +444,7 @@ func (s *Service) emailDeliveryPayload(
 		"display":    recipient.DisplayName,
 		"email":      redactedEmail(toEmail),
 	}
-	sensitive, err := json.Marshal(map[string]string{
+	sensitive := jsonStringObject(map[string]string{
 		"provider_url":    config.URL,
 		"provider_secret": config.Secret,
 		"from_name":       sender.FromName,
@@ -452,10 +452,7 @@ func (s *Service) emailDeliveryPayload(
 		"reply_to":        replyTo,
 		"to_email":        toEmail,
 	})
-	if err != nil {
-		return nil, nil, err
-	}
-	encrypted, err := s.encryptString(string(sensitive))
+	encrypted, err := s.encryptString(sensitive)
 	if err != nil {
 		return nil, nil, err
 	}

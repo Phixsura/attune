@@ -107,6 +107,17 @@ func TestRegenerate_NotFound(t *testing.T) {
 	require.False(t, drafter.called)
 }
 
+func TestRegenerate_PrecheckError(t *testing.T) {
+	drafter := &fakeDrafter{pcErr: errors.New("precheck failed")}
+	h := &FeedbackHandler{drafter: drafter}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusInternalServerError, w.Code)
+	require.False(t, drafter.called)
+}
+
 func TestRegenerate_Disabled(t *testing.T) {
 	drafter := &fakeDrafter{pcFound: true, pcEnabled: false, pcStatus: "done"}
 	h := &FeedbackHandler{drafter: drafter}
@@ -127,6 +138,20 @@ func TestRegenerate_NotEnriched(t *testing.T) {
 
 	require.Equal(t, http.StatusConflict, w.Code)
 	require.False(t, drafter.called) // no draft for an un-enriched row
+}
+
+func TestRegenerate_SendPending(t *testing.T) {
+	drafter := okDrafter("should not be generated")
+	h := &FeedbackHandler{
+		drafter:       drafter,
+		replyWorkflow: &fakeReplyWorkflow{snap: testReplySnapshot("send_pending")},
+	}
+
+	w := httptest.NewRecorder()
+	regenerateHandler(h)(w, regenRequest())
+
+	require.Equal(t, http.StatusConflict, w.Code)
+	require.False(t, drafter.called)
 }
 
 func TestRegenerate_GenerateError(t *testing.T) {
@@ -204,4 +229,41 @@ func TestRegenerate_RateLimited(t *testing.T) {
 
 	require.Equal(t, http.StatusTooManyRequests, w.Code)
 	require.False(t, drafter.called) // rejected before any LLM call
+}
+
+func TestReplyDraftRegenerateResponseAttachesWorkflow(t *testing.T) {
+	t.Parallel()
+
+	h := &FeedbackHandler{replyWorkflow: &fakeReplyWorkflow{snap: testReplySnapshot("suggested")}}
+
+	result, err := h.replyDraftRegenerateResponse(
+		replyWorkflowTestCtx(),
+		"test",
+		dispatchtest.TenantID,
+		123,
+		"fresh draft",
+		time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC),
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.Status)
+	require.Equal(t, "fresh draft", result.Body.GetReplyDraft())
+	require.Equal(t, "suggested", result.Body.GetWorkflow().GetStatus())
+}
+
+func TestReplyDraftRegenerateResponseMapsWorkflowSnapshotError(t *testing.T) {
+	t.Parallel()
+
+	h := &FeedbackHandler{replyWorkflow: &fakeReplyWorkflow{err: errors.New("snapshot failed")}}
+
+	_, err := h.replyDraftRegenerateResponse(
+		replyWorkflowTestCtx(),
+		"test",
+		dispatchtest.TenantID,
+		123,
+		"fresh draft",
+		time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC),
+	)
+
+	requireDispatcherError(t, err, http.StatusBadGateway, attunev1.ErrorCode_BAD_GATEWAY)
 }

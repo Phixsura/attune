@@ -544,15 +544,16 @@ func (r *scanRows) RawValues() [][]byte { return nil }
 func (r *scanRows) Conn() *pgx.Conn { return nil }
 
 type eventTx struct {
-	rows    []pgx.Row
-	rowIdx  int
-	execIdx int
-	execErr error
+	rows      []pgx.Row
+	rowIdx    int
+	execIdx   int
+	execErr   error
+	commitErr error
 }
 
 func (tx *eventTx) Begin(context.Context) (pgx.Tx, error) { return tx, nil }
 
-func (tx *eventTx) Commit(context.Context) error { return nil }
+func (tx *eventTx) Commit(context.Context) error { return tx.commitErr }
 
 func (tx *eventTx) Rollback(context.Context) error { return nil }
 

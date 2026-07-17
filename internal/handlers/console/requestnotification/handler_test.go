@@ -43,6 +43,17 @@ func requestNotificationContext() *dispatcher.RequestContext[*session.AuthCtx] {
 	}
 }
 
+func requireHandlerError(t *testing.T, err error, status int, code attunev1.ErrorCode) {
+	t.Helper()
+	var got *dispatcher.Error
+	if !errors.As(err, &got) {
+		t.Fatalf("error = %v, want dispatcher error", err)
+	}
+	if got.Status != status || got.Code != code {
+		t.Fatalf("status/code = %d/%s, want %d/%s", got.Status, got.Code, status, code)
+	}
+}
+
 func TestBindListDeliveriesParsesFilters(t *testing.T) {
 	requestID := uuid.NewString()
 	r := httptest.NewRequest(http.MethodGet, "/fb/v1/console/request-notifications/deliveries?status=failed&status=dead&limit=25&before_id=99&request_id="+requestID+"&channel=email", nil)
@@ -59,6 +70,15 @@ func TestBindListDeliveriesParsesFilters(t *testing.T) {
 	}
 	if req.GetChannel() != attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_EMAIL {
 		t.Fatalf("channel = %s", req.GetChannel())
+	}
+
+	webhookReq := ptrext.Of(attunev1.ListRequestNotificationDeliveriesRequest{})
+	webhook := httptest.NewRequest(http.MethodGet, "/fb/v1/console/request-notifications/deliveries?channel=webhook", nil)
+	if err := BindListDeliveries(webhook, webhookReq); err != nil {
+		t.Fatalf("BindListDeliveries(webhook) error = %v", err)
+	}
+	if webhookReq.GetChannel() != attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_WEBHOOK {
+		t.Fatalf("webhook channel = %s", webhookReq.GetChannel())
 	}
 }
 
@@ -85,6 +105,7 @@ func TestPublishInputAndChannelMappings(t *testing.T) {
 		NotifySubscribers: true,
 	}, []attunev1.RequestNotificationChannel{
 		attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_EMAIL,
+		attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED,
 		attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_WEBHOOK,
 	})
 	if err != nil {
@@ -282,6 +303,9 @@ func TestAuditAndStructMapperBranches(t *testing.T) {
 	if got := structMap(nil); got != nil {
 		t.Fatalf("structMap(nil) = %+v", got)
 	}
+	if got := structMap(mapStruct(map[string]any{"ok": "yes"})); got["ok"] != "yes" {
+		t.Fatalf("structMap(non-nil) = %+v", got)
+	}
 	if got := mapStruct(map[string]any{"bad": func() {}}).AsMap(); len(got) != 0 {
 		t.Fatalf("mapStruct(invalid) = %+v", got)
 	}
@@ -310,34 +334,10 @@ func TestConsoleErrorMapsServiceErrors(t *testing.T) {
 	}
 }
 
-func TestHandlerSettingsSenderAndWebhookEndpoints(t *testing.T) {
+func TestHandlerSettingsEndpoints(t *testing.T) {
 	now := time.Date(2026, 7, 16, 6, 0, 0, 0, time.UTC)
-	senderID := uuid.New()
-	targetID := uuid.New()
 	fake := &fakeNotificationService{
 		settings: repo.Settings{TenantID: "tenant-1", EmailEnabled: true, CreatedAt: now, UpdatedAt: now},
-		sender: repo.Sender{
-			ID:               senderID,
-			TenantID:         "tenant-1",
-			FromName:         "Attune",
-			FromEmailPayload: []byte("notify@example.test"),
-			Provider:         "email",
-			Status:           "verified",
-			CreatedAt:        now,
-			UpdatedAt:        now,
-		},
-		target: repo.WebhookTarget{
-			ID:                       targetID,
-			TenantID:                 "tenant-1",
-			Name:                     "CRM",
-			URLPayload:               []byte("https://hooks.example.test/notify"),
-			URLHost:                  "hooks.example.test",
-			SignatureVersion:         "v1",
-			IncludeRecipientIdentity: true,
-			Status:                   "active",
-			CreatedAt:                now,
-			UpdatedAt:                now,
-		},
 	}
 	audit := &fakeAudit{}
 	h := NewHandler(fake)
@@ -351,18 +351,48 @@ func TestHandlerSettingsSenderAndWebhookEndpoints(t *testing.T) {
 
 	emailEnabled := false
 	limit := int32(42)
+	tenantLimit := int32(100)
+	contactLimit := int32(3)
 	settings, err := h.UpdateSettings(ctx, &attunev1.UpdateRequestNotificationSettingsRequest{
 		EmailEnabled:                ptrext.Of(emailEnabled),
 		MaxRecipientsWithoutConfirm: ptrext.Of(limit),
+		TenantHourlySendLimit:       ptrext.Of(tenantLimit),
+		ContactDailySendLimit:       ptrext.Of(contactLimit),
 	})
 	if err != nil || settings.Body.GetMaxRecipientsWithoutConfirm() != 0 {
 		t.Fatalf("UpdateSettings() = %+v err=%v", settings.Body, err)
 	}
 	settingsInput := fake.last.(svc.UpdateSettingsInput)
 	if settingsInput.TenantID != "tenant-1" || settingsInput.EmailEnabled == nil ||
-		ptrext.Indirect(settingsInput.EmailEnabled) || ptrext.Indirect(settingsInput.MaxRecipientsWithoutConfirm) != 42 {
+		ptrext.Indirect(settingsInput.EmailEnabled) || ptrext.Indirect(settingsInput.MaxRecipientsWithoutConfirm) != 42 ||
+		ptrext.Indirect(settingsInput.TenantHourlySendLimit) != 100 ||
+		ptrext.Indirect(settingsInput.ContactDailySendLimit) != 3 {
 		t.Fatalf("settings input = %+v", settingsInput)
 	}
+	if len(audit.events) == 0 {
+		t.Fatalf("expected audit events")
+	}
+}
+
+func TestHandlerSenderEndpoints(t *testing.T) {
+	now := time.Date(2026, 7, 16, 6, 0, 0, 0, time.UTC)
+	senderID := uuid.New()
+	fake := &fakeNotificationService{
+		sender: repo.Sender{
+			ID:               senderID,
+			TenantID:         "tenant-1",
+			FromName:         "Attune",
+			FromEmailPayload: []byte("notify@example.test"),
+			Provider:         "email",
+			Status:           "verified",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		},
+	}
+	audit := &fakeAudit{}
+	h := NewHandler(fake)
+	h.SetAuditLogger(audit)
+	ctx := requestNotificationContext()
 
 	gotSender, err := h.UpsertSender(ctx, &attunev1.UpsertRequestNotificationSenderRequest{
 		FromName:    "Attune",
@@ -574,6 +604,233 @@ func TestHandlerProviderEventEndpoint(t *testing.T) {
 	}
 }
 
+func TestHandlerServiceErrors(t *testing.T) {
+	ctx := requestNotificationContext()
+	id := uuid.NewString()
+	draft := &attunev1.RequestNotificationUpdateDraft{
+		RequestId: id,
+		Title:     "Update",
+		Body:      "Body",
+		Kind:      "status_change",
+	}
+	cases := []struct {
+		name string
+		call func(*Handler) error
+	}{
+		{
+			name: "get settings",
+			call: func(h *Handler) error {
+				_, err := h.GetSettings(ctx, &attunev1.GetRequestNotificationSettingsRequest{})
+				return err
+			},
+		},
+		{
+			name: "update settings",
+			call: func(h *Handler) error {
+				_, err := h.UpdateSettings(ctx, &attunev1.UpdateRequestNotificationSettingsRequest{})
+				return err
+			},
+		},
+		{
+			name: "upsert sender",
+			call: func(h *Handler) error {
+				_, err := h.UpsertSender(ctx, &attunev1.UpsertRequestNotificationSenderRequest{})
+				return err
+			},
+		},
+		{
+			name: "get sender",
+			call: func(h *Handler) error {
+				_, err := h.GetSender(ctx, &attunev1.GetRequestNotificationSenderRequest{})
+				return err
+			},
+		},
+		{
+			name: "verify sender",
+			call: func(h *Handler) error {
+				_, err := h.VerifySender(ctx, &attunev1.VerifyRequestNotificationSenderRequest{Id: id})
+				return err
+			},
+		},
+		{
+			name: "list targets",
+			call: func(h *Handler) error {
+				_, err := h.ListWebhookTargets(ctx, &attunev1.ListRequestNotificationWebhookTargetsRequest{})
+				return err
+			},
+		},
+		{
+			name: "create target",
+			call: func(h *Handler) error {
+				_, err := h.CreateWebhookTarget(ctx, &attunev1.CreateRequestNotificationWebhookTargetRequest{})
+				return err
+			},
+		},
+		{
+			name: "update target",
+			call: func(h *Handler) error {
+				_, err := h.UpdateWebhookTarget(ctx, &attunev1.UpdateRequestNotificationWebhookTargetRequest{Id: id})
+				return err
+			},
+		},
+		{
+			name: "delete target",
+			call: func(h *Handler) error {
+				_, err := h.DeleteWebhookTarget(ctx, &attunev1.DeleteRequestNotificationWebhookTargetRequest{Id: id})
+				return err
+			},
+		},
+		{
+			name: "test target",
+			call: func(h *Handler) error {
+				_, err := h.TestWebhookTarget(ctx, &attunev1.TestRequestNotificationWebhookTargetRequest{Id: id})
+				return err
+			},
+		},
+		{
+			name: "preview",
+			call: func(h *Handler) error {
+				_, err := h.Preview(ctx, &attunev1.PreviewRequestNotificationRequest{Update: draft})
+				return err
+			},
+		},
+		{
+			name: "publish",
+			call: func(h *Handler) error {
+				_, err := h.Publish(ctx, &attunev1.PublishRequestUpdateRequest{Update: draft})
+				return err
+			},
+		},
+		{
+			name: "list deliveries",
+			call: func(h *Handler) error {
+				_, err := h.ListDeliveries(ctx, &attunev1.ListRequestNotificationDeliveriesRequest{})
+				return err
+			},
+		},
+		{
+			name: "retry delivery",
+			call: func(h *Handler) error {
+				_, err := h.RetryDelivery(ctx, &attunev1.RetryRequestNotificationDeliveryRequest{Id: "42"})
+				return err
+			},
+		},
+		{
+			name: "list subscribers",
+			call: func(h *Handler) error {
+				_, err := h.ListSubscribers(ctx, &attunev1.ListRequestSubscribersRequest{RequestId: id})
+				return err
+			},
+		},
+		{
+			name: "suppress subscriber",
+			call: func(h *Handler) error {
+				_, err := h.SuppressSubscriber(ctx, &attunev1.SuppressRequestSubscriberRequest{ContactId: id})
+				return err
+			},
+		},
+		{
+			name: "record provider event",
+			call: func(h *Handler) error {
+				_, err := h.RecordProviderEvent(ctx, &attunev1.RecordRequestNotificationProviderEventRequest{})
+				return err
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewHandler(&fakeNotificationService{err: errors.New("service down")})
+
+			requireHandlerError(t, tt.call(h), http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+		})
+	}
+}
+
+func TestHandlerValidationErrors(t *testing.T) {
+	ctx := requestNotificationContext()
+	h := NewHandler(&fakeNotificationService{})
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "verify sender",
+			call: func() error {
+				_, err := h.VerifySender(ctx, &attunev1.VerifyRequestNotificationSenderRequest{Id: "bad"})
+				return err
+			},
+		},
+		{
+			name: "update target",
+			call: func() error {
+				_, err := h.UpdateWebhookTarget(ctx, &attunev1.UpdateRequestNotificationWebhookTargetRequest{Id: "bad"})
+				return err
+			},
+		},
+		{
+			name: "delete target",
+			call: func() error {
+				_, err := h.DeleteWebhookTarget(ctx, &attunev1.DeleteRequestNotificationWebhookTargetRequest{Id: "bad"})
+				return err
+			},
+		},
+		{
+			name: "test target",
+			call: func() error {
+				_, err := h.TestWebhookTarget(ctx, &attunev1.TestRequestNotificationWebhookTargetRequest{Id: "bad"})
+				return err
+			},
+		},
+		{
+			name: "preview",
+			call: func() error {
+				_, err := h.Preview(ctx, &attunev1.PreviewRequestNotificationRequest{})
+				return err
+			},
+		},
+		{
+			name: "publish",
+			call: func() error {
+				_, err := h.Publish(ctx, &attunev1.PublishRequestUpdateRequest{})
+				return err
+			},
+		},
+		{
+			name: "list deliveries",
+			call: func() error {
+				_, err := h.ListDeliveries(ctx, &attunev1.ListRequestNotificationDeliveriesRequest{RequestId: ptrext.Of("bad")})
+				return err
+			},
+		},
+		{
+			name: "retry delivery",
+			call: func() error {
+				_, err := h.RetryDelivery(ctx, &attunev1.RetryRequestNotificationDeliveryRequest{Id: "0"})
+				return err
+			},
+		},
+		{
+			name: "list subscribers",
+			call: func() error {
+				_, err := h.ListSubscribers(ctx, &attunev1.ListRequestSubscribersRequest{RequestId: "bad"})
+				return err
+			},
+		},
+		{
+			name: "suppress subscriber",
+			call: func() error {
+				_, err := h.SuppressSubscriber(ctx, &attunev1.SuppressRequestSubscriberRequest{ContactId: "bad"})
+				return err
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			requireHandlerError(t, tt.call(), http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+		})
+	}
+}
+
 type fakeNotificationService struct {
 	last       any
 	settings   repo.Settings
@@ -583,27 +840,43 @@ type fakeNotificationService struct {
 	event      repo.Event
 	delivery   repo.Delivery
 	subscriber repo.Subscriber
+	err        error
 }
 
 func (f *fakeNotificationService) GetSettings(context.Context, string) (repo.Settings, error) {
+	if f.err != nil {
+		return repo.Settings{}, f.err
+	}
 	return f.settings, nil
 }
 
 func (f *fakeNotificationService) UpdateSettings(_ context.Context, in svc.UpdateSettingsInput) (repo.Settings, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.Settings{}, f.err
+	}
 	return f.settings, nil
 }
 
 func (f *fakeNotificationService) UpsertSender(_ context.Context, in svc.SenderInput) (repo.Sender, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.Sender{}, f.err
+	}
 	return f.sender, nil
 }
 
 func (f *fakeNotificationService) GetSender(context.Context, string) (repo.Sender, error) {
+	if f.err != nil {
+		return repo.Sender{}, f.err
+	}
 	return f.sender, nil
 }
 
 func (f *fakeNotificationService) VerifySender(context.Context, string, uuid.UUID) (repo.Sender, error) {
+	if f.err != nil {
+		return repo.Sender{}, f.err
+	}
 	return f.sender, nil
 }
 
@@ -619,60 +892,96 @@ func (f *fakeNotificationService) WebhookTargetURL(target repo.WebhookTarget) st
 }
 
 func (f *fakeNotificationService) ListWebhookTargets(context.Context, string) ([]repo.WebhookTarget, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return []repo.WebhookTarget{f.target}, nil
 }
 
 func (f *fakeNotificationService) CreateWebhookTarget(_ context.Context, in svc.WebhookTargetInput) (repo.WebhookTarget, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.WebhookTarget{}, f.err
+	}
 	return f.target, nil
 }
 
 func (f *fakeNotificationService) UpdateWebhookTarget(_ context.Context, in svc.WebhookTargetInput) (repo.WebhookTarget, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.WebhookTarget{}, f.err
+	}
 	return f.target, nil
 }
 
 func (f *fakeNotificationService) DeleteWebhookTarget(context.Context, string, uuid.UUID) error {
+	if f.err != nil {
+		return f.err
+	}
 	return nil
 }
 
 func (f *fakeNotificationService) TestWebhookTarget(context.Context, string, uuid.UUID) (svc.WebhookTestResult, error) {
+	if f.err != nil {
+		return svc.WebhookTestResult{}, f.err
+	}
 	return svc.WebhookTestResult{OK: true, StatusCode: http.StatusAccepted, LatencyMs: 15, Message: "ok"}, nil
 }
 
 func (f *fakeNotificationService) Preview(_ context.Context, in svc.PublishInput) (svc.PreviewResult, error) {
 	f.last = in
+	if f.err != nil {
+		return svc.PreviewResult{}, f.err
+	}
 	return f.preview, nil
 }
 
 func (f *fakeNotificationService) Publish(_ context.Context, in svc.PublishInput) (repo.Event, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.Event{}, f.err
+	}
 	return f.event, nil
 }
 
 func (f *fakeNotificationService) ListDeliveries(_ context.Context, filter repo.ListDeliveryFilter) ([]repo.Delivery, error) {
 	f.last = filter
+	if f.err != nil {
+		return nil, f.err
+	}
 	return []repo.Delivery{f.delivery}, nil
 }
 
 func (f *fakeNotificationService) RetryDelivery(_ context.Context, tenantID string, id int64, actorID string) (repo.Delivery, error) {
 	f.last = []any{tenantID, id, actorID}
+	if f.err != nil {
+		return repo.Delivery{}, f.err
+	}
 	f.delivery.RetriedBy = actorID
 	return f.delivery, nil
 }
 
 func (f *fakeNotificationService) ListSubscribers(context.Context, string, uuid.UUID) ([]repo.Subscriber, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return []repo.Subscriber{f.subscriber}, nil
 }
 
 func (f *fakeNotificationService) SuppressSubscriber(_ context.Context, _ string, contactID uuid.UUID, reason string) (repo.Subscriber, error) {
 	f.last = []any{contactID, reason}
+	if f.err != nil {
+		return repo.Subscriber{}, f.err
+	}
 	f.subscriber.ConsentState = repo.ConsentSuppressed
 	return f.subscriber, nil
 }
 
 func (f *fakeNotificationService) RecordProviderSuppression(_ context.Context, in svc.ProviderSuppressionInput) (repo.Subscriber, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.Subscriber{}, f.err
+	}
 	f.subscriber.ConsentState = repo.ConsentSuppressed
 	return f.subscriber, nil
 }

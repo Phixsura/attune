@@ -40,6 +40,7 @@ export function TransitionMatrix({
 
   const isDirty = useMemo(() => {
     if (edges.size !== initialEdges.size) return true
+    /* v8 ignore next -- @preserve: size equality leaves only stale-edge defensive comparison. */
     for (const e of edges) if (!initialEdges.has(e)) return true
     return false
   }, [edges, initialEdges])

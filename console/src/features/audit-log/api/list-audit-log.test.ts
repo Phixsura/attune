@@ -1,8 +1,18 @@
 import { QueryClient } from '@tanstack/react-query'
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { auditLogInfiniteQuery, downloadAuditLogCsv } from '@/features/audit-log/api/list-audit-log'
 import { server } from '@/testing/mocks/server'
+
+vi.mock('@/lib/blob-download', () => ({
+  triggerBlobDownload: vi.fn(),
+}))
+
+import { triggerBlobDownload } from '@/lib/blob-download'
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
 
 describe('auditLogInfiniteQuery', () => {
   it('returns audit log items from response', async () => {
@@ -57,7 +67,7 @@ describe('auditLogInfiniteQuery', () => {
 
     await qc.fetchInfiniteQuery(
       auditLogInfiniteQuery({
-        actions: ['member.remove', 'member.invite'],
+        actions: ['member.remove', ' ', 'member.invite'],
         actorId: 'user-7',
         from: '2026-06-16T00:00:00Z',
         targetType: 'member',
@@ -96,5 +106,62 @@ describe('auditLogInfiniteQuery', () => {
     )
 
     await expect(downloadAuditLogCsv({ actorId: 'user-7' })).rejects.toThrow('forbidden')
+  })
+
+  it('downloads CSV exports with the server filename', async () => {
+    let query = ''
+    server.use(
+      http.get('/fb/v1/console/audit-log/export.csv', ({ request }) => {
+        query = new URL(request.url).search
+        return new HttpResponse('id,action\n1,login', {
+          status: 200,
+          headers: {
+            'Content-Disposition': 'attachment; filename="audit-log-admin.csv"',
+            'Content-Type': 'text/csv',
+          },
+        })
+      }),
+    )
+
+    await downloadAuditLogCsv({ actorId: 'user-7', actions: ['login'] })
+
+    expect(query).toContain('actorId=user-7')
+    expect(query).toContain('action=login')
+    expect(triggerBlobDownload).toHaveBeenCalledTimes(1)
+    const [blob, filename] = vi.mocked(triggerBlobDownload).mock.calls[0] ?? []
+    expect(blob).toMatchObject({ size: 17, type: 'text/csv' })
+    expect(filename).toBe('audit-log-admin.csv')
+  })
+
+  it('uses the default filename when the CSV response omits content disposition', async () => {
+    server.use(
+      http.get(
+        '/fb/v1/console/audit-log/export.csv',
+        () =>
+          new HttpResponse('id,action', { status: 200, headers: { 'Content-Type': 'text/csv' } }),
+      ),
+    )
+
+    await downloadAuditLogCsv({})
+
+    const [, filename] = vi.mocked(triggerBlobDownload).mock.calls[0] ?? []
+    expect(filename).toBe('audit-log.csv')
+  })
+
+  it('falls back to HTTP status for empty or non-JSON export errors', async () => {
+    server.use(
+      http.get(
+        '/fb/v1/console/audit-log/export.csv',
+        () => new HttpResponse(null, { status: 404 }),
+      ),
+    )
+    await expect(downloadAuditLogCsv({})).rejects.toThrow('HTTP 404')
+
+    server.use(
+      http.get('/fb/v1/console/audit-log/export.csv', () =>
+        HttpResponse.text('not-json', { status: 500 }),
+      ),
+    )
+    await expect(downloadAuditLogCsv({})).rejects.toThrow('HTTP 500')
   })
 })

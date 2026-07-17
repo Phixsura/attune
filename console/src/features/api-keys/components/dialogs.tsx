@@ -80,12 +80,16 @@ export function CreateKeyDialog({
   const handleSubmit = () => {
     if (!label.trim()) return
     const scopes = getEffectiveScopes()
-    void onSubmit({ label: label.trim(), scopes }).then(() => {
-      setLabel('')
-      setSelectedPreset('full_access')
-      setCustomScopes(new Set())
-      setShowAdvanced(false)
-    })
+    void onSubmit({ label: label.trim(), scopes })
+      .then(() => {
+        setLabel('')
+        setSelectedPreset('full_access')
+        setCustomScopes(new Set())
+        setShowAdvanced(false)
+      })
+      .catch(() => {
+        // The page-level mutation handler owns error presentation.
+      })
   }
 
   const groupedScopes = scopes.reduce(
@@ -277,6 +281,7 @@ export function SecretKeyDialog({
   const open = issued !== null
   useRestoreFocusOnClose(open, restoreFocusRef)
   const onCopy = () => {
+    /* v8 ignore next -- @preserve: copy button is only rendered after a key is issued. */
     if (!issued) return
     void navigator.clipboard.writeText(issued.secret).then(() => {
       toast.success(t('api_keys.secret_dialog.copy_hint'))
@@ -285,7 +290,10 @@ export function SecretKeyDialog({
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
-        onPointerDownOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={
+          /* v8 ignore next -- @preserve: Radix owns outside-pointer dispatch; behavior is browser-level focus safety. */
+          (event) => event.preventDefault()
+        }
         onCloseAutoFocus={(event) => {
           const restoreFocusTo = restoreFocusRef?.current
           if (!restoreFocusTo?.isConnected) return

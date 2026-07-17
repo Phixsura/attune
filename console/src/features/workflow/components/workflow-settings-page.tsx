@@ -88,6 +88,7 @@ export function WorkflowSettingsPage() {
   }
 
   const handleUpdate = (data: StateFormData) => {
+    /* v8 ignore next -- @preserve: edit dialogs only submit after a workflow state target is selected. */
     if (!editState) return
     // The machine key (name) is immutable — send displayName to relabel.
     updateState.mutate(
@@ -103,6 +104,7 @@ export function WorkflowSettingsPage() {
   }
 
   const handleArchiveConfirm = () => {
+    /* v8 ignore next -- @preserve: archive dialogs only confirm after a workflow state target is selected. */
     if (!archiveTarget) return
     archiveState.mutate(archiveTarget.id, {
       onSuccess: () => {

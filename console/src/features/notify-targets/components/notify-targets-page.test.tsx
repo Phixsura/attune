@@ -171,4 +171,64 @@ describe('NotifyTargetsPage', () => {
     await user.click(await screen.findByTestId('delete-notify-confirm'))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot delete target'))
   })
+
+  it('opens create from the empty state and keeps the dialog open when creation fails', async () => {
+    server.use(
+      http.get('/fb/v1/console/notify-targets', () => HttpResponse.json({ items: [] })),
+      http.post('/fb/v1/console/notify-targets', () =>
+        HttpResponse.json({ message: 'cannot create target' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<NotifyTargetsPage />)
+
+    expect(await screen.findByText('还没有通知目标')).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: '+ 添加目标' })[1])
+    await user.type(screen.getByTestId('create-notify-url'), 'https://example.com/fail')
+    await user.click(screen.getByTestId('create-notify-submit'))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot create target'))
+    expect(screen.getByTestId('create-notify-url')).toHaveValue('https://example.com/fail')
+  })
+
+  it('surfaces edit failures and allows edit and delete dialogs to be cancelled', async () => {
+    server.use(
+      http.get('/fb/v1/console/notify-targets', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 'nt-1',
+              destinationType: 'raw-webhook',
+              audience: 'all',
+              url: 'https://example.com/hook',
+              timeoutSeconds: 10,
+              disabled: false,
+              lastFailureAt: '',
+              lastError: '',
+            },
+          ],
+        }),
+      ),
+      http.patch('/fb/v1/console/notify-targets/nt-1', () =>
+        HttpResponse.json({ message: 'cannot edit target' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<NotifyTargetsPage />)
+
+    expect(await screen.findByText('https://example.com/hook')).toBeInTheDocument()
+    await user.click(screen.getByTitle('编辑'))
+    await user.clear(screen.getByTestId('edit-notify-url'))
+    await user.type(screen.getByTestId('edit-notify-url'), 'https://example.com/broken')
+    await user.click(screen.getByTestId('edit-notify-save'))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot edit target'))
+    await user.click(screen.getByTestId('edit-notify-cancel'))
+    await waitFor(() => expect(screen.queryByTestId('edit-notify-url')).not.toBeInTheDocument())
+
+    await user.click(screen.getByTitle('删除'))
+    expect(await screen.findByRole('dialog', { name: '删除这个通知目标？' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
 })

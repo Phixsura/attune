@@ -75,7 +75,9 @@ export function EditNotifyDialog({
       onClose()
       return
     }
-    void onSubmit(patch)
+    void onSubmit(patch).catch(() => {
+      // The page-level mutation owns the toast; keep the operator's edits.
+    })
   }
 
   return (

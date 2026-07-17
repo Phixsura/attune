@@ -67,6 +67,7 @@ export function TagCombobox({
   }
 
   const handleCreate = () => {
+    /* v8 ignore next -- @preserve: create option is hidden/disabled without a create handler and non-empty query. */
     if (!onCreate || !trimmed) return
     onCreate(query.trim())
     setQuery('')

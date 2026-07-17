@@ -1,3 +1,4 @@
+import { fireEvent } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import { CreateInboundSourceDialog } from '@/features/inbound-sources/components/create-dialog'
@@ -31,7 +32,7 @@ describe('CreateInboundSourceDialog', () => {
         }
         expect(body.emailConfig).toMatchObject({
           host: 'imap.example.com',
-          port: 993,
+          port: 1143,
           tls: false,
           username: 'feedback@example.com',
         })
@@ -47,6 +48,7 @@ describe('CreateInboundSourceDialog', () => {
     await user.type(screen.getByLabelText('名称'), 'Support mailbox')
     await user.type(screen.getByLabelText('IMAP 主机'), 'imap.example.com')
     await user.click(screen.getByLabelText(/使用 TLS/))
+    fireEvent.change(screen.getByLabelText('端口'), { target: { value: '1143' } })
     await user.type(screen.getByLabelText('用户名'), 'feedback@example.com')
     await user.type(screen.getByLabelText('密码或 App Password'), 'secret')
     await user.clear(screen.getByLabelText('文件夹'))
@@ -61,7 +63,7 @@ describe('CreateInboundSourceDialog', () => {
         name: 'Support mailbox',
         emailConfig: {
           host: 'imap.example.com',
-          port: 993,
+          port: 1143,
           tls: false,
           username: 'feedback@example.com',
           password: 'secret',
@@ -104,6 +106,29 @@ describe('CreateInboundSourceDialog', () => {
     expect(await screen.findByText('request body is not valid JSON')).toBeInTheDocument()
   })
 
+  it('ignores invalid submit attempts before all required channel fields are present', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    const form = screen.getByRole('button', { name: '新建' }).closest('form')
+    expect(form).toBeTruthy()
+    if (!form) return
+
+    fireEvent.submit(form)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    await user.type(screen.getByLabelText('名称'), 'Incomplete source')
+    await user.click(screen.getByRole('button', { name: /邮箱/ }))
+    fireEvent.submit(form)
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
+    fireEvent.submit(form)
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
   it('shows an empty Slack discovery note and keeps channel selection blank', async () => {
     server.use(
       http.post('/fb/v1/console/inbound/sources/slack/discover', () =>
@@ -121,6 +146,86 @@ describe('CreateInboundSourceDialog', () => {
 
     expect(await screen.findByText('没有发现可读频道，请检查 token 和 scope。')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: '频道' })).toBeDisabled()
+  })
+
+  it('surfaces Slack discovery and test failures', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/slack/discover', () =>
+        HttpResponse.json(
+          { code: 'BAD_REQUEST', message: 'slack token rejected' },
+          { status: 400 },
+        ),
+      ),
+      http.post('/fb/v1/console/inbound/sources/test-connection', () =>
+        HttpResponse.json(
+          { code: 'BAD_REQUEST', message: 'channel not readable' },
+          { status: 400 },
+        ),
+      ),
+    )
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        pending={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
+    await user.type(screen.getByLabelText('Slack Bot Token'), 'xoxb-bad-token')
+    await user.click(screen.getByRole('button', { name: '发现频道' }))
+    expect(await screen.findByText('slack token rejected')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+    expect(await screen.findByText('channel not readable')).toBeInTheDocument()
+  })
+
+  it('preserves a selected Slack channel when rediscovery still returns it', async () => {
+    let discoverCalls = 0
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/slack/discover', () => {
+        discoverCalls += 1
+        return HttpResponse.json({
+          channels: [
+            {
+              id: 'C123456',
+              name: 'feedback',
+              isPrivate: false,
+              isArchived: false,
+              isShared: false,
+            },
+            {
+              id: 'C999999',
+              name: 'ops',
+              isPrivate: true,
+              isArchived: false,
+              isShared: false,
+            },
+          ],
+        })
+      }),
+    )
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        pending={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
+    await user.type(screen.getByLabelText('Slack Bot Token'), 'xoxb-test-token')
+    await user.click(screen.getByRole('button', { name: '发现频道' }))
+    await screen.findByText('#feedback')
+    await user.click(screen.getByRole('combobox', { name: '频道' }))
+    await user.click(screen.getByRole('option', { name: '#ops · 私有' }))
+    expect(screen.getByRole('combobox', { name: '频道' })).toHaveTextContent('#ops')
+
+    await user.click(screen.getByRole('button', { name: '发现频道' }))
+    await waitFor(() => expect(discoverCalls).toBe(2))
+    expect(screen.getByRole('combobox', { name: '频道' })).toHaveTextContent('#ops')
   })
 
   it('discovers a Slack channel and submits the Slack create payload', async () => {
@@ -184,5 +289,28 @@ describe('CreateInboundSourceDialog', () => {
         channelId: 'C999999',
       },
     })
+  })
+
+  it('resets transient state when switching back to webhook and when the dialog closes', async () => {
+    const onOpenChange = vi.fn()
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog
+        open
+        onOpenChange={onOpenChange}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        pending={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /邮箱/ }))
+    expect(screen.getByLabelText('IMAP 主机')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Webhook/ }))
+    expect(screen.queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    onOpenChange.mockClear()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })

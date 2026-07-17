@@ -42,11 +42,15 @@ export function CreateMCPClientDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    await onSubmit({
-      name: name.trim(),
-      redirect_uris: parsedRedirectURIs,
-      scopes,
-    })
+    try {
+      await onSubmit({
+        name: name.trim(),
+        redirect_uris: parsedRedirectURIs,
+        scopes,
+      })
+    } catch {
+      return
+    }
     setName('')
     setRedirectUrisText('')
     setScopes(['mcp:read'])

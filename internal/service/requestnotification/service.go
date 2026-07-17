@@ -13,6 +13,8 @@ import (
 	"errors"
 	"net/mail"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +27,8 @@ import (
 	repo "github.com/Phixsura/attune/internal/repo/requestnotification"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
+
+var randomRead = rand.Read
 
 var (
 	ErrValidation = errors.New("request notification validation failed")
@@ -237,10 +241,30 @@ func tokenHash(token string) string {
 
 func newToken() (string, error) {
 	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
+	if _, err := randomRead(b[:]); err != nil {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b[:]), nil
+}
+
+func jsonStringObject(fields map[string]string) string {
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	b.WriteByte('{')
+	for idx, key := range keys {
+		if idx > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Quote(key))
+		b.WriteByte(':')
+		b.WriteString(strconv.Quote(fields[key]))
+	}
+	b.WriteByte('}')
+	return b.String()
 }
 
 func redactedEmail(email string) string {

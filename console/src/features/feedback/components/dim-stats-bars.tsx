@@ -57,6 +57,7 @@ export function DimStatsBars({
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           {visibleStats.map((ds) => {
             const dim = dims.find((d) => d.name === ds.dim)
+            /* v8 ignore next -- @preserve: stats are emitted for configured dimensions; stale data is ignored defensively. */
             if (!dim) return null
             if (dim.kind === 'multi') {
               return <MultiInsightTile key={ds.dim} dim={dim} stats={ds.top} />
@@ -111,6 +112,7 @@ function InsightTile({
   const displayOf = useDisplayName()
   const label = displayOf(dim.displayName) || dim.name
   const lead = stats[0]
+  /* v8 ignore next -- @preserve: insight tiles are only rendered for stats with at least one value. */
   if (!lead) return null
 
   const leadCount = Number(lead.count)

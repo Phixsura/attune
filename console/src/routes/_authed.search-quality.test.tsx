@@ -149,4 +149,111 @@ describe('_authed.analytics.search-quality route', () => {
     expect(screen.getByText('暂无 embedding')).toBeInTheDocument()
     expect(screen.getByText('rrf.pgfts.v1.k60')).toBeInTheDocument()
   })
+
+  it('reloads search quality when range, bucket, and limit controls change', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get('/fb/v1/console/feedback/search/quality', ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({
+          ...searchQualityFixture,
+          summary: {
+            ...searchQualityFixture.summary,
+            p95LatencyMs: '3600',
+          },
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<SearchQualityPage />)
+
+    await screen.findByText('login failures after SSO')
+
+    const choose = async (index: number, optionName: string) => {
+      await user.click(screen.getAllByRole('combobox')[index])
+      await user.click(await screen.findByRole('option', { name: optionName }))
+    }
+
+    await choose(1, '按小时')
+    await waitFor(() =>
+      expect(urls.some((url) => new URL(url).searchParams.get('bucket_width') === 'hour')).toBe(
+        true,
+      ),
+    )
+
+    await choose(0, '90 天')
+    await waitFor(() => {
+      const latest = new URL(urls.at(-1) ?? '')
+      expect(latest.searchParams.get('bucket_width')).toBe('day')
+    })
+
+    await choose(2, 'Top 50')
+    await waitFor(() =>
+      expect(urls.some((url) => new URL(url).searchParams.get('limit') === '50')).toBe(true),
+    )
+  })
+
+  it('renders empty datasets, defaults, and active latency tone', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/search/quality', () =>
+        HttpResponse.json({
+          ...searchQualityFixture,
+          summary: {
+            queryCount: '0',
+            zeroResultCount: '0',
+            zeroResultRate: 0.2,
+            fallbackCount: '1',
+            fallbackRate: 0.1,
+            clickCount: '0',
+            clickThroughRate: undefined,
+            averageResultCount: undefined,
+            p95LatencyMs: '1200',
+            worstSeverity: '',
+          },
+          series: [],
+          queries: [
+            {
+              queryHash: 'c'.repeat(64),
+              queryPreview: '',
+              queryCount: '1',
+              zeroResultCount: '0',
+              zeroResultRate: 0,
+              fallbackCount: '0',
+              clickCount: '0',
+              clickThroughRate: 0,
+              averageResultCount: 0,
+              p95LatencyMs: '0',
+              lastSeenAt: '2026-07-01T14:00:00Z',
+            },
+          ],
+          zeroResultQueries: [],
+          fallbackBreakdown: [{ reason: '', count: '1', share: 0 }],
+          indexHealth: {
+            totalLiveFeedback: 0,
+            totalWithEmbeddings: 0,
+            coverageRatio: 0,
+            embeddingModel: '',
+            missingFeedbackCount: '0',
+          },
+          rankingVersions: [
+            {
+              rankingVersion: 'draft-ranker',
+              status: '',
+              trafficPercent: 5,
+              notes: '',
+              updatedAt: '',
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<SearchQualityPage />)
+
+    expect(await screen.findByText('暂无趋势数据')).toBeInTheDocument()
+    expect(screen.getByText('未知原因')).toBeInTheDocument()
+    expect(screen.getByText('暂无模型')).toBeInTheDocument()
+    expect(screen.getByText('draft-ranker')).toBeInTheDocument()
+    expect(screen.getByText(/^hash cccccccc$/)).toBeInTheDocument()
+  })
 })

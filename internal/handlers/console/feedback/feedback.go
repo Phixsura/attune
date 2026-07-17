@@ -149,20 +149,20 @@ func nullableString(s string) *string {
 // for proto wire output. Empty / missing returns an empty Struct so
 // the SPA can rely on the field always being present.
 func attrsToStruct(raw []byte) *structpb.Struct {
+	return jsonObjectStruct(raw)
+}
+
+func jsonObjectStruct(raw []byte) *structpb.Struct {
+	m := map[string]any{}
 	if len(raw) == 0 {
-		s, _ := structpb.NewStruct(map[string]any{})
+		s, _ := structpb.NewStruct(m)
 		return s
 	}
-	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
-		s, _ := structpb.NewStruct(map[string]any{})
-		return s
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err == nil && decoded != nil {
+		m = decoded
 	}
-	s, err := structpb.NewStruct(m)
-	if err != nil {
-		s2, _ := structpb.NewStruct(map[string]any{})
-		return s2
-	}
+	s, _ := structpb.NewStruct(m)
 	return s
 }
 

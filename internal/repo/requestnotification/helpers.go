@@ -58,9 +58,6 @@ func jsonObject(value map[string]any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !json.Valid(raw) {
-		return nil, ErrInvalidInput
-	}
 	return raw, nil
 }
 

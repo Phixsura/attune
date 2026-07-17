@@ -277,6 +277,44 @@ describe('feedbackPageTestables', () => {
     expect(feedbackPageTestables.shouldSurfaceRuntimeLink('all', 3, 1, 0, 0)).toBe(true)
   })
 
+  it('builds queue metric variants for urgent and multi-source queues', () => {
+    const urgentMetrics = feedbackPageTestables.buildQueueMetricItems({
+      queueMode: 'urgent',
+      visibleCount: 2,
+      urgentCount: 1,
+      readyCount: 0,
+      failedCount: 1,
+      pendingAiCount: 0,
+      sourceCount: 1,
+      oldestVisibleAt: null,
+      t,
+    })
+    expect(urgentMetrics.map((metric) => [metric.label, metric.value, metric.tone])).toEqual([
+      ['feedback.queue.posture', 'feedback.queue.posture_urgent', 'danger'],
+      ['feedback.queue.ai_health', 'feedback.queue.ai_health_mixed', 'danger'],
+      ['feedback.queue.visible', '2', undefined],
+      ['feedback.queue.failed', '1', 'danger'],
+      ['feedback.queue.oldest', '—', undefined],
+    ])
+
+    const sourceMetrics = feedbackPageTestables.buildQueueMetricItems({
+      queueMode: 'all',
+      visibleCount: 3,
+      urgentCount: 0,
+      readyCount: 1,
+      failedCount: 0,
+      pendingAiCount: 1,
+      sourceCount: 2,
+      oldestVisibleAt: '2026-06-16T10:00:00Z',
+      t,
+    })
+    expect(sourceMetrics.at(-1)).toMatchObject({
+      hint: 'feedback.queue.sources_hint',
+      label: 'feedback.queue.sources',
+      value: '2',
+    })
+  })
+
   it('covers sorting, semantic filters, and ready-state helpers', () => {
     const items = [defaultFeedback, activeFeedback, urgentFeedback]
     expect(feedbackPageTestables.sortFeedbackItems(items, 'newest').map((item) => item.id)).toEqual(

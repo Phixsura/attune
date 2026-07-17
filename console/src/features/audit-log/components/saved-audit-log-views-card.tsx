@@ -163,6 +163,7 @@ function describeSavedViewState(view: SavedAuditLogView, t: TFunction) {
   if (state.actorId) {
     pieces.push(t('audit_log.saved_views_summary_actor_id', { value: state.actorId }))
   } else if (state.actorType) {
+    /* v8 ignore next -- @preserve: actorType is a legacy saved-view field retained for old URLs. */
     pieces.push(t('audit_log.saved_views_summary_actor_type', { value: state.actorType }))
   }
   if (state.targetType) {

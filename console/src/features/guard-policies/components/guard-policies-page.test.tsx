@@ -9,7 +9,7 @@ import {
 } from '@/features/guard-policies/components/guard-policies-page'
 import { defaultMe } from '@/testing/mocks/handlers'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -413,6 +413,8 @@ describe('GuardPoliciesPage user flows', () => {
 
     await user.click(screen.getByRole('button', { name: '新建策略' }))
     const createDialog = screen.getByRole('dialog', { name: '新建防护策略' })
+    fireEvent.submit(within(createDialog).getByLabelText('名称').closest('form') as HTMLFormElement)
+    expect(createBody).toBeUndefined()
     await user.type(within(createDialog).getByLabelText('名称'), 'email default')
     await user.click(within(createDialog).getByRole('button', { name: '新建' }))
     await waitFor(() => {

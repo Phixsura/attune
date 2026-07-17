@@ -66,6 +66,17 @@ describe('SecretRevealDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
+  it('closes when dismissed with Escape', async () => {
+    const onClose = vi.fn()
+    const { user } = renderWithProviders(
+      <SecretRevealDialog open onClose={onClose} secretHex="def456" />,
+    )
+
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('does not mount content while closed', () => {
     renderWithProviders(<SecretRevealDialog open={false} onClose={vi.fn()} secretHex="def456" />)
 

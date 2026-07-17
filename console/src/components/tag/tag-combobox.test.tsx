@@ -151,10 +151,31 @@ describe('TagCombobox', () => {
     await user.keyboard('{Home}')
     expect(input).toHaveAttribute('aria-activedescendant', expect.stringContaining('t1'))
 
+    await user.keyboard('{End}')
+    expect(input).toHaveAttribute('aria-activedescendant', expect.stringContaining('t3'))
+
     await user.keyboard('{Escape}')
     await waitFor(() => {
       expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
     })
+  })
+
+  it('keeps keyboard navigation inert when there are no selectable options', async () => {
+    const onSelect = vi.fn()
+    const { user } = renderWithProviders(<TagCombobox availableTags={tags} onSelect={onSelect} />)
+
+    await user.click(screen.getByRole('button'))
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument()
+    })
+    const input = screen.getByRole('combobox')
+    await user.type(input, 'missing')
+    expect(screen.getByText('无匹配标签')).toBeInTheDocument()
+
+    await user.keyboard('{ArrowDown}{ArrowUp}{Home}{End}{Enter}')
+
+    expect(input).not.toHaveAttribute('aria-activedescendant')
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it('selects active option on Enter', async () => {

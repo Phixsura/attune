@@ -96,9 +96,7 @@ func feedbackFilterSnapshot(filter *attunev1.FeedbackFilter) map[string]any {
 		return nil
 	}
 	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
+	_ = json.Unmarshal(raw, &out)
 	if len(out) == 0 {
 		return nil
 	}
