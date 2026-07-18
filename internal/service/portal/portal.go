@@ -88,6 +88,7 @@ type SubmissionConfig struct {
 	TenantSlug            string
 	TenantName            string
 	PortalAccessMode      publicvisibilityrepo.AccessMode
+	ChangelogEnabled      bool
 	SubmissionWriteMode   publicvisibilityrepo.WriteMode
 	SubmitterIdentityMode publicvisibilityrepo.IdentityMode
 	Form                  publicvisibilityrepo.PortalSubmissionForm
@@ -177,6 +178,7 @@ func (s *Service) GetSubmissionConfig(ctx context.Context, tenantSlug string) (S
 		TenantSlug:            tenantSlug,
 		TenantName:            name,
 		PortalAccessMode:      policy.PortalAccessMode,
+		ChangelogEnabled:      policy.ChangelogEnabled,
 		SubmissionWriteMode:   policy.SubmissionWriteMode,
 		SubmitterIdentityMode: policy.SubmitterIdentityMode,
 		Form:                  form,

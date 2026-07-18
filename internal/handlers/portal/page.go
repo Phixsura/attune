@@ -35,6 +35,7 @@ var portalPageTemplate = template.Must(template.New("portal-page").Parse(`<!doct
       --border: rgba(19, 21, 26, 0.1);
       --accent: #1f6feb;
       --accent-strong: #174fbd;
+      --accent-2: #0f766e;
       --success: #166534;
       --danger: #b42318;
       --shadow: 0 28px 90px -62px rgba(19, 21, 26, 0.45);
@@ -297,6 +298,7 @@ var portalPageTemplate = template.Must(template.New("portal-page").Parse(`<!doct
         {{if .CanSubmit}}<span class="pill">Submissions open</span>{{else}}<span class="pill">Submissions closed</span>{{end}}
         <a class="link" href="{{.BoardURL}}">Browse requests</a>
         <a class="link" href="{{.RoadmapURL}}">Roadmap</a>
+        {{if .ChangelogURL}}<a class="link" href="{{.ChangelogURL}}">Changelog</a>{{end}}
       </div>
     </section>
 
@@ -520,6 +522,7 @@ type portalPageData struct {
 	SubmitURL                string
 	BoardURL                 string
 	RoadmapURL               string
+	ChangelogURL             string
 	Kinds                    []portalPageKindOption
 	Fields                   []portalPageField
 }
@@ -610,8 +613,14 @@ func portalPageDataFromConfig(cfg portalsvc.SubmissionConfig) portalPageData {
 		SubmitURL:                "/v1/portal/" + url.PathEscape(cfg.TenantSlug) + "/submissions",
 		BoardURL:                 "/portal/" + url.PathEscape(cfg.TenantSlug) + "/requests",
 		RoadmapURL:               "/portal/" + url.PathEscape(cfg.TenantSlug) + "/roadmap",
-		Kinds:                    kinds,
-		Fields:                   fields,
+		ChangelogURL: func() string {
+			if cfg.ChangelogEnabled {
+				return "/portal/" + url.PathEscape(cfg.TenantSlug) + "/changelog"
+			}
+			return ""
+		}(),
+		Kinds:  kinds,
+		Fields: fields,
 	}
 }
 

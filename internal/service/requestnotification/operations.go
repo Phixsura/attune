@@ -33,6 +33,10 @@ func (s *Service) Preview(ctx context.Context, in PublishInput) (PreviewResult, 
 		return PreviewResult{}, mapRepoError(err)
 	}
 	kind, eventType := publishEventKindAndType(in.Kind, request.Status)
+	title, body, err := s.resolvePublishDraft(ctx, in.TenantID, request, kind, in.Title, in.Body)
+	if err != nil {
+		return PreviewResult{}, err
+	}
 	recipients, err := s.repo.EligibleRequestRecipients(ctx, in.TenantID, in.RequestID)
 	if err != nil {
 		return PreviewResult{}, mapRepoError(err)
@@ -47,11 +51,11 @@ func (s *Service) Preview(ctx context.Context, in PublishInput) (PreviewResult, 
 	}
 	var emailPayload map[string]any
 	if channelRequested(channels, repo.ChannelEmail) {
-		emailPayload = requestPayload(request, in.Title, in.Body, kind)
+		emailPayload = requestPayload(request, title, body, kind)
 	}
 	var webhookPayload map[string]any
 	if channelRequested(channels, repo.ChannelWebhook) {
-		webhookPayload = requestPayload(request, in.Title, in.Body, kind)
+		webhookPayload = requestPayload(request, title, body, kind)
 	}
 	return PreviewResult{
 		EligibleRecipients: eligible,
@@ -101,18 +105,19 @@ func (s *Service) Publish(ctx context.Context, in PublishInput) (repo.Event, err
 		return repo.Event{}, ErrValidation
 	}
 	channels := normalizeNotificationChannels(in.Channels)
-	if strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Body) == "" {
-		return repo.Event{}, ErrValidation
-	}
 	request, err := s.repo.GetRequestSummary(ctx, in.TenantID, in.RequestID)
 	if err != nil {
 		return repo.Event{}, mapRepoError(err)
+	}
+	kind, eventType := publishEventKindAndType(in.Kind, request.Status)
+	title, body, err := s.resolvePublishDraft(ctx, in.TenantID, request, kind, in.Title, in.Body)
+	if err != nil {
+		return repo.Event{}, err
 	}
 	settings, err := s.repo.GetSettings(ctx, in.TenantID)
 	if err != nil {
 		return repo.Event{}, mapRepoError(err)
 	}
-	kind, eventType := publishEventKindAndType(in.Kind, request.Status)
 	if reason := notificationPolicyBlockReason(settings, eventType, request.Status); reason != "" {
 		return repo.Event{}, ErrDisabled
 	}
@@ -127,8 +132,8 @@ func (s *Service) Publish(ctx context.Context, in PublishInput) (repo.Event, err
 	event, err := s.repo.CreatePublicUpdateEventTx(ctx, tx, repo.PublicUpdateInput{
 		TenantID:  in.TenantID,
 		RequestID: in.RequestID,
-		Title:     strings.TrimSpace(in.Title),
-		Body:      strings.TrimSpace(in.Body),
+		Title:     title,
+		Body:      body,
 		Kind:      kind,
 		NewStatus: request.Status,
 		EventType: eventType,
@@ -329,6 +334,9 @@ func publishEventKindAndType(kind string, requestStatus string) (string, string)
 	out := strings.TrimSpace(kind)
 	if out == "" {
 		out = "status_change"
+	}
+	if out == "changelog_post" {
+		return out, repo.EventTypeChangelog
 	}
 	if out == "shipped" || strings.TrimSpace(requestStatus) == "shipped" {
 		return "shipped", repo.EventTypeShipped

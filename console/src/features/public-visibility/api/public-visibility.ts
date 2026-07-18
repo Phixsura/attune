@@ -25,6 +25,11 @@ import {
   type UpsertPublicRequestProfileRequest,
 } from '@/proto/attune/v1/public_visibility'
 
+export {
+  publicVisibilityPolicyQuery,
+  publicVisibilityPolicyQueryKey,
+} from '@/lib/public-visibility-policy'
+
 const base = '/fb/v1/console/public-visibility'
 const portalBase = '/fb/v1/portal'
 
@@ -66,13 +71,6 @@ export const publicVisibilityQueryKeys = {
   publicRequestDetail: (tenantSlug: string, publicSlug: string) =>
     [...publicVisibilityQueryKeys.root, 'public-request-detail', tenantSlug, publicSlug] as const,
 }
-
-export const publicVisibilityPolicyQuery = () =>
-  queryOptions({
-    queryKey: publicVisibilityQueryKeys.policy(),
-    queryFn: ({ signal }) => api<PublicVisibilityPolicy>(`${base}/policy`, { signal }),
-    staleTime: 20_000,
-  })
 
 export const moderationSubjectsQuery = (filters: ModerationSubjectsFilters = {}) =>
   queryOptions({

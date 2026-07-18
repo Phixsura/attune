@@ -301,6 +301,11 @@ beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
   vi.mocked(toast.success).mockClear()
   vi.mocked(toast.error).mockClear()
+  server.use(
+    http.get('/fb/v1/console/public-visibility/policy', () =>
+      HttpResponse.json({ changelogEnabled: true }),
+    ),
+  )
 })
 
 describe('request notification page helpers', () => {
@@ -530,6 +535,125 @@ describe('RequestNotificationsPage', () => {
     await user.click(screen.getByTestId(`rn-target-test-${targetFixture.id}`))
     await user.click(screen.getByTestId(`rn-target-delete-${targetFixture.id}`))
     await waitFor(() => expect(captures.deletedTarget).toBe(targetFixture.id))
+  })
+
+  it('links to the live changelog and auto-fills generated changelog drafts', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    server.use(
+      http.get('/fb/v1/console/me', () =>
+        HttpResponse.json({
+          tenant: {
+            id: 'tenant-1',
+            name: 'Acme Co',
+            slug: 'acme',
+            locale: 'zh-CN',
+            timezone: 'Asia/Singapore',
+          },
+          user: {
+            openId: 'user-1',
+            name: 'Ops',
+            role: 'admin',
+          },
+          csrfToken: 'csrf-test-token',
+        }),
+      ),
+      http.post('/fb/v1/console/request-notifications/preview', async ({ request }) => {
+        captures.preview = await request.json()
+        return HttpResponse.json({
+          eligibleRecipients: 4,
+          excludedRecipients: 0,
+          excludedByReason: {},
+          emailPayload: {
+            update: {
+              title: 'Release notes: CSV export',
+              body: 'We shipped CSV export.\n\nCustomers can export their data from the requests page.',
+              kind: 'changelog_post',
+            },
+          },
+          webhookPayload: {
+            update: {
+              title: 'Release notes: CSV export',
+              body: 'We shipped CSV export.\n\nCustomers can export their data from the requests page.',
+              kind: 'changelog_post',
+            },
+          },
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: seededClient(),
+    })
+
+    expect(await screen.findByRole('link', { name: '查看公开更新日志' })).toHaveAttribute(
+      'href',
+      '/portal/acme/changelog',
+    )
+    expect(screen.getByRole('link', { name: 'RSS' })).toHaveAttribute(
+      'href',
+      '/portal/acme/changelog/feed?format=rss',
+    )
+    expect(screen.getByRole('link', { name: 'JSON' })).toHaveAttribute(
+      'href',
+      '/portal/acme/changelog/feed?format=json',
+    )
+
+    await user.type(
+      screen.getByTestId('rn-draft-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.click(screen.getAllByRole('combobox')[1])
+    await user.click(await screen.findByRole('option', { name: '更新日志' }))
+    expect(screen.getByTestId('rn-draft-title')).not.toHaveAttribute('required')
+    expect(screen.getByTestId('rn-draft-body')).not.toHaveAttribute('required')
+    await user.click(screen.getByTestId('rn-preview'))
+
+    await waitFor(() =>
+      expect(captures.preview).toMatchObject({
+        update: {
+          kind: 'changelog_post',
+          title: '',
+          body: '',
+        },
+      }),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId('rn-draft-title')).toHaveValue('Release notes: CSV export'),
+    )
+    expect(screen.getByTestId('rn-draft-body')).toHaveValue(
+      'We shipped CSV export.\n\nCustomers can export their data from the requests page.',
+    )
+  })
+
+  it('hides changelog links when the public changelog is disabled', async () => {
+    const captures: Record<string, unknown> = {}
+    installRequestHandlers(captures)
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () =>
+        HttpResponse.json({ changelogEnabled: false }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<RequestNotificationsPage />, {
+      queryClient: seededClient(),
+    })
+
+    expect(await screen.findByText('CRM')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看公开更新日志' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'RSS' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'JSON' })).not.toBeInTheDocument()
+
+    await user.type(
+      screen.getByTestId('rn-draft-request-id'),
+      '55555555-5555-5555-5555-555555555555',
+    )
+    await user.click(screen.getAllByRole('combobox')[1])
+
+    await waitFor(() => expect(screen.getByTestId('rn-draft-title')).toHaveAttribute('required'))
+    await waitFor(() =>
+      expect(screen.queryByRole('option', { name: '更新日志' })).not.toBeInTheDocument(),
+    )
   })
 
   it('renders sender and subscriber fallback values', async () => {

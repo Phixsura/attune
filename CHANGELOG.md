@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Request notification Console now hides public changelog links until the
+  tenant enables changelog publishing, and hides the changelog publish kind
+  until it can actually be used.
+
 - Request notification previews now wrap long JSON fields inside the card,
   preventing horizontal overflow in deployed Console pages on narrow viewports.
 
@@ -66,6 +70,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   repo query instead of being dropped after binding.
 
 ### Added
+
+- **Jira bidirectional issue sync.**
+  Added the Jira `issue` provider, webhook receiver, and connection flow so
+  Attune can pull, push, and dedupe Jira issues with signed deliveries.
+
+- **Public changelog and release notes.**
+  Added a tenant-scoped public changelog page and RSS/JSON feeds for shipped
+  request updates, plus Console support for drafting and publishing
+  `changelog_post` entries from shipped requests and linking back to the live
+  changelog from the portal.
 
 - **Close-the-loop request notifications.**
   Added tenant-scoped request notification settings, sender configuration,

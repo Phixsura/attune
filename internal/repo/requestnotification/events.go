@@ -115,7 +115,11 @@ func (r *Repo) CreatePublicUpdateEventTx(ctx context.Context, tx pgx.Tx, in Publ
 		in.Kind = "status_change"
 	}
 	if in.EventType == "" {
-		in.EventType = EventTypeStatusChanged
+		if in.Kind == "changelog_post" {
+			in.EventType = EventTypeChangelog
+		} else {
+			in.EventType = EventTypeStatusChanged
+		}
 	}
 	threadID, err := insertPublicUpdateThread(ctx, tx, in)
 	if err != nil {
@@ -202,13 +206,17 @@ func (r *Repo) MarkEventFailed(ctx context.Context, id uuid.UUID, owner string, 
 
 func insertPublicUpdateThread(ctx context.Context, tx pgx.Tx, in PublicUpdateInput) (uuid.UUID, error) {
 	var id uuid.UUID
+	surface := "request_update"
+	if strings.TrimSpace(in.Kind) == "changelog_post" {
+		surface = "changelog_post"
+	}
 	err := tx.QueryRow(ctx, `
 		INSERT INTO public_update_threads (
 			tenant_id, surface, state, created_by
 		) VALUES (
-			$1, 'request_update', 'published', $2
+			$1, $3, 'published', $2
 		)
-		RETURNING id`, in.TenantID, actorID(in.ActorID)).Scan(&id)
+		RETURNING id`, in.TenantID, actorID(in.ActorID), surface).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert public update thread: %w", err)
 	}

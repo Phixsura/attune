@@ -55,9 +55,12 @@ import {
   useUpsertRequestNotificationSender,
   useVerifyRequestNotificationSender,
 } from '@/features/request-notifications/api/request-notifications'
+import { meQuery } from '@/features/session/api/get-me'
 import { useDocumentTitle } from '@/hooks/use-document-title'
+import { publicVisibilityPolicyQuery } from '@/lib/public-visibility-policy'
 import { cn } from '@/lib/utils'
 import {
+  type PreviewRequestNotificationResponse,
   RequestNotificationChannel,
   type RequestNotificationDelivery,
   type RequestNotificationSender,
@@ -146,6 +149,8 @@ export function RequestNotificationsPage() {
   const { i18n, t } = useTranslation()
   useDocumentTitle(t('nav.request_notifications'))
 
+  const me = useQuery(meQuery())
+  const publicVisibility = useQuery(publicVisibilityPolicyQuery())
   const settingsQuery = useQuery(requestNotificationSettingsQuery())
   const senderQuery = useQuery(requestNotificationSenderQuery())
   const targetsQuery = useQuery(requestNotificationWebhookTargetsQuery())
@@ -156,6 +161,12 @@ export function RequestNotificationsPage() {
   const targets = targetsQuery.data ?? []
   const deliveries = deliveriesQuery.data ?? []
   const locale = i18n.resolvedLanguage || i18n.language || undefined
+  const tenantSlug = me.data?.tenant?.slug?.trim() ?? ''
+  const changelogEnabled = publicVisibility.data?.changelogEnabled === true
+  const changelogURL =
+    tenantSlug && changelogEnabled ? `/portal/${encodeURIComponent(tenantSlug)}/changelog` : ''
+  const changelogRSSURL = changelogURL ? `${changelogURL}/feed?format=rss` : ''
+  const changelogJSONURL = changelogURL ? `${changelogURL}/feed?format=json` : ''
 
   const updateSettings = useUpdateRequestNotificationSettings()
   const upsertSender = useUpsertRequestNotificationSender()
@@ -213,6 +224,11 @@ export function RequestNotificationsPage() {
   const [subscribers, setSubscribers] = useState<RequestSubscriber[]>([])
   const [suppressingContactId, setSuppressingContactId] = useState('')
 
+  const isChangelogDraft = draft.kind === 'changelog_post'
+  const changelogDraftHelp = isChangelogDraft
+    ? t('request_notifications.publish.changelog_help')
+    : undefined
+
   useEffect(() => {
     if (!settings) return
     setEmailEnabled(settings.emailEnabled)
@@ -235,6 +251,13 @@ export function RequestNotificationsPage() {
     }))
   }, [sender])
 
+  useEffect(() => {
+    if (changelogEnabled || draft.kind !== 'changelog_post') return
+    setDraft((current) =>
+      current.kind === 'changelog_post' ? { ...current, kind: 'status_change' } : current,
+    )
+  }, [changelogEnabled, draft.kind])
+
   const failedDeliveries = deliveries.filter((delivery) =>
     ['failed', 'dead'].includes(delivery.status),
   )
@@ -243,7 +266,9 @@ export function RequestNotificationsPage() {
     () => channelList(draft.email, draft.webhook),
     [draft.email, draft.webhook],
   )
-  const canDraft = Boolean(draft.requestId.trim() && draft.title.trim() && draft.body.trim())
+  const canDraft = Boolean(
+    draft.requestId.trim() && (isChangelogDraft || (draft.title.trim() && draft.body.trim())),
+  )
 
   const updateEnabledEventType = (key: string, checked: boolean) => {
     setEnabledEventTypes((current) => ({ ...current, [key]: checked }))
@@ -369,6 +394,19 @@ export function RequestNotificationsPage() {
         channels: selectedChannels,
       },
       {
+        onSuccess: (result) => {
+          if (!isChangelogDraft) return
+          const generated = generatedChangelogDraft(result)
+          if (!generated) return
+          setDraft((current) => {
+            if (current.kind !== 'changelog_post') return current
+            return {
+              ...current,
+              title: current.title.trim() || generated.title,
+              body: current.body.trim() || generated.body,
+            }
+          })
+        },
         onError: (err) => toast.error(errorMessage(err, t('common.error'))),
       },
     )
@@ -452,20 +490,41 @@ export function RequestNotificationsPage() {
         title={t('nav.request_notifications')}
         subtitle={t('request_notifications.subtitle')}
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              settingsQuery.refetch()
-              senderQuery.refetch()
-              targetsQuery.refetch()
-              deliveriesQuery.refetch()
-            }}
-          >
-            <RefreshCcw className="size-4" />
-            {t('request_notifications.refresh')}
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                settingsQuery.refetch()
+                senderQuery.refetch()
+                targetsQuery.refetch()
+                deliveriesQuery.refetch()
+              }}
+            >
+              <RefreshCcw className="size-4" />
+              {t('request_notifications.refresh')}
+            </Button>
+            {changelogURL && (
+              <div className="flex flex-wrap items-center gap-3 text-sm font-medium">
+                <a className="text-primary underline-offset-4 hover:underline" href={changelogURL}>
+                  {t('request_notifications.publish.changelog_link')}
+                </a>
+                <a
+                  className="text-primary underline-offset-4 hover:underline"
+                  href={changelogRSSURL}
+                >
+                  RSS
+                </a>
+                <a
+                  className="text-primary underline-offset-4 hover:underline"
+                  href={changelogJSONURL}
+                >
+                  JSON
+                </a>
+              </div>
+            )}
+          </div>
         }
         metrics={
           <>
@@ -821,13 +880,22 @@ export function RequestNotificationsPage() {
                     <SelectItem value="shipped">
                       {t('request_notifications.publish.kind_shipped')}
                     </SelectItem>
+                    {changelogEnabled && (
+                      <SelectItem value="changelog_post">
+                        {t('request_notifications.publish.kind_changelog_post')}
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
               </FormField>
             </div>
-            <FormField label={t('request_notifications.publish.title_label')}>
+            <FormField
+              help={changelogDraftHelp}
+              label={t('request_notifications.publish.title_label')}
+            >
               <Input
                 data-testid="rn-draft-title"
+                required={!isChangelogDraft}
                 value={draft.title}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, title: event.target.value }))
@@ -838,6 +906,7 @@ export function RequestNotificationsPage() {
               <textarea
                 data-testid="rn-draft-body"
                 className="min-h-28 w-full min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                required={!isChangelogDraft}
                 value={draft.body}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, body: event.target.value }))
@@ -1081,6 +1150,25 @@ function FormField({
       {help && <p className="text-xs text-muted-foreground">{help}</p>}
     </div>
   )
+}
+
+function generatedChangelogDraft(result: PreviewRequestNotificationResponse) {
+  for (const payload of [result.emailPayload, result.webhookPayload]) {
+    const update = extractRecord(payload)?.update
+    if (!update || typeof update !== 'object') continue
+    const record = update as Record<string, unknown>
+    const title = typeof record.title === 'string' ? record.title.trim() : ''
+    const body = typeof record.body === 'string' ? record.body.trim() : ''
+    if (title && body) {
+      return { title, body }
+    }
+  }
+  return null
+}
+
+function extractRecord(value: unknown) {
+  if (!value || typeof value !== 'object') return null
+  return value as Record<string, unknown>
 }
 
 function SenderSummary({

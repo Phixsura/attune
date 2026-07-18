@@ -186,6 +186,64 @@ overwrite the existing GitHub issue body. The marker makes later pulls
 idempotently bridge the GitHub issue back to the Customer Request issue-link
 ledger.
 
+## Built-in Jira Issues Adapter
+
+The built-in Jira adapter registers provider token `jira` and supports external
+object type `issue`.
+
+Connection setup:
+
+```json
+{
+  "provider": "jira",
+  "auth_type": "token",
+  "webhook_secret": "replace-with-at-least-16-characters",
+  "provider_config": {
+    "site_url": "https://acme.atlassian.net",
+    "project_key": "ACME",
+    "issue_type": "Task",
+    "email": "bot@acme.com",
+    "request_label_prefix": "attune-customer-request-",
+    "status_transitions": {
+      "pending": "To Do",
+      "synced": "In Progress",
+      "failed": "Blocked"
+    }
+  },
+  "scopes": ["issues"]
+}
+```
+
+`provider_config` also accepts `api_base_url` or a connection `base_url` for
+the REST API base URL, and `issue_type_id` instead of `issue_type`. The
+credential is a Jira API token, and Attune sends it with the configured email
+as Basic auth `email:token`.
+
+Jira webhook setup:
+
+- set `webhook_secret` on the connection;
+- configure Jira to POST JSON deliveries to
+  `/v1/external-sync/webhooks/jira/{tenant_id}/{connection_id}`;
+- send `X-Hub-Signature` with the same `sha256=...` HMAC shape used by GitHub;
+- Attune records the delivery event with a compact normalized payload and
+  dedupe key.
+
+Pull behavior:
+
+- queries `/rest/api/3/search` for the configured project ordered by updated
+  time;
+- normalizes issue key, summary, status, labels, assignee, reporter,
+  timestamps, resolution, and comment metadata;
+- extracts Attune request markers from labels or comments and bridges them
+  back to `LocalObjectID`.
+
+Push behavior:
+
+- creates or updates issues with the configured project and issue type;
+- preserves the Attune request marker comment when needed;
+- transitions status using explicit `status_transitions` when configured, or a
+  heuristic fallback when the workflow is obvious.
+
 ## Pull Records
 
 `Pull` returns `externalsync.PullResult`:

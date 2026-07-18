@@ -1519,6 +1519,7 @@ func bindConfirmNotificationForTest(handler *Handler) http.HandlerFunc {
 type fakeNotificationService struct {
 	subscription rnrepo.Subscription
 	contact      rnrepo.Contact
+	changelog    rnrepo.ChangelogListResult
 
 	subscribeInput       rnsvc.SubscribeInput
 	unsubscribeTenant    string
@@ -1527,6 +1528,9 @@ type fakeNotificationService struct {
 	confirmTenant        string
 	confirmToken         string
 	confirmUserAgent     string
+	changelogTenantID    string
+	changelogLimit       int
+	changelogCursor      string
 	err                  error
 }
 
@@ -1547,6 +1551,13 @@ func (f *fakeNotificationService) ConfirmContact(_ context.Context, tenantSlug s
 	f.confirmToken = token
 	f.confirmUserAgent = userAgent
 	return f.contact, f.err
+}
+
+func (f *fakeNotificationService) ListChangelog(_ context.Context, tenantID string, limit int, cursor string) (rnrepo.ChangelogListResult, error) {
+	f.changelogTenantID = tenantID
+	f.changelogLimit = limit
+	f.changelogCursor = cursor
+	return f.changelog, f.err
 }
 
 func (f *fakeNotificationService) RedactedEmailPayload(payload []byte) string {
