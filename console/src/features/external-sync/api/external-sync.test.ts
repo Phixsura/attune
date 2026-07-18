@@ -5,6 +5,7 @@ import {
   ExternalSyncDirection,
   externalSyncConnectionSchemaQuery,
   externalSyncEventsQuery,
+  externalSyncProvidersQuery,
   externalSyncRunsQuery,
   retryExternalSyncFailure,
   updateExternalMapping,
@@ -151,6 +152,31 @@ describe('external sync api helpers', () => {
       '?limit=5',
       '?limit=3',
     ])
+  })
+
+  it('loads the registered external sync providers', async () => {
+    const seen: string[] = []
+    server.use(
+      http.get('/fb/v1/console/external-sync/providers', ({ request }) => {
+        seen.push(new URL(request.url).pathname)
+        return HttpResponse.json({
+          providers: [
+            { provider: 'github', display: 'GitHub' },
+            { provider: 'jira', display: 'Jira' },
+          ],
+        })
+      }),
+    )
+
+    const providersQuery = externalSyncProvidersQuery()
+    const providersQueryFn = providersQuery.queryFn
+    if (typeof providersQueryFn !== 'function') throw new Error('missing providers queryFn')
+
+    await expect(providersQueryFn({ signal: undefined } as never)).resolves.toEqual([
+      { provider: 'github', display: 'GitHub' },
+      { provider: 'jira', display: 'Jira' },
+    ])
+    expect(seen).toEqual(['/fb/v1/console/external-sync/providers'])
   })
 
   it('short-circuits schema discovery when no connection is selected', async () => {

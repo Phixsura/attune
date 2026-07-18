@@ -72,12 +72,12 @@ func settingsFromConnection(conn core.Connection) (settings, error) {
 	if token == "" {
 		return settings{}, fmt.Errorf("jira credential is required")
 	}
-	labelPrefix := strings.TrimSpace(cfg.RequestLabelPrefix)
-	if labelPrefix == "" {
-		labelPrefix = defaultLabelPrefix
-	}
-	if !strings.HasSuffix(labelPrefix, "-") {
-		labelPrefix += "-"
+	labelPrefix := defaultLabelPrefix
+	if raw := strings.TrimSpace(cfg.RequestLabelPrefix); raw != "" {
+		labelPrefix = normalizedRequestLabelPrefix(raw)
+		if labelPrefix == "" {
+			return settings{}, fmt.Errorf("jira provider_config request_label_prefix is invalid")
+		}
 	}
 	transitions := map[string]string{}
 	for k, v := range cfg.StatusTransitions {
@@ -299,6 +299,17 @@ func searchFields() []string {
 		"comment",
 		"issuelinks",
 	}
+}
+
+func normalizedRequestLabelPrefix(raw string) string {
+	prefix := sanitizeLabel(strings.TrimSpace(raw))
+	if prefix == "" {
+		return ""
+	}
+	if !strings.HasSuffix(prefix, "-") {
+		prefix += "-"
+	}
+	return prefix
 }
 
 func escapeJQL(raw string) string {

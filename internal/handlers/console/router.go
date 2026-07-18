@@ -3261,6 +3261,16 @@ func (r *Router) mountExternalSyncConnectionRoutes(es chi.Router) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))
+	es.Get("/providers", dispatcher.Bind(
+		"console.ExternalSyncHandler.ListProviders",
+		dispatcher.Empty(func() *attunev1.ListExternalSyncProvidersRequest {
+			return ptrext.Of(attunev1.ListExternalSyncProvidersRequest{})
+		}),
+		r.externalSync.ListProviders,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExternalSyncProvidersRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 	es.With(r.requireDelegatedAdminStrict).Post("/connections", dispatcher.Bind(
 		"console.ExternalSyncHandler.CreateConnection",
 		dispatcher.JSON(func() *attunev1.CreateExternalConnectionRequest {

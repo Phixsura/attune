@@ -164,6 +164,9 @@ failures once the adapter is registered.
   and normalized in `internal/service/externalsync/jira.go`.
 - External sync connection setup and operator guidance are documented in
   `docs/external-sync-adapters.md`.
+- Console provider selection now reads the backend registry and hides
+  test-only `noop` wiring so the create-connection dialog lists real adapters
+  such as GitHub and Jira.
 - Router registration and CLI bootstrap are wired through `cmd/attune/router.go`
   and `cmd/attune/main.go`.
 

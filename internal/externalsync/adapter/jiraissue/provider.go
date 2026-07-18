@@ -290,7 +290,7 @@ func (p *Provider) findIssueByRequestMarker(ctx context.Context, cfg settings, c
 		}
 		for i := range result.Issues {
 			issue := result.Issues[i]
-			if issueHasMarker(issue, customerRequestID) {
+			if issueHasMarker(cfg, issue, customerRequestID) {
 				return ptrext.Of(issue), nil
 			}
 		}
@@ -345,7 +345,7 @@ func (p *Provider) ensureRequestComment(ctx context.Context, cfg settings, issue
 	if marker == "" {
 		return nil
 	}
-	if issueHasMarker(issue, marker) {
+	if issueHasMarker(cfg, issue, marker) {
 		return nil
 	}
 	comment := buildRequestComment(payload)

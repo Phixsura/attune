@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Jira request-label markers now honor the configured `request_label_prefix`
+  when Attune pulls issues back into the Customer Request ledger, so custom
+  prefixes keep bridging cleanly without falling back to the default label
+  pattern.
+
 - Request notification Console now hides public changelog links until the
   tenant enables changelog publishing, and hides the changelog publish kind
   until it can actually be used.
@@ -74,6 +79,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - **Jira bidirectional issue sync.**
   Added the Jira `issue` provider, webhook receiver, and connection flow so
   Attune can pull, push, and dedupe Jira issues with signed deliveries.
+
+- External sync Console provider selection now loads registered adapters from
+  the backend registry and hides the test-only `noop` provider, so GitHub and
+  Jira are discoverable from the same create-connection dialog.
 
 - **Close-the-loop request notifications.**
   Added tenant-scoped request notification settings, sender configuration,

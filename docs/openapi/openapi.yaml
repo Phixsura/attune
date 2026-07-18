@@ -2898,6 +2898,24 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/providers:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalSyncProviders
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalSyncProvidersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/external-sync/records:timeline:
         post:
             tags:
@@ -12695,6 +12713,13 @@ components:
                 quarantinedConnections:
                     type: integer
                     format: int32
+        ExternalSyncProvider:
+            type: object
+            properties:
+                provider:
+                    type: string
+                display:
+                    type: string
         ExternalSyncQualificationCheck:
             type: object
             properties:
@@ -14149,6 +14174,13 @@ components:
                         $ref: '#/components/schemas/ExternalSyncEvent'
                 nextBeforeId:
                     type: string
+        ListExternalSyncProvidersResponse:
+            type: object
+            properties:
+                providers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncProvider'
         ListExternalSyncRunsResponse:
             type: object
             properties:

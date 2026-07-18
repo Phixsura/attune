@@ -48,6 +48,7 @@ import {
   ExternalSyncConflictResolution,
   ExternalSyncDirection,
   type ExternalSyncEvent,
+  type ExternalSyncProvider,
   type ExternalSyncRecordFailure,
   type ExternalSyncRecordTimelineEntry,
   type ExternalSyncRun,
@@ -58,6 +59,7 @@ import {
   externalSyncEventsQuery,
   externalSyncHealthQuery,
   externalSyncMappingsQuery,
+  externalSyncProvidersQuery,
   externalSyncQueryKeys,
   externalSyncRunQuery,
   externalSyncRunsQuery,
@@ -167,7 +169,9 @@ export function ExternalSyncPage() {
   useDocumentTitle(t('nav.external_sync'))
 
   const health = useQuery(externalSyncHealthQuery())
+  const providersQuery = useQuery(externalSyncProvidersQuery())
   const connectionsQuery = useQuery(externalSyncConnectionsQuery())
+  const providers = providersQuery.data ?? []
   const connections = connectionsQuery.data ?? []
   const [selectedConnectionID, setSelectedConnectionID] = useState('')
   const [selectedRunID, setSelectedRunID] = useState('')
@@ -664,6 +668,7 @@ export function ExternalSyncPage() {
       <CreateConnectionDialog
         open={createOpen}
         pending={createConnection.isPending}
+        providers={providers}
         onOpenChange={setCreateOpen}
         onSubmit={(body) => createConnection.mutate(body)}
       />
@@ -2015,11 +2020,13 @@ export function canShowRecordTimeline(localObjectId: string, externalKey: string
 export function CreateConnectionDialog({
   open,
   pending,
+  providers = [],
   onOpenChange,
   onSubmit,
 }: {
   open: boolean
   pending: boolean
+  providers?: ExternalSyncProvider[]
   onOpenChange: (open: boolean) => void
   onSubmit: (body: CreateExternalConnectionRequest) => void
 }) {
@@ -2033,9 +2040,18 @@ export function CreateConnectionDialog({
   const [providerConfig, setProviderConfig] = useState('{}')
   const [scopes, setScopes] = useState('issues')
   const [enabled, setEnabled] = useState(true)
+  const hasProviders = providers.length > 0
+  const defaultProvider = providers[0]?.provider ?? 'github'
+
+  useEffect(() => {
+    if (!hasProviders) return
+    setProvider((current) =>
+      providers.some((entry) => entry.provider === current) ? current : defaultProvider,
+    )
+  }, [defaultProvider, hasProviders, providers])
 
   const reset = () => {
-    setProvider('github')
+    setProvider(defaultProvider)
     setName('')
     setAuthType('token')
     setCredential('')
@@ -2078,13 +2094,28 @@ export function CreateConnectionDialog({
           <div className="grid gap-4 py-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="external-sync-provider">{t('external_sync.create.provider')}</Label>
-              <Input
-                id="external-sync-provider"
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                disabled={pending}
-                required
-              />
+              {hasProviders ? (
+                <Select value={provider} onValueChange={setProvider} disabled={pending}>
+                  <SelectTrigger id="external-sync-provider" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers.map((entry) => (
+                      <SelectItem key={entry.provider} value={entry.provider}>
+                        {entry.display}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="external-sync-provider"
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value)}
+                  disabled={pending}
+                  required
+                />
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="external-sync-name">{t('external_sync.create.name')}</Label>

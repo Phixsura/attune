@@ -291,7 +291,11 @@ func requestLabel(cfg settings, customerRequestID string) string {
 	if _, err := uuid.Parse(customerRequestID); err != nil {
 		return ""
 	}
-	return sanitizeLabel(cfg.requestLabelPrefix + customerRequestID)
+	prefix := normalizedRequestLabelPrefix(cfg.requestLabelPrefix)
+	if prefix == "" {
+		return ""
+	}
+	return sanitizeLabel(prefix + customerRequestID)
 }
 
 func requestMarker(customerRequestID string) string {
@@ -378,7 +382,7 @@ func normalizeIssueRecord(cfg settings, issue jiraIssue, updatedAt time.Time) (c
 		Key:           issue.Key,
 		URL:           issueURLFromIssue(cfg, issue),
 		Version:       issueVersion(issue),
-		LocalObjectID: extractCustomerRequestID(issue),
+		LocalObjectID: extractCustomerRequestID(cfg, issue),
 		UpdatedAt:     updatedAt,
 		Payload:       payload,
 	}, nil
@@ -447,7 +451,7 @@ func normalizedIssuePayload(cfg settings, issue jiraIssue, updatedAt time.Time) 
 	if issue.Fields.Resolution != nil {
 		out.ResolvedAt = normalizedTime(issue.Fields.ResolutionDate)
 	}
-	out.RequestMarker = extractCustomerRequestID(issue)
+	out.RequestMarker = extractCustomerRequestID(cfg, issue)
 	return out
 }
 
@@ -744,8 +748,8 @@ func normalizeLabels(labels []string) []string {
 	return uniqueSortedLabels(out)
 }
 
-func extractCustomerRequestID(issue jiraIssue) string {
-	if marker := extractCustomerRequestIDFromLabels(issue.Fields.Labels); marker != "" {
+func extractCustomerRequestID(cfg settings, issue jiraIssue) string {
+	if marker := extractCustomerRequestIDFromLabels(cfg, issue.Fields.Labels); marker != "" {
 		return marker
 	}
 	if marker := extractCustomerRequestIDFromText(issueText(issue.Fields.Description)); marker != "" {
@@ -759,11 +763,15 @@ func extractCustomerRequestID(issue jiraIssue) string {
 	return ""
 }
 
-func extractCustomerRequestIDFromLabels(labels []string) string {
+func extractCustomerRequestIDFromLabels(cfg settings, labels []string) string {
+	prefix := normalizedRequestLabelPrefix(cfg.requestLabelPrefix)
+	if prefix == "" {
+		prefix = defaultLabelPrefix
+	}
 	for _, label := range labels {
-		label = strings.TrimSpace(label)
-		if strings.HasPrefix(label, defaultLabelPrefix) {
-			id := strings.TrimPrefix(label, defaultLabelPrefix)
+		label = sanitizeLabel(label)
+		if strings.HasPrefix(label, prefix) {
+			id := strings.TrimPrefix(label, prefix)
 			if _, err := uuid.Parse(id); err == nil {
 				return id
 			}
@@ -783,12 +791,12 @@ func extractCustomerRequestIDFromText(text string) string {
 	return matches[1]
 }
 
-func issueHasMarker(issue jiraIssue, marker string) bool {
+func issueHasMarker(cfg settings, issue jiraIssue, marker string) bool {
 	marker = markerCustomerRequestID(marker)
 	if marker == "" {
 		return false
 	}
-	if marker == extractCustomerRequestIDFromLabels(issue.Fields.Labels) {
+	if marker == extractCustomerRequestIDFromLabels(cfg, issue.Fields.Labels) {
 		return true
 	}
 	if marker == extractCustomerRequestIDFromText(issueText(issue.Fields.Description)) {

@@ -34,6 +34,27 @@ func TestSettingsAndCursorHelpers(t *testing.T) {
 	assertJiraSearchCursorHelpers(t, settings, cursor)
 }
 
+func TestCustomRequestLabelPrefixIsRespected(t *testing.T) {
+	settings := testSettings("https://jira.example.com")
+	settings.requestLabelPrefix = "Acme Request Labels-"
+	customerRequestID := uuid.NewString()
+	label := requestLabel(settings, customerRequestID)
+	if !strings.HasPrefix(label, "acme-request-labels-") {
+		t.Fatalf("requestLabel = %q; want normalized custom prefix", label)
+	}
+	issue := jiraIssue{
+		Fields: jiraIssueFields{
+			Labels: []string{label},
+		},
+	}
+	if got := extractCustomerRequestID(settings, issue); got != customerRequestID {
+		t.Fatalf("extractCustomerRequestID = %q; want %q", got, customerRequestID)
+	}
+	if !issueHasMarker(settings, issue, customerRequestID) {
+		t.Fatal("issueHasMarker returned false for custom label prefix")
+	}
+}
+
 func TestCheckAndPullIssues(t *testing.T) {
 	setLoopbackEgress(t)
 	customerRequestID := uuid.NewString()

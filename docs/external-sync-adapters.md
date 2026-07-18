@@ -127,6 +127,10 @@ The Console connection editor updates name, enabled state, base URL, provider
 configuration, and scopes. It rotates the credential or webhook secret only
 when a new value is submitted.
 
+The Console provider picker lists registered adapters from the backend
+registry, so the create-connection dialog can surface GitHub and Jira without
+hard-coded provider tokens. Test-only `noop` wiring is omitted from that list.
+
 GitHub webhook setup:
 
 - set the connection `webhook_secret` when creating or updating the connection;
@@ -235,7 +239,9 @@ Pull behavior:
 - normalizes issue key, summary, status, labels, assignee, reporter,
   timestamps, resolution, and comment metadata;
 - extracts Attune request markers from labels or comments and bridges them
-  back to `LocalObjectID`.
+  back to `LocalObjectID`;
+- honors the configured `request_label_prefix` when matching request labels,
+  so tenants with custom marker prefixes remain idempotent on pull.
 
 Push behavior:
 

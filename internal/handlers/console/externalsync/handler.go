@@ -76,6 +76,21 @@ func (h *Handler) ListConnections(ctx *dispatcher.RequestContext[*session.AuthCt
 	return dispatcher.OK(ptrext.Of(attunev1.ListExternalConnectionsResponse{Connections: out}))
 }
 
+func (h *Handler) ListProviders(_ *dispatcher.RequestContext[*session.AuthCtx], _ *attunev1.ListExternalSyncProvidersRequest) (dispatcher.Result[*attunev1.ListExternalSyncProvidersResponse], error) {
+	entries := externalsynccore.Providers()
+	out := make([]*attunev1.ExternalSyncProvider, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Provider == "noop" {
+			continue
+		}
+		out = append(out, ptrext.Of(attunev1.ExternalSyncProvider{
+			Provider: entry.Provider,
+			Display:  entry.Display,
+		}))
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.ListExternalSyncProvidersResponse{Providers: out}))
+}
+
 func (h *Handler) CreateConnection(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.CreateExternalConnectionRequest) (dispatcher.Result[*attunev1.ExternalConnection], error) {
 	enabled := true
 	if req.Enabled != nil {
