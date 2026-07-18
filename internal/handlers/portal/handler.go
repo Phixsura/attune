@@ -61,7 +61,6 @@ type notificationService interface {
 	SubscribePublicRequest(ctx context.Context, in rnsvc.SubscribeInput) (rnrepo.Subscription, error)
 	Unsubscribe(ctx context.Context, tenantSlug string, token string, userAgent string) (rnrepo.Subscription, error)
 	ConfirmContact(ctx context.Context, tenantSlug string, token string, userAgent string) (rnrepo.Contact, error)
-	ListChangelog(ctx context.Context, tenantID string, limit int, cursor string) (rnrepo.ChangelogListResult, error)
 	RedactedEmailPayload(payload []byte) string
 }
 

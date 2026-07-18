@@ -10,7 +10,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -64,19 +63,14 @@ func (f *failingSecrets) Decrypt(ciphertext []byte) ([]byte, error) {
 type flowRepo struct {
 	settings repo.Settings
 
-	request           repo.RequestSummary
-	context           repo.EventContext
-	publicRef         repo.PublicRequestRef
-	contactID         uuid.UUID
-	recipients        []repo.Subscriber
-	sender            repo.Sender
-	target            repo.WebhookTarget
-	targets           []repo.WebhookTarget
-	changelogList     repo.ChangelogListResult
-	changelogRequest  repo.ChangelogRequest
-	changelogTenantID string
-	changelogLimit    int
-	changelogCursor   string
+	request    repo.RequestSummary
+	context    repo.EventContext
+	publicRef  repo.PublicRequestRef
+	contactID  uuid.UUID
+	recipients []repo.Subscriber
+	sender     repo.Sender
+	target     repo.WebhookTarget
+	targets    []repo.WebhookTarget
 
 	upsertedSettings   repo.Settings
 	upsertedSender     repo.Sender
@@ -116,14 +110,12 @@ type flowRepo struct {
 	useTokenErr        error
 	confirmTokenErr    error
 	getRequestErr      error
-	getChangelogErr    error
 	getEventContextErr error
 	eligibleErr        error
 	countTenantErr     error
 	countContactErr    error
 	beginErr           error
 	createEventErr     error
-	listChangelogErr   error
 	listActiveErr      error
 	insertDeliveryErr  error
 	activeSenderErr    error
@@ -588,137 +580,6 @@ func TestPreviewAndStatusEventFlow(t *testing.T) {
 	}
 }
 
-const (
-	wantChangelogDraftTitle = "Release notes: CSV export"
-	wantChangelogDraftBody  = "We shipped CSV export.\n\nCustomers can export their data from the requests page."
-)
-
-func newChangelogFlowFixture(t *testing.T) (*flowRepo, *Service, uuid.UUID) {
-	t.Helper()
-	requestID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
-	fake := &flowRepo{
-		settings: repo.Settings{
-			TenantID:                     "tenant-1",
-			EmailEnabled:                 true,
-			WebhookEnabled:               true,
-			EnabledEventTypes:            map[string]any{repo.EventTypeChangelog: true},
-			DefaultConsentMode:           "explicit_opt_in",
-			RequirePublicUpdateForStatus: true,
-		},
-		request: repo.RequestSummary{
-			ID:     requestID,
-			Title:  "CSV export",
-			Status: "shipped",
-		},
-		changelogRequest: repo.ChangelogRequest{
-			ID:            requestID,
-			PublicSlug:    "csv-export",
-			PublicTitle:   "CSV export",
-			PublicSummary: "Customers can export their data from the requests page.",
-			PublicState:   "shipped",
-			RoadmapColumn: "done",
-		},
-		tx: &serviceTx{},
-	}
-	return fake, newFlowService(fake), requestID
-}
-
-func TestPreviewChangelogPostFlow(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	_, service, requestID := newChangelogFlowFixture(t)
-
-	preview, err := service.Preview(ctx, PublishInput{
-		TenantID:  "tenant-1",
-		RequestID: requestID,
-		Kind:      "changelog_post",
-		Channels:  []string{repo.ChannelEmail, repo.ChannelWebhook},
-	})
-	if err != nil {
-		t.Fatalf("Preview(changelog_post) error = %v", err)
-	}
-	if preview.EmailPayload == nil || preview.WebhookPayload == nil {
-		t.Fatalf("preview payloads = %+v, want both channel payloads", preview)
-	}
-	emailUpdate, ok := preview.EmailPayload["update"].(map[string]any)
-	if !ok {
-		t.Fatalf("preview email payload = %#v, want update object", preview.EmailPayload)
-	}
-	if got := emailUpdate["title"]; got != wantChangelogDraftTitle {
-		t.Fatalf("preview title = %#v, want generated release notes title", got)
-	}
-	if got := emailUpdate["body"]; got != wantChangelogDraftBody {
-		t.Fatalf("preview body = %#v, want generated release notes body", got)
-	}
-	if got := emailUpdate["kind"]; got != "changelog_post" {
-		t.Fatalf("preview kind = %#v, want changelog_post", got)
-	}
-}
-
-func TestPublishChangelogPostFlow(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	fake, service, requestID := newChangelogFlowFixture(t)
-
-	event, err := service.Publish(ctx, PublishInput{
-		TenantID:  "tenant-1",
-		RequestID: requestID,
-		Kind:      "changelog_post",
-		Channels:  []string{repo.ChannelEmail},
-		Actor:     auditlogsvc.Actor{Type: "user", ID: "user-1"},
-	})
-	if err != nil {
-		t.Fatalf("Publish(changelog_post) error = %v", err)
-	}
-	if event.EventType != repo.EventTypeChangelog || !fake.tx.committed {
-		t.Fatalf("event = %+v committed=%v, want changelog publish", event, fake.tx.committed)
-	}
-	if len(fake.createdEvents) == 0 {
-		t.Fatal("created events = none, want publish input captured")
-	}
-	got := fake.createdEvents[len(fake.createdEvents)-1]
-	if got.Kind != "changelog_post" || got.EventType != repo.EventTypeChangelog {
-		t.Fatalf("published input = %+v, want changelog post event", got)
-	}
-	if got.Title != wantChangelogDraftTitle || got.Body != wantChangelogDraftBody {
-		t.Fatalf("published draft = %+v, want generated changelog draft", got)
-	}
-}
-
-func TestListChangelogDelegatesToRepository(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	expected := repo.ChangelogListResult{
-		Items: []repo.ChangelogPost{{
-			ID:          uuid.MustParse("99999999-9999-9999-9999-999999999999"),
-			ThreadID:    uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-			Title:       "Release notes: CSV export",
-			Body:        "We shipped CSV export.\n\nCustomers can export their data from the requests page.",
-			Kind:        "changelog_post",
-			PublishedAt: time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC),
-		}},
-		NextCursor:           "10",
-		NoIndex:              true,
-		HidePublicTimestamps: true,
-	}
-	fake := &flowRepo{changelogList: expected}
-	service := newFlowService(fake)
-
-	got, err := service.ListChangelog(ctx, " tenant-1 ", 10, " page-2 ")
-	if err != nil {
-		t.Fatalf("ListChangelog() error = %v", err)
-	}
-	if !reflect.DeepEqual(got, expected) {
-		t.Fatalf("ListChangelog() = %#v, want %#v", got, expected)
-	}
-	if fake.changelogTenantID != "tenant-1" || fake.changelogLimit != 10 || fake.changelogCursor != " page-2 " {
-		t.Fatalf("ListChangelog repo call = tenant:%q limit:%d cursor:%q", fake.changelogTenantID, fake.changelogLimit, fake.changelogCursor)
-	}
-}
-
 func TestPreviewReportsDisabledEventPolicy(t *testing.T) {
 	ctx := context.Background()
 	fake, service, requestID, _ := newPreviewResolveFixture(t)
@@ -756,16 +617,12 @@ func TestPreviewOperationErrorBranches(t *testing.T) {
 	if _, err := newFlowService(&flowRepo{request: repo.RequestSummary{ID: requestID}, eligibleErr: repo.ErrInvalidInput}).Preview(ctx, PublishInput{
 		TenantID:  "tenant-1",
 		RequestID: requestID,
-		Title:     "Shipped",
-		Body:      "CSV export is now available.",
 	}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("Preview(eligible error) = %v, want validation", err)
 	}
 	if _, err := newFlowService(&flowRepo{request: repo.RequestSummary{ID: requestID}, getSettingsErr: repo.ErrNotFound}).Preview(ctx, PublishInput{
 		TenantID:  "tenant-1",
 		RequestID: requestID,
-		Title:     "Shipped",
-		Body:      "CSV export is now available.",
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Preview(settings error) = %v, want not found", err)
 	}
@@ -2316,26 +2173,6 @@ func (f *flowRepo) GetRequestSummary(context.Context, string, uuid.UUID) (repo.R
 		return repo.RequestSummary{}, f.getRequestErr
 	}
 	return f.request, nil
-}
-
-func (f *flowRepo) ListChangelogPosts(_ context.Context, tenantID string, limit int, cursor string) (repo.ChangelogListResult, error) {
-	if f.listChangelogErr != nil {
-		return repo.ChangelogListResult{}, f.listChangelogErr
-	}
-	f.changelogTenantID = tenantID
-	f.changelogLimit = limit
-	f.changelogCursor = cursor
-	return f.changelogList, nil
-}
-
-func (f *flowRepo) GetChangelogRequest(context.Context, string, uuid.UUID) (repo.ChangelogRequest, error) {
-	if f.getChangelogErr != nil {
-		return repo.ChangelogRequest{}, f.getChangelogErr
-	}
-	if f.changelogRequest.ID != uuid.Nil {
-		return f.changelogRequest, nil
-	}
-	return repo.ChangelogRequest{}, repo.ErrNotFound
 }
 
 func (f *flowRepo) GetEventContext(context.Context, uuid.UUID) (repo.EventContext, error) {

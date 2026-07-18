@@ -176,32 +176,6 @@ type EventContext struct {
 	UpdateKind  string
 }
 
-type ChangelogRequest struct {
-	ID            uuid.UUID
-	PublicSlug    string
-	PublicTitle   string
-	PublicSummary string
-	PublicState   string
-	RoadmapColumn string
-}
-
-type ChangelogPost struct {
-	ID          uuid.UUID
-	ThreadID    uuid.UUID
-	Title       string
-	Body        string
-	Kind        string
-	PublishedAt time.Time
-	Requests    []ChangelogRequest
-}
-
-type ChangelogListResult struct {
-	Items                []ChangelogPost
-	NextCursor           string
-	NoIndex              bool
-	HidePublicTimestamps bool
-}
-
 type WebhookTarget struct {
 	ID                       uuid.UUID
 	TenantID                 string
