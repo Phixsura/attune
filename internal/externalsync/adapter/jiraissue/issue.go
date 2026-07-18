@@ -216,7 +216,7 @@ func issueTypeRefFromSettings(cfg settings) issueTypeRef {
 }
 
 func buildLabels(cfg settings, payload localIssuePayload) []string {
-	labels := make([]string, 0, len(payload.Labels)+2)
+	labels := make([]string, 0, len(payload.Labels))
 	for _, label := range payload.Labels {
 		labels = append(labels, sanitizeLabel(label))
 	}

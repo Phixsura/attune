@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Jira issue label construction now avoids an overflow-prone preallocation,
+  and Console external-sync internal errors no longer log raw error strings in
+  the shared error path, which keeps the CodeQL scan clean.
+
 - Jira request-label markers now honor the configured `request_label_prefix`
   when Attune pulls issues back into the Customer Request ledger, so custom
   prefixes keep bridging cleanly without falling back to the default label

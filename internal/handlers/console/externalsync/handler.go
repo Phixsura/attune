@@ -608,7 +608,7 @@ func internalError[T proto.Message](ctx context.Context, where string, err error
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return dispatcher.Result[T]{}, err
 	}
-	logext.Errorf(ctx, "[console.externalsync.%s] failed,err:%+v", where, err.Error())
+	logext.Errorf(ctx, "[console.externalsync.%s] failed,err_type:%T", where, err)
 	return dispatcher.Fail[T](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "external sync operation failed")
 }
 
