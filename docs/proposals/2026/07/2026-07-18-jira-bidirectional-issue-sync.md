@@ -46,6 +46,14 @@ Without a Jira provider, operators cannot:
 - Add provider-specific UI beyond what the current generic external sync
   Console already supports.
 
+## Acceptance criteria
+
+- A customer request can create or link a Jira issue.
+- Jira status and comment updates are reflected in Attune without duplicate
+  links.
+- Attune request context appears in Jira via backlink or comment.
+- Failures and conflicts are visible to operators.
+
 ## Proposal
 
 Implement a new `jira` provider under `internal/externalsync/adapter/jiraissue`
@@ -100,7 +108,7 @@ should be normalized into a compact event envelope with:
 
 - webhook event type
 - issue key / id
-- changelog summary
+- changelog or comment summary
 - timestamp
 - dedupe key / external event id
 
@@ -148,6 +156,16 @@ failures once the adapter is registered.
 5. Document the Jira provider setup in `docs/external-sync-adapters.md`.
 6. Update the changelog and mark this proposal `Implemented` once the code
    lands.
+
+## Implementation notes
+
+- The Jira provider now lives under `internal/externalsync/adapter/jiraissue`.
+- Signed webhook receipt is handled by `internal/handlers/externalsyncwebhook`
+  and normalized in `internal/service/externalsync/jira.go`.
+- External sync connection setup and operator guidance are documented in
+  `docs/external-sync-adapters.md`.
+- Router registration and CLI bootstrap are wired through `cmd/attune/router.go`
+  and `cmd/attune/main.go`.
 
 ## Verification
 
