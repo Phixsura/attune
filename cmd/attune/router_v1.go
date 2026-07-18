@@ -147,19 +147,25 @@ func mountPortalWriteRoutes(
 ) {
 	r.Post("/portal/{tenant_slug}/requests/{public_slug}/votes", dispatcher.Bind(
 		"portal.Handler.VotePublicCustomerRequest",
-		dispatcher.Path(
+		dispatcher.Custom(
 			func() *attunev1.VotePublicCustomerRequest {
 				return ptrext.Of(attunev1.VotePublicCustomerRequest{})
 			},
-			dispatcher.Param("tenant_slug", func(req *attunev1.VotePublicCustomerRequest, slug string) {
-				req.TenantSlug = slug
-			}),
-			dispatcher.Param("public_slug", func(req *attunev1.VotePublicCustomerRequest, slug string) {
-				req.PublicSlug = slug
-			}),
+			portal.BindVotePublicCustomerRequest,
 		),
 		portalHandler.VotePublicCustomerRequest,
 		dispatcher.WithAuth(okAuth[attunev1.VotePublicCustomerRequest]),
+	))
+	r.Post("/portal/{tenant_slug}/requests/{public_slug}/subscribe", dispatcher.Bind(
+		"portal.Handler.SubscribePublicCustomerRequest",
+		dispatcher.Custom(
+			func() *attunev1.SubscribePublicCustomerRequestRequest {
+				return ptrext.Of(attunev1.SubscribePublicCustomerRequestRequest{})
+			},
+			portal.BindSubscribePublicCustomerRequest,
+		),
+		portalHandler.SubscribePublicCustomerRequest,
+		dispatcher.WithAuth(okAuth[attunev1.SubscribePublicCustomerRequestRequest]),
 	))
 	r.Delete("/portal/{tenant_slug}/requests/{public_slug}/votes", dispatcher.Bind(
 		"portal.Handler.UnvotePublicCustomerRequest",
@@ -204,6 +210,28 @@ func mountPortalWriteRoutes(
 		),
 		portalHandler.CreatePublicSubmission,
 		dispatcher.WithAuth(okAuth[attunev1.CreatePublicSubmissionRequest]),
+	))
+	r.Post("/portal/{tenant_slug}/unsubscribe", dispatcher.Bind(
+		"portal.Handler.UnsubscribePublicCustomerRequest",
+		dispatcher.Custom(
+			func() *attunev1.UnsubscribePublicCustomerRequestRequest {
+				return ptrext.Of(attunev1.UnsubscribePublicCustomerRequestRequest{})
+			},
+			portal.BindUnsubscribePublicCustomerRequest,
+		),
+		portalHandler.UnsubscribePublicCustomerRequest,
+		dispatcher.WithAuth(okAuth[attunev1.UnsubscribePublicCustomerRequestRequest]),
+	))
+	r.Post("/portal/{tenant_slug}/notification-contact/confirm", dispatcher.Bind(
+		"portal.Handler.ConfirmPublicNotificationContact",
+		dispatcher.Custom(
+			func() *attunev1.ConfirmPublicNotificationContactRequest {
+				return ptrext.Of(attunev1.ConfirmPublicNotificationContactRequest{})
+			},
+			portal.BindConfirmPublicNotificationContact,
+		),
+		portalHandler.ConfirmPublicNotificationContact,
+		dispatcher.WithAuth(okAuth[attunev1.ConfirmPublicNotificationContactRequest]),
 	))
 }
 

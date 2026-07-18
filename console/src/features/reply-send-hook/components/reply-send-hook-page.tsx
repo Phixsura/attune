@@ -1069,3 +1069,15 @@ function replySendSamplePayload(hookId?: string) {
     2,
   )
 }
+
+export const replySendHookPageTestables = {
+  countFromProto,
+  deliveryHealthForUI,
+  formatDeliveryTime,
+  isLoopbackHost,
+  replySendHeaders,
+  replySendSamplePayload,
+  shortFingerprint,
+  summarizeDeliveryHealth,
+  validateReplySendHookURL,
+}

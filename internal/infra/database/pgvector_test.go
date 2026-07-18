@@ -1,10 +1,24 @@
 package database
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestCheckPgvector_ReturnsClusteringProbeError(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	err := CheckPgvector(ctx, newUnreachableMigrationPool(t))
+	require.Error(t, err)
+	require.True(t, strings.Contains(err.Error(), "check clustering enabled"), "error = %v", err)
+}
 
 func TestCheckPgvectorVersion(t *testing.T) {
 	t.Parallel()

@@ -26,6 +26,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
+	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/crypto"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -59,6 +60,7 @@ import (
 	publicvisibilityrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
 	publicvisibilityviewrepo "github.com/Phixsura/attune/internal/repo/publicvisibilityview"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
+	requestnotificationrepo "github.com/Phixsura/attune/internal/repo/requestnotification"
 	systemsettingsrepo "github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
@@ -84,6 +86,7 @@ import (
 	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 	publicvisibilityviewsvc "github.com/Phixsura/attune/internal/service/publicvisibilityview"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
+	requestnotificationsvc "github.com/Phixsura/attune/internal/service/requestnotification"
 	"github.com/Phixsura/attune/internal/service/securityalert"
 	"github.com/Phixsura/attune/internal/service/semanticsearch"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
@@ -268,7 +271,6 @@ func buildConsoleRouter(
 
 	// Batch operations service dependencies.
 	idempotencyRepo := idempotencyrepo.New(pool)
-	customerRequestHandler := buildCustomerRequestHandler(pool, idempotencyRepo, auditLogSvc)
 	jobRepo := feedbackjobrepo.New(pool)
 	batchSvc, batchHandler := buildBatchHandler(feedbackRepo, idempotencyRepo, jobRepo)
 
@@ -307,7 +309,7 @@ func buildConsoleRouter(
 		guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub, tagHandler, tagAssignmentHandler,
 		workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
-	router.SetCustomerRequestHandler(customerRequestHandler)
+	wireRequestNotificationHandlers(router, pool, secrets, cfg.ConsoleBaseURL, idempotencyRepo, auditLogSvc)
 	router.SetPublicVisibilityHandler(buildPublicVisibilityHandler(pool, auditLogSvc))
 	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets), nil
 }
@@ -320,12 +322,47 @@ func wireConsoleAuditLoggers(targets []consoleAuditTarget, auditLogSvc *auditlog
 	}
 }
 
-func buildCustomerRequestHandler(pool *pgxpool.Pool, idempotencyRepo idempotencyrepo.Store, auditLogSvc *auditlogsvc.Service) *consolecustomerrequest.Handler {
+func buildCustomerRequestHandler(
+	pool *pgxpool.Pool,
+	idempotencyRepo idempotencyrepo.Store,
+	auditLogSvc *auditlogsvc.Service,
+	notifications *requestnotificationsvc.Service,
+) *consolecustomerrequest.Handler {
 	customerRequestRepo := customerrequestrepo.New(pool)
 	settingsRepo := systemsettingsrepo.NewRepo(pool)
-	handler := console.NewCustomerRequestHandler(customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc))
+	service := customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc)
+	service.SetNotificationSink(notifications)
+	handler := console.NewCustomerRequestHandler(service)
 	handler.SetSavedViewService(customerrequestviewsvc.New(customerrequestviewrepo.New(settingsRepo)))
 	return handler
+}
+
+func wireRequestNotificationHandlers(
+	router *console.Router,
+	pool *pgxpool.Pool,
+	secrets *secretstore.TinkStore,
+	publicBaseURL string,
+	idempotencyRepo idempotencyrepo.Store,
+	auditLogSvc *auditlogsvc.Service,
+) {
+	service := buildRequestNotificationService(pool, secrets, publicBaseURL)
+	router.SetCustomerRequestHandler(buildCustomerRequestHandler(pool, idempotencyRepo, auditLogSvc, service))
+	handler := console.NewRequestNotificationHandler(service)
+	handler.SetAuditLogger(auditLogSvc)
+	router.SetRequestNotificationHandler(handler)
+}
+
+func buildRequestNotificationService(
+	pool *pgxpool.Pool,
+	secrets *secretstore.TinkStore,
+	publicBaseURL string,
+) *requestnotificationsvc.Service {
+	return requestnotificationsvc.New(
+		requestnotificationrepo.New(pool),
+		secrets,
+		notify.NewTransport(nil, notify.DefaultRetry()),
+		publicBaseURL,
+	)
 }
 
 func buildPublicVisibilityHandler(pool *pgxpool.Pool, auditLogSvc *auditlogsvc.Service) *consolepublicvisibility.Handler {

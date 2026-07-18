@@ -27,6 +27,27 @@ func (f *fakeAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) e
 	return nil
 }
 
+func TestSetAuditLoggerStoresRecorder(t *testing.T) {
+	t.Parallel()
+
+	audit := ptrext.Of(fakeAuditRecorder{})
+	h := ptrext.Of(Handler{})
+
+	h.SetAuditLogger(audit)
+
+	require.Same(t, audit, h.audit)
+}
+
+func TestNewHandlerStoresService(t *testing.T) {
+	t.Parallel()
+
+	svc := ptrext.Of(fakeService{})
+	h := NewHandler(svc)
+
+	require.NotNil(t, h)
+	require.Same(t, svc, h.svc)
+}
+
 type fakeService struct {
 	channel   llmrepo.Channel
 	ability   llmrepo.Ability

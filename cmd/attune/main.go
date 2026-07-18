@@ -39,6 +39,7 @@ import (
 	// applies: cmd/attune is the only legal blank-import site per the
 	// outbound-boundary depguard rule.
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/discord"
+	_ "github.com/Phixsura/attune/internal/outbound/adapter/email"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/generic"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/githubissue"
 	_ "github.com/Phixsura/attune/internal/outbound/adapter/lark"

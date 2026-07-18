@@ -29,6 +29,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/member"
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
+	consolerequestnotification "github.com/Phixsura/attune/internal/handlers/console/requestnotification"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -43,33 +44,34 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 	require.NoError(t, err)
 
 	router := (&Router{
-		signer:             signer,
-		login:              &auth.Handler{},
-		changePassword:     &auth.ChangePasswordHandler{},
-		me:                 &me.MeHandler{},
-		auditLog:           &consoleauditlog.Handler{},
-		gdpr:               &consolegdpr.Handler{},
-		apiKeys:            &apikey.APIKeysHandler{},
-		notifyTargets:      &notifytarget.NotifyTargetsHandler{},
-		digestSubscription: &digestsubscription.Handler{},
-		feedback:           &feedback.FeedbackHandler{},
-		feedbackBatch:      &feedback.BatchHandler{},
-		feedbackSearch:     &feedback.SearchHandler{},
-		feedbackJob:        &feedbackjob.Handler{},
-		publicVisibility:   &consolepublicvisibility.Handler{},
-		usage:              &usage.UsageHandler{},
-		enrichConfig:       &enrichconfig.Handler{},
-		enrichmentRuntime:  &consoleenrichmentruntime.Handler{},
-		guardPolicies:      &consoleguardpolicy.Handler{},
-		inbound:            &consoleinbound.Handler{},
-		llmConfig:          &consolellmconfig.Handler{},
-		clusters:           &clusters.ClustersHandler{},
-		tags:               &consoletag.Handler{},
-		tagAssignments:     &consoletagassignment.Handler{},
-		workflow:           &consoleworkflow.Handler{},
-		members:            &member.Handler{},
-		mcpClients:         &consolemcpclient.Handler{},
-		auditEvidence:      &consoleauditevidence.Handler{},
+		signer:               signer,
+		login:                &auth.Handler{},
+		changePassword:       &auth.ChangePasswordHandler{},
+		me:                   &me.MeHandler{},
+		auditLog:             &consoleauditlog.Handler{},
+		gdpr:                 &consolegdpr.Handler{},
+		apiKeys:              &apikey.APIKeysHandler{},
+		notifyTargets:        &notifytarget.NotifyTargetsHandler{},
+		digestSubscription:   &digestsubscription.Handler{},
+		feedback:             &feedback.FeedbackHandler{},
+		feedbackBatch:        &feedback.BatchHandler{},
+		feedbackSearch:       &feedback.SearchHandler{},
+		feedbackJob:          &feedbackjob.Handler{},
+		publicVisibility:     &consolepublicvisibility.Handler{},
+		requestNotifications: &consolerequestnotification.Handler{},
+		usage:                &usage.UsageHandler{},
+		enrichConfig:         &enrichconfig.Handler{},
+		enrichmentRuntime:    &consoleenrichmentruntime.Handler{},
+		guardPolicies:        &consoleguardpolicy.Handler{},
+		inbound:              &consoleinbound.Handler{},
+		llmConfig:            &consolellmconfig.Handler{},
+		clusters:             &clusters.ClustersHandler{},
+		tags:                 &consoletag.Handler{},
+		tagAssignments:       &consoletagassignment.Handler{},
+		workflow:             &consoleworkflow.Handler{},
+		members:              &member.Handler{},
+		mcpClients:           &consolemcpclient.Handler{},
+		auditEvidence:        &consoleauditevidence.Handler{},
 	}).Mount()
 
 	got := map[string]bool{}
@@ -137,6 +139,17 @@ var auditEmittedActions = []string{
 	"moderation.hide",
 	"moderation.mark_spam",
 	"moderation.restore",
+	"request_notification.settings_update",
+	"request_notification.sender_verify",
+	"request_notification.webhook_target_create",
+	"request_notification.webhook_target_update",
+	"request_notification.webhook_target_delete",
+	"request_notification.webhook_target_test",
+	"request_notification.delivery_retry",
+	"request_notification.suppress_contact",
+	"request_notification.bounce",
+	"request_notification.complaint",
+	"request_notification.public_update_publish",
 }
 
 // TestAuditedRouteActionsAreRegistered asserts every emitted audit action is
@@ -160,6 +173,7 @@ func expectedMutatingRouteCoverage() map[string]string {
 	mergeMutatingRouteCoverage(coverage, workflowMutatingRouteCoverage())
 	mergeMutatingRouteCoverage(coverage, replyDraftMutatingRouteCoverage())
 	mergeMutatingRouteCoverage(coverage, publicVisibilityMutatingRouteCoverage())
+	mergeMutatingRouteCoverage(coverage, requestNotificationMutatingRouteCoverage())
 	return coverage
 }
 
@@ -308,5 +322,22 @@ func publicVisibilityMutatingRouteCoverage() map[string]string {
 		"POST /public-visibility/moderation/{id}:hide":         "audited: moderation.hide",
 		"POST /public-visibility/moderation/{id}:mark-spam":    "audited: moderation.mark_spam",
 		"POST /public-visibility/moderation/{id}:restore":      "audited: moderation.restore",
+	}
+}
+
+func requestNotificationMutatingRouteCoverage() map[string]string {
+	return map[string]string{
+		"PUT /request-notifications/settings":                           "audited: request_notification.settings_update",
+		"PUT /request-notifications/sender":                             "audited: request_notification.sender_verify",
+		"POST /request-notifications/sender:verify":                     "audited: request_notification.sender_verify",
+		"POST /request-notifications/webhook-targets":                   "audited: request_notification.webhook_target_create",
+		"PATCH /request-notifications/webhook-targets/{id}":             "audited: request_notification.webhook_target_update",
+		"DELETE /request-notifications/webhook-targets/{id}":            "audited: request_notification.webhook_target_delete",
+		"POST /request-notifications/webhook-targets/{id}:test":         "audited: request_notification.webhook_target_test",
+		"POST /request-notifications/preview":                           "exempt: preview-only, does not persist notification state",
+		"POST /request-notifications/publish":                           "audited: request_notification.public_update_publish",
+		"POST /request-notifications/deliveries/{id}:retry":             "audited: request_notification.delivery_retry",
+		"POST /request-notifications/subscribers/{contact_id}:suppress": "audited: request_notification.suppress_contact",
+		"POST /request-notifications/provider-events:suppress":          "audited: request_notification.bounce, request_notification.complaint, or request_notification.suppress_contact",
 	}
 }

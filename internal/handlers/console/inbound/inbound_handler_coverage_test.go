@@ -160,6 +160,20 @@ func covHandler(repo inbound.SourceStore, audit auditRecorder) *Handler {
 	})
 }
 
+func TestListReturnsInternalErrorWhenPoolMissing(t *testing.T) {
+	t.Parallel()
+	h := ptrext.Of(Handler{})
+
+	_, err := h.List(covDirectCtx("tenant-1"), ptrext.Of(attunev1.ListInboundSourcesRequest{}))
+
+	require.Error(t, err)
+	var derr *dispatcher.Error
+	require.ErrorAs(t, err, &derr)
+	require.Equal(t, http.StatusInternalServerError, derr.Status)
+	require.Equal(t, attunev1.ErrorCode_INTERNAL, derr.Code)
+	require.Equal(t, "failed to list inbound sources", derr.Message)
+}
+
 // ====================== encryptEmailConfig =================================
 
 func TestEncryptEmailConfig_HappyPath(t *testing.T) {

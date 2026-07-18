@@ -440,6 +440,151 @@ func TestSubmitRejectsAdversarialInputWithoutStartingTx(t *testing.T) {
 	}
 }
 
+func TestNormalizeCustomFieldsTextAndOptionalValues(t *testing.T) {
+	t.Parallel()
+
+	got, err := normalizeCustomFields(
+		[]publicvisibilityrepo.PortalSubmissionField{
+			{
+				Key:      "summary",
+				Kind:     publicvisibilityrepo.PortalSubmissionFieldKindText,
+				Required: true,
+			},
+			{
+				Key:  "notes",
+				Kind: publicvisibilityrepo.PortalSubmissionFieldKindTextarea,
+			},
+		},
+		map[string]any{
+			"summary": "  hello portal  ",
+			"notes":   "   ",
+		},
+	)
+	if err != nil {
+		t.Fatalf("normalizeCustomFields() error = %v", err)
+	}
+	if got, want := got, map[string]any{"summary": "hello portal"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeCustomFields() = %#v, want %#v", got, want)
+	}
+}
+
+func TestNormalizeCustomFieldValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		field publicvisibilityrepo.PortalSubmissionField
+		name  string
+		value any
+	}{
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind:     publicvisibilityrepo.PortalSubmissionFieldKindText,
+				Required: true,
+			},
+			name:  "required text blank",
+			value: "   ",
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind: publicvisibilityrepo.PortalSubmissionFieldKindText,
+			},
+			name:  "text non string",
+			value: 123,
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind:     publicvisibilityrepo.PortalSubmissionFieldKindSelect,
+				Options:  []string{"low", "high"},
+				Required: true,
+			},
+			name:  "required select blank",
+			value: " ",
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind:    publicvisibilityrepo.PortalSubmissionFieldKindSelect,
+				Options: []string{"low", "high"},
+			},
+			name:  "select outside options",
+			value: "medium",
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind:     publicvisibilityrepo.PortalSubmissionFieldKindMultiSelect,
+				Options:  []string{"ui", "api"},
+				Required: true,
+			},
+			name:  "required multiselect empty",
+			value: []string{},
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind:    publicvisibilityrepo.PortalSubmissionFieldKindMultiSelect,
+				Options: []string{"ui", "api"},
+			},
+			name:  "multiselect outside options",
+			value: []any{"ui", "docs"},
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind: publicvisibilityrepo.PortalSubmissionFieldKindMultiSelect,
+			},
+			name:  "multiselect blank item",
+			value: []any{"ui", " "},
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind: publicvisibilityrepo.PortalSubmissionFieldKindBoolean,
+			},
+			name:  "boolean non bool",
+			value: "true",
+		},
+		{
+			field: publicvisibilityrepo.PortalSubmissionField{
+				Kind: publicvisibilityrepo.PortalSubmissionFieldKind("unsupported"),
+			},
+			name:  "unknown kind",
+			value: "value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := normalizeCustomFieldValue(tt.field, tt.value)
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizeCustomFieldValue() error = %v, want %v", err, ErrValidation)
+			}
+		})
+	}
+}
+
+func TestNormalizeStringArrayVariants(t *testing.T) {
+	t.Parallel()
+
+	fromStrings, err := normalizeStringArray([]string{" ui ", "api"})
+	if err != nil {
+		t.Fatalf("normalizeStringArray([]string) error = %v", err)
+	}
+	if got, want := fromStrings, []string{"ui", "api"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeStringArray([]string) = %#v, want %#v", got, want)
+	}
+
+	fromAny, err := normalizeStringArray([]any{" support "})
+	if err != nil {
+		t.Fatalf("normalizeStringArray([]any) error = %v", err)
+	}
+	if got, want := fromAny, []string{"support"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalizeStringArray([]any) = %#v, want %#v", got, want)
+	}
+
+	_, err = normalizeStringArray("ui")
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeStringArray(string) error = %v, want %v", err, ErrValidation)
+	}
+}
+
 func TestSubmitPreservesAdversarialPortalTextForRendering(t *testing.T) {
 	t.Parallel()
 

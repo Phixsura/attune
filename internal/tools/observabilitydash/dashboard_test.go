@@ -38,6 +38,50 @@ func TestCommittedDashboardsMatchGeneratedOutput(t *testing.T) {
 	}
 }
 
+func TestWriteAllWritesGeneratedArtifactsInWorkingDirectory(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+	rendered, err := renderAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := sortedNames(rendered)
+	if len(names) == 0 {
+		t.Fatal("renderAll returned no dashboards")
+	}
+
+	stalePath := filepath.Join(observabilityDir, "stale-dashboard.json")
+	if err := os.MkdirAll(filepath.Dir(stalePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stalePath, []byte(`{"stale":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, path := range []string{
+		filepath.Join(observabilityDir, names[0]),
+		filepath.Join(helmDir, names[0]),
+		reliabilityCatalogTSPath,
+		reliabilitySloRulesPath,
+		reliabilitySloHelmRulesPath,
+		openSLOBundlePath,
+		reliabilityReplayReportTemplatePath,
+		replayWorksheetTSPath,
+		reliabilityPolicyReferencePath,
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("generated artifact %s missing: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(stalePath); !os.IsNotExist(err) {
+		t.Fatalf("stale dashboard stat error = %v, want not exist", err)
+	}
+}
+
 func TestMetricsReferenceDocumentsRegisteredMetrics(t *testing.T) {
 	readme := string(readFile(t, filepath.Join(repoRoot(t), "observability", "README.md")))
 	for _, name := range registeredMetricNames() {

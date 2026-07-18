@@ -119,6 +119,54 @@ describe('ClassificationSettingsPage', () => {
     )
   }
 
+  it('shows a retryable empty-data state when the config payload is missing', async () => {
+    let calls = 0
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () => {
+        calls += 1
+        if (calls === 1) return HttpResponse.json({})
+        return HttpResponse.json({
+          config: {
+            promptTemplate: 'Prompt',
+            defaultPromptTemplate: 'Prompt',
+            dimensions: [],
+          },
+        })
+      }),
+      http.get('/fb/v1/console/eval/suggestions', () =>
+        HttpResponse.json({ suggestions: [], coverage: [] }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<ClassificationSettingsPage />)
+
+    const retry = await screen.findByRole('button', { name: '重试' })
+    await user.click(retry)
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'AI 分类设置' })).toBeInTheDocument(),
+    )
+    expect(calls).toBe(2)
+  })
+
+  it('keeps the preview editor available when preview generation fails', async () => {
+    seedConfig()
+    server.use(
+      http.post('/fb/v1/console/enrich-config/preview', () =>
+        HttpResponse.json({ message: 'preview failed' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<ClassificationSettingsPage />)
+
+    const sample = await screen.findByLabelText('样例反馈')
+    await user.type(sample, 'The billing export is broken')
+    await user.click(screen.getByRole('button', { name: '生成预览' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '生成预览' })).toBeEnabled())
+    expect(sample).toHaveValue('The billing export is broken')
+  })
+
   it('strips client-only identity fields from the saved dimensions (#90 G7)', async () => {
     const captured: { body: { dimensions?: unknown[] } | null } = { body: null }
     seedConfig((b) => {
@@ -485,6 +533,21 @@ describe('ClassificationSettingsPage', () => {
       vi.useRealTimers()
     })
 
+    it('discard confirmation can be cancelled without losing edits', async () => {
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+      const textarea = await screen.findByLabelText('提示词模板')
+      await waitFor(() => expect(textarea).toBeEnabled())
+      await user.clear(textarea)
+      await user.type(textarea, 'dirty edit')
+      await user.click(screen.getByRole('button', { name: '放弃更改' }))
+      const dialog = await screen.findByRole('alertdialog')
+      await user.click(within(dialog).getByRole('button', { name: '继续编辑' }))
+
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+      expect(textarea).toHaveValue('dirty edit')
+    })
+
     it('shows recovery banner when draft exists on mount', async () => {
       localStorage.setItem(
         'attune:draft:classification-settings',
@@ -521,6 +584,29 @@ describe('ClassificationSettingsPage', () => {
       })
       const textarea = await screen.findByLabelText('提示词模板')
       expect(textarea).toHaveValue('Prompt')
+    })
+
+    it('recovery banner keep action dismisses the banner and preserves recovered draft', async () => {
+      localStorage.setItem(
+        'attune:draft:classification-settings',
+        JSON.stringify({
+          _v: 1,
+          _ts: Date.now() - 60_000,
+          data: { prompt: 'Recovered', rows: [] },
+        }),
+      )
+      seedConfig()
+      const { user } = renderWithProviders(<ClassificationSettingsPage />)
+
+      await waitFor(() => {
+        expect(screen.getByText('检测到未保存的草稿')).toBeInTheDocument()
+      })
+      await user.click(screen.getByRole('button', { name: '保留草稿' }))
+
+      await waitFor(() => {
+        expect(screen.queryByText('检测到未保存的草稿')).not.toBeInTheDocument()
+      })
+      expect(await screen.findByLabelText('提示词模板')).toHaveValue('Recovered')
     })
 
     it('shows SaveStatus unsaved indicator when dirty', async () => {

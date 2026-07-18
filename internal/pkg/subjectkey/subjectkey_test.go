@@ -13,9 +13,12 @@ func TestNormalize(t *testing.T) {
 		wantDisplay string
 	}{
 		{name: "prefers source user", sourceUser: "alice@example.com", legacyID: "ext_1:bob@example.com", wantKey: "alice@example.com", wantDisplay: "alice@example.com"},
+		{name: "trims source user", sourceUser: " alice@example.com ", legacyID: "ext_1:bob@example.com", wantKey: "alice@example.com", wantDisplay: "alice@example.com"},
 		{name: "parses legacy composed id", legacyID: "ext_1:bob@example.com", wantKey: "bob@example.com", wantDisplay: "bob@example.com"},
+		{name: "trims parsed legacy composed id", legacyID: " ext_1: bob@example.com ", wantKey: "bob@example.com", wantDisplay: "bob@example.com"},
 		{name: "opaque legacy id fallback", legacyID: "legacy-user-42", wantKey: "legacy-user-42", wantDisplay: "legacy-user-42"},
 		{name: "legacy ext id without subject falls back to raw id", legacyID: "ext_1", wantKey: "ext_1", wantDisplay: "ext_1"},
+		{name: "blank identifiers return empty subject", sourceUser: " ", legacyID: " ", wantKey: "", wantDisplay: ""},
 	}
 
 	for _, tt := range tests {

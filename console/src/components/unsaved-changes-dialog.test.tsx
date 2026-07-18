@@ -27,6 +27,17 @@ describe('UnsavedChangesDialog', () => {
     expect(onCancel).toHaveBeenCalledOnce()
   })
 
+  it('calls onCancelLeave when the dialog requests close', async () => {
+    const onCancel = vi.fn()
+    const { user } = renderWithProviders(
+      <UnsavedChangesDialog open={true} onConfirmLeave={vi.fn()} onCancelLeave={onCancel} />,
+    )
+
+    await user.keyboard('{Escape}')
+
+    expect(onCancel).toHaveBeenCalledOnce()
+  })
+
   it('calls onConfirmLeave when leave button is clicked', async () => {
     const onConfirm = vi.fn()
     const { user } = renderWithProviders(

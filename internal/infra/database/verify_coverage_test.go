@@ -2,7 +2,10 @@
 package database
 
 import (
+	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -134,6 +137,34 @@ func TestErrManifestReorder_FieldAccess(t *testing.T) {
 	err := ErrManifestReorder{Stored: "abc", Computed: "def"}
 	require.Equal(t, "abc", err.Stored)
 	require.Equal(t, "def", err.Computed)
+}
+
+func TestVerifyWrappersReturnAcquireErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	pool := newUnreachableMigrationPool(t)
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "VerifyChecksums", call: func() error { return VerifyChecksums(ctx, pool) }},
+		{name: "GetChecksumStatus", call: func() error {
+			_, err := GetChecksumStatus(ctx, pool)
+			return err
+		}},
+		{name: "VerifyManifestHash", call: func() error { return VerifyManifestHash(ctx, pool) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := tc.call()
+			if err == nil || !strings.Contains(err.Error(), "acquire connection") {
+				t.Fatalf("%s() error = %v, want acquire connection", tc.name, err)
+			}
+		})
+	}
 }
 
 func TestChecksumShort_BoundaryCases(t *testing.T) {

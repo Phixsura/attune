@@ -23,9 +23,11 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	rnrepo "github.com/Phixsura/attune/internal/repo/requestnotification"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
+	rnsvc "github.com/Phixsura/attune/internal/service/requestnotification"
 )
 
 func TestPublicRequestToProtoStripsPolicyHiddenFields(t *testing.T) {
@@ -336,6 +338,170 @@ func TestNoStoreMiddlewareSetsCacheHeader(t *testing.T) {
 	}
 	if got := rec.Header().Get("Cache-Control"); got != publicRequestCacheControl {
 		t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
+	}
+}
+
+func TestPublicNotificationSubscribeEndpoint(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	notifications := ptrext.Of(fakeNotificationService{
+		subscription: rnrepo.Subscription{
+			ID:        uuid.MustParse("22222222-2222-2222-2222-222222222222"),
+			RequestID: requestID,
+			Scope:     "request",
+			Status:    "active",
+		},
+	})
+	handler := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	handler.SetNotificationService(notifications)
+
+	rec := httptest.NewRecorder()
+	req := requestWithPortalSlug(
+		http.MethodPost,
+		"/v1/portal/acme/requests/pricing-api/subscribe",
+		"acme",
+		"pricing-api",
+		strings.NewReader(`{"email":"jane@example.test","notifyMe":true,"notificationConsentTextVersion":"v1","displayName":"Jane","organization":"Acme","locale":"en-US","timezone":"UTC"}`),
+	)
+	bindSubscribeNotificationForTest(handler)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex" {
+		t.Fatalf("X-Robots-Tag = %q, want noindex", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != publicRequestCacheControl {
+		t.Fatalf("Cache-Control = %q, want %q", got, publicRequestCacheControl)
+	}
+	if notifications.subscribeInput.TenantSlug != "acme" ||
+		notifications.subscribeInput.PublicSlug != "pricing-api" ||
+		notifications.subscribeInput.Source != "follower" ||
+		notifications.subscribeInput.CreatedBy != "portal" {
+		t.Fatalf("subscribe input = %+v, want portal follower source", notifications.subscribeInput)
+	}
+	if !strings.Contains(rec.Body.String(), requestID.String()) {
+		t.Fatalf("body=%s, want request id", rec.Body.String())
+	}
+}
+
+func TestPublicNotificationUnsubscribeEndpointAcceptsQueryToken(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	notifications := ptrext.Of(fakeNotificationService{
+		subscription: rnrepo.Subscription{
+			ID:        uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+			RequestID: requestID,
+			Scope:     "request",
+			Status:    "unsubscribed",
+		},
+	})
+	handler := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	handler.SetNotificationService(notifications)
+
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodPost, "/v1/portal/acme/unsubscribe?token=token-query", "acme", nil)
+	req.Header.Set("User-Agent", "mailbox-provider/1.0")
+	bindUnsubscribeNotificationForTest(handler)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if notifications.unsubscribeTenant != "acme" ||
+		notifications.unsubscribeToken != "token-query" ||
+		notifications.unsubscribeUserAgent != "mailbox-provider/1.0" {
+		t.Fatalf("unsubscribe = tenant:%q token:%q ua:%q", notifications.unsubscribeTenant, notifications.unsubscribeToken, notifications.unsubscribeUserAgent)
+	}
+	if got := rec.Header().Get("X-Robots-Tag"); got != "noindex" {
+		t.Fatalf("X-Robots-Tag = %q, want noindex", got)
+	}
+}
+
+func TestPublicNotificationUnsubscribeEndpointAcceptsOneClickForm(t *testing.T) {
+	t.Parallel()
+
+	notifications := ptrext.Of(fakeNotificationService{
+		subscription: rnrepo.Subscription{
+			ID:        uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+			RequestID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			Scope:     rnrepo.SubscriptionScopeTenantUpdates,
+			Status:    "unsubscribed",
+		},
+	})
+	handler := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	handler.SetNotificationService(notifications)
+
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(
+		http.MethodPost,
+		"/v1/portal/acme/unsubscribe?token=tenant-token",
+		"acme",
+		strings.NewReader("List-Unsubscribe=One-Click"),
+	)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "mailbox-provider/one-click")
+	bindUnsubscribeNotificationForTest(handler)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if notifications.unsubscribeToken != "tenant-token" ||
+		notifications.unsubscribeUserAgent != "mailbox-provider/one-click" {
+		t.Fatalf("one-click unsubscribe token=%q ua=%q", notifications.unsubscribeToken, notifications.unsubscribeUserAgent)
+	}
+}
+
+func TestPublicNotificationConfirmEndpointAcceptsQueryToken(t *testing.T) {
+	t.Parallel()
+
+	verifiedAt := time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)
+	notifications := ptrext.Of(fakeNotificationService{
+		contact: rnrepo.Contact{
+			ID:              uuid.MustParse("44444444-4444-4444-4444-444444444444"),
+			EmailPayload:    []byte("jane@example.test"),
+			EmailVerifiedAt: ptrext.Of(verifiedAt),
+			ConsentState:    "opted_in",
+		},
+	})
+	handler := NewHandler(fakePublicRequestService{}, nil, testVisitorSecrets())
+	handler.SetNotificationService(notifications)
+
+	rec := httptest.NewRecorder()
+	req := requestWithTenantSlug(http.MethodPost, "/v1/portal/acme/notification-contact/confirm?token=confirm-query", "acme", nil)
+	req.Header.Set("User-Agent", "browser/1.0")
+	bindConfirmNotificationForTest(handler)(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if notifications.confirmTenant != "acme" ||
+		notifications.confirmToken != "confirm-query" ||
+		notifications.confirmUserAgent != "browser/1.0" {
+		t.Fatalf("confirm = tenant:%q token:%q ua:%q", notifications.confirmTenant, notifications.confirmToken, notifications.confirmUserAgent)
+	}
+	if !strings.Contains(rec.Body.String(), "redacted:jane@example.test") ||
+		!strings.Contains(rec.Body.String(), `"verified":true`) {
+		t.Fatalf("body=%s, want verified redacted contact", rec.Body.String())
+	}
+}
+
+func TestBindUnsubscribePublicCustomerRequestPrefersJSONToken(t *testing.T) {
+	t.Parallel()
+
+	req := requestWithTenantSlug(
+		http.MethodPost,
+		"/v1/portal/acme/unsubscribe?token=query-token",
+		"acme",
+		strings.NewReader(`{"token":"body-token"}`),
+	)
+	got := ptrext.Of(attunev1.UnsubscribePublicCustomerRequestRequest{})
+	if err := BindUnsubscribePublicCustomerRequest(req, got); err != nil {
+		t.Fatalf("BindUnsubscribePublicCustomerRequest() error = %v", err)
+	}
+	if got.GetTenantSlug() != "acme" || got.GetToken() != "body-token" {
+		t.Fatalf("bound unsubscribe = %+v, want tenant slug and body token", got)
 	}
 }
 
@@ -948,6 +1114,47 @@ func TestGetPublicSubmissionConfigReturnsPortalConfig(t *testing.T) {
 	}
 }
 
+func TestPortalSubmissionFieldToProtoMapsKindsAndCopiesOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		kind pvrepo.PortalSubmissionFieldKind
+		want attunev1.PortalSubmissionFieldKind
+	}{
+		{pvrepo.PortalSubmissionFieldKindText, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_TEXT},
+		{pvrepo.PortalSubmissionFieldKindTextarea, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_TEXTAREA},
+		{pvrepo.PortalSubmissionFieldKindSelect, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_SELECT},
+		{pvrepo.PortalSubmissionFieldKindMultiSelect, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_MULTISELECT},
+		{pvrepo.PortalSubmissionFieldKindBoolean, attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_BOOLEAN},
+		{pvrepo.PortalSubmissionFieldKind("unknown"), attunev1.PortalSubmissionFieldKind_PORTAL_SUBMISSION_FIELD_KIND_UNSPECIFIED},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			options := []string{"low", "high"}
+			got := portalSubmissionFieldToProto(pvrepo.PortalSubmissionField{
+				Key:         "severity",
+				Label:       "Severity",
+				Kind:        tt.kind,
+				Required:    true,
+				Options:     options,
+				Placeholder: "Pick one",
+			})
+			options[0] = "mutated"
+
+			if got.GetKind() != tt.want {
+				t.Fatalf("kind = %v, want %v", got.GetKind(), tt.want)
+			}
+			if got.GetKey() != "severity" || got.GetLabel() != "Severity" || !got.GetRequired() || got.GetPlaceholder() != "Pick one" {
+				t.Fatalf("field = %#v, want mapped metadata", got)
+			}
+			if len(got.GetOptions()) != 2 || got.GetOptions()[0] != "low" || got.GetOptions()[1] != "high" {
+				t.Fatalf("options = %v, want copied low/high options", got.GetOptions())
+			}
+		})
+	}
+}
+
 func TestCreatePublicSubmissionMapsRequestAndResponse(t *testing.T) {
 	t.Parallel()
 
@@ -1031,6 +1238,46 @@ func TestCreatePublicSubmissionMapsRequestAndResponse(t *testing.T) {
 	}
 }
 
+func TestBindVotePublicCustomerRequest(t *testing.T) {
+	t.Parallel()
+
+	body, err := protojson.Marshal(ptrext.Of(attunev1.VotePublicCustomerRequest{
+		TenantSlug:                     "body-tenant",
+		PublicSlug:                     "body-slug",
+		Email:                          ptrext.Of("jane@example.test"),
+		NotifyMe:                       true,
+		NotificationConsentTextVersion: "v1",
+		DisplayName:                    "Jane",
+		Organization:                   "Acme",
+		Locale:                         "en-US",
+		Timezone:                       "UTC",
+	}))
+	if err != nil {
+		t.Fatalf("marshal vote request: %v", err)
+	}
+	req := requestWithPortalSlug(http.MethodPost, "/v1/portal/acme/requests/pricing-api/votes", "acme", "pricing-api", bytes.NewReader(body))
+	got := ptrext.Of(attunev1.VotePublicCustomerRequest{})
+
+	if err := BindVotePublicCustomerRequest(req, got); err != nil {
+		t.Fatalf("BindVotePublicCustomerRequest() error = %v", err)
+	}
+	if got.GetTenantSlug() != "acme" || got.GetPublicSlug() != "pricing-api" {
+		t.Fatalf("bound route params = (%q, %q), want route tenant/public slugs", got.GetTenantSlug(), got.GetPublicSlug())
+	}
+	if got.GetEmail() != "jane@example.test" || !got.GetNotifyMe() || got.GetNotificationConsentTextVersion() != "v1" {
+		t.Fatalf("bound notification fields = %#v, want vote notification body", got)
+	}
+
+	emptyBodyReq := requestWithPortalSlug(http.MethodPost, "/v1/portal/acme/requests/pricing-api/votes", "acme", "pricing-api", strings.NewReader("  "))
+	emptyBody := ptrext.Of(attunev1.VotePublicCustomerRequest{})
+	if err := BindVotePublicCustomerRequest(emptyBodyReq, emptyBody); err != nil {
+		t.Fatalf("BindVotePublicCustomerRequest(empty body) error = %v", err)
+	}
+	if emptyBody.GetTenantSlug() != "acme" || emptyBody.GetPublicSlug() != "pricing-api" {
+		t.Fatalf("empty body route params = (%q, %q)", emptyBody.GetTenantSlug(), emptyBody.GetPublicSlug())
+	}
+}
+
 func TestCreatePublicSubmissionMapsErrors(t *testing.T) {
 	t.Parallel()
 
@@ -1088,6 +1335,98 @@ func TestCreatePublicSubmissionMapsErrors(t *testing.T) {
 	}
 }
 
+func TestPortalVoteErrorMapsExpectedFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		code    attunev1.ErrorCode
+		message string
+	}{
+		{name: "service not found", err: pvsvc.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "repo not found", err: pvrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "validation", err: pvsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_BAD_REQUEST, message: "invalid public request vote"},
+		{name: "disabled", err: pvsvc.ErrDisabled, status: http.StatusForbidden, code: attunev1.ErrorCode_FORBIDDEN, message: "public votes are disabled"},
+		{name: "default", err: errors.New("storage failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL, message: "public request vote failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := portalVoteError[*attunev1.PublicCustomerRequestDetail](tt.err)
+			assertDispatcherError(t, err, tt.status, tt.code, tt.message)
+		})
+	}
+}
+
+func TestPortalCommentErrorMapsExpectedFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		code    attunev1.ErrorCode
+		message string
+	}{
+		{name: "service not found", err: pvsvc.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "repo not found", err: pvrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "public request not found"},
+		{name: "validation", err: pvsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_BAD_REQUEST, message: "invalid public request comment"},
+		{name: "disabled", err: pvsvc.ErrDisabled, status: http.StatusForbidden, code: attunev1.ErrorCode_FORBIDDEN, message: "public comments are disabled"},
+		{name: "default", err: errors.New("storage failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL, message: "public request comment failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := portalCommentError[*attunev1.PublicCustomerRequestDetail](tt.err)
+			assertDispatcherError(t, err, tt.status, tt.code, tt.message)
+		})
+	}
+}
+
+func TestPortalNotificationErrorMapsExpectedFailures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		err     error
+		status  int
+		code    attunev1.ErrorCode
+		message string
+	}{
+		{name: "service not found", err: rnsvc.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "request notification not found"},
+		{name: "repo not found", err: rnrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND, message: "request notification not found"},
+		{name: "service validation", err: rnsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_VALIDATION, message: "invalid request notification"},
+		{name: "repo validation", err: rnrepo.ErrInvalidInput, status: http.StatusBadRequest, code: attunev1.ErrorCode_VALIDATION, message: "invalid request notification"},
+		{name: "disabled", err: rnsvc.ErrDisabled, status: http.StatusForbidden, code: attunev1.ErrorCode_FORBIDDEN, message: "request notifications are disabled"},
+		{name: "default", err: errors.New("storage failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL, message: "request notification failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := portalNotificationError[*attunev1.PublicNotificationContact](tt.err)
+			assertDispatcherError(t, err, tt.status, tt.code, tt.message)
+		})
+	}
+}
+
+func assertDispatcherError(t *testing.T, err error, status int, code attunev1.ErrorCode, message string) {
+	t.Helper()
+
+	var dispatchErr *dispatcher.Error
+	if !errors.As(err, &dispatchErr) {
+		t.Fatalf("error = %T(%v), want *dispatcher.Error", err, err)
+	}
+	if dispatchErr.Status != status || dispatchErr.Code != code || dispatchErr.Message != message {
+		t.Fatalf("dispatcher error = (%d, %s, %q), want (%d, %s, %q)",
+			dispatchErr.Status, dispatchErr.Code, dispatchErr.Message, status, code, message)
+	}
+}
+
 func TestBindCreatePublicSubmissionRequest(t *testing.T) {
 	t.Parallel()
 
@@ -1127,6 +1466,94 @@ func TestBindCreatePublicSubmissionRequest(t *testing.T) {
 	if err := BindCreatePublicSubmissionRequest(tooLarge, ptrext.Of(attunev1.CreatePublicSubmissionRequest{})); err == nil {
 		t.Fatal("BindCreatePublicSubmissionRequest() error = nil, want body too large")
 	}
+}
+
+func bindSubscribeNotificationForTest(handler *Handler) http.HandlerFunc {
+	return dispatcher.Bind(
+		"portal.Handler.SubscribePublicCustomerRequest",
+		dispatcher.Custom(
+			func() *attunev1.SubscribePublicCustomerRequestRequest {
+				return ptrext.Of(attunev1.SubscribePublicCustomerRequestRequest{})
+			},
+			BindSubscribePublicCustomerRequest,
+		),
+		handler.SubscribePublicCustomerRequest,
+		dispatcher.WithAuth(func(*http.Request, *attunev1.SubscribePublicCustomerRequestRequest) (struct{}, error) {
+			return struct{}{}, nil
+		}),
+	)
+}
+
+func bindUnsubscribeNotificationForTest(handler *Handler) http.HandlerFunc {
+	return dispatcher.Bind(
+		"portal.Handler.UnsubscribePublicCustomerRequest",
+		dispatcher.Custom(
+			func() *attunev1.UnsubscribePublicCustomerRequestRequest {
+				return ptrext.Of(attunev1.UnsubscribePublicCustomerRequestRequest{})
+			},
+			BindUnsubscribePublicCustomerRequest,
+		),
+		handler.UnsubscribePublicCustomerRequest,
+		dispatcher.WithAuth(func(*http.Request, *attunev1.UnsubscribePublicCustomerRequestRequest) (struct{}, error) {
+			return struct{}{}, nil
+		}),
+	)
+}
+
+func bindConfirmNotificationForTest(handler *Handler) http.HandlerFunc {
+	return dispatcher.Bind(
+		"portal.Handler.ConfirmPublicNotificationContact",
+		dispatcher.Custom(
+			func() *attunev1.ConfirmPublicNotificationContactRequest {
+				return ptrext.Of(attunev1.ConfirmPublicNotificationContactRequest{})
+			},
+			BindConfirmPublicNotificationContact,
+		),
+		handler.ConfirmPublicNotificationContact,
+		dispatcher.WithAuth(func(*http.Request, *attunev1.ConfirmPublicNotificationContactRequest) (struct{}, error) {
+			return struct{}{}, nil
+		}),
+	)
+}
+
+type fakeNotificationService struct {
+	subscription rnrepo.Subscription
+	contact      rnrepo.Contact
+
+	subscribeInput       rnsvc.SubscribeInput
+	unsubscribeTenant    string
+	unsubscribeToken     string
+	unsubscribeUserAgent string
+	confirmTenant        string
+	confirmToken         string
+	confirmUserAgent     string
+	err                  error
+}
+
+func (f *fakeNotificationService) SubscribePublicRequest(_ context.Context, in rnsvc.SubscribeInput) (rnrepo.Subscription, error) {
+	f.subscribeInput = in
+	return f.subscription, f.err
+}
+
+func (f *fakeNotificationService) Unsubscribe(_ context.Context, tenantSlug string, token string, userAgent string) (rnrepo.Subscription, error) {
+	f.unsubscribeTenant = tenantSlug
+	f.unsubscribeToken = token
+	f.unsubscribeUserAgent = userAgent
+	return f.subscription, f.err
+}
+
+func (f *fakeNotificationService) ConfirmContact(_ context.Context, tenantSlug string, token string, userAgent string) (rnrepo.Contact, error) {
+	f.confirmTenant = tenantSlug
+	f.confirmToken = token
+	f.confirmUserAgent = userAgent
+	return f.contact, f.err
+}
+
+func (f *fakeNotificationService) RedactedEmailPayload(payload []byte) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	return "redacted:" + string(payload)
 }
 
 type fakePublicRequestService struct {

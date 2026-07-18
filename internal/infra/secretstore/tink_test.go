@@ -4,9 +4,12 @@ package secretstore
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"testing"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestTinkStoreRoundTrip(t *testing.T) {
@@ -524,6 +527,181 @@ func TestMetadataFromKeysetNil(t *testing.T) {
 	}
 }
 
+func TestMetadataFromKeysetBuildsSafeMetadata(t *testing.T) {
+	t.Parallel()
+
+	rec := newAESGCMKeyRecord(12345, bytes.Repeat([]byte{0x33}, aesGCMKeySize))
+	doc := ptrext.Of(keysetDocument{PrimaryKeyID: rec.KeyID, Key: []keyRecord{rec}})
+
+	got := metadataFromKeyset(doc)
+	if len(got) != 1 {
+		t.Fatalf("metadata length = %d, want 1", len(got))
+	}
+	if got[0].KeyID != "12345" || !got[0].Primary || got[0].FingerprintSHA256 == "" {
+		t.Fatalf("metadata = %+v", got[0])
+	}
+}
+
+func TestBuildKeyRejectsUnsupportedRecords(t *testing.T) {
+	t.Parallel()
+
+	base := newAESGCMKeyRecord(12345, bytes.Repeat([]byte{0x44}, aesGCMKeySize))
+	for _, tc := range []struct {
+		name string
+		rec  keyRecord
+	}{
+		{name: "output prefix", rec: func() keyRecord {
+			rec := base
+			rec.OutputPrefixType = "RAW"
+			return rec
+		}()},
+		{name: "status", rec: func() keyRecord {
+			rec := base
+			rec.Status = "DISABLED"
+			return rec
+		}()},
+		{name: "type url", rec: func() keyRecord {
+			rec := base
+			rec.KeyData.TypeURL = "type.example/Other"
+			return rec
+		}()},
+		{name: "material", rec: func() keyRecord {
+			rec := base
+			rec.KeyData.KeyMaterialType = "ASYMMETRIC_PRIVATE"
+			return rec
+		}()},
+		{name: "base64", rec: func() keyRecord {
+			rec := base
+			rec.KeyData.Value = "not base64"
+			return rec
+		}()},
+		{name: "key proto", rec: func() keyRecord {
+			rec := base
+			rec.KeyData.Value = base64.StdEncoding.EncodeToString([]byte{0x08, 0x00, 0x12, 0x01, 0x01})
+			return rec
+		}()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := buildKey(tc.rec); err == nil {
+				t.Fatal("expected buildKey error")
+			}
+		})
+	}
+}
+
+func TestDecodeAesGCMKeyParsesUnknownFields(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		unknown []byte
+	}{
+		{name: "varint", unknown: []byte{0x18, 0x01}},
+		{name: "fixed64", unknown: append([]byte{0x19}, bytes.Repeat([]byte{0x01}, 8)...)},
+		{name: "bytes", unknown: []byte{0x1a, 0x02, 0xaa, 0xbb}},
+		{name: "fixed32", unknown: append([]byte{0x1d}, bytes.Repeat([]byte{0x02}, 4)...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			key, err := decodeAesGCMKey(serializedAESGCMKeyWithUnknown(tc.unknown))
+			if err != nil {
+				t.Fatalf("decodeAesGCMKey returned error: %v", err)
+			}
+			if len(key) != aesGCMKeySize {
+				t.Fatalf("key length = %d, want %d", len(key), aesGCMKeySize)
+			}
+		})
+	}
+}
+
+func TestDecodeAesGCMKeyRejectsMalformedProto(t *testing.T) {
+	t.Parallel()
+
+	shortKey := bytes.Repeat([]byte{0x11}, aesGCMKeySize-1)
+	tooLongLength := append([]byte{0x08, 0x00, 0x12, byte(aesGCMKeySize + 1)}, bytes.Repeat([]byte{0x22}, aesGCMKeySize)...)
+	tests := [][]byte{
+		{0x80},
+		{0x09},
+		{0x08, 0x80},
+		append([]byte{0x08, 0x01, 0x12, byte(aesGCMKeySize)}, bytes.Repeat([]byte{0x22}, aesGCMKeySize)...),
+		{0x08, 0x00, 0x10},
+		{0x08, 0x00, 0x12, 0x80},
+		tooLongLength,
+		append([]byte{0x08, 0x00, 0x12, byte(len(shortKey))}, shortKey...),
+		append([]byte{0x12, byte(aesGCMKeySize)}, bytes.Repeat([]byte{0x22}, aesGCMKeySize)...),
+		{0x08, 0x00, 0x1b},
+	}
+	for _, serialized := range tests {
+		serialized := serialized
+		t.Run(hex.EncodeToString(serialized[:min(len(serialized), 4)]), func(t *testing.T) {
+			t.Parallel()
+			if _, err := decodeAesGCMKey(serialized); err == nil {
+				t.Fatalf("decodeAesGCMKey(%x) error = nil, want error", serialized)
+			}
+		})
+	}
+}
+
+func TestSkipProtoFieldBounds(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name    string
+		data    []byte
+		wire    int
+		wantIdx int
+		wantErr bool
+	}{
+		{name: "varint", data: []byte{0x96, 0x01}, wire: 0, wantIdx: 2},
+		{name: "fixed64", data: bytes.Repeat([]byte{0x01}, 8), wire: 1, wantIdx: 8},
+		{name: "bytes", data: []byte{0x03, 'a', 'b', 'c'}, wire: 2, wantIdx: 4},
+		{name: "fixed32", data: bytes.Repeat([]byte{0x02}, 4), wire: 5, wantIdx: 4},
+		{name: "bad varint", data: []byte{0x80}, wire: 0, wantErr: true},
+		{name: "bad fixed64", data: []byte{0x01}, wire: 1, wantErr: true},
+		{name: "bad length", data: []byte{0x80}, wire: 2, wantErr: true},
+		{name: "bad bytes", data: []byte{0x05, 'a'}, wire: 2, wantErr: true},
+		{name: "bad fixed32", data: []byte{0x01}, wire: 5, wantErr: true},
+		{name: "unsupported", data: nil, wire: 7, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			idx, err := skipProtoField(tc.data, 0, tc.wire)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("skipProtoField returned error: %v", err)
+			}
+			if idx != tc.wantIdx {
+				t.Fatalf("idx = %d, want %d", idx, tc.wantIdx)
+			}
+		})
+	}
+}
+
+func TestDecodeKeyValueMustAndNumericMappings(t *testing.T) {
+	t.Parallel()
+
+	rec := newAESGCMKeyRecord(99, bytes.Repeat([]byte{0x55}, aesGCMKeySize))
+	decoded := decodeKeyValueMust(" " + rec.KeyData.Value + " ")
+	if len(decoded) == 0 {
+		t.Fatal("expected decoded key value")
+	}
+	if bad := decodeKeyValueMust("not base64"); len(bad) != 0 {
+		t.Fatalf("invalid base64 decoded to %x, want empty bytes", bad)
+	}
+	if statusToNumeric(aesGCMEnabledStatus) != 1 || statusToNumeric("DISABLED") != 0 {
+		t.Fatal("unexpected status numeric mapping")
+	}
+	if outputPrefixToNumeric(aesGCMOutputPrefix) != 1 || outputPrefixToNumeric("RAW") != 0 {
+		t.Fatal("unexpected output prefix numeric mapping")
+	}
+}
+
 func TestTinkStoreRejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -611,4 +789,13 @@ func assertKeysetState(t *testing.T, raw, wantPrimary string, wantKeys int) {
 	if got := len(store.Keys()); got != wantKeys {
 		t.Fatalf("len(keys) = %d; want %d", got, wantKeys)
 	}
+}
+
+func serializedAESGCMKeyWithUnknown(unknown []byte) []byte {
+	serialized := []byte{0x08, 0x00}
+	serialized = append(serialized, unknown...)
+	serialized = append(serialized, 0x12)
+	serialized = appendUint64(serialized, aesGCMKeySize)
+	serialized = append(serialized, bytes.Repeat([]byte{0x7a}, aesGCMKeySize)...)
+	return serialized
 }

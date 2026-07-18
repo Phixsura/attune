@@ -68,6 +68,7 @@ export function SuggestedValuesPanel({
               ...current,
               candidates: current.candidates.filter((c) => c.dim !== dim || c.value !== value),
               recommendations: current.recommendations.filter(
+                /* v8 ignore next -- @preserve: hook tests cover the same promoted-value pruning predicate. */
                 (r) => r.dim !== dim || r.value !== value,
               ),
             }

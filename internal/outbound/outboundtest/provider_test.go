@@ -7,10 +7,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Phixsura/attune/internal/outbound"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestFakeProviderRecordsRequestsAndRepeatsFinalResponse(t *testing.T) {
@@ -72,6 +74,26 @@ func TestFakeProviderURL(t *testing.T) {
 	}
 	if !strings.HasSuffix(provider.URL("/absolute"), "/absolute") {
 		t.Fatalf("absolute URL = %q, want /absolute suffix", provider.URL("/absolute"))
+	}
+}
+
+func TestFakeProviderClientAndFailureSnapshot(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+	provider := ptrext.Of(FakeProvider{server: server})
+
+	if provider.Client() == nil {
+		t.Fatal("Client() returned nil")
+	}
+
+	provider.recordFailure("bad %s", "shape")
+	failures := provider.Failures()
+	if len(failures) != 1 || failures[0] != "bad shape" {
+		t.Fatalf("Failures() = %#v, want bad shape", failures)
+	}
+	failures[0] = "mutated"
+	if provider.Failures()[0] != "bad shape" {
+		t.Fatal("Failures() must return a defensive copy")
 	}
 }
 

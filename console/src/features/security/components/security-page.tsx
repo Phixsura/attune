@@ -452,6 +452,13 @@ export function SecurityPage() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              aria-label={t(
+                                'security.token.revoke_aria',
+                                'Revoke token {{email}}',
+                                {
+                                  email: token.admin_email,
+                                },
+                              )}
                               onClick={() => revokeMutation.mutate(token.id)}
                               disabled={revokeMutation.isPending}
                             >

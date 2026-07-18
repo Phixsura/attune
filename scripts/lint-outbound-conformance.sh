@@ -27,8 +27,8 @@ while IFS= read -r dir; do
     status=1
   fi
 
-  if ! grep -Eq 'outboundtest\.Test(Event|Digest)Channel' "$conf"; then
-    echo "ERROR $conf: must call outboundtest.TestEventChannel or TestDigestChannel" >&2
+  if ! grep -Eq 'outboundtest\.Test(Event|Digest|Notification)Channel' "$conf"; then
+    echo "ERROR $conf: must call outboundtest.TestEventChannel, TestDigestChannel, or TestNotificationChannel" >&2
     status=1
   fi
 

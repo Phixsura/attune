@@ -2,6 +2,7 @@ package httpretry
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -70,4 +71,89 @@ func TestDo_MaxRetriesExceeded(t *testing.T) {
 
 	require.Error(t, err)
 	require.EqualError(t, err, "max retries exceeded")
+}
+
+func TestDefaultRetryable_NetworkAndNilResponse(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, DefaultRetryable(nil, errors.New("dial refused")))
+	require.False(t, DefaultRetryable(nil, nil))
+}
+
+func TestDo_ReturnsRequestBodyFactoryError(t *testing.T) {
+	t.Parallel()
+
+	bodyErr := errors.New("rewind failed")
+	req, err := http.NewRequest(http.MethodPost, "https://example.com", strings.NewReader("payload"))
+	require.NoError(t, err)
+	req.GetBody = func() (io.ReadCloser, error) {
+		return nil, bodyErr
+	}
+
+	resp, err := Do(context.Background(), http.DefaultClient, req, DefaultConfig())
+
+	require.Nil(t, resp)
+	require.ErrorIs(t, err, bodyErr)
+}
+
+func TestDo_ReturnsLastNetworkErrorAfterRetries(t *testing.T) {
+	t.Parallel()
+
+	networkErr := errors.New("temporary network failure")
+	client := ptrext.Of(http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return nil, networkErr
+		}),
+	})
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	require.NoError(t, err)
+
+	resp, err := Do(context.Background(), client, req, Config{
+		MaxRetries:    0,
+		BaseDelay:     time.Millisecond,
+		MaxDelay:      time.Millisecond,
+		Multiplier:    1,
+		RetryableFunc: DefaultRetryable,
+	})
+
+	require.Nil(t, resp)
+	require.ErrorIs(t, err, networkErr)
+}
+
+func TestDo_ClosesRetryableResponseBody(t *testing.T) {
+	t.Parallel()
+
+	body := ptrext.Of(closeTrackingBody{Reader: strings.NewReader("retry me")})
+	client := ptrext.Of(http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return ptrext.Of(http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Body:       body,
+				Header:     make(http.Header),
+			}), nil
+		}),
+	})
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	require.NoError(t, err)
+
+	_, err = Do(context.Background(), client, req, Config{
+		MaxRetries:    0,
+		BaseDelay:     time.Millisecond,
+		MaxDelay:      time.Millisecond,
+		Multiplier:    1,
+		RetryableFunc: DefaultRetryable,
+	})
+
+	require.EqualError(t, err, "max retries exceeded")
+	require.True(t, body.closed)
+}
+
+type closeTrackingBody struct {
+	*strings.Reader
+	closed bool
+}
+
+func (b *closeTrackingBody) Close() error {
+	b.closed = true
+	return nil
 }

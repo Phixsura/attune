@@ -15,8 +15,34 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRepoConstructorAndPoolMethodsReturnErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	r := newUnreachableCustomerRequestRepo(t)
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	if _, err := r.Begin(ctx); err == nil {
+		t.Fatalf("Begin() error = nil, want pool error")
+	}
+	if _, err := r.GetScoringSettings(ctx, "tenant-a"); err == nil {
+		t.Fatalf("GetScoringSettings() error = nil, want pool error")
+	}
+	if _, err := r.List(ctx, ListFilter{TenantID: "tenant-a", Limit: 1}); err == nil {
+		t.Fatalf("List() error = nil, want pool error")
+	}
+	if _, err := r.GetDetail(ctx, "tenant-a", requestID, 1); err == nil {
+		t.Fatalf("GetDetail() error = nil, want pool error")
+	}
+	if _, err := r.GetOwner(ctx, "tenant-a", requestID); err == nil {
+		t.Fatalf("GetOwner() error = nil, want pool error")
+	}
+}
 
 func TestBuildListQueryFiltersAndOrdering(t *testing.T) {
 	t.Parallel()
@@ -167,6 +193,21 @@ func TestLoadDetailScansAllCollections(t *testing.T) {
 	require.Equal(t, "CR-2", detail.Duplicates[0].DisplayID)
 	require.Len(t, detail.AccountProfiles, 2)
 	require.Equal(t, 100, db.queryArgs[0][2])
+}
+
+func TestGetDetailTxUsesTransactionQueryer(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 11, 0, 0, 0, time.UTC)
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	tx := &fakeRepoTx{rows: []fakeRepoRow{summaryRow(requestID, "tenant-a", "CR-7", uuid.Nil, nil, now, nil)}}
+
+	detail, err := (&Repo{}).GetDetailTx(ctx, tx, "tenant-a", requestID, 0)
+	require.NoError(t, err)
+	require.Equal(t, requestID, detail.Summary.ID)
+	require.Empty(t, detail.Feedback)
+	require.Equal(t, 6, tx.queryIdx)
 }
 
 func TestScanHelpersAndErrorMapping(t *testing.T) {
@@ -508,6 +549,15 @@ func TestLoadDetailAndListErrorBranches(t *testing.T) {
 	if _, err := listDuplicates(ctx, &fakeRepoDB{queries: []*fakeRepoRows{{scanErr: boom, rows: [][]any{{requestID, "CR-1", "Title", now}}}}}, "tenant-a", requestID); !errors.Is(err, boom) {
 		t.Fatalf("listDuplicates(scan error) = %v, want boom", err)
 	}
+
+	for _, cursor := range []string{"bad", "-1"} {
+		if _, err := (&Repo{}).List(ctx, ListFilter{TenantID: "tenant-a", Cursor: cursor}); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("List(cursor %q) error = %v, want ErrInvalidInput", cursor, err)
+		}
+	}
+	if sql := scoringSettingsSelectSQL(); !strings.Contains(sql, "customer_request_scoring_settings") {
+		t.Fatalf("scoringSettingsSelectSQL() = %q", sql)
+	}
 }
 
 func TestTransactionConflictAndMissingBranches(t *testing.T) {
@@ -821,6 +871,22 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+func newUnreachableCustomerRequestRepo(t *testing.T) *Repo {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
+	if err != nil {
+		t.Fatalf("pgxpool.ParseConfig() error = %v", err)
+	}
+	cfg.ConnConfig.ConnectTimeout = 25 * time.Millisecond
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("pgxpool.NewWithConfig() error = %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return New(pool)
+}
+
 type fakeRepoDB struct {
 	rows      []fakeRepoRow
 	rowIdx    int
@@ -873,7 +939,10 @@ func (tx *fakeRepoTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.Co
 	return 0, nil
 }
 func (tx *fakeRepoTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
-func (tx *fakeRepoTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+func (tx *fakeRepoTx) LargeObjects() pgx.LargeObjects {
+	return pgx.LargeObjects{}
+}
+
 func (tx *fakeRepoTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }

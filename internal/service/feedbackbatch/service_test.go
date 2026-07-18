@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
@@ -37,6 +38,24 @@ func (e *errSlidingLimiter) Allow(_ context.Context, _ string, _ int, _ time.Dur
 
 func (e *errSlidingLimiter) AllowWithInfo(_ context.Context, _ string, _ int, _ time.Duration) (bool, ratelimit.RateLimitInfo, error) {
 	return false, ratelimit.RateLimitInfo{}, e.err
+}
+
+type fakeConcurrencyLimiter struct {
+	err      error
+	acquire  bool
+	released bool
+}
+
+func (f *fakeConcurrencyLimiter) Acquire(_ context.Context, _ string, _ int) (func(), bool, error) {
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	if !f.acquire {
+		return nil, false, nil
+	}
+	return func() {
+		f.released = true
+	}, true, nil
 }
 
 // mockIdempotencyStore implements idempotency.Store for testing.
@@ -251,6 +270,22 @@ func (m *mockJobStore) Heartbeat(ctx context.Context, jobID, owner string) (int6
 
 func (m *mockJobStore) RecoverStuck(ctx context.Context, staleThreshold time.Duration) (int64, error) {
 	return 0, nil
+}
+
+func newUnreachableFeedbackRepo(t *testing.T) *feedback.FeedbackRepo {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
+	if err != nil {
+		t.Fatalf("pgxpool.ParseConfig() error = %v", err)
+	}
+	cfg.ConnConfig.ConnectTimeout = 25 * time.Millisecond
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("pgxpool.NewWithConfig() error = %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return feedback.NewFeedback(pool)
 }
 
 func TestValidateRequest(t *testing.T) {
@@ -1661,6 +1696,189 @@ func TestExecute_DryRunWithDirectIDs(t *testing.T) {
 	})
 }
 
+func TestExecuteAsyncCreatesJobAndCompletesIdempotency(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newMockIdempotencyStore()
+	jobs := newMockJobStore()
+	svc := &service{idempotencyRepo: store, jobRepo: jobs}
+	req := &BatchRequest{
+		TenantID:       "tenant-1",
+		CreatedBy:      "admin-1",
+		IdempotencyKey: "async-key",
+		Operation: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Delete{Delete: &attunev1.BatchDeleteOp{Hard: true}},
+		},
+	}
+	_, _, err := svc.handleIdempotency(ctx, req)
+	require.NoError(t, err)
+
+	resp, err := svc.executeAsync(ctx, req, []int64{1, 2, 3}, 3, time.Now(), "delete")
+	require.NoError(t, err)
+	require.Equal(t, "test-job-123", resp.JobID)
+	require.Equal(t, "/fb/v1/console/jobs/test-job-123", resp.JobStatusURL)
+	require.Len(t, jobs.jobs, 1)
+
+	key, err := store.Get(ctx, "tenant-1", "async-key")
+	require.NoError(t, err)
+	require.Equal(t, idempotency.StatusCompleted, key.Status)
+}
+
+func TestExecuteAsyncCreateJobErrorFailsIdempotency(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newMockIdempotencyStore()
+	svc := &service{idempotencyRepo: store, jobRepo: &mockJobStore{createErr: errors.New("job store down")}}
+	req := &BatchRequest{
+		TenantID:       "tenant-1",
+		CreatedBy:      "admin-1",
+		IdempotencyKey: "async-key",
+		Operation: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Tag{Tag: &attunev1.BatchTagOp{AddTagIds: []string{"tag-1"}}},
+		},
+	}
+	_, _, err := svc.handleIdempotency(ctx, req)
+	require.NoError(t, err)
+
+	_, err = svc.executeAsync(ctx, req, []int64{1, 2, 3}, 3, time.Now(), "tag")
+	require.Error(t, err)
+
+	key, err := store.Get(ctx, "tenant-1", "async-key")
+	require.NoError(t, err)
+	require.Equal(t, idempotency.StatusFailed, key.Status)
+}
+
+func TestExecuteAsyncConcurrencyBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	req := &BatchRequest{
+		TenantID:       "tenant-1",
+		CreatedBy:      "admin-1",
+		IdempotencyKey: "async-key",
+		Operation: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Delete{Delete: &attunev1.BatchDeleteOp{}},
+		},
+	}
+
+	t.Run("wraps acquire error", func(t *testing.T) {
+		t.Parallel()
+		limiterErr := errors.New("limiter down")
+		svc := &service{concurrency: &fakeConcurrencyLimiter{err: limiterErr}}
+
+		_, err := svc.executeAsync(ctx, req, []int64{1, 2}, 2, time.Now(), "delete")
+		require.Error(t, err)
+		require.ErrorIs(t, err, limiterErr)
+	})
+
+	t.Run("fails idempotency when limit is reached", func(t *testing.T) {
+		t.Parallel()
+		store := newMockIdempotencyStore()
+		svc := &service{idempotencyRepo: store, concurrency: &fakeConcurrencyLimiter{}}
+		_, _, err := svc.handleIdempotency(ctx, req)
+		require.NoError(t, err)
+
+		_, err = svc.executeAsync(ctx, req, []int64{1, 2}, 2, time.Now(), "delete")
+		require.ErrorIs(t, err, ErrConcurrentJobLimit)
+
+		key, err := store.Get(ctx, req.TenantID, req.IdempotencyKey)
+		require.NoError(t, err)
+		require.Equal(t, idempotency.StatusFailed, key.Status)
+	})
+
+	t.Run("releases acquired slot after creating job", func(t *testing.T) {
+		t.Parallel()
+		limiter := &fakeConcurrencyLimiter{acquire: true}
+		svc := &service{jobRepo: newMockJobStore(), concurrency: limiter}
+
+		resp, err := svc.executeAsync(ctx, req, []int64{1, 2}, 2, time.Now(), "delete")
+		require.NoError(t, err)
+		require.Equal(t, "test-job-123", resp.JobID)
+		require.True(t, limiter.released)
+	})
+}
+
+func TestExecuteAsyncPathWithDirectIDs(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	ids := make([]int64, SyncThreshold+1)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+	svc := &service{jobRepo: newMockJobStore()}
+	req := &BatchRequest{
+		TenantID:    "tenant-1",
+		CreatedBy:   "admin-1",
+		FeedbackIDs: ids,
+		Operation: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Delete{Delete: &attunev1.BatchDeleteOp{}},
+		},
+	}
+
+	resp, err := svc.Execute(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, len(ids), resp.TotalMatched)
+	require.Equal(t, "test-job-123", resp.JobID)
+}
+
+func TestExecuteSyncOperationErrorFailsIdempotency(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store := newMockIdempotencyStore()
+	svc := &service{idempotencyRepo: store, feedbackRepo: newUnreachableFeedbackRepo(t)}
+	req := &BatchRequest{
+		TenantID:       "tenant-1",
+		IdempotencyKey: "sync-key",
+		Operation: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Workflow{Workflow: &attunev1.BatchWorkflowOp{ToStateId: "triaged"}},
+		},
+	}
+	_, _, err := svc.handleIdempotency(ctx, req)
+	require.NoError(t, err)
+
+	_, err = svc.executeSync(ctx, req, []int64{1}, 1, time.Now(), "workflow")
+	require.Error(t, err)
+
+	key, err := store.Get(ctx, "tenant-1", "sync-key")
+	require.NoError(t, err)
+	require.Equal(t, idempotency.StatusFailed, key.Status)
+}
+
+func TestExecuteOperationDispatchesRepoMethods(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	svc := &service{feedbackRepo: newUnreachableFeedbackRepo(t)}
+	for _, tc := range []struct {
+		name string
+		op   *attunev1.BatchOperation
+	}{
+		{name: "tag", op: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Tag{Tag: &attunev1.BatchTagOp{AddTagIds: []string{"tag-1"}, RemoveTagIds: []string{"tag-2"}}},
+		}},
+		{name: "workflow", op: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Workflow{Workflow: &attunev1.BatchWorkflowOp{ToStateId: "triaged", Comment: "bulk triage"}},
+		}},
+		{name: "soft delete", op: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Delete{Delete: &attunev1.BatchDeleteOp{}},
+		}},
+		{name: "hard delete", op: &attunev1.BatchOperation{
+			Op: &attunev1.BatchOperation_Delete{Delete: &attunev1.BatchDeleteOp{Hard: true}},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.executeOperation(ctx, &BatchRequest{TenantID: "tenant-1", Operation: tc.op}, []int64{1, 2})
+			require.Error(t, err)
+		})
+	}
+	_, err := svc.executeOperation(ctx, &BatchRequest{TenantID: "tenant-1", Operation: &attunev1.BatchOperation{}}, []int64{1})
+	require.ErrorIs(t, err, ErrNoOperation)
+}
+
 func TestCompleteIdempotencyKey(t *testing.T) {
 	t.Parallel()
 
@@ -1827,6 +2045,18 @@ func TestResolveTargetIDs(t *testing.T) {
 		ids, err := svc.resolveTargetIDs(ctx, req)
 		require.NoError(t, err)
 		require.Equal(t, []int64{42}, ids)
+	})
+
+	t.Run("wraps filter count errors", func(t *testing.T) {
+		t.Parallel()
+		svc := &service{feedbackRepo: newUnreachableFeedbackRepo(t)}
+
+		_, err := svc.resolveTargetIDs(ctx, &BatchRequest{
+			TenantID: "tenant-1",
+			Filter:   &attunev1.FeedbackFilter{Q: ptrext.Of("search")},
+		})
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "count by filter")
 	})
 }
 

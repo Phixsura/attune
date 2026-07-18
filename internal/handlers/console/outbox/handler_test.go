@@ -136,6 +136,52 @@ func TestList_RepoError(t *testing.T) {
 	assertErr(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
 }
 
+func TestBindListRequest(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "/deliveries?status=dead&status=failed&limit=25&before_id=99", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	var bound attunev1.ListDeliveriesRequest
+
+	err = BindListRequest(req, &bound)
+	if err != nil {
+		t.Fatalf("BindListRequest returned error: %v", err)
+	}
+	if got := bound.GetStatus(); len(got) != 2 || got[0] != "dead" || got[1] != "failed" {
+		t.Fatalf("status = %v, want [dead failed]", got)
+	}
+	if bound.GetLimit() != 25 {
+		t.Fatalf("limit = %d, want 25", bound.GetLimit())
+	}
+	if bound.GetBeforeId() != 99 {
+		t.Fatalf("before_id = %d, want 99", bound.GetBeforeId())
+	}
+}
+
+func TestBindListRequest_InvalidNumbers(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{"non-numeric limit", "/deliveries?limit=abc"},
+		{"zero limit", "/deliveries?limit=0"},
+		{"overflowing limit", "/deliveries?limit=2147483648"},
+		{"non-numeric before id", "/deliveries?before_id=abc"},
+		{"negative before id", "/deliveries?before_id=-1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, tt.raw, nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			err = BindListRequest(req, &attunev1.ListDeliveriesRequest{})
+			assertErr(t, err, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST)
+		})
+	}
+}
+
 func TestRetry_BadID(t *testing.T) {
 	h := NewHandler(&fakeRepo{})
 	_, err := h.Retry(testCtx(), &attunev1.RetryDeliveryRequest{Id: 0})

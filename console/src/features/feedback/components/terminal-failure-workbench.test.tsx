@@ -83,8 +83,37 @@ const sampleWorkbench = {
 }
 
 describe('TerminalFailureWorkbenchPanel', () => {
+  it('renders nothing until workbench data is available', () => {
+    const { container } = renderWithProviders(
+      <TerminalFailureWorkbenchPanel
+        data={undefined}
+        isLoading={false}
+        isError={false}
+        onRetry={vi.fn()}
+        onOpenFeedback={vi.fn()}
+      />,
+    )
+
+    expect(container).toBeEmptyDOMElement()
+  })
+
+  it('renders an empty state when there are no terminal failures', () => {
+    renderWithProviders(
+      <TerminalFailureWorkbenchPanel
+        data={{ ...sampleWorkbench, totalTerminalFailures: '0' }}
+        isLoading={false}
+        isError={false}
+        onRetry={vi.fn()}
+        onOpenFeedback={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('当前窗口没有终态失败')).toBeInTheDocument()
+  })
+
   it('renders retry and open-detail actions for samples', async () => {
     retryMutate.mockReset()
+    retryMutate.mockImplementation((_vars, options) => options.onSuccess())
     const onOpenFeedback = vi.fn()
     const { user } = renderWithProviders(
       <TerminalFailureWorkbenchPanel
@@ -99,6 +128,25 @@ describe('TerminalFailureWorkbenchPanel', () => {
     await user.click(screen.getByRole('button', { name: '重试富化 #123' }))
 
     expect(retryMutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('surfaces retry mutation failures without closing the workbench', async () => {
+    retryMutate.mockReset()
+    retryMutate.mockImplementation((_vars, options) => options.onError())
+    const { user } = renderWithProviders(
+      <TerminalFailureWorkbenchPanel
+        data={sampleWorkbench}
+        isLoading={false}
+        isError={false}
+        onRetry={vi.fn()}
+        onOpenFeedback={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '重试富化 #123' }))
+
+    expect(retryMutate).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('终态失败聚类工位')).toBeInTheDocument()
   })
 
   it('renders remediation links for config-related clusters', () => {
@@ -142,6 +190,24 @@ describe('TerminalFailureWorkbenchPanel', () => {
     expect(screen.getByRole('button', { name: '优先处理 #123' })).toBeInTheDocument()
     expect(screen.getAllByText('最早出现').length).toBeGreaterThan(0)
     expect(screen.getAllByText('最近出现').length).toBeGreaterThan(0)
+  })
+
+  it('opens the first priority sample from the recommendation card', async () => {
+    retryMutate.mockReset()
+    const onOpenFeedback = vi.fn()
+    const { user } = renderWithProviders(
+      <TerminalFailureWorkbenchPanel
+        data={sampleWorkbench}
+        isLoading={false}
+        isError={false}
+        onRetry={vi.fn()}
+        onOpenFeedback={onOpenFeedback}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '优先处理 #123' }))
+
+    expect(onOpenFeedback).toHaveBeenCalledWith('123')
   })
 
   it('renders in-page jump links for each failure dimension', () => {

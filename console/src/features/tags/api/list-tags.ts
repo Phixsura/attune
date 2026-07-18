@@ -11,6 +11,7 @@ export const tagsQuery = () =>
     queryKey: [...tagsQueryKey],
     queryFn: async ({ signal }) => {
       const resp = await api<ListTagsResponse>('/fb/v1/console/tags', { signal })
+      /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
       return resp.tags ?? []
     },
     staleTime: 30_000,

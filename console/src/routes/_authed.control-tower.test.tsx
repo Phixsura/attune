@@ -15,9 +15,9 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import i18n from '@/i18n'
 import { Route as ControlTowerRoute } from '@/routes/_authed.control-tower'
 import { Route as AuthedIndexRoute } from '@/routes/_authed.index'
-import { ControlTowerPage } from '@/routes/-control-tower-page'
+import { ControlTowerPage, controlTowerPageTestables } from '@/routes/-control-tower-page'
 import { server } from '@/testing/mocks/server'
-import { screen, waitFor } from '@/testing/test-utils'
+import { screen, userEvent, waitFor } from '@/testing/test-utils'
 
 beforeAll(() => {
   window.scrollTo = vi.fn()
@@ -131,6 +131,27 @@ interface ThrownRedirect {
 }
 
 describe('_authed.control-tower route', () => {
+  it('normalizes helper edge cases for dashboard signals', () => {
+    expect(controlTowerPageTestables.normalizeSeverity('alert', 'normal')).toBe('alert')
+    expect(controlTowerPageTestables.normalizeSeverity('unknown', 'watch')).toBe('watch')
+    expect(controlTowerPageTestables.worstSeverity(['normal', 'watch'])).toBe('watch')
+    expect(controlTowerPageTestables.worstSeverity(['normal', 'insufficient_data'])).toBe(
+      'insufficient_data',
+    )
+    expect(controlTowerPageTestables.metricTone('alert')).toBe('urgent')
+    expect(controlTowerPageTestables.metricTone('insufficient_data')).toBe('active')
+    expect(controlTowerPageTestables.metricTone('normal')).toBe('default')
+    expect(controlTowerPageTestables.toNumber(Number.NaN, 7)).toBe(7)
+    expect(controlTowerPageTestables.toNumber('42')).toBe(42)
+    expect(controlTowerPageTestables.toNumber('not-a-number', 3)).toBe(3)
+    expect(controlTowerPageTestables.toNumber(undefined, 5)).toBe(5)
+    expect(controlTowerPageTestables.clampUnit(Number.NaN)).toBe(0)
+    expect(controlTowerPageTestables.clampUnit(-0.5)).toBe(0)
+    expect(controlTowerPageTestables.clampUnit(1.5)).toBe(1)
+    expect(controlTowerPageTestables.formatLatency(999.4)).toBe('999ms')
+    expect(controlTowerPageTestables.formatLatency(1200)).toBe('1.2s')
+  })
+
   it('preloads classification and search quality from the route loader', async () => {
     const seen = new Set<string>()
     server.use(
@@ -200,6 +221,131 @@ describe('_authed.control-tower route', () => {
     expect(screen.getByText('rrf.pgfts.v1.k60')).toBeInTheDocument()
   })
 
+  it('updates quality actions from the risk queue and keeps failed actions retryable', async () => {
+    const payloads: Record<string, unknown>[] = []
+    let updateCalls = 0
+    server.use(
+      http.get('/fb/v1/console/classification-quality', () =>
+        HttpResponse.json(classificationFixture),
+      ),
+      http.get('/fb/v1/console/feedback/search/quality', () => HttpResponse.json(searchFixture)),
+      http.get('/fb/v1/console/quality-actions', () => HttpResponse.json({ actions: [] })),
+      http.post('/fb/v1/console/quality-actions/update', async ({ request }) => {
+        updateCalls += 1
+        payloads.push((await request.json()) as Record<string, unknown>)
+        if (updateCalls === 1) {
+          return HttpResponse.json({ message: 'queue unavailable' }, { status: 500 })
+        }
+        return HttpResponse.json({})
+      }),
+    )
+
+    const { user } = renderControlTower()
+
+    await screen.findByText('低置信度升高')
+    await user.click(screen.getAllByRole('button', { name: '开始处理' })[0])
+    await waitFor(() => expect(payloads).toHaveLength(1))
+    expect(payloads[0]).toMatchObject({
+      actionKey: 'control_tower.classification_warnings',
+      signal: 'classification-warnings',
+      status: 'acknowledged',
+      targetPath: '/analytics/classification-quality',
+    })
+
+    await user.click(screen.getAllByRole('button', { name: '标记已验证' })[0])
+    await waitFor(() => expect(payloads).toHaveLength(2))
+    expect(payloads[1]).toMatchObject({
+      actionKey: 'control_tower.classification_warnings',
+      signal: 'classification-warnings',
+      status: 'resolved',
+    })
+  })
+
+  it('renders empty and insufficient-data states when all signals are within target', async () => {
+    server.use(
+      http.get('/fb/v1/console/classification-quality', () =>
+        HttpResponse.json({
+          ...classificationFixture,
+          summary: {
+            ...classificationFixture.summary,
+            classificationEvents: '0',
+            lowConfidenceRate: 0,
+            offListRate: 0,
+            worstSeverity: 'normal',
+          },
+          warnings: [],
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/search/quality', () =>
+        HttpResponse.json({
+          ...searchFixture,
+          summary: {
+            ...searchFixture.summary,
+            queryCount: '0',
+            zeroResultRate: 0,
+            fallbackRate: 0,
+            p95LatencyMs: '200',
+            worstSeverity: 'normal',
+          },
+          zeroResultQueries: [],
+          indexHealth: {
+            ...searchFixture.indexHealth,
+            coverageRatio: 1,
+          },
+          rankingVersions: [],
+        }),
+      ),
+      http.get('/fb/v1/console/quality-actions', () => HttpResponse.json({ actions: [] })),
+    )
+
+    renderControlTower()
+
+    expect(await screen.findByText('暂无待处理动作')).toBeInTheDocument()
+    expect(screen.getByText('数据不足')).toBeInTheDocument()
+    expect(screen.getByText('暂无零结果 query')).toBeInTheDocument()
+    expect(screen.getByText('暂无排序版本')).toBeInTheDocument()
+  })
+
+  it('keeps quality evidence visible when action status cannot be loaded', async () => {
+    server.use(
+      http.get('/fb/v1/console/classification-quality', () =>
+        HttpResponse.json({
+          ...classificationFixture,
+          summary: {
+            ...classificationFixture.summary,
+            lowConfidenceRate: 0,
+            offListRate: 0,
+            worstSeverity: 'normal',
+          },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/search/quality', () =>
+        HttpResponse.json({
+          ...searchFixture,
+          summary: {
+            ...searchFixture.summary,
+            zeroResultRate: 0,
+            fallbackRate: 0,
+            p95LatencyMs: '100',
+            worstSeverity: 'normal',
+          },
+          indexHealth: {
+            ...searchFixture.indexHealth,
+            coverageRatio: 1.2,
+          },
+        }),
+      ),
+      http.get('/fb/v1/console/quality-actions', () =>
+        HttpResponse.json({ message: 'actions failed' }, { status: 500 }),
+      ),
+    )
+
+    renderControlTower()
+
+    expect(await screen.findByText('分类质量出现告警')).toBeInTheDocument()
+    expect(screen.getByText('动作状态暂不可用，仍可查看质量证据。')).toBeInTheDocument()
+  })
+
   it('shows an explicit unavailable state when quality APIs fail', async () => {
     server.use(
       http.get(
@@ -222,6 +368,7 @@ describe('_authed.control-tower route', () => {
 })
 
 function renderControlTower() {
+  const user = userEvent.setup({ delay: null })
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: Number.POSITIVE_INFINITY },
@@ -239,13 +386,16 @@ function renderControlTower() {
     history: createMemoryHistory({ initialEntries: ['/'] }),
   })
 
-  return render(
-    <I18nextProvider i18n={i18n}>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <RouterProvider router={router} />
-        </TooltipProvider>
-      </QueryClientProvider>
-    </I18nextProvider>,
-  )
+  return {
+    user,
+    ...render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <RouterProvider router={router} />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </I18nextProvider>,
+    ),
+  }
 }

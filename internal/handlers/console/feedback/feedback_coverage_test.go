@@ -259,6 +259,25 @@ func TestSetDrafter_WiresDrafter(t *testing.T) {
 	require.NotNil(t, h.drafter)
 }
 
+func TestNewFeedbackHandler_AllowsNilReposForWiring(t *testing.T) {
+	t.Parallel()
+
+	h := NewFeedbackHandler(nil, nil)
+
+	require.NotNil(t, h)
+	require.Nil(t, h.repo)
+	require.Nil(t, h.tenants)
+}
+
+func TestSetReplyDraftWorkflow_WiresWorkflow(t *testing.T) {
+	t.Parallel()
+
+	h := &FeedbackHandler{}
+	h.SetReplyDraftWorkflow(nil)
+
+	require.Nil(t, h.replyWorkflow)
+}
+
 func TestSetRegenLimiter_WiresLimiter(t *testing.T) {
 	t.Parallel()
 
@@ -300,6 +319,13 @@ func TestFeedbackFilterSnapshot_Nil(t *testing.T) {
 func TestFeedbackFilterSnapshot_EmptyFilter(t *testing.T) {
 	t.Parallel()
 	got := feedbackFilterSnapshot(ptrext.Of(attunev1.FeedbackFilter{}))
+	require.Nil(t, got)
+}
+
+func TestFeedbackFilterSnapshot_InvalidUTF8(t *testing.T) {
+	t.Parallel()
+	q := string([]byte{0xff})
+	got := feedbackFilterSnapshot(ptrext.Of(attunev1.FeedbackFilter{Q: ptrext.Of(q)}))
 	require.Nil(t, got)
 }
 

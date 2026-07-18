@@ -208,6 +208,108 @@ components:
 	}
 }
 
+func TestPatchOpenAPI_RejectsInvalidDocuments(t *testing.T) {
+	t.Parallel()
+
+	if _, err := PatchOpenAPI([]byte(":\n")); err == nil {
+		t.Fatal("PatchOpenAPI accepted invalid YAML")
+	}
+
+	if _, err := documentMapping(ptrext.Of(yaml.Node{Kind: yaml.SequenceNode})); err == nil {
+		t.Fatal("documentMapping accepted non-document node")
+	}
+
+	if _, err := documentMapping(ptrext.Of(yaml.Node{
+		Kind:    yaml.DocumentNode,
+		Content: []*yaml.Node{ptrext.Of(yaml.Node{Kind: yaml.SequenceNode})},
+	})); err == nil {
+		t.Fatal("documentMapping accepted non-mapping root")
+	}
+}
+
+func TestPatchOpenAPI_SkipsInboundVersionHeadersAndMalformedOperations(t *testing.T) {
+	t.Parallel()
+
+	in := []byte(`openapi: 3.0.3
+paths:
+  /v1/inbound/slack:
+    post:
+      responses:
+        "400":
+          description: bad request
+  /v1/no-responses:
+    get:
+      operationId: NoResponses
+  /v1/non-operation:
+    parameters:
+      - name: ignored
+components:
+  schemas: {}
+`)
+
+	out, err := PatchOpenAPI(in)
+	if err != nil {
+		t.Fatalf("PatchOpenAPI: %v", err)
+	}
+
+	root := parseYAMLDoc(t, out)
+	paths := mappingValue(root, "paths")
+	inboundOp := mappingValue(mappingValue(paths, "/v1/inbound/slack"), "post")
+	if got := mappingValue(inboundOp, "parameters"); got != nil {
+		t.Fatalf("inbound operation should not receive API version parameters: %#v", got)
+	}
+	responses := mappingValue(inboundOp, "responses")
+	assertSchemaRef(t, mappingValue(responses, "400"), "#/components/schemas/ErrorResponse")
+
+	nonOperation := mappingValue(mappingValue(paths, "/v1/non-operation"), "parameters")
+	if nonOperation == nil || nonOperation.Kind != yaml.SequenceNode {
+		t.Fatalf("non-operation path item was unexpectedly rewritten: %#v", nonOperation)
+	}
+}
+
+func TestOpenAPINodeHelpersRepairZeroKindNodes(t *testing.T) {
+	t.Parallel()
+
+	parent := mappingNode()
+	appendMappingPair(parent, "existingMap", ptrext.Of(yaml.Node{}))
+	appendMappingPair(parent, "existingSeq", ptrext.Of(yaml.Node{}))
+
+	gotMap := ensureMapping(parent, "existingMap")
+	if gotMap.Kind != yaml.MappingNode || gotMap.Tag != "!!map" {
+		t.Fatalf("ensureMapping did not repair zero-kind node: %#v", gotMap)
+	}
+
+	gotSeq := ensureSequence(parent, "existingSeq")
+	if gotSeq.Kind != yaml.SequenceNode || gotSeq.Tag != "!!seq" {
+		t.Fatalf("ensureSequence did not repair zero-kind node: %#v", gotSeq)
+	}
+
+	setBool(parent, "flag", true)
+	if got := mappingValue(parent, "flag"); got == nil || got.Value != "true" {
+		t.Fatalf("setBool true = %#v, want true", got)
+	}
+	setBool(parent, "flag", false)
+	if got := mappingValue(parent, "flag"); got == nil || got.Value != "false" {
+		t.Fatalf("setBool false = %#v, want false", got)
+	}
+
+	deleteMappingKey(parent, "missing")
+	deleteMappingKey(ptrext.Of(yaml.Node{Kind: yaml.SequenceNode}), "missing")
+
+	if findHeaderParameter(nil, apiVersionHeaderName) != nil {
+		t.Fatal("findHeaderParameter returned a parameter for nil input")
+	}
+	if findHeaderParameter(ptrext.Of(yaml.Node{Kind: yaml.MappingNode}), apiVersionHeaderName) != nil {
+		t.Fatal("findHeaderParameter returned a parameter for non-sequence input")
+	}
+	if !isHTTPOperation("GET") {
+		t.Fatal("isHTTPOperation should accept uppercase methods")
+	}
+	if isHTTPOperation("connect") {
+		t.Fatal("isHTTPOperation should reject unsupported methods")
+	}
+}
+
 func parseYAMLDoc(t *testing.T, raw []byte) *yaml.Node {
 	t.Helper()
 

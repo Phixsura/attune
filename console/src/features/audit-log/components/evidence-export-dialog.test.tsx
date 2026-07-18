@@ -1,5 +1,5 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EvidenceExportDialog } from '@/features/audit-log/components/evidence-export-dialog'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
@@ -15,6 +15,11 @@ vi.mock('@/features/audit-log/api/evidence-export', async (importOriginal) => {
 const emptyFilters = {}
 
 describe('EvidenceExportDialog', () => {
+  beforeEach(async () => {
+    const { downloadEvidenceExport } = await import('@/features/audit-log/api/evidence-export')
+    vi.mocked(downloadEvidenceExport).mockResolvedValue(undefined)
+  })
+
   it('renders the dialog with start button when open', () => {
     renderWithProviders(
       <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
@@ -49,8 +54,9 @@ describe('EvidenceExportDialog', () => {
       ),
     )
 
+    const onOpenChange = vi.fn()
     const { user } = renderWithProviders(
-      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={onOpenChange} open={true} />,
     )
 
     await user.click(screen.getByRole('button', { name: '开始导出' }))
@@ -58,6 +64,8 @@ describe('EvidenceExportDialog', () => {
     await waitFor(() => {
       expect(screen.getByText('下载证据包')).toBeInTheDocument()
     })
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it('shows processing view with queued status', async () => {
@@ -133,8 +141,9 @@ describe('EvidenceExportDialog', () => {
       ),
     )
 
+    const onOpenChange = vi.fn()
     const { user } = renderWithProviders(
-      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={onOpenChange} open={true} />,
     )
 
     await user.click(screen.getByRole('button', { name: '开始导出' }))
@@ -143,6 +152,8 @@ describe('EvidenceExportDialog', () => {
       expect(screen.getByText(/internal error/)).toBeInTheDocument()
     })
     expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '关闭' }))
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
   it('triggers download when clicking the download button', async () => {
@@ -180,6 +191,92 @@ describe('EvidenceExportDialog', () => {
     await waitFor(() => {
       expect(downloadEvidenceExport).toHaveBeenCalledWith('job-dl', 'evidence.zip')
     })
+  })
+
+  it('keeps the ready view open when starting the export fails', async () => {
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () =>
+        HttpResponse.json({ message: 'export service unavailable' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '开始导出' })).not.toBeDisabled())
+  })
+
+  it('returns to the ready view when retrying the export fails', async () => {
+    let postCount = 0
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () => {
+        postCount += 1
+        if (postCount === 2) {
+          return HttpResponse.json({ message: 'retry failed' }, { status: 500 })
+        }
+        return HttpResponse.json({
+          jobId: 'job-retry-fail',
+          status: 'queued',
+          retryAfterSeconds: 1,
+        })
+      }),
+      http.get('/fb/v1/console/audit-log/evidence/job-retry-fail', () =>
+        HttpResponse.json({
+          jobId: 'job-retry-fail',
+          status: 'failed',
+          totalEvents: 0,
+          createdAt: '2026-06-26T00:00:00Z',
+          error: 'timeout',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+    await user.click(await screen.findByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(postCount).toBe(2))
+    expect(screen.getByRole('button', { name: '开始导出' })).toBeInTheDocument()
+  })
+
+  it('keeps completed exports available when the archive download fails', async () => {
+    const { downloadEvidenceExport } = await import('@/features/audit-log/api/evidence-export')
+    vi.mocked(downloadEvidenceExport).mockRejectedValueOnce(new Error('download failed'))
+    server.use(
+      http.post('/fb/v1/console/audit-log/evidence', () =>
+        HttpResponse.json({ jobId: 'job-dl-fail', status: 'queued', retryAfterSeconds: 1 }),
+      ),
+      http.get('/fb/v1/console/audit-log/evidence/job-dl-fail', () =>
+        HttpResponse.json({
+          jobId: 'job-dl-fail',
+          status: 'completed',
+          totalEvents: 2,
+          createdAt: '2026-06-26T00:00:00Z',
+          completedAt: '2026-06-26T00:00:01Z',
+          archiveFilename: 'evidence.zip',
+          retryAfterSeconds: 2,
+        }),
+      ),
+    )
+
+    const { user } = renderWithProviders(
+      <EvidenceExportDialog filters={emptyFilters} onOpenChange={vi.fn()} open={true} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '开始导出' }))
+    await user.click(await screen.findByRole('button', { name: '下载证据包' }))
+
+    await waitFor(() => {
+      expect(downloadEvidenceExport).toHaveBeenCalledWith('job-dl-fail', 'evidence.zip')
+    })
+    expect(screen.getByRole('button', { name: '下载证据包' })).toBeInTheDocument()
   })
 
   it('retries export after failure', async () => {

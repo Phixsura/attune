@@ -79,6 +79,19 @@ func testSigner(t *testing.T) *session.Signer {
 	return signer
 }
 
+func TestNewMeHandlerCreatesHandler(t *testing.T) {
+	t.Parallel()
+
+	h := NewMeHandler(nil, nil, nil, nil, nil)
+
+	require.NotNil(t, h)
+	require.Nil(t, h.signer)
+	require.Nil(t, h.tenants)
+	require.Nil(t, h.users)
+	require.Nil(t, h.admins)
+	require.Nil(t, h.oidcUsers)
+}
+
 // directCtx builds a RequestContext for handler methods that do NOT call
 // ClearSessionCookie (no response writer needed).
 func directCtx(tenantID, userID, userType string) *dispatcher.RequestContext[*session.AuthCtx] {

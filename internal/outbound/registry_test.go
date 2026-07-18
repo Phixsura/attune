@@ -34,6 +34,18 @@ func (s *stubDigestChannel) RenderDigest(view any, dst Target) (Rendered, error)
 	}, nil
 }
 
+type stubNotificationChannel struct {
+	id string
+}
+
+func (s *stubNotificationChannel) ID() string { return s.id }
+func (s *stubNotificationChannel) RenderNotification(env *NotificationEnvelope, dst Target) (Rendered, error) {
+	return Rendered{
+		Build: func(ctx context.Context) (*http.Request, error) { return nil, nil },
+		Check: CheckWebhook(s.id),
+	}, nil
+}
+
 type stubBothChannel struct {
 	id string
 }
@@ -131,6 +143,35 @@ func TestLookupDigest(t *testing.T) {
 	}
 }
 
+func TestLookupNotification(t *testing.T) {
+	ResetForTest()
+	defer ResetForTest()
+
+	Register(ptrext.Of(stubEventChannel{id: "event-only"}))
+	Register(ptrext.Of(stubDigestChannel{id: "digest-only"}))
+	Register(ptrext.Of(stubNotificationChannel{id: "notification-only"}))
+
+	tests := []struct {
+		name     string
+		destType string
+		wantNil  bool
+	}{
+		{"notification channel found", "notification-only", false},
+		{"event-only channel returns nil for notification", "event-only", true},
+		{"digest-only channel returns nil for notification", "digest-only", true},
+		{"unknown channel returns nil", "unknown", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := LookupNotification(tt.destType)
+			if (ch == nil) != tt.wantNil {
+				t.Errorf("LookupNotification(%q) nil=%v, want nil=%v", tt.destType, ch == nil, tt.wantNil)
+			}
+		})
+	}
+}
+
 func TestChannels_Sorted(t *testing.T) {
 	ResetForTest()
 	defer ResetForTest()
@@ -158,6 +199,7 @@ func TestChannels_Capabilities(t *testing.T) {
 
 	Register(ptrext.Of(stubEventChannel{id: "event-only"}))
 	Register(ptrext.Of(stubDigestChannel{id: "digest-only"}))
+	Register(ptrext.Of(stubNotificationChannel{id: "notification-only"}))
 	Register(ptrext.Of(stubBothChannel{id: "both"}))
 
 	entries := Channels()
@@ -170,10 +212,12 @@ func TestChannels_Capabilities(t *testing.T) {
 		id         string
 		wantEvent  bool
 		wantDigest bool
+		wantNotif  bool
 	}{
-		{"event-only", true, false},
-		{"digest-only", false, true},
-		{"both", true, true},
+		{"event-only", true, false, false},
+		{"digest-only", false, true, false},
+		{"notification-only", false, false, true},
+		{"both", true, true, false},
 	}
 
 	for _, tt := range tests {
@@ -183,6 +227,9 @@ func TestChannels_Capabilities(t *testing.T) {
 		}
 		if e.SupportsDigest != tt.wantDigest {
 			t.Errorf("%s.SupportsDigest = %v, want %v", tt.id, e.SupportsDigest, tt.wantDigest)
+		}
+		if e.SupportsNotification != tt.wantNotif {
+			t.Errorf("%s.SupportsNotification = %v, want %v", tt.id, e.SupportsNotification, tt.wantNotif)
 		}
 	}
 }

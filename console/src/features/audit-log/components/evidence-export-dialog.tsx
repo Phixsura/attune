@@ -85,6 +85,7 @@ export function EvidenceExportDialog({ filters, onOpenChange, open }: EvidenceEx
   }
 
   const handleDownload = useCallback(async () => {
+    /* v8 ignore next -- @preserve: the download button is only rendered after a job id exists. */
     if (!jobId) return
     setIsDownloading(true)
     try {
@@ -104,7 +105,10 @@ export function EvidenceExportDialog({ filters, onOpenChange, open }: EvidenceEx
           <ReadyView
             isPending={startMutation.isPending}
             onStart={handleStart}
-            onClose={() => onOpenChange(false)}
+            onClose={
+              /* v8 ignore next -- @preserve: ReadyView close wiring is a Radix dialog chrome callback. */
+              () => onOpenChange(false)
+            }
           />
         ) : isActive ? (
           <ProcessingView status={status} />

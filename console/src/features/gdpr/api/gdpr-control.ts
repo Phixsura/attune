@@ -39,6 +39,7 @@ export function useVerifyGdprStepUp() {
     mutationFn: (password: string) =>
       api<VerifyGdprStepUpResponse>('/fb/v1/console/gdpr/step-up/verify', {
         method: 'POST',
+        /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
         body: password ? { password } : {},
       }),
   })

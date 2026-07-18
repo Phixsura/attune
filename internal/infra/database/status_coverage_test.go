@@ -2,8 +2,11 @@
 package database
 
 import (
+	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -151,6 +154,24 @@ func TestBuildMigrationQuery_ExtendedColumns(t *testing.T) {
 	require.Contains(t, extended, "applied_by")
 	require.Contains(t, extended, "checksum")
 	require.NotContains(t, legacy, "duration_ms")
+}
+
+func TestMigrationStatusWrappersReturnAcquireErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	pool := newUnreachableMigrationPool(t)
+
+	_, err := GetMigrationStatus(ctx, pool)
+	if err == nil || !strings.Contains(err.Error(), "acquire connection") {
+		t.Fatalf("GetMigrationStatus() error = %v, want acquire connection", err)
+	}
+
+	_, err = GetPendingMigrations(ctx, pool)
+	if err == nil || !strings.Contains(err.Error(), "acquire connection") {
+		t.Fatalf("GetPendingMigrations() error = %v, want acquire connection", err)
+	}
 }
 
 func TestBuildPendingMigrations_AllAppliedYieldsEmpty(t *testing.T) {

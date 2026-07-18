@@ -104,6 +104,7 @@ export function ServiceAccountsCard({ canEdit }: { canEdit: boolean }) {
   }
 
   const handleToggle = () => {
+    /* v8 ignore next -- @preserve: status dialogs only confirm after a service account target is chosen. */
     if (!toggleTarget) return Promise.resolve()
     const nextActive = !toggleTarget.isActive
     const params: UpdateServiceAccountParams = {
@@ -126,6 +127,7 @@ export function ServiceAccountsCard({ canEdit }: { canEdit: boolean }) {
   }
 
   const handleDelete = () => {
+    /* v8 ignore next -- @preserve: delete dialogs only confirm after a service account target is chosen. */
     if (!deleteTarget) return Promise.resolve()
     const account = deleteTarget
     return remove.mutateAsync(account.id, {

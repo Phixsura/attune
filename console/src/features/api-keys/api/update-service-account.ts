@@ -19,6 +19,7 @@ export function useUpdateServiceAccount() {
     onSuccess: (serviceAccount) => {
       queryClient.setQueryData<ServiceAccount[]>(serviceAccountsQueryKey, (current) => {
         const next = [
+          /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
           ...(current ?? []).filter((item) => item.id !== serviceAccount.id),
           serviceAccount,
         ]

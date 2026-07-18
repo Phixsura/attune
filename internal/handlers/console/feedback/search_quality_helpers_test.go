@@ -267,6 +267,27 @@ func TestSearchQualityDashboardToProtoComputesDerivedFields(t *testing.T) {
 	require.Equal(t, "rrf.next", resp.GetRankingVersions()[0].GetRankingVersion())
 }
 
+func TestSearchQualityDashboardToProtoHandlesNilDashboard(t *testing.T) {
+	t.Parallel()
+
+	generatedAt := time.Date(2026, 7, 2, 10, 0, 0, 0, time.UTC)
+	window := searchQualityWindow{
+		from:        time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		to:          time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+		bucketWidth: repofeedback.SearchQualityBucketDay,
+		limit:       10,
+	}
+
+	resp := searchQualityDashboardToProto(window, nil, generatedAt)
+
+	require.Equal(t, "2026-07-02T10:00:00Z", resp.GetGeneratedAt())
+	require.Equal(t, "insufficient_data", resp.GetSummary().GetWorstSeverity())
+	require.Empty(t, resp.GetQueries())
+	require.Empty(t, resp.GetZeroResultQueries())
+	require.Len(t, resp.GetRankingVersions(), 1)
+	require.Equal(t, semanticsearch.RankingVersion, resp.GetRankingVersions()[0].GetRankingVersion())
+}
+
 func TestSearchQualityFallbackHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -282,6 +303,8 @@ func TestSearchQualityFallbackHelpers(t *testing.T) {
 	require.Len(t, searchStableHash(" invoice "), 64)
 	require.Equal(t, searchStableHash("invoice"), searchStableHash(" invoice "))
 	require.Empty(t, searchFilterHash(nil))
+	invalidUTF8 := string([]byte{0xff})
+	require.Empty(t, searchFilterHash(ptrext.Of(attunev1.FeedbackFilter{Q: ptrext.Of(invalidUTF8)})))
 	require.NotEmpty(t, searchFilterHash(ptrext.Of(attunev1.FeedbackFilter{Urgent: ptrext.Of(true)})))
 
 	require.Equal(t, "界界...", truncateSearchLabel("  "+strings.Repeat("界", 6)+"  ", 5))
@@ -289,6 +312,7 @@ func TestSearchQualityFallbackHelpers(t *testing.T) {
 
 	require.InDelta(t, 1.0, searchCoverageRatio(0, 0), 0.001)
 	require.InDelta(t, 1.0, searchCoverageRatio(12, 10), 0.001)
+	require.InDelta(t, 0.0, rate(1, 0), 0.001)
 	require.InDelta(t, 0.0, rate(-1, 10), 0.001)
 	require.InDelta(t, 1.0, rate(12, 10), 0.001)
 	require.InDelta(t, 0.0, clampUnit(math.NaN()), 0.001)

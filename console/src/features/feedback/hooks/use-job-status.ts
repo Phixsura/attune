@@ -16,6 +16,7 @@ export function useJobStatus(jobId: string | null, options?: { enabled?: boolean
   return useQuery({
     queryKey: ['job', jobId],
     queryFn: async ({ signal }) => {
+      /* v8 ignore next -- @preserve: query is disabled until a job id exists. */
       if (!jobId) return null
       return api<Job>(`/fb/v1/console/jobs/${jobId}`, { signal })
     },

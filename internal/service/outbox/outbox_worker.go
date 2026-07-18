@@ -29,8 +29,8 @@ const drainTimeout = 30 * time.Second
 // missed card to an internal PM, not a missed delivery to a paying
 // customer. a follow-up may unify if inline routing returns via #34.
 type OutboxWorker struct {
-	outbox    *outboxrepo.OutboxRepo
-	targets   *notifytarget.NotifyTargetRepo
+	outbox    outboxStore
+	targets   notifyTargetStore
 	transport *notify.Transport
 
 	// owner uniquely identifies this worker instance so claim renewal
@@ -46,6 +46,21 @@ type OutboxWorker struct {
 	maxAttempts  int
 }
 
+type outboxStore interface {
+	ResetStaleClaims(ctx context.Context) (int64, error)
+	ClaimBatch(ctx context.Context, n int, owner string) ([]outboxrepo.OutboxRow, error)
+	RefreshClaims(ctx context.Context, ids []int64, owner string) (int64, error)
+	MarkDelivered(ctx context.Context, id int64, owner string) (int64, error)
+	MarkFailed(ctx context.Context, id int64, owner, errMsg, failureKind string, httpStatus int, nextDelay time.Duration) (int64, error)
+	MarkDead(ctx context.Context, id int64, owner, reason, failureKind string, httpStatus int) (int64, error)
+}
+
+type notifyTargetStore interface {
+	GetByTenantAudience(ctx context.Context, tenantID, destType, audience string) (*notifytarget.NotifyTarget, error)
+	ClearFailure(ctx context.Context, tenantID, destType, url, audience string) error
+	TouchFailure(ctx context.Context, tenantID, destType, url, audience, errMsg string) error
+}
+
 // NewOutboxWorker wires the worker. Defaults baked in below match
 // design doc §3.6 retry table (30s / 2m / 10m / 1h / dead).
 func NewOutboxWorker(
@@ -55,9 +70,17 @@ func NewOutboxWorker(
 ) *OutboxWorker {
 	d := workerdrain.New("outbox")
 	d.SetTimeout(drainTimeout)
+	var outboxStore outboxStore
+	if outbox != nil {
+		outboxStore = outbox
+	}
+	var targetStore notifyTargetStore
+	if targets != nil {
+		targetStore = targets
+	}
 	return ptrext.Of(OutboxWorker{
-		outbox:       outbox,
-		targets:      targets,
+		outbox:       outboxStore,
+		targets:      targetStore,
 		transport:    transport,
 		owner:        "outbox-" + uuid.NewString(),
 		drain:        d,

@@ -1,0 +1,395 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
+
+service RequestNotificationService {
+  rpc GetRequestNotificationSettings(GetRequestNotificationSettingsRequest) returns (RequestNotificationSettings) {
+    option (google.api.http) = {get: "/fb/v1/console/request-notifications/settings"};
+  }
+  rpc UpdateRequestNotificationSettings(UpdateRequestNotificationSettingsRequest) returns (RequestNotificationSettings) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/request-notifications/settings"
+      body: "*"
+    };
+  }
+  rpc GetRequestNotificationSender(GetRequestNotificationSenderRequest) returns (RequestNotificationSender) {
+    option (google.api.http) = {get: "/fb/v1/console/request-notifications/sender"};
+  }
+  rpc UpsertRequestNotificationSender(UpsertRequestNotificationSenderRequest) returns (RequestNotificationSender) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/request-notifications/sender"
+      body: "*"
+    };
+  }
+  rpc VerifyRequestNotificationSender(VerifyRequestNotificationSenderRequest) returns (RequestNotificationSender) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/sender:verify"
+      body: "*"
+    };
+  }
+  rpc ListRequestNotificationWebhookTargets(ListRequestNotificationWebhookTargetsRequest) returns (ListRequestNotificationWebhookTargetsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/request-notifications/webhook-targets"};
+  }
+  rpc CreateRequestNotificationWebhookTarget(CreateRequestNotificationWebhookTargetRequest) returns (RequestNotificationWebhookTarget) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/webhook-targets"
+      body: "*"
+    };
+  }
+  rpc UpdateRequestNotificationWebhookTarget(UpdateRequestNotificationWebhookTargetRequest) returns (RequestNotificationWebhookTarget) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/request-notifications/webhook-targets/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteRequestNotificationWebhookTarget(DeleteRequestNotificationWebhookTargetRequest) returns (DeleteRequestNotificationWebhookTargetResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/request-notifications/webhook-targets/{id}"};
+  }
+  rpc TestRequestNotificationWebhookTarget(TestRequestNotificationWebhookTargetRequest) returns (RequestNotificationWebhookTestResult) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/webhook-targets/{id}:test"
+      body: "*"
+    };
+  }
+  rpc PreviewRequestNotification(PreviewRequestNotificationRequest) returns (PreviewRequestNotificationResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/preview"
+      body: "*"
+    };
+  }
+  rpc PublishRequestUpdate(PublishRequestUpdateRequest) returns (RequestNotificationEvent) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/publish"
+      body: "*"
+    };
+  }
+  rpc ListRequestNotificationDeliveries(ListRequestNotificationDeliveriesRequest) returns (ListRequestNotificationDeliveriesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/request-notifications/deliveries"};
+  }
+  rpc RetryRequestNotificationDelivery(RetryRequestNotificationDeliveryRequest) returns (RequestNotificationDelivery) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/deliveries/{id}:retry"
+      body: "*"
+    };
+  }
+  rpc ListRequestSubscribers(ListRequestSubscribersRequest) returns (ListRequestSubscribersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/request-notifications/requests/{request_id}/subscribers"};
+  }
+  rpc SuppressRequestSubscriber(SuppressRequestSubscriberRequest) returns (RequestSubscriber) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/subscribers/{contact_id}:suppress"
+      body: "*"
+    };
+  }
+  rpc RecordRequestNotificationProviderEvent(RecordRequestNotificationProviderEventRequest) returns (RequestSubscriber) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications/provider-events:suppress"
+      body: "*"
+    };
+  }
+}
+
+service PublicRequestNotificationService {
+  rpc SubscribePublicCustomerRequest(SubscribePublicCustomerRequestRequest) returns (PublicRequestSubscription) {
+    option (google.api.http) = {
+      post: "/v1/portal/{tenant_slug}/requests/{public_slug}/subscribe"
+      body: "*"
+    };
+  }
+  rpc UnsubscribePublicCustomerRequest(UnsubscribePublicCustomerRequestRequest) returns (PublicRequestSubscription) {
+    option (google.api.http) = {
+      post: "/v1/portal/{tenant_slug}/unsubscribe"
+      body: "*"
+    };
+  }
+  rpc ConfirmPublicNotificationContact(ConfirmPublicNotificationContactRequest) returns (PublicNotificationContact) {
+    option (google.api.http) = {
+      post: "/v1/portal/{tenant_slug}/notification-contact/confirm"
+      body: "*"
+    };
+  }
+}
+
+enum RequestNotificationEventType {
+  REQUEST_NOTIFICATION_EVENT_TYPE_UNSPECIFIED = 0;
+  REQUEST_NOTIFICATION_EVENT_TYPE_STATUS_CHANGED = 1;
+  REQUEST_NOTIFICATION_EVENT_TYPE_SHIPPED = 2;
+  REQUEST_NOTIFICATION_EVENT_TYPE_NEED_INFO_DIRECT = 3;
+  REQUEST_NOTIFICATION_EVENT_TYPE_MODERATOR_RESPONSE = 4;
+  REQUEST_NOTIFICATION_EVENT_TYPE_CHANGELOG_POST_PUBLISHED = 5;
+}
+
+enum RequestNotificationChannel {
+  REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED = 0;
+  REQUEST_NOTIFICATION_CHANNEL_EMAIL = 1;
+  REQUEST_NOTIFICATION_CHANNEL_WEBHOOK = 2;
+}
+
+message RequestNotificationSettings {
+  string tenant_id = 1;
+  bool email_enabled = 2;
+  bool webhook_enabled = 3;
+  google.protobuf.Struct enabled_event_types = 4;
+  google.protobuf.Struct status_policy = 5;
+  string default_consent_mode = 6;
+  bool require_public_update_for_status = 7;
+  int32 max_recipients_without_confirm = 8;
+  int32 tenant_hourly_send_limit = 9;
+  int32 contact_daily_send_limit = 10;
+  string updated_by = 11;
+  string created_at = 12;
+  string updated_at = 13;
+}
+
+message GetRequestNotificationSettingsRequest {}
+
+message UpdateRequestNotificationSettingsRequest {
+  optional bool email_enabled = 1;
+  optional bool webhook_enabled = 2;
+  google.protobuf.Struct enabled_event_types = 3;
+  google.protobuf.Struct status_policy = 4;
+  optional string default_consent_mode = 5;
+  optional bool require_public_update_for_status = 6;
+  optional int32 max_recipients_without_confirm = 7;
+  optional int32 tenant_hourly_send_limit = 8;
+  optional int32 contact_daily_send_limit = 9;
+}
+
+message RequestNotificationSender {
+  string id = 1;
+  string from_name = 2;
+  string from_email_redacted = 3;
+  string reply_to_redacted = 4;
+  string domain = 5;
+  string dkim_status = 6;
+  string spf_status = 7;
+  string dmarc_status = 8;
+  string provider = 9;
+  string status = 10;
+  optional string verified_at = 11;
+  string created_at = 12;
+  string updated_at = 13;
+}
+
+message GetRequestNotificationSenderRequest {}
+
+message UpsertRequestNotificationSenderRequest {
+  string from_name = 1 [(google.api.field_behavior) = REQUIRED];
+  string from_email = 2 [(google.api.field_behavior) = REQUIRED];
+  optional string reply_to = 3;
+  string provider = 4;
+  string provider_url = 5;
+  optional string provider_secret = 6;
+}
+
+message VerifyRequestNotificationSenderRequest {
+  string id = 1;
+}
+
+message RequestNotificationWebhookTarget {
+  string id = 1;
+  string name = 2;
+  string url = 3;
+  string url_host = 4;
+  string signature_version = 5;
+  google.protobuf.Struct event_mask = 6;
+  bool include_recipient_identity = 7;
+  string status = 8;
+  optional string verified_at = 9;
+  optional string last_tested_at = 10;
+  string created_at = 11;
+  string updated_at = 12;
+}
+
+message ListRequestNotificationWebhookTargetsRequest {}
+
+message ListRequestNotificationWebhookTargetsResponse {
+  repeated RequestNotificationWebhookTarget targets = 1;
+}
+
+message CreateRequestNotificationWebhookTargetRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  string url = 2 [(google.api.field_behavior) = REQUIRED];
+  optional string secret = 3;
+  google.protobuf.Struct event_mask = 4;
+  bool include_recipient_identity = 5;
+}
+
+message UpdateRequestNotificationWebhookTargetRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string name = 2;
+  optional string url = 3;
+  optional string secret = 4;
+  google.protobuf.Struct event_mask = 5;
+  optional bool include_recipient_identity = 6;
+  optional string status = 7;
+}
+
+message DeleteRequestNotificationWebhookTargetRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message DeleteRequestNotificationWebhookTargetResponse {}
+
+message TestRequestNotificationWebhookTargetRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RequestNotificationWebhookTestResult {
+  bool ok = 1;
+  optional int32 status_code = 2;
+  optional int64 latency_ms = 3;
+  string message = 4;
+}
+
+message RequestNotificationUpdateDraft {
+  string request_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string title = 2 [(google.api.field_behavior) = REQUIRED];
+  string body = 3 [(google.api.field_behavior) = REQUIRED];
+  string kind = 4;
+  bool notify_subscribers = 5;
+}
+
+message PreviewRequestNotificationRequest {
+  RequestNotificationUpdateDraft update = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated RequestNotificationChannel channels = 2;
+}
+
+message PreviewRequestNotificationResponse {
+  int32 eligible_recipients = 1;
+  int32 excluded_recipients = 2;
+  google.protobuf.Struct excluded_by_reason = 3;
+  google.protobuf.Struct email_payload = 4;
+  google.protobuf.Struct webhook_payload = 5;
+}
+
+message PublishRequestUpdateRequest {
+  RequestNotificationUpdateDraft update = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated RequestNotificationChannel channels = 2;
+  bool confirm_large_audience = 3;
+}
+
+message RequestNotificationEvent {
+  string id = 1;
+  RequestNotificationEventType event_type = 2;
+  string status = 3;
+  optional string request_id = 4;
+  optional string update_id = 5;
+  optional string direct_followup_id = 6;
+  string dedupe_key = 7;
+  google.protobuf.Struct recipient_snapshot = 8;
+  string created_at = 9;
+}
+
+message RequestNotificationDelivery {
+  string id = 1;
+  string event_id = 2;
+  RequestNotificationChannel channel = 3;
+  string status = 4;
+  int32 attempts = 5;
+  string failure_kind = 6;
+  optional int32 http_status = 7;
+  string last_error = 8;
+  string dead_reason = 9;
+  string trace_id = 10;
+  string destination_hash = 11;
+  string created_at = 12;
+  optional string delivered_at = 13;
+  optional string next_retry_at = 14;
+  optional string last_manual_retry_at = 15;
+  string retried_by = 16;
+  int32 manual_retry_count = 17;
+  google.protobuf.Struct payload = 18;
+}
+
+message ListRequestNotificationDeliveriesRequest {
+  repeated string status = 1;
+  int32 limit = 2;
+  int64 before_id = 3;
+  optional string request_id = 4;
+  optional RequestNotificationChannel channel = 5;
+}
+
+message ListRequestNotificationDeliveriesResponse {
+  repeated RequestNotificationDelivery deliveries = 1;
+  int64 next_before_id = 2;
+}
+
+message RetryRequestNotificationDeliveryRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ListRequestSubscribersRequest {
+  string request_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ListRequestSubscribersResponse {
+  repeated RequestSubscriber subscribers = 1;
+}
+
+message RequestSubscriber {
+  string contact_id = 1;
+  string display_name = 2;
+  string organization = 3;
+  string email_redacted = 4;
+  string consent_state = 5;
+  string subscription_status = 6;
+  repeated string sources = 7;
+  optional string created_at = 8;
+  optional string unsubscribed_at = 9;
+}
+
+message SuppressRequestSubscriberRequest {
+  string contact_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string reason = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message RecordRequestNotificationProviderEventRequest {
+  string email = 1 [(google.api.field_behavior) = REQUIRED];
+  string event_type = 2 [(google.api.field_behavior) = REQUIRED];
+  string reason = 3;
+  string provider = 4;
+  string provider_message_id = 5;
+}
+
+message SubscribePublicCustomerRequestRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+  string email = 3 [(google.api.field_behavior) = REQUIRED];
+  bool notify_me = 4;
+  string notification_consent_text_version = 5;
+  string display_name = 6;
+  string organization = 7;
+  string locale = 8;
+  string timezone = 9;
+}
+
+message UnsubscribePublicCustomerRequestRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  string token = 2 [(google.api.field_behavior) = REQUIRED];
+  string scope = 3;
+}
+
+message ConfirmPublicNotificationContactRequest {
+  string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
+  string token = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message PublicRequestSubscription {
+  string id = 1;
+  string request_id = 2;
+  string status = 3;
+  string scope = 4;
+  string email_redacted = 5;
+}
+
+message PublicNotificationContact {
+  string id = 1;
+  string email_redacted = 2;
+  string consent_state = 3;
+  bool verified = 4;
+}

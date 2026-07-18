@@ -7,6 +7,7 @@ import {
   isActiveStatus,
   useRevokeGdprExport,
 } from '@/features/gdpr/api/export-gdpr-subject'
+import { setCsrfToken } from '@/lib/api-client'
 import { GdprExportStatus } from '@/proto/attune/v1/gdpr'
 import { server } from '@/testing/mocks/server'
 import { renderHook, waitFor } from '@/testing/test-utils'
@@ -19,6 +20,7 @@ import { triggerBlobDownload } from '@/lib/blob-download'
 
 describe('gdpr export api helpers', () => {
   afterEach(() => {
+    setCsrfToken(null)
     vi.clearAllMocks()
   })
 
@@ -49,6 +51,27 @@ describe('gdpr export api helpers', () => {
     expect(filename).toBe('gdpr-export-job-123.zip')
   })
 
+  it('sends the CSRF token and uses the caller filename when no server filename is present', async () => {
+    let csrfHeader: string | null = null
+    setCsrfToken('csrf-token-1')
+    server.use(
+      http.get('/fb/v1/console/gdpr/exports/job-456/download', ({ request }) => {
+        csrfHeader = request.headers.get('X-CSRF-Token')
+        return new HttpResponse('zip-bytes', {
+          status: 200,
+          headers: { 'Content-Type': 'application/zip' },
+        })
+      }),
+    )
+
+    await downloadGdprExport('job-456', 'requested-gdpr.zip')
+
+    expect(csrfHeader).toBe('csrf-token-1')
+    expect(triggerBlobDownload).toHaveBeenCalledTimes(1)
+    const [, filename] = vi.mocked(triggerBlobDownload).mock.calls[0] ?? []
+    expect(filename).toBe('requested-gdpr.zip')
+  })
+
   it('surfaces structured download errors', async () => {
     server.use(
       http.get('/fb/v1/console/gdpr/exports/job-123/download', () =>
@@ -57,6 +80,37 @@ describe('gdpr export api helpers', () => {
     )
 
     await expect(downloadGdprExport('job-123')).rejects.toThrow('archive expired')
+  })
+
+  it('falls back to the HTTP status when the error body is empty', async () => {
+    server.use(
+      http.get(
+        '/fb/v1/console/gdpr/exports/job-empty/download',
+        () => new HttpResponse(null, { status: 404 }),
+      ),
+    )
+
+    await expect(downloadGdprExport('job-empty')).rejects.toThrow('HTTP 404')
+  })
+
+  it('falls back to the HTTP status when the error body is not structured JSON', async () => {
+    server.use(
+      http.get('/fb/v1/console/gdpr/exports/job-plain/download', () =>
+        HttpResponse.text('not json', { status: 500 }),
+      ),
+    )
+
+    await expect(downloadGdprExport('job-plain')).rejects.toThrow('HTTP 500')
+  })
+
+  it('falls back to the HTTP status when JSON lacks a message field', async () => {
+    server.use(
+      http.get('/fb/v1/console/gdpr/exports/job-json/download', () =>
+        HttpResponse.json({ error: 'expired' }, { status: 410 }),
+      ),
+    )
+
+    await expect(downloadGdprExport('job-json')).rejects.toThrow('HTTP 410')
   })
 
   it('treats queued and running exports as active', () => {

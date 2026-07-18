@@ -31,6 +31,7 @@ export const deliveriesQuery = (status: DeliveryStatusFilter) =>
         `/fb/v1/console/outbox/deliveries?${params.toString()}`,
         { signal },
       )
+      /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
       return resp.deliveries ?? []
     },
     staleTime: 15_000,

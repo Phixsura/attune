@@ -18,8 +18,9 @@ import {
   SortDirection,
 } from '@/proto/attune/v1/customer_request'
 import type { Member } from '@/proto/attune/v1/member'
+import { defaultMe } from '@/testing/mocks/handlers'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 const requestID = '11111111-1111-1111-1111-111111111111'
 const noteID = '44444444-4444-4444-4444-444444444444'
@@ -63,6 +64,116 @@ describe('CustomerRequestsPage', () => {
     expect(screen.getAllByText(/收入影响/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('决策分 114').length).toBeGreaterThan(0)
     expect(screen.getAllByText('已同步').length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByPlaceholderText('反馈 ID')).not.toBeInTheDocument())
+  })
+
+  it('retries after the list query fails', async () => {
+    let calls = 0
+    server.use(
+      http.get(baseURL, () => {
+        calls += 1
+        return calls === 1
+          ? HttpResponse.json({ message: 'list failed' }, { status: 500 })
+          : HttpResponse.json({ requests: [] })
+      }),
+      http.get(`${baseURL}/saved-views`, () => HttpResponse.json({ views: [] })),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    expect(await screen.findByText('客户需求加载失败')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重试' }))
+
+    expect(await screen.findByText('还没有客户需求')).toBeInTheDocument()
+    expect(calls).toBeGreaterThanOrEqual(2)
+  })
+
+  it('opens the promote dialog from the toolbar and ignores invalid feedback ids', async () => {
+    let promoted = false
+    mockList({ requests: [] })
+    server.use(
+      http.post(`${baseURL}:promote-feedback`, () => {
+        promoted = true
+        return HttpResponse.json(sampleDetail(), { status: 201 })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: '从反馈提升' }))
+    const dialog = await screen.findByRole('dialog', { name: '从反馈提升为客户需求' })
+    await user.type(within(dialog).getByLabelText('反馈 ID'), 'not-a-number')
+    await user.type(within(dialog).getByLabelText('标题'), 'Invalid promote')
+    await user.click(within(dialog).getByRole('button', { name: '提升' }))
+
+    expect(promoted).toBe(false)
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+  })
+
+  it('changes toolbar status, priority, visibility, and sort filters', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ requests: [sampleSummary()] })
+      }),
+      http.get(`${baseURL}/saved-views`, () => HttpResponse.json({ views: [] })),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await screen.findByText('Export bundles')
+    const toolbarCombos = () => screen.getAllByRole('combobox').slice(1)
+
+    await user.click(toolbarCombos()[0])
+    await user.click(await screen.findByRole('option', { name: 'Planned' }))
+    await waitFor(() =>
+      expect(
+        urls.some(
+          (url) =>
+            new URL(url).searchParams.get('status') ===
+            CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_PLANNED,
+        ),
+      ).toBe(true),
+    )
+
+    await user.click(toolbarCombos()[1])
+    await user.click(await screen.findByRole('option', { name: 'High' }))
+    await waitFor(() =>
+      expect(
+        urls.some(
+          (url) =>
+            new URL(url).searchParams.get('priority') ===
+            CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+        ),
+      ).toBe(true),
+    )
+
+    await user.click(toolbarCombos()[3])
+    await user.click(await screen.findByRole('option', { name: 'All' }))
+    await waitFor(() =>
+      expect(
+        urls.some(
+          (url) =>
+            new URL(url).searchParams.get('visibility') ===
+            CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
+        ),
+      ).toBe(true),
+    )
+
+    await user.click(toolbarCombos()[4])
+    await user.click(await screen.findByRole('option', { name: '决策分' }))
+    await waitFor(() =>
+      expect(
+        urls.some(
+          (url) =>
+            new URL(url).searchParams.get('sort') ===
+            CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
+        ),
+      ).toBe(true),
+    )
   })
 
   it('posts a create request payload from the dialog', async () => {
@@ -80,21 +191,44 @@ describe('CustomerRequestsPage', () => {
     const { user } = renderWithProviders(<CustomerRequestsPage />)
 
     await user.click(await screen.findByRole('button', { name: '新建需求' }))
-    await user.type(screen.getByLabelText('标题'), 'Search result exports')
-    await user.type(screen.getByLabelText('描述'), 'Enterprise teams need exports.')
-    await user.click(screen.getByRole('combobox', { name: '负责人' }))
+    const dialog = await screen.findByRole('dialog', { name: '新建客户需求' })
+    await user.type(within(dialog).getByLabelText('标题'), 'Search result exports')
+    await user.type(within(dialog).getByLabelText('描述'), 'Enterprise teams need exports.')
+    await user.click(within(dialog).getAllByRole('combobox')[0])
+    await user.click(await screen.findByRole('option', { name: 'High' }))
+    await user.click(within(dialog).getByRole('combobox', { name: '负责人' }))
     await user.click(await screen.findByRole('option', { name: member.email }))
-    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(payload).toBeDefined())
     expect(payload).toMatchObject({
       title: 'Search result exports',
       description: 'Enterprise teams need exports.',
       status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
-      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_NONE,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
       ownerMemberId: member.id,
     })
     expect(payload?.idempotencyKey).toEqual(expect.stringMatching(/^cr_[A-Za-z0-9_-]+$/))
+  })
+
+  it('keeps the create dialog open when creating a request fails', async () => {
+    let attempts = 0
+    mockList({ requests: [] })
+    server.use(
+      http.post(baseURL, () => {
+        attempts += 1
+        return HttpResponse.json({ message: 'create failed' }, { status: 500 })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: '新建需求' }))
+    await user.type(screen.getByLabelText('标题'), 'Search result exports')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(attempts).toBe(1))
+    expect(screen.getByRole('dialog', { name: '新建客户需求' })).toBeInTheDocument()
   })
 
   it('updates scoring settings from the settings dialog', async () => {
@@ -119,6 +253,8 @@ describe('CustomerRequestsPage', () => {
     await user.click(await screen.findByRole('button', { name: '评分设置' }))
     const dialog = await screen.findByRole('dialog', { name: '评分设置' })
     expect(await within(dialog).findByLabelText('反馈权重')).toHaveValue(2)
+    await user.clear(within(dialog).getByLabelText('None'))
+    await user.type(within(dialog).getByLabelText('None'), '11')
     await user.clear(within(dialog).getByLabelText('反馈权重'))
     await user.type(within(dialog).getByLabelText('反馈权重'), '9')
     await user.clear(within(dialog).getByLabelText('每分收入金额'))
@@ -127,9 +263,35 @@ describe('CustomerRequestsPage', () => {
 
     await waitFor(() =>
       expect(payload).toMatchObject({
+        priorityNoneWeight: 11,
         feedbackWeight: 9,
         revenueCentsPerPoint: '250000',
       }),
+    )
+  })
+
+  it('keeps scoring settings open when saving fails', async () => {
+    let attempts = 0
+    mockList({ requests: [] })
+    server.use(
+      http.get(`${baseURL}/scoring-settings`, () => HttpResponse.json(sampleScoringSettings())),
+      http.put(`${baseURL}/scoring-settings`, () => {
+        attempts += 1
+        return HttpResponse.json({ message: 'scoring failed' }, { status: 500 })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: '评分设置' }))
+    const dialog = await screen.findByRole('dialog', { name: '评分设置' })
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(attempts).toBe(1))
+    expect(screen.getByRole('dialog', { name: '评分设置' })).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '评分设置' })).not.toBeInTheDocument(),
     )
   })
 
@@ -358,6 +520,28 @@ describe('CustomerRequestsPage', () => {
     expect(payload?.idempotencyKey).toEqual(expect.stringMatching(/^cr_[A-Za-z0-9_-]+$/))
   })
 
+  it('keeps the promote dialog open when promoting feedback fails', async () => {
+    let attempts = 0
+    mockList({ requests: [] })
+    server.use(
+      http.post(`${baseURL}:promote-feedback`, () => {
+        attempts += 1
+        return HttpResponse.json({ message: 'promote failed' }, { status: 500 })
+      }),
+    )
+
+    const { user } = renderWithProviders(
+      <CustomerRequestsPage initialPromoteFeedbackIDs={['101']} />,
+    )
+
+    const dialog = await screen.findByRole('dialog', { name: '从反馈提升为客户需求' })
+    await user.type(within(dialog).getByLabelText('标题'), 'Failed promotion')
+    await user.click(within(dialog).getByRole('button', { name: '提升' }))
+
+    await waitFor(() => expect(attempts).toBe(1))
+    expect(screen.getByRole('dialog', { name: '从反馈提升为客户需求' })).toBeInTheDocument()
+  })
+
   it('filters the list by feedback id when opened from a feedback context', async () => {
     let feedbackID: string | null = null
     server.use(
@@ -501,13 +685,39 @@ describe('CustomerRequestsPage', () => {
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('combobox', { name: '负责人' }))
     await user.click(await screen.findByRole('option', { name: member.email }))
+    await user.click(within(dialog).getByRole('combobox', { name: '优先级' }))
+    await user.click(await screen.findByRole('option', { name: 'Urgent' }))
     await user.click(within(dialog).getByRole('button', { name: '保存更改' }))
 
     await waitFor(() => expect(payload).toBeDefined())
     expect(payload).toMatchObject({
       id: requestID,
+      priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_URGENT,
       ownerMemberId: member.id,
     })
+  })
+
+  it('keeps detail status edits available when update fails', async () => {
+    let attempts = 0
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.patch(`${baseURL}/${requestID}`, () => {
+        attempts += 1
+        return HttpResponse.json({ message: 'update failed' }, { status: 500 })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('combobox', { name: '状态' }))
+    await user.click(await screen.findByRole('option', { name: 'Planned' }))
+    await user.click(within(dialog).getByRole('button', { name: '保存更改' }))
+
+    await waitFor(() => expect(attempts).toBe(1))
+    expect(within(dialog).getByRole('button', { name: '保存更改' })).toBeInTheDocument()
   })
 
   it('clears owner from the detail drawer', async () => {
@@ -726,6 +936,28 @@ describe('CustomerRequestsPage', () => {
     expect(await within(dialog).findByText('Prioritize after ACME review.')).toBeInTheDocument()
   })
 
+  it('ignores empty note submissions from the detail drawer', async () => {
+    let posted = false
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.post(`${baseURL}/${requestID}/notes`, () => {
+        posted = true
+        return HttpResponse.json(sampleDetail())
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    const form = within(dialog).getByLabelText('备注内容').closest('form') as HTMLFormElement
+
+    fireEvent.submit(form)
+
+    await waitFor(() => expect(posted).toBe(false))
+  })
+
   it('deletes an internal note from the detail drawer', async () => {
     let deleted = false
     let detailResponse = sampleDetail({ notes: [sampleNote()] })
@@ -749,6 +981,60 @@ describe('CustomerRequestsPage', () => {
     await waitFor(() => expect(deleted).toBe(true))
     await waitFor(() =>
       expect(within(dialog).queryByText('Prioritize after ACME review.')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('links an external issue and clears the issue URL field', async () => {
+    let payload: Record<string, unknown> | undefined
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(sampleDetail())
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(
+      within(dialog).getByPlaceholderText('Issue URL'),
+      'https://github.com/Phixsura/attune/issues/224',
+    )
+    await user.click(within(dialog).getByRole('button', { name: '添加引用' }))
+
+    await waitFor(() =>
+      expect(payload).toMatchObject({
+        id: requestID,
+        provider: 'github',
+        externalUrl: 'https://github.com/Phixsura/attune/issues/224',
+      }),
+    )
+    await waitFor(() => expect(within(dialog).getByPlaceholderText('Issue URL')).toHaveValue(''))
+  })
+
+  it('hides issue linking controls for read-only users', async () => {
+    server.use(
+      http.get('/fb/v1/console/me', () =>
+        HttpResponse.json({
+          ...defaultMe,
+          user: { ...defaultMe.user, role: 'viewer' },
+        }),
+      ),
+    )
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('关联反馈')).toBeInTheDocument()
+
+    await waitFor(() =>
+      expect(within(dialog).queryByPlaceholderText('Issue URL')).not.toBeInTheDocument(),
     )
   })
 

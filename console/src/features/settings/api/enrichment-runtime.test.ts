@@ -133,6 +133,40 @@ describe('enrichmentRuntimeQuery', () => {
       targetVersion: '9',
     })
   })
+
+  it('normalizes missing and malformed duration fields to zero seconds', async () => {
+    server.use(
+      http.get('/fb/v1/console/enrichment-runtime', () =>
+        HttpResponse.json({
+          runtime: {
+            bootstrapDefault: {},
+            desiredSpec: {
+              batchWindow: '500ms',
+              sweepInterval: 'NaNs',
+            },
+            instances: [
+              {
+                appliedSpec: {
+                  batchWindow: '',
+                  sweepInterval: '4s',
+                },
+              },
+            ],
+            history: [],
+          },
+        }),
+      ),
+    )
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const runtime = await qc.fetchQuery(enrichmentRuntimeQuery())
+
+    expect(runtime.bootstrapDefault.batchWindowSeconds).toBe(0)
+    expect(runtime.desiredSpec.batchWindowSeconds).toBe(0)
+    expect(runtime.desiredSpec.sweepIntervalSeconds).toBe(0)
+    expect(runtime.instances[0]?.appliedSpec.batchWindowSeconds).toBe(0)
+    expect(runtime.instances[0]?.appliedSpec.sweepIntervalSeconds).toBe(4)
+  })
 })
 
 describe('useUpdateEnrichmentRuntime', () => {

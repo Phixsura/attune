@@ -175,3 +175,17 @@ func TestPublicIngestCORSKeepsVersionErrorsReadableInBrowser(t *testing.T) {
 	require.Contains(t, rec.Header().Values("Vary"), "Origin")
 	require.Contains(t, rec.Header().Values("Vary"), "X-Attune-Api-Version")
 }
+
+func TestAPIKeyAuthReadsRequestContext(t *testing.T) {
+	t.Parallel()
+
+	keyID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	ctx := apikey.WithAuthForTest(context.Background(), "tenant-1", keyID.String(), []domain.Scope{domain.ScopeIngestWrite})
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/verify", nil).WithContext(ctx)
+
+	auth, err := apiKeyAuth(req, nil)
+	require.NoError(t, err)
+	require.Equal(t, "tenant-1", auth.TenantID)
+	require.Equal(t, keyID, auth.KeyID)
+	require.Equal(t, []domain.Scope{domain.ScopeIngestWrite}, auth.Scopes)
+}

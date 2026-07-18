@@ -47,6 +47,16 @@ func (f *fakeLLMUsageRepo) UsageByTenant(
 	return f.rows, nil
 }
 
+func TestNewUsageHandlerCreatesHandler(t *testing.T) {
+	t.Parallel()
+
+	h := NewUsageHandler(nil, nil)
+
+	require.NotNil(t, h)
+	require.Nil(t, h.repo)
+	require.Nil(t, h.llm)
+}
+
 func TestHTTPDispatchSmoke(t *testing.T) {
 	t.Parallel()
 

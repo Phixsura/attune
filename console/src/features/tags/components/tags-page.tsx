@@ -70,6 +70,7 @@ export function TagsPage() {
     description: string
     exclusiveScope: string
   }) => {
+    /* v8 ignore next -- @preserve: edit dialogs only submit after a tag target is selected. */
     if (!editTag) return
     updateTag.mutate(
       {
@@ -90,6 +91,7 @@ export function TagsPage() {
   }
 
   const handleArchiveConfirm = () => {
+    /* v8 ignore next -- @preserve: archive dialogs only confirm after a tag target is selected. */
     if (!archiveTarget) return
     archiveTag.mutate(archiveTarget.id, {
       onSuccess: () => {

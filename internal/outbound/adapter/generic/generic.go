@@ -96,6 +96,34 @@ func (c *channel) RenderDigest(view any, dst outbound.Target) (outbound.Rendered
 	}, nil
 }
 
+func (c *channel) RenderNotification(env *outbound.NotificationEnvelope, dst outbound.Target) (outbound.Rendered, error) {
+	body, err := json.Marshal(env)
+	if err != nil {
+		return outbound.Rendered{}, fmt.Errorf("marshal request notification: %w", err)
+	}
+
+	signature := outbound.BytesSign(body, dst.Secret)
+	label := fmt.Sprintf("request-notification-%s", dst.TenantID)
+	return outbound.Rendered{
+		Build: func(ctx context.Context) (*http.Request, error) {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, dst.URL, bytes.NewReader(body))
+			if err != nil {
+				return nil, err
+			}
+			req.Header.Set("Content-Type", "application/json; charset=utf-8")
+			req.Header.Set("X-Attune-Signature", signature)
+			if env.DeliveryID != "" {
+				req.Header.Set("X-Attune-Delivery-Id", env.DeliveryID)
+			}
+			req.Header.Set("User-Agent", "attune/1.0")
+			logext.Infof(ctx, "[outbound.generic] request notification req,label:%s,url:%s,body_bytes:%d",
+				label, redactURL(dst.URL), len(body))
+			return req, nil
+		},
+		Check: outbound.CheckWebhook(label),
+	}, nil
+}
+
 type digestPayload struct {
 	Version        string `json:"version"`
 	EventType      string `json:"event_type"`

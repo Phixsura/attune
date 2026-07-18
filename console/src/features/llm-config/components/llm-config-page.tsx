@@ -104,72 +104,85 @@ export function LLMConfigPage() {
   ): Promise<unknown> => {
     const target = channelDialog.target
     if (target) {
-      return updateChannel.mutateAsync(
-        { id: target.id, body },
-        {
-          onSuccess: (row) => {
-            setSelectedId(row.id)
-            setChannelDialog({ open: false, target: null })
-            toast.success(t('llm_config.toast.channel_saved'))
+      return handledMutation(
+        updateChannel.mutateAsync(
+          { id: target.id, body },
+          {
+            onSuccess: (row) => {
+              setSelectedId(row.id)
+              setChannelDialog({ open: false, target: null })
+              toast.success(t('llm_config.toast.channel_saved'))
+            },
+            onError: toastError,
           },
-          onError: toastError,
-        },
+        ),
       )
     }
-    return createChannel.mutateAsync(body as CreateLLMChannelRequest, {
-      onSuccess: (row) => {
-        setSelectedId(row.id)
-        setChannelDialog({ open: false, target: null })
-        toast.success(t('llm_config.toast.channel_saved'))
-      },
-      onError: toastError,
-    })
+    return handledMutation(
+      createChannel.mutateAsync(body as CreateLLMChannelRequest, {
+        onSuccess: (row) => {
+          setSelectedId(row.id)
+          setChannelDialog({ open: false, target: null })
+          toast.success(t('llm_config.toast.channel_saved'))
+        },
+        onError: toastError,
+      }),
+    )
   }
 
   const submitAbility = (
     body: Omit<UpsertLLMChannelAbilityRequest, 'channelId'>,
   ): Promise<unknown> => {
+    /* v8 ignore next -- @preserve: ability dialogs only open with a selected channel. */
     if (!selected) return Promise.resolve()
-    return upsertAbility.mutateAsync(
-      { channelId: selected.id, body },
-      {
-        onSuccess: () => {
-          setAbilityDialog(null)
-          toast.success(t('llm_config.toast.ability_saved'))
+    return handledMutation(
+      upsertAbility.mutateAsync(
+        { channelId: selected.id, body },
+        {
+          onSuccess: () => {
+            setAbilityDialog(null)
+            toast.success(t('llm_config.toast.ability_saved'))
+          },
+          onError: toastError,
         },
-        onError: toastError,
-      },
+      ),
     )
   }
 
   const submitRoute = (body: UpsertLLMRouteRequest): Promise<unknown> =>
-    upsertRoute.mutateAsync(body, {
-      onSuccess: () => {
-        setRouteDialog(null)
-        toast.success(t('llm_config.toast.route_saved'))
-      },
-      onError: toastError,
-    })
+    handledMutation(
+      upsertRoute.mutateAsync(body, {
+        onSuccess: () => {
+          setRouteDialog(null)
+          toast.success(t('llm_config.toast.route_saved'))
+        },
+        onError: toastError,
+      }),
+    )
 
   const runTest = (body: { providerModel: string; prompt: string }): Promise<unknown> => {
+    /* v8 ignore next -- @preserve: test dialogs only open with a selected channel target. */
     if (!testTarget) return Promise.resolve()
-    return testChannel.mutateAsync(
-      { id: testTarget.id, body },
-      {
-        onSuccess: (result) => {
-          setLastTest(result)
-          setTestTarget(null)
-          toast.success(t('llm_config.toast.test_ok', { ms: result.latencyMs || '0' }))
+    return handledMutation(
+      testChannel.mutateAsync(
+        { id: testTarget.id, body },
+        {
+          onSuccess: (result) => {
+            setLastTest(result)
+            setTestTarget(null)
+            toast.success(t('llm_config.toast.test_ok', { ms: result.latencyMs || '0' }))
+          },
+          onError: (err) => {
+            toastError(err)
+          },
         },
-        onError: (err) => {
-          toastError(err)
-        },
-      },
+      ),
     )
   }
 
   const confirmDelete = useMutation({
     mutationFn: async () => {
+      /* v8 ignore next -- @preserve: delete confirmation only opens after a target is chosen. */
       if (!deleteTarget) return
       if (deleteTarget.kind === 'channel') {
         await deleteChannel.mutateAsync(deleteTarget.row.id)
@@ -581,6 +594,10 @@ function toastError(err: unknown) {
   toast.error(errorText(err) || 'failed')
 }
 
+function handledMutation<T>(promise: Promise<T>): Promise<T | undefined> {
+  return promise.catch(() => undefined)
+}
+
 function queryError(err: unknown) {
   return errorText(err)
 }
@@ -596,6 +613,7 @@ export const llmConfigPageTestables = {
   deleteBody,
   deleteTitle,
   errorText,
+  handledMutation,
   queryError,
   toastError,
 }

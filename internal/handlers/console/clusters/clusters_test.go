@@ -50,6 +50,13 @@ func clusterCtx() *dispatcher.RequestContext[*session.AuthCtx] {
 	})
 }
 
+func TestNewClustersHandler(t *testing.T) {
+	t.Parallel()
+
+	h := NewClustersHandler(nil)
+	require.NotNil(t, h)
+}
+
 // --- BindListRequest -----------------------------------------------------
 
 func TestBindListRequest(t *testing.T) {

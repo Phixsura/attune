@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +48,25 @@ func TestRunDemoSeedRejectsBadFlag(t *testing.T) {
 	}
 }
 
+func TestRunDemoSubcommandsReturnConfigErrors(t *testing.T) {
+	setNoConfig(t)
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "seed", call: func() error { return runDemo([]string{"seed"}) }},
+		{name: "reset", call: func() error { return runDemo([]string{"reset"}) }},
+		{name: "bootstrap", call: func() error { return runDemo([]string{"bootstrap"}) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); err == nil || !strings.Contains(err.Error(), "read config") {
+				t.Fatalf("runDemo(%s) err = %v, want config load error", tc.name, err)
+			}
+		})
+	}
+}
+
 func TestRunDemoResetRequiresTenant(t *testing.T) {
 	t.Parallel()
 
@@ -54,11 +75,44 @@ func TestRunDemoResetRequiresTenant(t *testing.T) {
 	}
 }
 
+func TestRunDemoResetRejectsBadFlag(t *testing.T) {
+	t.Parallel()
+
+	if err := runDemoReset([]string{"--bad"}); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("runDemoReset bad flag err = %v, want flag validation", err)
+	}
+}
+
 func TestRunDemoBootstrapRequiresTenant(t *testing.T) {
 	t.Parallel()
 
 	if err := runDemoBootstrap([]string{"--tenant", ""}); err == nil || !strings.Contains(err.Error(), "--tenant is required") {
 		t.Fatalf("runDemoBootstrap err = %v, want tenant validation", err)
+	}
+}
+
+func TestRunDemoBootstrapRejectsBadFlag(t *testing.T) {
+	t.Parallel()
+
+	if err := runDemoBootstrap([]string{"--bad"}); err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("runDemoBootstrap bad flag err = %v, want flag validation", err)
+	}
+}
+
+func TestPrintDemoWorkspaceSummary(t *testing.T) {
+	out := captureDemoStdout(t, func() {
+		printDemoWorkspaceSummary("Demo ready", demoSeedResult{
+			TenantID:       "tenant-1",
+			TenantSlug:     "attune-demo",
+			FeedbackRows:   10,
+			SearchRuns:     12,
+			QualityActions: 1,
+		})
+	})
+	for _, want := range []string{"Demo ready", "tenant: attune-demo", "tenant_id: tenant-1", "feedback_rows: 10", "quality_actions: 1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("summary output missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -151,9 +205,25 @@ func TestClearDemoWorkspacePropagatesErrors(t *testing.T) {
 	t.Parallel()
 
 	want := errors.New("boom")
-	err := clearDemoWorkspace(context.Background(), ptrext.Of(fakeDemoWorkspaceExec{failOnCall: 3, err: want}), "tenant-1")
-	if !errors.Is(err, want) {
-		t.Fatalf("err = %v, want %v", err, want)
+	for _, tc := range []struct {
+		failOnCall int
+		wrap       string
+	}{
+		{failOnCall: 1, wrap: "clear demo outbox rows"},
+		{failOnCall: 2, wrap: "clear demo llm audit rows"},
+		{failOnCall: 3, wrap: "clear demo quality failure rows"},
+		{failOnCall: 4, wrap: "clear demo search events"},
+		{failOnCall: 5, wrap: "clear demo search runs"},
+		{failOnCall: 6, wrap: "clear demo quality actions"},
+		{failOnCall: 7, wrap: "clear demo semantic runs"},
+		{failOnCall: 8, wrap: "clear demo feedback rows"},
+	} {
+		t.Run(tc.wrap, func(t *testing.T) {
+			err := clearDemoWorkspace(context.Background(), ptrext.Of(fakeDemoWorkspaceExec{failOnCall: tc.failOnCall, err: want}), "tenant-1")
+			if !errors.Is(err, want) || !strings.Contains(err.Error(), tc.wrap) {
+				t.Fatalf("err = %v, want %v wrapped with %q", err, want, tc.wrap)
+			}
+		})
 	}
 }
 
@@ -319,4 +389,22 @@ func (f *fakeDemoQualityUpdater) UpsertQualityActionStatus(_ context.Context, in
 	}
 	f.in = in
 	return ptrext.Of(feedbackrepo.QualityAction{ActionKey: in.ActionKey}), nil
+}
+
+func captureDemoStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	original := os.Stdout
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	os.Stdout = writer
+	fn()
+	_ = writer.Close()
+	os.Stdout = original
+	out, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("io.ReadAll() error = %v", err)
+	}
+	return string(out)
 }

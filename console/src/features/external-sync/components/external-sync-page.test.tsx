@@ -92,8 +92,10 @@ describe('ExternalSyncPage', () => {
     let qualifiedConnectionID = ''
     let resumedConnectionID = ''
     let retriedRunID = ''
+    let retriedFailureID = ''
     let replayedEventID = ''
     let resetMappingID = ''
+    let savedMapping: unknown
     let previewBody: unknown
     let backfillBody: unknown
     let timelineBody: unknown
@@ -250,6 +252,25 @@ describe('ExternalSyncPage', () => {
           ],
         }),
       ),
+      http.put('/fb/v1/console/external-sync/mappings/mapping-1', async ({ request }) => {
+        savedMapping = await request.json()
+        return HttpResponse.json({
+          id: 'mapping-1',
+          tenantId: 'tenant-1',
+          connectionId: 'conn-1',
+          localObjectType: 'customer_request',
+          externalObjectType: 'issue',
+          direction: 'EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL',
+          fieldMappingJson: '{}',
+          statusMappingJson: '{}',
+          conflictPolicy: 'manual',
+          tombstonePolicy: 'mark_stale',
+          enabled: true,
+          mappingVersion: 2,
+          createdAt: '2026-07-08T01:00:00Z',
+          updatedAt: '2026-07-08T02:25:00Z',
+        })
+      }),
       http.get('/fb/v1/console/external-sync/mappings', () =>
         HttpResponse.json({
           mappings: [
@@ -575,6 +596,27 @@ describe('ExternalSyncPage', () => {
           }),
         ),
       ),
+      http.post('/fb/v1/console/external-sync/failures/failure-1:retry', () => {
+        retriedFailureID = 'failure-1'
+        return HttpResponse.json({
+          id: 'failure-1',
+          tenantId: 'tenant-1',
+          runId: 'run-1',
+          mappingId: 'mapping-1',
+          operation: 'push',
+          localObjectId: 'cr-42',
+          externalKey: 'issue-42',
+          failureKind: 'validation',
+          message: 'missing required provider field',
+          payloadDigest: 'sha256:abc123',
+          retryMode: 'manual',
+          normalizedPayloadJson: '{"number":42,"title":"Quota bug"}',
+          retryable: false,
+          resolvedAt: '2026-07-08T02:07:00Z',
+          resolvedBy: 'admin',
+          createdAt: '2026-07-08T02:01:00Z',
+        })
+      }),
       http.post('/fb/v1/console/external-sync/events/event-1:replay', () => {
         replayedEventID = 'event-1'
         return HttpResponse.json({
@@ -905,6 +947,14 @@ describe('ExternalSyncPage', () => {
     expect(screen.getByText('未匹配 provider schema：headline')).toBeInTheDocument()
     expect(mappingSaveButton).toBeEnabled()
     fireEvent.change(fieldMappingInput, { target: { value: '{}' } })
+    await user.click(mappingSaveButton)
+    await waitFor(() => {
+      expect(savedMapping).toMatchObject({
+        fieldMappingJson: '{}',
+        statusMappingJson: '{}',
+      })
+    })
+    expect(toast.success).toHaveBeenCalledWith('映射已保存')
 
     await user.click(screen.getByRole('button', { name: '预检 issue 映射' }))
     await waitFor(() => {
@@ -1004,6 +1054,11 @@ describe('ExternalSyncPage', () => {
     expect(screen.getAllByText('本地快照').length).toBeGreaterThan(0)
     expect(screen.getAllByText('外部快照').length).toBeGreaterThan(0)
     expect(screen.getByText('2 个待处理冲突')).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: '重试' }).at(-1) as HTMLButtonElement)
+    await waitFor(() => {
+      expect(retriedFailureID).toBe('failure-1')
+    })
+    expect(toast.success).toHaveBeenCalledWith('失败记录已标记重试')
     await user.click(screen.getByRole('button', { name: '批量处理' }))
     await waitFor(() => {
       expect(batchResolvedConflict).toMatchObject({
@@ -1409,6 +1464,8 @@ describe('ExternalSyncPage', () => {
     const apiFailure = (message: string) =>
       HttpResponse.json({ code: 'external_sync_test', message }, { status: 500 })
     let deleted = false
+    let deleteAttempts = 0
+    let testAttempts = 0
     let runDetailRequests = 0
     const connection = {
       id: 'conn-1',
@@ -1623,9 +1680,11 @@ describe('ExternalSyncPage', () => {
       http.patch('/fb/v1/console/external-sync/connections/conn-1', () =>
         apiFailure('update failed'),
       ),
-      http.post(/\/fb\/v1\/console\/external-sync\/connections\/conn-1:test$/, () =>
-        apiFailure('test failed'),
-      ),
+      http.post(/\/fb\/v1\/console\/external-sync\/connections\/conn-1:test$/, () => {
+        testAttempts += 1
+        if (testAttempts === 1) return HttpResponse.json({ ok: true, latencyMs: 18, error: '' })
+        return apiFailure('test failed')
+      }),
       http.post(/\/fb\/v1\/console\/external-sync\/connections\/conn-1:qualify$/, () =>
         apiFailure('qualify failed'),
       ),
@@ -1633,6 +1692,8 @@ describe('ExternalSyncPage', () => {
         apiFailure('resume failed'),
       ),
       http.delete('/fb/v1/console/external-sync/connections/conn-1', () => {
+        deleteAttempts += 1
+        if (deleteAttempts === 1) return apiFailure('delete failed')
         deleted = true
         return new HttpResponse(null, { status: 204 })
       }),
@@ -1710,6 +1771,10 @@ describe('ExternalSyncPage', () => {
 
     await user.click(screen.getAllByLabelText('测试连接')[0])
     await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith('连接测试通过，耗时 18ms')
+    })
+    await user.click(screen.getAllByLabelText('测试连接')[0])
+    await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith('test failed')
     })
     await user.click(screen.getAllByLabelText('资格检查')[0])
@@ -1782,6 +1847,10 @@ describe('ExternalSyncPage', () => {
       expect(toast.error).toHaveBeenCalledWith('batch resolve failed')
     })
 
+    await user.click(screen.getAllByLabelText('删除')[0])
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('delete failed')
+    })
     await user.click(screen.getAllByLabelText('删除')[0])
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('外部连接已删除')
@@ -2001,6 +2070,10 @@ describe('ExternalSyncPage', () => {
       />,
     )
     const createDialog = screen.getByRole('dialog', { name: '新建外部连接' })
+    const createForm = within(createDialog).getByRole('button', { name: '新建' }).closest('form')
+    expect(createForm).not.toBeNull()
+    fireEvent.submit(createForm as HTMLFormElement)
+    expect(onCreate).not.toHaveBeenCalled()
 
     fireEvent.change(within(createDialog).getByLabelText('Provider'), {
       target: { value: ' GitHub ' },
@@ -2077,6 +2150,13 @@ describe('ExternalSyncPage', () => {
       />,
     )
     const editDialog = screen.getByRole('dialog', { name: '编辑外部连接' })
+    fireEvent.change(within(editDialog).getByLabelText('名称'), {
+      target: { value: ' ' },
+    })
+    const editForm = within(editDialog).getByRole('button', { name: '保存' }).closest('form')
+    expect(editForm).not.toBeNull()
+    fireEvent.submit(editForm as HTMLFormElement)
+    expect(onEdit).not.toHaveBeenCalled()
 
     fireEvent.change(within(editDialog).getByLabelText('名称'), {
       target: { value: ' GitHub Enterprise ' },

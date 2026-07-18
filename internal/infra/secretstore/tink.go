@@ -640,7 +640,9 @@ func decodeAesGCMKey(serialized []byte) ([]byte, error) {
 			keyBytes = append([]byte(nil), serialized[i:i+int(l)]...)
 			i += int(l)
 		default:
-			if err := skipProtoField(serialized, ptrext.Of(i), wireType); err != nil {
+			var err error
+			i, err = skipProtoField(serialized, i, wireType)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -659,45 +661,40 @@ func decodeKeyValueMust(raw string) []byte {
 	return decoded
 }
 
-func skipProtoField(serialized []byte, i *int, wireType int) error {
-	idx := ptrext.Indirect(i)
+func skipProtoField(serialized []byte, idx int, wireType int) (int, error) {
 	switch wireType {
 	case 0:
 		_, n := binary.Uvarint(serialized[idx:])
 		if n <= 0 {
-			return errors.New("secretstore: malformed proto varint")
+			return idx, errors.New("secretstore: malformed proto varint")
 		}
 		idx += n
-		*i = idx
-		return nil
+		return idx, nil
 	case 1:
 		if len(serialized)-idx < 8 {
-			return errors.New("secretstore: malformed proto fixed64")
+			return idx, errors.New("secretstore: malformed proto fixed64")
 		}
 		idx += 8
-		*i = idx
-		return nil
+		return idx, nil
 	case 2:
 		l, n := binary.Uvarint(serialized[idx:])
 		if n <= 0 {
-			return errors.New("secretstore: malformed proto length")
+			return idx, errors.New("secretstore: malformed proto length")
 		}
 		idx += n
 		if l > uint64(len(serialized)-idx) {
-			return errors.New("secretstore: malformed proto bytes")
+			return idx, errors.New("secretstore: malformed proto bytes")
 		}
 		idx += int(l)
-		*i = idx
-		return nil
+		return idx, nil
 	case 5:
 		if len(serialized)-idx < 4 {
-			return errors.New("secretstore: malformed proto fixed32")
+			return idx, errors.New("secretstore: malformed proto fixed32")
 		}
 		idx += 4
-		*i = idx
-		return nil
+		return idx, nil
 	default:
-		return fmt.Errorf("secretstore: unsupported proto wire type %d", wireType)
+		return idx, fmt.Errorf("secretstore: unsupported proto wire type %d", wireType)
 	}
 }
 

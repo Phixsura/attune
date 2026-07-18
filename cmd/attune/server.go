@@ -70,6 +70,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/llmrouter"
 	"github.com/Phixsura/attune/internal/service/outbox"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
+	requestnotificationsvc "github.com/Phixsura/attune/internal/service/requestnotification"
 	"github.com/Phixsura/attune/internal/worker/batchjob"
 
 	digestrunrepo "github.com/Phixsura/attune/internal/repo/digestrun"
@@ -656,6 +657,7 @@ func startBackgroundWorkers(
 	startEmbeddingWorker(ctx, pool, enricher, rawLLM, llm)
 	startReplyDraftWorker(ctx, pool, enricher, llm, secrets)
 	startDigestWorker(ctx, pool, llm, consoleBaseURL)
+	startRequestNotificationWorker(ctx, pool, secrets, consoleBaseURL)
 	startGDPRExportWorker(ctx, pool, gdprExportTTL)
 	startAuditEvidenceWorker(ctx, pool, auditEvidenceExportTTL, auditEvidenceSigningKey)
 
@@ -666,6 +668,11 @@ func startBackgroundWorkers(
 	)
 	worker.Start(ctx)
 	return worker
+}
+
+func startRequestNotificationWorker(ctx context.Context, pool *pgxpool.Pool, secrets *secretstore.TinkStore, publicBaseURL string) {
+	worker := requestnotificationsvc.NewWorker(buildRequestNotificationService(pool, secrets, publicBaseURL))
+	safego(ctx, "request_notifications", func() { worker.Run(ctx) })
 }
 
 func startGDPRExportWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL time.Duration) {

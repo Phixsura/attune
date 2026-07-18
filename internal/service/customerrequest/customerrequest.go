@@ -53,13 +53,30 @@ type Detail struct {
 }
 
 type Service struct {
-	repo        *repo.Repo
-	idempotency idempotency.Store
-	audit       *auditlogsvc.Service
+	repo          *repo.Repo
+	idempotency   idempotency.Store
+	audit         *auditlogsvc.Service
+	notifications notificationSink
 }
 
 func New(r *repo.Repo, idem idempotency.Store, audit *auditlogsvc.Service) *Service {
 	return ptrext.Of(Service{repo: r, idempotency: idem, audit: audit})
+}
+
+type notificationSink interface {
+	RecordStatusChangeTx(
+		ctx context.Context,
+		tx pgx.Tx,
+		tenantID string,
+		requestID uuid.UUID,
+		oldStatus string,
+		newStatus string,
+		actor auditlogsvc.Actor,
+	) error
+}
+
+func (s *Service) SetNotificationSink(sink notificationSink) {
+	s.notifications = sink
 }
 
 type ListInput struct {
@@ -327,6 +344,14 @@ func (s *Service) Update(ctx context.Context, in UpdateInput) (*Detail, error) {
 	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.update", ptrext.Indirect(after),
 		"Updated customer request", updateAuditBeforeAfter(ptrext.Indirect(before), ptrext.Indirect(after))); err != nil {
 		return nil, err
+	}
+	beforeSummary := ptrext.Indirect(before)
+	afterSummary := ptrext.Indirect(after)
+	if s.notifications != nil && beforeSummary.Status != afterSummary.Status {
+		if err := s.notifications.RecordStatusChangeTx(ctx, tx, normalized.TenantID, normalized.ID,
+			string(beforeSummary.Status), string(afterSummary.Status), normalized.Actor); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err

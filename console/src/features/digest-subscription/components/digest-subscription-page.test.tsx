@@ -1,10 +1,20 @@
 import { QueryClient } from '@tanstack/react-query'
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { toast } from 'sonner'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DigestSubscription } from '@/proto/attune/v1/digest_subscription'
 import { server } from '@/testing/mocks/server'
 import { fireEvent, renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 import { DigestSubscriptionPage } from './digest-subscription-page'
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
+
+beforeEach(() => {
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.error).mockClear()
+})
 
 function seeded(data: DigestSubscription | null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -44,6 +54,14 @@ describe('DigestSubscriptionPage', () => {
     })
   })
 
+  it('disables deletion when there is no existing digest subscription', async () => {
+    renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(null) })
+    await waitFor(() => {
+      expect(screen.getByTestId('digest-delete')).toBeDisabled()
+    })
+    expect(screen.queryByTestId('digest-next-run')).not.toBeInTheDocument()
+  })
+
   it('populates the clustering checkbox from loaded config', async () => {
     const withClustering: DigestSubscription = { ...sample, clusteringEnabled: true }
     renderWithProviders(<DigestSubscriptionPage />, { queryClient: seeded(withClustering) })
@@ -68,6 +86,86 @@ describe('DigestSubscriptionPage', () => {
     fireEvent.click(screen.getByTestId('digest-save'))
     await waitFor(() => expect(captured).not.toBeNull())
     expect((captured as { clusteringEnabled?: boolean }).clusteringEnabled).toBe(true)
+  })
+
+  it('saves weekly cadence changes with numeric fallbacks and a trimmed prompt', async () => {
+    let captured: unknown = null
+    server.use(
+      http.put('/fb/v1/console/digest-subscription', async ({ request }) => {
+        captured = await request.json()
+        return HttpResponse.json(sample)
+      }),
+    )
+    const { user } = renderWithProviders(<DigestSubscriptionPage />, {
+      queryClient: seeded(sample),
+    })
+    await waitFor(() => screen.getByTestId('digest-frequency'))
+
+    await user.click(screen.getByTestId('digest-frequency'))
+    await user.click(await screen.findByRole('option', { name: '每周' }))
+    await user.click(screen.getByTestId('digest-weekday'))
+    await user.click(await screen.findByRole('option', { name: '周五' }))
+    fireEvent.change(screen.getByTestId('digest-send-hour'), { target: { value: '' } })
+    fireEvent.change(screen.getByTestId('digest-llm-min'), { target: { value: '' } })
+    fireEvent.change(screen.getByTestId('digest-theme-prompt'), {
+      target: { value: '  summarize high-risk themes  ' },
+    })
+    await user.click(screen.getByTestId('digest-save'))
+
+    await waitFor(() =>
+      expect(captured).toMatchObject({
+        frequency: 'weekly',
+        byweekday: 5,
+        sendHour: 0,
+        llmMinFeedback: 6,
+        themePrompt: 'summarize high-risk themes',
+      }),
+    )
+  })
+
+  it('shows the save spinner while an upsert is pending', async () => {
+    let releaseSave: () => void = () => {}
+    server.use(
+      http.put('/fb/v1/console/digest-subscription', async () => {
+        await new Promise<void>((resolve) => {
+          releaseSave = resolve
+        })
+        return HttpResponse.json(sample)
+      }),
+    )
+    const { user } = renderWithProviders(<DigestSubscriptionPage />, {
+      queryClient: seeded(sample),
+    })
+    await waitFor(() => screen.getByTestId('digest-save'))
+
+    const saveButton = screen.getByTestId('digest-save')
+    await user.click(saveButton)
+    await waitFor(() => expect(saveButton).toBeDisabled())
+    expect(saveButton.querySelector('.animate-spin')).toBeInTheDocument()
+    releaseSave()
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('保存'))
+  })
+
+  it('surfaces save and delete errors', async () => {
+    server.use(
+      http.put('/fb/v1/console/digest-subscription', () =>
+        HttpResponse.json({ message: 'save failed' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/digest-subscription', () =>
+        HttpResponse.json({ message: 'delete failed' }, { status: 500 }),
+      ),
+    )
+    const { user } = renderWithProviders(<DigestSubscriptionPage />, {
+      queryClient: seeded(sample),
+    })
+    await waitFor(() => screen.getByTestId('digest-save'))
+
+    await user.click(screen.getByTestId('digest-save'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('save failed'))
+    vi.mocked(toast.error).mockClear()
+
+    await user.click(screen.getByTestId('digest-delete'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('delete failed'))
   })
 
   it('calls delete mutation on delete click', async () => {

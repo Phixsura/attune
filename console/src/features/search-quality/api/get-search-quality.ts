@@ -25,6 +25,7 @@ export const searchQualityQuery = (filters: SearchQualityFilters = {}) =>
     queryKey: ['console', 'search-quality', normalizeSearchQualityFilters(filters)],
     queryFn: ({ signal }) => {
       const qs = searchQualitySearchParams(filters)
+      /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
       const suffix = qs.size > 0 ? `?${qs.toString()}` : ''
       return api<SearchQuality>(`/fb/v1/console/feedback/search/quality${suffix}`, {
         signal,

@@ -36,6 +36,100 @@ func TestClassifyPurpose_ExplicitPurpose(t *testing.T) {
 	require.Equal(t, "eval", classifyPurpose(ClassifyConfig{Purpose: "eval"}))
 }
 
+func TestClassifyWithDiagnosticsUsesSchemaAndFiltersAttrs(t *testing.T) {
+	t.Parallel()
+	llm := &capturingEnrichLLM{
+		text: `{"title":"Login fails","rationale":"Users cannot sign in","severity":"critical","unknown":"drop","classification_confidence":0.9}`,
+	}
+	enricher := NewEnricher(nil, llm, "logical-model")
+	dims := domain.DimensionSet{{
+		Name: "severity",
+		Kind: domain.DimSingle,
+		Taxonomy: []domain.Taxonomy{
+			{Value: "critical", DisplayName: domain.I18nString{"en": "Critical"}},
+			{Value: "minor", DisplayName: domain.I18nString{"en": "Minor"}},
+		},
+		UrgentSet: []string{"critical"},
+	}}
+
+	got, err := enricher.ClassifyWithDiagnostics(context.Background(), "Cannot login", ClassifyConfig{
+		TenantID:   "tenant-1",
+		FeedbackID: 42,
+		Channel:    "web",
+		SourceID:   "src-1",
+		SourceTags: []string{"vip"},
+		Dimensions: dims,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "Login fails", got.Enriched.Title)
+	require.True(t, got.Enriched.IsUrgent)
+	require.Equal(t, "critical", got.Enriched.Attrs["severity"])
+	require.NotContains(t, got.Enriched.Attrs, "unknown")
+	require.NotEmpty(t, got.DropDiagnostics)
+	require.Equal(t, "logical-model", llm.lastReq.Model)
+	require.NotNil(t, llm.lastReq.Schema)
+	require.Equal(t, "tenant-1", llm.lastReq.Guard.TenantID)
+	require.Equal(t, int64(42), llm.lastReq.Guard.FeedbackID)
+	require.Equal(t, "enrich", llm.lastReq.Guard.Purpose)
+	require.Equal(t, []string{"vip"}, llm.lastReq.Guard.SourceTags)
+}
+
+func TestClassifyDefaultsLanguageAndDisplayLocale(t *testing.T) {
+	t.Parallel()
+	llm := &capturingEnrichLLM{
+		text: `{"title":"Billing issue","rationale":"Customer reports a billing problem"}`,
+	}
+	enricher := NewEnricher(nil, llm, "")
+
+	got, err := enricher.Classify(context.Background(), "Billing problem", ClassifyConfig{})
+	require.NoError(t, err)
+	require.Equal(t, "Billing issue", got.Title)
+	require.Equal(t, "Billing issue", got.DisplayTitle)
+	require.Nil(t, llm.lastReq.Schema)
+	require.Empty(t, llm.lastReq.Guard.TenantID)
+	require.Equal(t, "enrich", llm.lastReq.Guard.Purpose)
+}
+
+func TestClassifyWrapsLLMAndParseErrors(t *testing.T) {
+	t.Parallel()
+	enricher := NewEnricher(nil, &capturingEnrichLLM{err: errors.New("provider down")}, "")
+	if _, err := enricher.Classify(context.Background(), "content", ClassifyConfig{}); err == nil ||
+		!strings.Contains(err.Error(), "llm:") {
+		t.Fatalf("Classify(llm error) = %v, want llm wrapper", err)
+	}
+
+	enricher = NewEnricher(nil, &capturingEnrichLLM{text: "not-json"}, "")
+	if _, err := enricher.Classify(context.Background(), "content", ClassifyConfig{}); err == nil ||
+		!strings.Contains(err.Error(), "parse:") {
+		t.Fatalf("Classify(parse error) = %v, want parse wrapper", err)
+	}
+}
+
+func TestEnrichOneRejectsNilLLMBeforeRepoAccess(t *testing.T) {
+	t.Parallel()
+	enricher := NewEnricher(nil, nil, "")
+
+	err := enricher.EnrichOne(context.Background(), 42)
+
+	require.ErrorContains(t, err, "llm client not configured")
+}
+
+func TestRunBackgroundReturnsWithoutLLM(t *testing.T) {
+	t.Parallel()
+	enricher := NewEnricher(nil, nil, "")
+
+	enricher.RunBackground(context.Background(), time.Hour, 10)
+}
+
+func TestRunBackgroundReturnsWhenContextCancelled(t *testing.T) {
+	t.Parallel()
+	enricher := NewEnricher(nil, &capturingEnrichLLM{}, "")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	enricher.RunBackground(ctx, time.Hour, 10)
+}
+
 // ---------------------------------------------------------------------------
 // shouldMarkEnrichFailed
 // ---------------------------------------------------------------------------
@@ -1350,5 +1444,25 @@ func (s *stubLister) ListPending(_ context.Context, _ int) ([]int64, error) {
 type stubExecutor struct{}
 
 func (s *stubExecutor) EnrichOne(_ context.Context, _ int64) error {
+	return nil
+}
+
+type capturingEnrichLLM struct {
+	text    string
+	err     error
+	lastReq llmclient.CompletionRequest
+}
+
+func (c *capturingEnrichLLM) Complete(_ context.Context, req llmclient.CompletionRequest) (llmclient.CompletionResponse, error) {
+	c.lastReq = req
+	if c.err != nil {
+		return llmclient.CompletionResponse{
+			Route: llmclient.RouteMetadata{LogicalModel: "fallback"},
+		}, c.err
+	}
+	return llmclient.CompletionResponse{Text: c.text}, nil
+}
+
+func (c *capturingEnrichLLM) Close() error {
 	return nil
 }

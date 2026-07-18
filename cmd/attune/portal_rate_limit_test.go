@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/time/rate"
 
 	"github.com/Phixsura/attune/internal/handlers/portal"
 )
@@ -97,6 +98,35 @@ func TestPortalNoStoreWrapsRateLimitRejections(t *testing.T) {
 	}
 	if second.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("Cache-Control = %q, want no-store", second.Header().Get("Cache-Control"))
+	}
+}
+
+func TestPortalLimiterKeyFallbacks(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/portal/acme/requests", nil)
+	req.RemoteAddr = "203.0.113.77:1234"
+
+	var nilLimiter *portalAnonymousLimiter
+	if got := nilLimiter.key(req); got != "" {
+		t.Fatalf("nil limiter key = %q, want empty", got)
+	}
+
+	limiter := newPortalLimiter(60, 1, false, 0, nil)
+	if got := limiter.key(req); got != "203.0.113.77" {
+		t.Fatalf("fallback key = %q, want client IP", got)
+	}
+}
+
+func TestPortalLimiterRetryAfterFallbacks(t *testing.T) {
+	t.Parallel()
+
+	limiter := newPortalAnonymousLimiter(60, 1, false, 0)
+	if got := limiter.retryAfterSeconds(rate.NewLimiter(0, 0)); got != 1 {
+		t.Fatalf("retry after without reservation = %d, want 1", got)
+	}
+	if got := limiter.retryAfterSeconds(rate.NewLimiter(rate.Inf, 1)); got != 1 {
+		t.Fatalf("retry after for zero delay = %d, want 1", got)
 	}
 }
 

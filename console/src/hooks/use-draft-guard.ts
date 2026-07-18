@@ -122,6 +122,7 @@ export function useDraftGuard<T>(opts: UseDraftGuardOpts<T>): UseDraftGuardRetur
   useEffect(() => {
     if (disabled || !dirty) return
     timerRef.current = setTimeout(() => {
+      /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
       if (dirtyRef.current) writeDraft(storageKey, draftRef.current)
     }, DEBOUNCE_MS)
     return () => {

@@ -1054,6 +1054,7 @@ export function MappingEditor({
   const canPreview = !pending && !previewing && !fieldMappingError && !statusMappingError
 
   const handleSave = () => {
+    /* v8 ignore next -- @preserve: save is disabled while mapping JSON has validation errors. */
     if (fieldMappingError || statusMappingError) return
     onSave({
       ...mapping,

@@ -36,6 +36,7 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 			"slack":        true,
 			"lark":         true,
 			"discord":      true,
+			"email":        true,
 			"github-issue": true,
 		}
 		channels := outbound.Channels()
