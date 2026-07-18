@@ -29,6 +29,7 @@ const (
 	ProviderShapeDiscord     ProviderShape = "discord"
 	ProviderShapeLark        ProviderShape = "lark"
 	ProviderShapeGitHubIssue ProviderShape = "github-issue"
+	ProviderShapeEmail       ProviderShape = "email-provider"
 )
 
 // Capabilities declares which conformance profiles apply to an adapter.
@@ -59,6 +60,18 @@ type DigestCase struct {
 	Channel       outbound.DigestChannel
 	Target        outbound.Target
 	View          any
+	Golden        string
+	ProviderShape ProviderShape
+	Capabilities  Capabilities
+	ResponseCases []ResponseCase
+	ForbiddenBody []string
+}
+
+// NotificationCase configures one NotificationChannel conformance run.
+type NotificationCase struct {
+	Channel       outbound.NotificationChannel
+	Target        outbound.Target
+	Envelope      *outbound.NotificationEnvelope
 	Golden        string
 	ProviderShape ProviderShape
 	Capabilities  Capabilities
@@ -107,6 +120,33 @@ func TestDigestChannel(t *testing.T, tc DigestCase) {
 	rendered, err := tc.Channel.RenderDigest(tc.View, tc.Target)
 	if err != nil {
 		t.Fatalf("RenderDigest: %v", err)
+	}
+	testRendered(t, rendered, renderCase{
+		Target:        tc.Target,
+		Golden:        tc.Golden,
+		ProviderShape: tc.ProviderShape,
+		Capabilities:  tc.Capabilities,
+		ResponseCases: tc.ResponseCases,
+		ForbiddenBody: tc.ForbiddenBody,
+	})
+}
+
+// TestNotificationChannel runs the shared request-notification adapter
+// contract.
+func TestNotificationChannel(t *testing.T, tc NotificationCase) {
+	t.Helper()
+	if tc.Channel == nil {
+		t.Fatal("Channel must not be nil")
+	}
+	if tc.Channel.ID() == "" {
+		t.Fatal("Channel.ID returned empty string")
+	}
+	if tc.Envelope == nil {
+		tc.Envelope = CanonicalNotification()
+	}
+	rendered, err := tc.Channel.RenderNotification(tc.Envelope, tc.Target)
+	if err != nil {
+		t.Fatalf("RenderNotification: %v", err)
 	}
 	testRendered(t, rendered, renderCase{
 		Target:        tc.Target,
@@ -243,6 +283,8 @@ func assertProviderShape(t *testing.T, req *http.Request, target outbound.Target
 		assertLarkShape(t, body, target)
 	case ProviderShapeGitHubIssue:
 		assertGitHubIssueShape(t, body)
+	case ProviderShapeEmail:
+		assertEmailProviderShape(t, body)
 	default:
 		t.Fatalf("unknown provider shape %q", shape)
 	}
@@ -381,6 +423,18 @@ func assertGitHubIssueShape(t *testing.T, body map[string]any) {
 		if strings.TrimSpace(s) != s || strings.ContainsAny(s, "\n\r\t@") {
 			t.Fatalf("GitHub issue label %q contains unsafe whitespace or mention marker", s)
 		}
+	}
+}
+
+func assertEmailProviderShape(t *testing.T, body map[string]any) {
+	t.Helper()
+	for _, key := range []string{"from_email", "to_email", "subject", "text_body", "html_body"} {
+		if stringValue(body, key) == "" {
+			t.Fatalf("email provider body missing %s: %#v", key, body)
+		}
+	}
+	if _, ok := body["metadata"].(map[string]any); !ok {
+		t.Fatalf("email provider body missing metadata object: %#v", body)
 	}
 }
 

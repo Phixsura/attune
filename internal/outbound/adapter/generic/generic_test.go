@@ -35,6 +35,62 @@ func TestRenderEvent_SetsDeliveryIDHeader(t *testing.T) {
 	}
 }
 
+func TestRenderNotification_SetsDeliveryHeaders(t *testing.T) {
+	c := channel{}
+	env := ptrext.Of(outbound.NotificationEnvelope{
+		Version:    "1",
+		EventType:  "request.shipped",
+		TenantID:   "t1",
+		EventID:    "evt-1",
+		Request:    map[string]any{"display_id": "REQ-7", "title": "Checkout"},
+		DeliveryID: "delivery-7",
+	})
+	rendered, err := c.RenderNotification(env, outbound.Target{
+		URL:      "https://example.com/request-notifications",
+		Secret:   "shhh",
+		TenantID: "t1",
+	})
+	if err != nil {
+		t.Fatalf("RenderNotification: %v", err)
+	}
+	req, err := rendered.Build(context.Background())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if got := req.Header.Get("X-Attune-Delivery-Id"); got != "delivery-7" {
+		t.Fatalf("X-Attune-Delivery-Id = %q, want delivery-7", got)
+	}
+	if req.Header.Get("X-Attune-Signature") == "" {
+		t.Fatal("expected X-Attune-Signature")
+	}
+	if got := req.Header.Get("Content-Type"); got != "application/json; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want application/json; charset=utf-8", got)
+	}
+	if got := req.Header.Get("User-Agent"); got != "attune/1.0" {
+		t.Fatalf("User-Agent = %q, want attune/1.0", got)
+	}
+}
+
+func TestRenderNotification_OmitsDeliveryIDHeaderWhenUnset(t *testing.T) {
+	c := channel{}
+	env := ptrext.Of(outbound.NotificationEnvelope{Version: "1", EventType: "request.shipped", TenantID: "t1"})
+	rendered, err := c.RenderNotification(env, outbound.Target{
+		URL:      "https://example.com/request-notifications",
+		Secret:   "shhh",
+		TenantID: "t1",
+	})
+	if err != nil {
+		t.Fatalf("RenderNotification: %v", err)
+	}
+	req, err := rendered.Build(context.Background())
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if _, ok := req.Header["X-Attune-Delivery-Id"]; ok {
+		t.Fatal("X-Attune-Delivery-Id should be absent when DeliveryID is empty")
+	}
+}
+
 func TestRedactURL_StripsSecrets(t *testing.T) {
 	cases := map[string]string{
 		"https://u:p@hooks.example.com/services/T0/B0/SECRET?tok=abc#frag": "https://hooks.example.com",

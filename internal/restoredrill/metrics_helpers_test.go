@@ -4,6 +4,7 @@ package restoredrill
 
 import (
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
@@ -33,4 +34,46 @@ func TestRegisterMetrics_WithRegistry(t *testing.T) {
 	mfs, err := reg.Gather()
 	require.NoError(t, err)
 	require.Empty(t, mfs)
+}
+
+func TestMetricsCollectorSnapshot_UsesFreshCache(t *testing.T) {
+	t.Parallel()
+
+	cached := []prometheus.Metric{
+		prometheus.MustNewConstMetric(descLastSuccess, prometheus.GaugeValue, 123),
+	}
+	collector := metricsCollector{
+		pool:     newUnreachableVerifierPool(t),
+		cached:   cached,
+		hasCache: true,
+		lastAt:   time.Now(),
+	}
+
+	require.Same(t, cached[0], collector.snapshot()[0])
+}
+
+func TestMetricsCollectorSnapshot_QueryErrorKeepsLastGood(t *testing.T) {
+	t.Parallel()
+
+	cached := []prometheus.Metric{
+		prometheus.MustNewConstMetric(descLastSuccess, prometheus.GaugeValue, 456),
+	}
+	collector := metricsCollector{
+		pool:     newUnreachableVerifierPool(t),
+		cached:   cached,
+		hasCache: true,
+		lastAt:   time.Now().Add(-2 * metricsCacheTTL),
+	}
+
+	require.Same(t, cached[0], collector.snapshot()[0])
+	require.True(t, collector.hasCache)
+}
+
+func TestMetricsCollectorSnapshot_QueryErrorWithoutCache(t *testing.T) {
+	t.Parallel()
+
+	collector := metricsCollector{pool: newUnreachableVerifierPool(t)}
+
+	require.Nil(t, collector.snapshot())
+	require.False(t, collector.hasCache)
 }

@@ -3,7 +3,10 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { type ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
-import { useSemanticSearch } from '@/features/feedback/hooks/use-semantic-search'
+import {
+  useRecordSearchEvent,
+  useSemanticSearch,
+} from '@/features/feedback/hooks/use-semantic-search'
 import { server } from '@/testing/mocks/server'
 
 function createWrapper() {
@@ -89,6 +92,40 @@ describe('useSemanticSearch', () => {
 
     await waitFor(() => {
       expect(result.current.isError).toBe(true)
+    })
+  })
+
+  it('posts search result interaction events', async () => {
+    let capturedBody: unknown
+    server.use(
+      http.post('/fb/v1/console/feedback/search/events', async ({ request }) => {
+        capturedBody = await request.json()
+        return HttpResponse.json({ recorded: true })
+      }),
+    )
+
+    const { result } = renderHook(() => useRecordSearchEvent(), {
+      wrapper: createWrapper(),
+    })
+
+    result.current.mutate({
+      feedbackId: 'fb-1',
+      action: 'open_result',
+      matchType: 'semantic',
+      rank: 1,
+      runId: 'search-1',
+    })
+
+    await waitFor(() => {
+      expect(result.current.isSuccess).toBe(true)
+    })
+
+    expect(capturedBody).toEqual({
+      feedbackId: 'fb-1',
+      action: 'open_result',
+      matchType: 'semantic',
+      rank: 1,
+      runId: 'search-1',
     })
   })
 })

@@ -55,3 +55,31 @@ func TestUpdateRecordsAudit(t *testing.T) {
 	require.NotNil(t, audit.events[0].Before)
 	require.NotNil(t, audit.events[0].After)
 }
+
+func TestSetAuditLoggerStoresRecorder(t *testing.T) {
+	t.Parallel()
+
+	audit := ptrext.Of(fakeAuditRecorder{})
+	h := ptrext.Of(Handler{})
+
+	h.SetAuditLogger(audit)
+
+	require.Same(t, audit, h.audit)
+}
+
+func TestSetEvalGetterAndNewHandler(t *testing.T) {
+	t.Parallel()
+
+	h := NewHandler(nil)
+	require.NotNil(t, h)
+
+	h.SetEvalGetter(func(context.Context, string) (*SuggestedAttrsReport, error) {
+		return ptrext.Of(SuggestedAttrsReport{
+			Coverage: map[string]float64{"topic": 0.75},
+		}), nil
+	})
+
+	report, err := h.evalGetter(context.Background(), "tenant-1")
+	require.NoError(t, err)
+	require.Equal(t, 0.75, report.Coverage["topic"])
+}

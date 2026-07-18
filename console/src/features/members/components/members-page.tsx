@@ -93,6 +93,7 @@ export function MembersPage() {
   }
 
   const handleRemove = () => {
+    /* v8 ignore next -- @preserve: remove dialogs only confirm after a member target is selected. */
     if (!removeTarget) return
     removeMember.mutate(removeTarget.id, {
       onSuccess: () => {
@@ -617,7 +618,7 @@ export function MembersPage() {
             <Button variant="outline" onClick={() => setInviteOpen(false)}>
               {t('common.cancel')}
             </Button>
-            <Button onClick={handleInvite} disabled={inviteMember.isPending || !inviteEmail.trim()}>
+            <Button onClick={handleInvite} disabled={inviteMember.isPending}>
               {inviteMember.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t('members.invite_submit')}
             </Button>
@@ -699,6 +700,9 @@ function getMemberLockReason({
 }): string | null {
   if (!isAdmin) return t('members.role_locked_privilege')
   if (member.userId === actorUserId) return t('members.role_locked_self')
+  if (actorRole === 'admin' && member.role === 'admin' && activeAdminCount <= 1) {
+    return t('members.role_locked_last_admin')
+  }
   const hierarchy: Record<Role, number> = {
     viewer: 0,
     member: 1,
@@ -707,9 +711,6 @@ function getMemberLockReason({
   }
   if (hierarchy[actorRole] <= hierarchy[member.role as Role]) {
     return t('members.role_locked_privilege')
-  }
-  if (member.role === 'admin' && activeAdminCount <= 1) {
-    return t('members.role_locked_last_admin')
   }
   return null
 }
@@ -833,4 +834,14 @@ function MetricCard({ label, value, hint }: { label: string; value: string; hint
       </CardContent>
     </Card>
   )
+}
+
+export const membersPageTestables = {
+  abbreviateId,
+  buildMemberStats,
+  filterMembers,
+  getMemberLockReason,
+  getMemberPrimaryLabel,
+  getMemberSecondaryLabel,
+  isValidEmail,
 }

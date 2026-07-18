@@ -158,3 +158,36 @@ func UnknownDigest() map[string]any {
 		"unexpected": SensitiveFeedbackMarker + " " + MentionAttackText(),
 	}
 }
+
+// CanonicalNotification returns the customer-request notification envelope used
+// by NotificationChannel conformance runs.
+func CanonicalNotification() *outbound.NotificationEnvelope {
+	return ptrext.Of(outbound.NotificationEnvelope{
+		Version:            "1",
+		Timestamp:          "2026-07-01T00:00:00Z",
+		EventID:            "event-conformance",
+		EventType:          "request.shipped",
+		TenantID:           "tenant-conformance",
+		UnsubscribeURL:     "https://portal.example.test/unsubscribe/request-token",
+		ListUnsubscribeURL: "https://portal.example.test/unsubscribe/tenant-token",
+		Request: map[string]any{
+			"id":          "request-conformance",
+			"display_id":  "REQ-42",
+			"title":       "Checkout fix",
+			"description": SensitiveFeedbackMarker + " " + MentionAttackText(),
+			"state":       "shipped",
+		},
+		Update: map[string]any{
+			"id":    "update-conformance",
+			"title": "Checkout fix shipped",
+			"body":  "The checkout fix is now available.",
+			"kind":  "shipped",
+		},
+		Recipient: map[string]any{
+			"contact_id": "contact-conformance",
+			"display":    "Customer",
+			"email":      "c***@example.test",
+		},
+		DeliveryID: "delivery-conformance",
+	})
+}

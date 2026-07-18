@@ -3,6 +3,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -27,15 +28,24 @@ const minNewPasswordLen = 12
 // for #66 (their rotation belongs to the IdP that owns their identity);
 // a session whose TenantID is non-empty is rejected with 403.
 type ChangePasswordHandler struct {
-	admins *admin.Repo
+	admins passwordAdminStore
 	signer *session.Signer
+}
+
+type passwordAdminStore interface {
+	GetByID(ctx context.Context, id string) (admin.Admin, error)
+	UpdatePasswordHash(ctx context.Context, id, newHash string) error
 }
 
 // NewChangePasswordHandler wires the dependencies. The signer is kept
 // so a future iteration can revoke peer sessions on rotate; the current
 // release does not (single-session per admin is the day-1 expectation).
 func NewChangePasswordHandler(admins *admin.Repo, signer *session.Signer) *ChangePasswordHandler {
-	return ptrext.Of(ChangePasswordHandler{admins: admins, signer: signer})
+	var store passwordAdminStore
+	if admins != nil {
+		store = admins
+	}
+	return ptrext.Of(ChangePasswordHandler{admins: store, signer: signer})
 }
 
 // ValidateRequest enforces endpoint-specific body rules after

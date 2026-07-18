@@ -340,6 +340,34 @@ func TestCreateSavedViewDelegatesToService(t *testing.T) {
 	require.Equal(t, "view-1", res.Body.GetView().GetId())
 }
 
+func TestUpdateSavedViewDelegatesToService(t *testing.T) {
+	t.Parallel()
+
+	savedSvc := ptrext.Of(fakeSavedViewService{})
+	handler := NewHandler(ptrext.Of(fakeAuditLogService{}))
+	handler.SetSavedViewService(savedSvc)
+	ctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
+	})
+
+	res, err := handler.UpdateSavedView(ctx, ptrext.Of(attunev1.UpdateSavedAuditLogViewRequest{
+		Id:   "view-1",
+		Name: "Investigation",
+		State: ptrext.Of(attunev1.AuditLogViewState{
+			TargetType: "notify_target",
+			TargetId:   "target-1",
+		}),
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, "view-1", savedSvc.saveInput.ID)
+	require.Equal(t, "Investigation", savedSvc.saveInput.Name)
+	require.Equal(t, "notify_target", savedSvc.saveInput.State.TargetType)
+	require.Equal(t, "target-1", savedSvc.saveInput.State.TargetID)
+	require.Equal(t, "view-1", res.Body.GetView().GetId())
+}
+
 func TestDeleteSavedViewDelegatesToService(t *testing.T) {
 	t.Parallel()
 

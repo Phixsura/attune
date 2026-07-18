@@ -164,6 +164,37 @@ func TestSendReplyDraft_UsesIdempotencyHeader(t *testing.T) {
 	require.Equal(t, int64(9), fake.gotRevision)
 }
 
+func TestRejectReplyDraft_HTTP(t *testing.T) {
+	fake := &fakeReplyWorkflow{snap: testReplySnapshot("rejected")}
+	audit := &fakeAuditRecorder{}
+	h := &FeedbackHandler{replyWorkflow: fake, audit: audit}
+	handler := dispatcher.Bind(
+		"console.FeedbackHandler.RejectReplyDraft",
+		dispatcher.Path(
+			func() *attunev1.RejectReplyDraftRequest {
+				return ptrext.Of(attunev1.RejectReplyDraftRequest{ExpectedRevision: 5})
+			},
+			dispatcher.ParamInt64("id", func(req *attunev1.RejectReplyDraftRequest, id int64) { req.Id = id }, "id must be an integer"),
+		),
+		h.RejectReplyDraft,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RejectReplyDraftRequest) (*session.AuthCtx, error) {
+			return dispatchtest.Auth(r.Context()), nil
+		}),
+	)
+
+	w := httptest.NewRecorder()
+	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/feedback/123/reply-draft/reject", "", dispatchtest.Param{Name: "id", Value: "123"}))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, int64(5), fake.gotRevision)
+	require.Equal(t, "admin", fake.gotActor.Type)
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "reply_draft.reject", audit.events[0].Action)
+	body, err := dispatchtest.DecodeJSON(w.Body)
+	require.NoError(t, err)
+	require.Equal(t, "rejected", body["workflow"].(map[string]any)["status"])
+}
+
 func TestSendReplyDraft_AuditsRequestAndSuccess(t *testing.T) {
 	fake := &fakeReplyWorkflow{snap: testReplySnapshot("sent")}
 	audit := &fakeAuditRecorder{}
@@ -264,6 +295,36 @@ func TestApproveReplyDraft_InvalidState(t *testing.T) {
 	handler(w, dispatchtest.Request(http.MethodPost, "/fb/v1/console/feedback/123/reply-draft/approve", "", dispatchtest.Param{Name: "id", Value: "123"}))
 
 	require.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestApproveReplyDraft_DirectSuccess(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeReplyWorkflow{snap: testReplySnapshot(replydraftrepo.StatusApproved)}
+	audit := &fakeAuditRecorder{}
+	h := &FeedbackHandler{replyWorkflow: fake, audit: audit}
+
+	result, err := h.ApproveReplyDraft(replyWorkflowTestCtx(), ptrext.Of(attunev1.ApproveReplyDraftRequest{
+		Id:               123,
+		ExpectedRevision: 7,
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.Status)
+	require.Equal(t, replydraftrepo.StatusApproved, result.Body.GetWorkflow().GetStatus())
+	require.Equal(t, int64(7), fake.gotRevision)
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "reply_draft.approve", audit.events[0].Action)
+}
+
+func TestDisableReplySendHook_MapsServiceError(t *testing.T) {
+	t.Parallel()
+
+	h := &FeedbackHandler{replyWorkflow: &fakeReplyWorkflow{err: replydraftsvc.ErrWorkflowHookNotFound}}
+
+	_, err := h.DisableReplySendHook(replyWorkflowTestCtx(), ptrext.Of(attunev1.DisableReplySendHookRequest{}))
+
+	requireDispatcherError(t, err, http.StatusConflict, attunev1.ErrorCode_CONFLICT)
 }
 
 func TestReplyDraftWorkflowError_MapsIdempotencyConflict(t *testing.T) {
@@ -495,6 +556,355 @@ func TestTestReplySendHook_AuditsResult(t *testing.T) {
 	require.Equal(t, "reply_send_hook.test", audit.events[0].Action)
 }
 
+func TestReplyDraftWorkflowHandlersRequireConfiguredWorkflow(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	tests := []struct {
+		name string
+		run  func(*FeedbackHandler) error
+	}{
+		{"edit", func(h *FeedbackHandler) error {
+			_, err := h.UpdateReplyDraft(ctx, ptrext.Of(attunev1.UpdateReplyDraftRequest{Id: 123}))
+			return err
+		}},
+		{"approve", func(h *FeedbackHandler) error {
+			_, err := h.ApproveReplyDraft(ctx, ptrext.Of(attunev1.ApproveReplyDraftRequest{Id: 123}))
+			return err
+		}},
+		{"reject", func(h *FeedbackHandler) error {
+			_, err := h.RejectReplyDraft(ctx, ptrext.Of(attunev1.RejectReplyDraftRequest{Id: 123}))
+			return err
+		}},
+		{"send", func(h *FeedbackHandler) error {
+			_, err := h.SendReplyDraft(ctx, ptrext.Of(attunev1.SendReplyDraftRequest{Id: 123}))
+			return err
+		}},
+		{"get hook", func(h *FeedbackHandler) error {
+			_, err := h.GetReplySendHook(ctx, ptrext.Of(attunev1.GetReplySendHookRequest{}))
+			return err
+		}},
+		{"upsert hook", func(h *FeedbackHandler) error {
+			_, err := h.UpsertReplySendHook(ctx, ptrext.Of(attunev1.UpsertReplySendHookRequest{}))
+			return err
+		}},
+		{"disable hook", func(h *FeedbackHandler) error {
+			_, err := h.DisableReplySendHook(ctx, ptrext.Of(attunev1.DisableReplySendHookRequest{}))
+			return err
+		}},
+		{"list deliveries", func(h *FeedbackHandler) error {
+			_, err := h.ListReplySendHookDeliveries(ctx, ptrext.Of(attunev1.ListReplySendHookDeliveriesRequest{}))
+			return err
+		}},
+		{"health", func(h *FeedbackHandler) error {
+			_, err := h.GetReplySendHookHealth(ctx, ptrext.Of(attunev1.GetReplySendHookHealthRequest{}))
+			return err
+		}},
+		{"test hook", func(h *FeedbackHandler) error {
+			_, err := h.TestReplySendHook(ctx, ptrext.Of(attunev1.TestReplySendHookRequest{}))
+			return err
+		}},
+		{"redeliver", func(h *FeedbackHandler) error {
+			_, err := h.RedeliverReplySendHookDelivery(ctx, ptrext.Of(attunev1.RedeliverReplySendHookDeliveryRequest{}))
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.run(&FeedbackHandler{})
+
+			requireDispatcherError(t, err, http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL)
+		})
+	}
+}
+
+func TestReplyDraftWorkflowHandlersMapServiceErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	tests := []struct {
+		name   string
+		fake   *fakeReplyWorkflow
+		run    func(*FeedbackHandler) error
+		status int
+		code   attunev1.ErrorCode
+	}{
+		{
+			name: "edit",
+			fake: &fakeReplyWorkflow{err: replydraftsvc.ErrWorkflowRevisionConflict},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.UpdateReplyDraft(ctx, ptrext.Of(attunev1.UpdateReplyDraftRequest{Id: 123}))
+				return err
+			},
+			status: http.StatusConflict,
+			code:   attunev1.ErrorCode_CONFLICT,
+		},
+		{
+			name: "reject",
+			fake: &fakeReplyWorkflow{err: replydraftsvc.ErrWorkflowAlreadySent},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.RejectReplyDraft(ctx, ptrext.Of(attunev1.RejectReplyDraftRequest{Id: 123}))
+				return err
+			},
+			status: http.StatusConflict,
+			code:   attunev1.ErrorCode_CONFLICT,
+		},
+		{
+			name: "get hook",
+			fake: &fakeReplyWorkflow{err: replydraftsvc.ErrWorkflowHookNotFound},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.GetReplySendHook(ctx, ptrext.Of(attunev1.GetReplySendHookRequest{}))
+				return err
+			},
+			status: http.StatusConflict,
+			code:   attunev1.ErrorCode_CONFLICT,
+		},
+		{
+			name: "upsert hook",
+			fake: &fakeReplyWorkflow{err: replydraftsvc.ErrInvalidSendHook},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.UpsertReplySendHook(ctx, ptrext.Of(attunev1.UpsertReplySendHookRequest{}))
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "list deliveries",
+			fake: &fakeReplyWorkflow{err: errors.New("db down")},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.ListReplySendHookDeliveries(ctx, ptrext.Of(attunev1.ListReplySendHookDeliveriesRequest{}))
+				return err
+			},
+			status: http.StatusBadGateway,
+			code:   attunev1.ErrorCode_BAD_GATEWAY,
+		},
+		{
+			name: "health",
+			fake: &fakeReplyWorkflow{err: errors.New("db down")},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.GetReplySendHookHealth(ctx, ptrext.Of(attunev1.GetReplySendHookHealthRequest{}))
+				return err
+			},
+			status: http.StatusBadGateway,
+			code:   attunev1.ErrorCode_BAD_GATEWAY,
+		},
+		{
+			name: "test hook",
+			fake: &fakeReplyWorkflow{err: replydraftsvc.ErrInvalidIdempotencyKey},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.TestReplySendHook(ctx, ptrext.Of(attunev1.TestReplySendHookRequest{}))
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "redeliver",
+			fake: &fakeReplyWorkflow{err: replydraftsvc.ErrDeliveryNotFound},
+			run: func(h *FeedbackHandler) error {
+				_, err := h.RedeliverReplySendHookDelivery(ctx, ptrext.Of(attunev1.RedeliverReplySendHookDeliveryRequest{}))
+				return err
+			},
+			status: http.StatusNotFound,
+			code:   attunev1.ErrorCode_NOT_FOUND,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := &FeedbackHandler{replyWorkflow: tt.fake}
+
+			err := tt.run(h)
+
+			requireDispatcherError(t, err, tt.status, tt.code)
+		})
+	}
+}
+
+func TestReplyDraftWorkflowAuditFailuresReturnInternal(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	tests := []struct {
+		name  string
+		run   func(*FeedbackHandler) error
+		check func(*testing.T, *FeedbackHandler)
+	}{
+		{"edit", func(h *FeedbackHandler) error {
+			_, err := h.UpdateReplyDraft(ctx, ptrext.Of(attunev1.UpdateReplyDraftRequest{Id: 123}))
+			return err
+		}, nil},
+		{"approve", func(h *FeedbackHandler) error {
+			_, err := h.ApproveReplyDraft(ctx, ptrext.Of(attunev1.ApproveReplyDraftRequest{Id: 123}))
+			return err
+		}, nil},
+		{"reject", func(h *FeedbackHandler) error {
+			_, err := h.RejectReplyDraft(ctx, ptrext.Of(attunev1.RejectReplyDraftRequest{Id: 123}))
+			return err
+		}, nil},
+		{"upsert hook default enabled", func(h *FeedbackHandler) error {
+			_, err := h.UpsertReplySendHook(ctx, ptrext.Of(attunev1.UpsertReplySendHookRequest{}))
+			return err
+		}, func(t *testing.T, h *FeedbackHandler) {
+			t.Helper()
+			require.True(t, h.replyWorkflow.(*fakeReplyWorkflow).gotEnabled)
+		}},
+		{"disable hook", func(h *FeedbackHandler) error {
+			_, err := h.DisableReplySendHook(ctx, ptrext.Of(attunev1.DisableReplySendHookRequest{}))
+			return err
+		}, nil},
+		{"test hook", func(h *FeedbackHandler) error {
+			_, err := h.TestReplySendHook(ctx, ptrext.Of(attunev1.TestReplySendHookRequest{}))
+			return err
+		}, nil},
+		{"redeliver", func(h *FeedbackHandler) error {
+			_, err := h.RedeliverReplySendHookDelivery(ctx, ptrext.Of(attunev1.RedeliverReplySendHookDeliveryRequest{}))
+			return err
+		}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := &FeedbackHandler{
+				replyWorkflow: &fakeReplyWorkflow{snap: testReplySnapshot("edited"), hookConfig: testHookConfig()},
+				audit:         &fakeAuditRecorder{err: errors.New("audit down")},
+			}
+
+			err := tt.run(h)
+
+			requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+			if tt.check != nil {
+				tt.check(t, h)
+			}
+		})
+	}
+}
+
+func TestSendReplyDraftRecordsFailureAudit(t *testing.T) {
+	t.Parallel()
+
+	audit := &fakeAuditRecorder{}
+	fake := &fakeReplyWorkflow{err: replydraftsvc.ErrWorkflowRevisionConflict}
+	h := &FeedbackHandler{replyWorkflow: fake, audit: audit}
+
+	_, err := h.SendReplyDraft(replyWorkflowTestCtx(), ptrext.Of(attunev1.SendReplyDraftRequest{
+		Id:             123,
+		IdempotencyKey: ptrext.Of("reply_send_body"),
+	}))
+
+	requireDispatcherError(t, err, http.StatusConflict, attunev1.ErrorCode_CONFLICT)
+	require.Equal(t, "reply_send_body", fake.gotKey)
+	require.Len(t, audit.events, 2)
+	require.Equal(t, "reply_draft.send.request", audit.events[0].Action)
+	require.Equal(t, "reply_draft.send.failure", audit.events[1].Action)
+}
+
+func TestSendReplyDraftFailureAuditErrorWins(t *testing.T) {
+	t.Parallel()
+
+	h := &FeedbackHandler{
+		replyWorkflow: &fakeReplyWorkflow{err: replydraftsvc.ErrWorkflowRevisionConflict},
+		audit:         &fakeAuditRecorder{err: errors.New("audit down"), failAt: 2},
+	}
+
+	_, err := h.SendReplyDraft(replyWorkflowTestCtx(), ptrext.Of(attunev1.SendReplyDraftRequest{Id: 123}))
+
+	requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+}
+
+func TestReplyDraftWorkflowProtoHelpersCoverOptionalBranches(t *testing.T) {
+	t.Parallel()
+
+	require.Nil(t, replyDraftWorkflowToProto(replydraftsvc.Snapshot{}))
+	require.Nil(t, auditWorkflowSnapshot(replydraftsvc.Snapshot{}))
+	require.Equal(t, "body-key", replySendIdempotencyKey(replyWorkflowTestCtx(), ptrext.Of(attunev1.SendReplyDraftRequest{
+		IdempotencyKey: ptrext.Of("body-key"),
+	})))
+	require.Equal(t, replydraftrepo.Actor{Type: "service", ID: "bot-1"}, replyDraftActor(ptrext.Of(session.AuthCtx{
+		TenantID: dispatchtest.TenantID,
+		UserID:   "bot-1",
+		UserType: "service",
+	})))
+
+	now := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
+	snap := testReplySnapshot(replydraftrepo.StatusSent)
+	snap.Draft.ActiveRevisionID = "active-rev"
+	snap.Draft.ApprovedRevisionID = "approved-rev"
+	snap.Draft.SentRevisionID = "sent-rev"
+	snap.Draft.GeneratedAt = ptrext.Of(now)
+	snap.Draft.GeneratedBy = "ai"
+	snap.Draft.EditedAt = ptrext.Of(now.Add(time.Minute))
+	snap.Draft.EditedBy = "editor"
+	snap.Draft.ApprovedAt = ptrext.Of(now.Add(2 * time.Minute))
+	snap.Draft.ApprovedBy = "approver"
+	snap.Draft.RejectedAt = ptrext.Of(now.Add(3 * time.Minute))
+	snap.Draft.RejectedBy = "rejecter"
+	snap.Draft.SentAt = ptrext.Of(now.Add(4 * time.Minute))
+	snap.Draft.SentBy = "sender"
+	snap.Draft.ExternalDeliveryStatus = "accepted"
+	snap.Draft.ExternalMessageID = "external-1"
+	snap.Events = []replydraftrepo.Event{{
+		ID:         "event-1",
+		DraftID:    snap.Draft.ID,
+		RevisionID: "active-rev",
+		HookID:     "hook-1",
+		EventType:  "reply.sent",
+		ActorType:  "admin",
+		ActorID:    "admin-1",
+		Blocker:    "none",
+		Metadata:   []byte(`not-json`),
+		CreatedAt:  now,
+	}}
+
+	workflow := replyDraftWorkflowToProto(snap)
+
+	require.Equal(t, "active-rev", workflow.GetActiveRevisionId())
+	require.Equal(t, "approved-rev", workflow.GetApprovedRevisionId())
+	require.Equal(t, "sent-rev", workflow.GetSentRevisionId())
+	require.Equal(t, "2026-07-03T10:00:00Z", workflow.GetGeneratedAt())
+	require.Equal(t, "editor", workflow.GetEditedBy())
+	require.Equal(t, "accepted", workflow.GetExternalDeliveryStatus())
+	require.Equal(t, "external-1", workflow.GetExternalMessageId())
+	require.Equal(t, "active-rev", workflow.GetEvents()[0].GetRevisionId())
+	require.Equal(t, "hook-1", workflow.GetEvents()[0].GetHookId())
+	require.Equal(t, "none", workflow.GetEvents()[0].GetBlocker())
+	require.Empty(t, workflow.GetEvents()[0].GetMetadata().GetFields())
+
+	attempt := testDeliveryAttempt(replydraftrepo.DeliveryStatusAccepted)
+	attempt.DraftID = snap.Draft.ID
+	attempt.FeedbackID = 123
+	attempt.RevisionID = "sent-rev"
+	attempt.NextRetryAt = ptrext.Of(now.Add(time.Hour))
+	attempt.CompletedAt = ptrext.Of(now.Add(2 * time.Hour))
+	attempt.ExternalMessageID = "external-2"
+	delivery := replySendHookDeliveryToProto(attempt)
+	require.Equal(t, int64(123), delivery.GetFeedbackId())
+	require.Equal(t, "2026-07-03T11:00:00Z", delivery.GetNextRetryAt())
+	require.Equal(t, "2026-07-03T12:00:00Z", delivery.GetCompletedAt())
+	require.False(t, delivery.GetRetryable())
+}
+
+func TestAttachReplyDraftWorkflowBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	detail := ptrext.Of(attunev1.FeedbackDetail{})
+	(&FeedbackHandler{}).attachReplyDraftWorkflow(ctx, detail, 123)
+	require.Nil(t, detail.GetReplyDraftWorkflow())
+	(&FeedbackHandler{replyWorkflow: &fakeReplyWorkflow{snap: testReplySnapshot("suggested")}}).attachReplyDraftWorkflow(ctx, nil, 123)
+
+	errDetail := ptrext.Of(attunev1.FeedbackDetail{})
+	(&FeedbackHandler{replyWorkflow: &fakeReplyWorkflow{err: errors.New("snapshot failed")}}).attachReplyDraftWorkflow(ctx, errDetail, 123)
+	require.Nil(t, errDetail.GetReplyDraftWorkflow())
+
+	okDetail := ptrext.Of(attunev1.FeedbackDetail{})
+	(&FeedbackHandler{replyWorkflow: &fakeReplyWorkflow{snap: testReplySnapshot("suggested")}}).attachReplyDraftWorkflow(ctx, okDetail, 123)
+	require.Equal(t, "suggested", okDetail.GetReplyDraftWorkflow().GetStatus())
+}
+
 func testReplySnapshot(status string) replydraftsvc.Snapshot {
 	now := time.Date(2026, 7, 3, 10, 0, 0, 0, time.UTC)
 	draft := replydraftrepo.Draft{
@@ -525,6 +935,24 @@ func testReplySnapshot(status string) replydraftsvc.Snapshot {
 			CreatedAt:  now,
 		}},
 	}
+}
+
+func replyWorkflowTestCtx() *dispatcher.RequestContext[*session.AuthCtx] {
+	return ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{
+		Context: context.Background(),
+		Auth: ptrext.Of(session.AuthCtx{
+			TenantID: dispatchtest.TenantID,
+			UserID:   dispatchtest.UserID,
+		}),
+	})
+}
+
+func requireDispatcherError(t *testing.T, err error, status int, code attunev1.ErrorCode) {
+	t.Helper()
+	typed := ptrext.Of((*dispatcher.Error)(nil))
+	require.ErrorAs(t, err, typed)
+	require.Equal(t, status, ptrext.Indirect(typed).Status)
+	require.Equal(t, code, ptrext.Indirect(typed).Code)
 }
 
 func testHookConfig() replydraftsvc.HookConfig {

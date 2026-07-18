@@ -66,3 +66,15 @@ func TestBuildDefaultHandlerNoSpanOmitsTraceID(t *testing.T) {
 		t.Errorf("trace_id should be absent without an active span, got %v", rec["trace_id"])
 	}
 }
+
+func TestInstallDefaultLoggerInstallsUsableLogger(t *testing.T) {
+	old := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(old) })
+
+	InstallDefaultLogger()
+
+	if slog.Default() == old {
+		t.Fatal("InstallDefaultLogger should replace slog default")
+	}
+	slog.Default().InfoContext(context.Background(), "installed")
+}

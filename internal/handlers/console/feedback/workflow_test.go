@@ -187,6 +187,103 @@ func TestBatchTransitionState_HTTP(t *testing.T) {
 	})
 }
 
+func TestTransitionStateDirectEdges(t *testing.T) {
+	t.Parallel()
+
+	ctx := makeRC()
+	t.Run("internal error", func(t *testing.T) {
+		t.Parallel()
+		h := &FeedbackHandler{workflow: &fakeWorkflow{err: errors.New("store down")}}
+
+		_, err := h.TransitionState(ctx, ptrext.Of(attunev1.TransitionFeedbackRequest{
+			FeedbackId: 1,
+			ToStateId:  "s-2",
+		}))
+
+		requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	})
+
+	t.Run("nil states remain absent", func(t *testing.T) {
+		t.Parallel()
+		h := &FeedbackHandler{workflow: &fakeWorkflow{result: &workflow.TransitionResult{FeedbackID: 1}}}
+
+		result, err := h.TransitionState(ctx, ptrext.Of(attunev1.TransitionFeedbackRequest{
+			FeedbackId: 1,
+			ToStateId:  "s-2",
+		}))
+
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, result.Status)
+		require.Nil(t, result.Body.GetFromState())
+		require.Nil(t, result.Body.GetToState())
+	})
+}
+
+func TestBatchTransitionStateDirectEdges(t *testing.T) {
+	t.Parallel()
+
+	ctx := makeRC()
+	t.Run("workflow not configured", func(t *testing.T) {
+		t.Parallel()
+		_, err := (&FeedbackHandler{}).BatchTransitionState(ctx, ptrext.Of(attunev1.BatchTransitionFeedbackRequest{
+			FeedbackIds: []int64{1},
+		}))
+
+		requireDispatcherError(t, err, http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL)
+	})
+
+	t.Run("too many ids", func(t *testing.T) {
+		t.Parallel()
+		ids := make([]int64, 101)
+		for i := range ids {
+			ids[i] = int64(i + 1)
+		}
+		h := &FeedbackHandler{workflow: &fakeWorkflow{}}
+
+		_, err := h.BatchTransitionState(ctx, ptrext.Of(attunev1.BatchTransitionFeedbackRequest{
+			FeedbackIds: ids,
+		}))
+
+		requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST)
+	})
+
+	t.Run("service error", func(t *testing.T) {
+		t.Parallel()
+		h := &FeedbackHandler{workflow: &fakeWorkflow{err: errors.New("batch failed")}}
+
+		_, err := h.BatchTransitionState(ctx, ptrext.Of(attunev1.BatchTransitionFeedbackRequest{
+			FeedbackIds: []int64{1},
+			ToStateId:   "s-2",
+		}))
+
+		requireDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	})
+
+	t.Run("failed items", func(t *testing.T) {
+		t.Parallel()
+		h := &FeedbackHandler{workflow: &fakeWorkflow{batch: &workflow.BatchResult{
+			Succeeded: 1,
+			Failed: []workflow.BatchItemFailure{{
+				FeedbackID: 2,
+				Code:       "INVALID_TRANSITION",
+				Message:    "transition not allowed",
+			}},
+		}}}
+
+		result, err := h.BatchTransitionState(ctx, ptrext.Of(attunev1.BatchTransitionFeedbackRequest{
+			FeedbackIds: []int64{1, 2},
+			ToStateId:   "s-2",
+		}))
+
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, result.Status)
+		require.Equal(t, int32(1), result.Body.GetSucceeded())
+		require.Len(t, result.Body.GetFailed(), 1)
+		require.Equal(t, int64(2), result.Body.GetFailed()[0].GetFeedbackId())
+		require.Equal(t, "INVALID_TRANSITION", result.Body.GetFailed()[0].GetCode())
+	})
+}
+
 func TestListAudit_HTTP(t *testing.T) {
 	t.Parallel()
 
@@ -245,6 +342,27 @@ func TestListAudit_HTTP(t *testing.T) {
 			`{"feedbackId":"1"}`))
 
 		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("500 audit reader error", func(t *testing.T) {
+		h := &FeedbackHandler{}
+		h.SetAuditReader(&fakeAuditReader{err: errors.New("audit read failed")})
+		handler := dispatcher.Bind(
+			"console.FeedbackHandler.ListAudit",
+			dispatcher.JSON(func() *attunev1.ListAuditRequest {
+				return ptrext.Of(attunev1.ListAuditRequest{})
+			}),
+			h.ListAudit,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListAuditRequest) (*session.AuthCtx, error) {
+				return dispatchtest.Auth(r.Context()), nil
+			}),
+		)
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodGet, "/feedback/1/audit",
+			`{"feedbackId":"1"}`))
+
+		require.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 }
 

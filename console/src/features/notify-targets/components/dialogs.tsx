@@ -109,7 +109,11 @@ export function CreateNotifyDialog({
               disabled: false,
             }
             if (secret.trim()) body.secret = secret.trim()
-            void onSubmit(body).then(() => reset())
+            void onSubmit(body)
+              .then(() => reset())
+              .catch(() => {
+                // The page-level mutation owns the toast; keep the dialog open.
+              })
           }}
         >
           <DialogHeader>

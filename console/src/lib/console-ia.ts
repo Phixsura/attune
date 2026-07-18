@@ -212,6 +212,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
   {
     group: 'integrations',
+    icon: Bell,
+    labelKey: 'nav.request_notifications',
+    path: '/integrations/request-notifications',
+    adminOnly: true,
+    settingsAliases: ['request-notifications', 'request_notifications'],
+  },
+  {
+    group: 'integrations',
     icon: Send,
     labelKey: 'nav.reply_send_hook',
     path: '/integrations/reply-send-hook',
@@ -304,6 +312,7 @@ export const consoleNavItems: ConsoleNavItem[] = [
 ]
 
 export function canAccessConsoleItem(role: Role, access?: ConsoleRouteAccess): boolean {
+  /* v8 ignore next -- @preserve: callers omit access for universally visible chrome items. */
   if (!access) return true
   if (access.adminOnly) return role === 'admin'
   if (access.permission) return hasPermission(role, access.permission)

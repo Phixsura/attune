@@ -93,6 +93,21 @@ describe('feedbackListInfiniteQuery URL builder', () => {
     expect(url.searchParams.get('quality_signal')).toBe('low_confidence')
   })
 
+  it('enriched date drilldown filters map to backend params', async () => {
+    const captured: { url?: string } = {}
+    captureRequestURL(captured)
+    await makeQc().fetchInfiniteQuery(
+      feedbackListInfiniteQuery({
+        attrs: [],
+        enrichedFrom: '2026-07-03T00:00:00Z',
+        enrichedTo: '2026-07-04T00:00:00Z',
+      }),
+    )
+    const url = new URL(captured.url ?? '')
+    expect(url.searchParams.get('enriched_from')).toBe('2026-07-03T00:00:00Z')
+    expect(url.searchParams.get('enriched_to')).toBe('2026-07-04T00:00:00Z')
+  })
+
   it('getNextPageParam returns nextCursor; null ends pagination', () => {
     const options = feedbackListInfiniteQuery({ attrs: [] })
     const fn = options.getNextPageParam as (page: { nextCursor?: string | null }) => string | null

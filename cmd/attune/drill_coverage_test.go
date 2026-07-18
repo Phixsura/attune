@@ -160,3 +160,30 @@ func TestFinalizeDrill_WarnNoExit(t *testing.T) {
 	err := finalizeDrill(context.Background(), "", report, false, "text", false)
 	require.NoError(t, err)
 }
+
+func TestGatherDrillBaselineRejectsInvalidDatabaseURL(t *testing.T) {
+	t.Parallel()
+
+	_, _, _, err := gatherDrillBaseline(context.Background(), "://bad-database-url")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "connect to baseline database")
+}
+
+func TestRunDrillRejectsInvalidTargetDatabaseURL(t *testing.T) {
+	t.Parallel()
+
+	_, err := runDrill(context.Background(), false, "", "", "", "://bad-database-url", nil, restoredrill.Options{})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "connect to target database")
+}
+
+func TestRecordDrillRejectsInvalidProductionDatabaseURL(t *testing.T) {
+	t.Parallel()
+
+	err := recordDrill(context.Background(), "://bad-database-url", restoredrill.DrillReport{})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "connect to production database")
+}

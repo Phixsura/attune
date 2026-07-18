@@ -21,6 +21,7 @@ import (
 
 type fakeFeedbackRepo struct {
 	listRows   []feedbackrepo.ConsoleListRow
+	listErr    error
 	listOpts   feedbackrepo.ConsoleListOpts
 	listTenant string
 
@@ -30,8 +31,11 @@ type fakeFeedbackRepo struct {
 	getTenant string
 
 	usageRows []feedbackrepo.UsageBucket
+	usageErr  error
 	urgent    int64
+	urgentErr error
 	topValues map[string][]feedbackrepo.ValueCount
+	topErr    error
 
 	workbench       *feedbackrepo.TerminalFailureWorkbench
 	workbenchErr    error
@@ -40,10 +44,14 @@ type fakeFeedbackRepo struct {
 	workbenchTo     time.Time
 
 	qualityRefreshOpts feedbackrepo.ClassificationQualityRefreshOpts
+	qualityRefreshErr  error
 	qualityAggregate   feedbackrepo.ClassificationQualitySignalAggregate
+	qualityAggErrs     []error
 	qualityValues      []feedbackrepo.ClassificationQualityValueAggregate
 	qualitySeries      []feedbackrepo.ClassificationQualitySeriesBucket
+	qualitySeriesErr   error
 	qualitySamples     []feedbackrepo.ClassificationQualitySample
+	qualitySamplesErr  error
 	qualityTenant      string
 	qualitySampleIDs   []int64
 	qualityAggOpts     []feedbackrepo.ClassificationQualityQueryOpts
@@ -55,7 +63,7 @@ func (f *fakeFeedbackRepo) ListForConsole(
 ) ([]feedbackrepo.ConsoleListRow, error) {
 	f.listTenant = tenantID
 	f.listOpts = opts
-	return f.listRows, nil
+	return f.listRows, f.listErr
 }
 
 func (f *fakeFeedbackRepo) GetForConsole(
@@ -69,17 +77,17 @@ func (f *fakeFeedbackRepo) GetForConsole(
 func (f *fakeFeedbackRepo) UsageByDay(
 	_ context.Context, _ string, _, _ time.Time,
 ) ([]feedbackrepo.UsageBucket, error) {
-	return f.usageRows, nil
+	return f.usageRows, f.usageErr
 }
 
 func (f *fakeFeedbackRepo) UrgentCount(_ context.Context, _ string, _, _ time.Time) (int64, error) {
-	return f.urgent, nil
+	return f.urgent, f.urgentErr
 }
 
 func (f *fakeFeedbackRepo) TopValuesByDim(
 	_ context.Context, _ string, dim string, _ bool, _, _ time.Time, _ int,
 ) ([]feedbackrepo.ValueCount, error) {
-	return f.topValues[dim], nil
+	return f.topValues[dim], f.topErr
 }
 
 func (f *fakeFeedbackRepo) TerminalFailureWorkbench(
@@ -95,14 +103,18 @@ func (f *fakeFeedbackRepo) RefreshClassificationQuality(
 	_ context.Context, opts feedbackrepo.ClassificationQualityRefreshOpts,
 ) error {
 	f.qualityRefreshOpts = opts
-	return nil
+	return f.qualityRefreshErr
 }
 
 func (f *fakeFeedbackRepo) ClassificationQualityAggregates(
 	_ context.Context, opts feedbackrepo.ClassificationQualityQueryOpts,
 ) (feedbackrepo.ClassificationQualitySignalAggregate, []feedbackrepo.ClassificationQualityValueAggregate, error) {
 	f.qualityTenant = opts.TenantID
+	call := len(f.qualityAggOpts)
 	f.qualityAggOpts = append(f.qualityAggOpts, opts)
+	if call < len(f.qualityAggErrs) && f.qualityAggErrs[call] != nil {
+		return feedbackrepo.ClassificationQualitySignalAggregate{}, nil, f.qualityAggErrs[call]
+	}
 	return f.qualityAggregate, f.qualityValues, nil
 }
 
@@ -110,7 +122,7 @@ func (f *fakeFeedbackRepo) ClassificationQualitySeries(
 	_ context.Context, opts feedbackrepo.ClassificationQualityQueryOpts,
 ) ([]feedbackrepo.ClassificationQualitySeriesBucket, error) {
 	f.qualitySeriesOpts = &opts
-	return f.qualitySeries, nil
+	return f.qualitySeries, f.qualitySeriesErr
 }
 
 func (f *fakeFeedbackRepo) ClassificationQualitySamples(
@@ -118,7 +130,7 @@ func (f *fakeFeedbackRepo) ClassificationQualitySamples(
 ) ([]feedbackrepo.ClassificationQualitySample, error) {
 	f.qualityTenant = tenantID
 	f.qualitySampleIDs = append([]int64(nil), ids...)
-	return f.qualitySamples, nil
+	return f.qualitySamples, f.qualitySamplesErr
 }
 
 func (f *fakeFeedbackRepo) RetryEnrichment(
@@ -129,10 +141,11 @@ func (f *fakeFeedbackRepo) RetryEnrichment(
 
 type fakeTenantConfigRepo struct {
 	cfg tenantrepo.EnrichConfig
+	err error
 }
 
 func (f *fakeTenantConfigRepo) GetEnrichConfig(_ context.Context, _ string) (tenantrepo.EnrichConfig, error) {
-	return f.cfg, nil
+	return f.cfg, f.err
 }
 
 func TestHTTPDispatchSmoke(t *testing.T) {

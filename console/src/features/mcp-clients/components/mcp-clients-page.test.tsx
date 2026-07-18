@@ -1,6 +1,10 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
-import { MCPClientsPage } from '@/features/mcp-clients/components/mcp-clients-page'
+import { toast } from 'sonner'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import {
+  MCPClientsPage,
+  mcpClientsPageTestables,
+} from '@/features/mcp-clients/components/mcp-clients-page'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
@@ -8,6 +12,11 @@ import { renderWithProviders, screen, waitFor, within } from '@/testing/test-uti
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+beforeEach(() => {
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.error).mockClear()
+})
 
 const clientFixture: {
   id: string
@@ -128,6 +137,30 @@ const baseDetail = {
   ],
 }
 
+describe('mcpClientsPageTestables', () => {
+  it('formats local helper output and parse fallbacks', () => {
+    expect(mcpClientsPageTestables.emptyDraft()).toEqual({
+      effect: '',
+      rateLimitBurst: '',
+      rateLimitRPM: '',
+    })
+    expect(mcpClientsPageTestables.parseNullableInt('')).toBeNull()
+    expect(mcpClientsPageTestables.parseNullableInt(' 42 ')).toBe(42)
+    expect(mcpClientsPageTestables.parseNullableInt('bad')).toBeNull()
+    expect(mcpClientsPageTestables.truncateMiddle('short-id')).toBe('short-id')
+    expect(mcpClientsPageTestables.truncateMiddle('client-uuid-1234567890')).toBe('client-u…7890')
+    expect(mcpClientsPageTestables.truncateAgent('')).toBe('-')
+    expect(mcpClientsPageTestables.truncateAgent('Claude Code')).toBe('Claude Code')
+    expect(mcpClientsPageTestables.truncateAgent('A'.repeat(32))).toBe(`${'A'.repeat(25)}…`)
+    expect(mcpClientsPageTestables.formatPolicyMode('allow_list', (key) => key)).toBe(
+      'mcp_clients.governance.mode.allow_list',
+    )
+    expect(mcpClientsPageTestables.formatPolicyMode('legacy_allow_all', (key) => key)).toBe(
+      'mcp_clients.governance.mode.legacy_allow_all',
+    )
+  })
+})
+
 describe('MCPClientsPage user flow', () => {
   it('updates governance, saves tool policies, and revokes a session', async () => {
     let patchBody: unknown
@@ -235,6 +268,14 @@ describe('MCPClientsPage user flow', () => {
     expect(screen.getByText('兼容别名')).toBeInTheDocument()
     if (!toolRow) return
     await user.click(within(toolRow).getByRole('checkbox', { name: '允许工具 list_feedback' }))
+    await user.type(
+      within(toolRow).getByRole('textbox', { name: '设置工具 list_feedback 的每分钟请求数' }),
+      '30',
+    )
+    await user.type(
+      within(toolRow).getByRole('textbox', { name: '设置工具 list_feedback 的突发上限' }),
+      '6',
+    )
     await user.click(screen.getByRole('button', { name: '保存工具策略' }))
 
     await waitFor(() => {
@@ -243,8 +284,8 @@ describe('MCPClientsPage user flow', () => {
           {
             tool_name: 'list_feedback',
             effect: 'allow',
-            rate_limit_rpm: null,
-            rate_limit_burst: null,
+            rate_limit_rpm: 30,
+            rate_limit_burst: 6,
           },
         ],
       })
@@ -409,6 +450,83 @@ describe('MCPClientsPage user flow', () => {
     })
   })
 
+  it('keeps the create dialog open and surfaces create failures', async () => {
+    server.use(
+      http.get('/fb/v1/console/mcp/clients', () => HttpResponse.json({ clients: [clientFixture] })),
+      http.get('/fb/v1/console/mcp/clients/:id', () => HttpResponse.json(baseDetail)),
+      http.post('/fb/v1/console/mcp/clients', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'create failed' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<MCPClientsPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('claude-code-agent')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '+ 注册客户端' }))
+    const createDialog = screen.getByRole('dialog', { name: '注册 MCP 客户端' })
+    await user.type(within(createDialog).getByLabelText('客户端名称'), 'bad-agent')
+    await user.type(within(createDialog).getByLabelText('重定向 URI'), 'http://127.0.0.1:33418')
+    await user.click(within(createDialog).getByRole('button', { name: '+ 注册客户端' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('create failed'))
+    expect(screen.getByRole('dialog', { name: '注册 MCP 客户端' })).toBeInTheDocument()
+    expect(within(createDialog).getByLabelText('客户端名称')).toHaveValue('bad-agent')
+  })
+
+  it('surfaces governance, tool, session, grant, and client revoke failures', async () => {
+    server.use(
+      http.get('/fb/v1/console/mcp/clients', () => HttpResponse.json({ clients: [clientFixture] })),
+      http.get('/fb/v1/console/mcp/clients/:id', () => HttpResponse.json(baseDetail)),
+      http.patch('/fb/v1/console/mcp/clients/:id', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'governance failed' }, { status: 500 }),
+      ),
+      http.put('/fb/v1/console/mcp/clients/:id/tool-policies', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'tool policy failed' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/mcp/clients/:id/sessions/:sessionId', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'session revoke failed' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/mcp/clients/:id/grants/:grantId', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'grant revoke failed' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/mcp/clients/:id', () =>
+        HttpResponse.json({ code: 'INTERNAL', message: 'client revoke failed' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<MCPClientsPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('claude-code-agent')).toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(screen.getByText('默认治理策略')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '保存治理设置' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('governance failed'))
+
+    vi.mocked(toast.error).mockClear()
+    await user.click(screen.getByRole('button', { name: '保存工具策略' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('tool policy failed'))
+
+    vi.mocked(toast.error).mockClear()
+    await user.click(screen.getByRole('button', { name: '终止' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('session revoke failed'))
+
+    vi.mocked(toast.error).mockClear()
+    await user.click(screen.getByRole('button', { name: '撤销授权' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('grant revoke failed'))
+
+    vi.mocked(toast.error).mockClear()
+    await user.click(screen.getByRole('button', { name: '撤销客户端 claude-code-agent' }))
+    const revokeDialog = screen.getByRole('dialog', { name: '撤销此客户端？' })
+    await user.click(within(revokeDialog).getByRole('button', { name: '撤销' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('client revoke failed'))
+  })
+
   it('treats revoked clients as read-only in the detail workspace', async () => {
     const revokedClient = {
       ...clientFixture,
@@ -460,10 +578,14 @@ describe('MCPClientsPage user flow', () => {
   it('shows empty state when no clients exist', async () => {
     server.use(http.get('/fb/v1/console/mcp/clients', () => HttpResponse.json({ clients: [] })))
 
-    renderWithProviders(<MCPClientsPage />)
+    const { user } = renderWithProviders(<MCPClientsPage />)
 
     await waitFor(() => {
       expect(screen.getByText('还没有 MCP 客户端')).toBeInTheDocument()
     })
+
+    const createButtons = screen.getAllByRole('button', { name: '+ 注册客户端' })
+    await user.click(createButtons.at(-1) ?? createButtons[0])
+    expect(screen.getByRole('dialog', { name: '注册 MCP 客户端' })).toBeInTheDocument()
   })
 })

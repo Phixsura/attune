@@ -52,3 +52,37 @@ func TestMCPToolPolicyListProtoCarriesKind(t *testing.T) {
 		DataClass:     "user_content",
 	}), resp[0])
 }
+
+func TestMCPClientListProtoMapsOptionalFields(t *testing.T) {
+	t.Parallel()
+
+	rpm := 120
+	burst := 20
+	revokedAt := "2026-07-01T00:00:00Z"
+	resp := mcpClientListProto([]consolemcpclient.ClientDTO{{
+		ID:             "client-1",
+		Name:           "Automation",
+		RedirectURIs:   []string{"https://app.example/callback"},
+		Scopes:         []string{"mcp:read"},
+		ToolPolicyMode: "custom",
+		RateLimitRPM:   ptrext.Of(rpm),
+		RateLimitBurst: ptrext.Of(burst),
+		CreatedAt:      "2026-06-01T00:00:00Z",
+		CreatedBy:      "admin-1",
+		RevokedAt:      ptrext.Of(revokedAt),
+	}})
+
+	require.Len(t, resp, 1)
+	require.Equal(t, ptrext.Of(attunev1.MCPClient{
+		Id:             "client-1",
+		Name:           "Automation",
+		RedirectUris:   []string{"https://app.example/callback"},
+		Scopes:         []string{"mcp:read"},
+		ToolPolicyMode: "custom",
+		RateLimitRpm:   ptrext.Of(int32(120)),
+		RateLimitBurst: ptrext.Of(int32(20)),
+		CreatedAt:      "2026-06-01T00:00:00Z",
+		CreatedBy:      "admin-1",
+		RevokedAt:      ptrext.Of(revokedAt),
+	}), resp[0])
+}

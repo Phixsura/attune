@@ -5,6 +5,7 @@ import {
   type ModerationSubject,
   PortalSubmissionFieldKind,
   PublicSurface,
+  type SavedPublicVisibilityView,
 } from '@/proto/attune/v1/public_visibility'
 import { publicVisibilityPageTestables } from './public-visibility-page'
 
@@ -95,6 +96,67 @@ describe('public visibility helper coverage', () => {
       PublicSurface.PUBLIC_SURFACE_REQUEST,
       PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION,
     ])
+
+    const savedView: SavedPublicVisibilityView = {
+      id: 'view-1',
+      name: 'Approved portal requests',
+      state: {
+        queueView: 'approved',
+        surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+      },
+      createdAt: '2026-07-10T00:00:00Z',
+      updatedAt: '2026-07-10T00:00:00Z',
+    }
+    const currentFilters = {
+      queueView: 'blocked' as const,
+      surfaces: [PublicSurface.PUBLIC_SURFACE_REQUEST],
+    }
+
+    expect(
+      publicVisibilityPageTestables.savedViewSaveRequest(null, '  Triage  ', currentFilters),
+    ).toEqual({
+      kind: 'create',
+      name: 'Triage',
+      state: {
+        queueView: 'blocked',
+        surfaces: [PublicSurface.PUBLIC_SURFACE_REQUEST],
+      },
+    })
+    expect(
+      publicVisibilityPageTestables.savedViewSaveRequest(
+        savedView,
+        '  Approved requests  ',
+        currentFilters,
+      ),
+    ).toEqual({
+      kind: 'update',
+      id: 'view-1',
+      name: 'Approved requests',
+      state: {
+        queueView: 'blocked',
+        surfaces: [PublicSurface.PUBLIC_SURFACE_REQUEST],
+      },
+    })
+    expect(
+      publicVisibilityPageTestables.savedViewSaveRequest(savedView, '   ', currentFilters),
+    ).toBeNull()
+    expect(publicVisibilityPageTestables.savedViewDeleteID(savedView)).toBe('view-1')
+    expect(publicVisibilityPageTestables.savedViewDeleteID(null)).toBeNull()
+    expect(
+      publicVisibilityPageTestables.savedViewSelectionFromValue([savedView], '__current__'),
+    ).toEqual({ selectedID: '', filters: null })
+    expect(
+      publicVisibilityPageTestables.savedViewSelectionFromValue([savedView], 'missing'),
+    ).toEqual({ selectedID: '', filters: null })
+    expect(
+      publicVisibilityPageTestables.savedViewSelectionFromValue([savedView], 'view-1'),
+    ).toEqual({
+      selectedID: 'view-1',
+      filters: {
+        queueView: 'approved',
+        surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+      },
+    })
   })
 
   it('describes and names saved moderation views', () => {

@@ -27,6 +27,7 @@ export function ReplayWorksheetCard({
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
+      /* v8 ignore next -- @preserve: clipboard-denied fallback only resets an already false visual state. */
       setCopied(false)
     }
   }

@@ -3,8 +3,10 @@
 package oidc
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -12,8 +14,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/pkg/crypto"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/service/oidcauth"
 )
 
 func TestNewHandler_NilDependencies(t *testing.T) {
@@ -28,6 +33,142 @@ func TestNewHandler_NilDependencies(t *testing.T) {
 	// NewHandler returns nil if any required dependency is nil
 	// We can't easily construct real dependencies here, so we just verify
 	// the nil check path works.
+}
+
+func TestNewHandler_ProviderMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		providerName string
+		oidcOnly     bool
+	}{
+		{name: "local login available", providerName: "Okta", oidcOnly: false},
+		{name: "oidc only", providerName: "Acme SSO", oidcOnly: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := newMetadataHandler(t, tt.providerName, tt.oidcOnly)
+
+			require.NotNil(t, h)
+			assert.Equal(t, tt.providerName, h.ProviderName())
+			assert.Equal(t, tt.oidcOnly, h.OIDCOnly())
+			assert.Equal(t, "https://console.example.test", h.baseURL)
+		})
+	}
+}
+
+func TestStartSetsStateCookieAndRedirects(t *testing.T) {
+	t.Parallel()
+
+	h := newMetadataHandler(t, "Okta", false)
+	req := httptest.NewRequest(http.MethodGet, "/start?return_url=/console/settings", nil)
+	rec := httptest.NewRecorder()
+
+	h.Start(rec, req)
+
+	require.Equal(t, http.StatusFound, rec.Code)
+
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, oidcStateCookie, cookies[0].Name)
+
+	reqWithCookie := httptest.NewRequest(http.MethodGet, "/callback", nil)
+	reqWithCookie.AddCookie(cookies[0])
+	storedState, err := h.getStateCookie(reqWithCookie)
+	require.NoError(t, err)
+	assert.Equal(t, "/console/settings", storedState.ReturnURL)
+	assert.NotEmpty(t, storedState.State)
+	assert.NotEmpty(t, storedState.PKCEVerifier)
+	assert.NotEmpty(t, storedState.Nonce)
+	assert.Greater(t, storedState.ExpiresAt, time.Now().Unix())
+
+	redirectURL, err := url.Parse(rec.Header().Get("Location"))
+	require.NoError(t, err)
+	assert.Equal(t, "/authorize", redirectURL.Path)
+
+	query := redirectURL.Query()
+	assert.Equal(t, "client-1", query.Get("client_id"))
+	assert.Equal(t, "code", query.Get("response_type"))
+	assert.Equal(t, "S256", query.Get("code_challenge_method"))
+	assert.Equal(t, storedState.State, query.Get("state"))
+	assert.Equal(t, storedState.Nonce, query.Get("nonce"))
+	assert.NotEmpty(t, query.Get("code_challenge"))
+}
+
+func TestStartDropsInvalidReturnURL(t *testing.T) {
+	t.Parallel()
+
+	h := newMetadataHandler(t, "Okta", false)
+	req := httptest.NewRequest(http.MethodGet, "/start?return_url=https://evil.example/phish", nil)
+	rec := httptest.NewRecorder()
+
+	h.Start(rec, req)
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	cookies := rec.Result().Cookies()
+	require.Len(t, cookies, 1)
+
+	reqWithCookie := httptest.NewRequest(http.MethodGet, "/callback", nil)
+	reqWithCookie.AddCookie(cookies[0])
+	storedState, err := h.getStateCookie(reqWithCookie)
+	require.NoError(t, err)
+	assert.Empty(t, storedState.ReturnURL)
+}
+
+func newMetadataHandler(t *testing.T, providerName string, oidcOnly bool) *Handler {
+	t.Helper()
+
+	server := newOIDCMetadataServer(t)
+	cfg := ptrext.Of(config.OIDCConfig{
+		Enabled:            true,
+		IssuerURL:          server.URL,
+		ClientID:           "client-1",
+		ClientSecret:       "secret-1",
+		RedirectURI:        "https://console.example.test/fb/v1/console/auth/oidc/callback",
+		Scopes:             []string{"openid", "email"},
+		UserClaim:          "email",
+		GroupsClaim:        "groups",
+		ProviderName:       providerName,
+		OIDCOnly:           oidcOnly,
+		InsecureSkipVerify: true,
+	})
+	svc, err := oidcauth.NewService(t.Context(), cfg, nil, nil)
+	require.NoError(t, err)
+
+	signer, err := session.NewSigner("0123456789abcdef0123456789abcdef")
+	require.NoError(t, err)
+	aead, err := crypto.NewAEAD([]byte("test-key-handler-metadata"))
+	require.NoError(t, err)
+
+	return NewHandler(svc, signer, aead, "https://console.example.test/")
+}
+
+func newOIDCMetadataServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var server *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{
+			"issuer": %q,
+			"authorization_endpoint": %q,
+			"token_endpoint": %q,
+			"jwks_uri": %q,
+			"userinfo_endpoint": %q
+		}`, server.URL, server.URL+"/authorize", server.URL+"/token", server.URL+"/keys", server.URL+"/userinfo")
+	})
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	})
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
 }
 
 func TestStateCookie_RoundTrip(t *testing.T) {

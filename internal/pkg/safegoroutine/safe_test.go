@@ -52,6 +52,20 @@ func TestGoWithContext_PassesContext(t *testing.T) {
 	require.Equal(t, ctx, receivedCtx.Load())
 }
 
+func TestGoWithContext_RecoversPanic(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	var called atomic.Bool
+	GoWithContext(ctx, "test-context-panic", func(context.Context) {
+		called.Store(true)
+		panic("test context panic")
+	})
+
+	time.Sleep(10 * time.Millisecond)
+	require.True(t, called.Load())
+}
+
 func TestGoLoop_StopsOnCancel(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())

@@ -18,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	viewrepo "github.com/Phixsura/attune/internal/repo/customerrequestview"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	svc "github.com/Phixsura/attune/internal/service/customerrequest"
 	viewsvc "github.com/Phixsura/attune/internal/service/customerrequestview"
@@ -95,6 +96,15 @@ func TestBindListRequestRejectsInvalidStatus(t *testing.T) {
 
 	if err := BindListRequest(r, req); err == nil {
 		t.Fatal("BindListRequest() error = nil, want invalid status error")
+	}
+}
+
+func TestBindListRequestRejectsInvalidPriority(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/fb/v1/console/customer-requests?priority=eventually", nil)
+	req := ptrext.Of(attunev1.ListCustomerRequestsRequest{})
+
+	if err := BindListRequest(r, req); err == nil {
+		t.Fatal("BindListRequest() error = nil, want invalid priority error")
 	}
 }
 
@@ -520,7 +530,733 @@ func TestHandlerErrorMapping(t *testing.T) {
 				wantCode = attunev1.ErrorCode_BAD_REQUEST
 			}
 			assertDispatcherError(t, err, wantStatus, wantCode)
+
+			_, err = handler.scoringSettingsError(ctx, tc.err)
+			wantStatus = http.StatusInternalServerError
+			wantCode = attunev1.ErrorCode_INTERNAL
+			if errors.Is(tc.err, svc.ErrValidation) || errors.Is(tc.err, repo.ErrInvalidInput) {
+				wantStatus = http.StatusBadRequest
+				wantCode = attunev1.ErrorCode_VALIDATION
+			}
+			assertDispatcherError(t, err, wantStatus, wantCode)
 		})
+	}
+}
+
+func TestHandlerNilServiceGuards(t *testing.T) {
+	handler := NewHandler(nil)
+	ctx := customerRequestHandlerContext()
+	requestID := "11111111-1111-1111-1111-111111111111"
+	targetID := "22222222-2222-2222-2222-222222222222"
+	linkID := "33333333-3333-3333-3333-333333333333"
+
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "list",
+			call: func() error {
+				_, err := handler.List(ctx, &attunev1.ListCustomerRequestsRequest{})
+				return err
+			},
+		},
+		{
+			name: "get scoring settings",
+			call: func() error {
+				_, err := handler.GetScoringSettings(ctx, &attunev1.GetCustomerRequestScoringSettingsRequest{})
+				return err
+			},
+		},
+		{
+			name: "update scoring settings",
+			call: func() error {
+				_, err := handler.UpdateScoringSettings(ctx, &attunev1.UpdateCustomerRequestScoringSettingsRequest{})
+				return err
+			},
+		},
+		{
+			name: "create",
+			call: func() error {
+				_, err := handler.Create(ctx, &attunev1.CreateCustomerRequestRequest{})
+				return err
+			},
+		},
+		{
+			name: "update",
+			call: func() error {
+				_, err := handler.Update(ctx, &attunev1.UpdateCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "promote feedback",
+			call: func() error {
+				_, err := handler.PromoteFeedback(ctx, &attunev1.PromoteFeedbackToCustomerRequestRequest{})
+				return err
+			},
+		},
+		{
+			name: "link feedback",
+			call: func() error {
+				_, err := handler.LinkFeedback(ctx, &attunev1.LinkFeedbackToCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "unlink feedback",
+			call: func() error {
+				_, err := handler.UnlinkFeedback(ctx, &attunev1.UnlinkFeedbackFromCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "link customer",
+			call: func() error {
+				_, err := handler.LinkCustomer(ctx, &attunev1.LinkCustomerToCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "unlink customer",
+			call: func() error {
+				_, err := handler.UnlinkCustomer(ctx, &attunev1.UnlinkCustomerFromCustomerRequestRequest{Id: requestID, CustomerLinkId: linkID})
+				return err
+			},
+		},
+		{
+			name: "add vote",
+			call: func() error {
+				_, err := handler.AddVote(ctx, &attunev1.AddCustomerRequestVoteRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "remove vote",
+			call: func() error {
+				_, err := handler.RemoveVote(ctx, &attunev1.RemoveCustomerRequestVoteRequest{Id: requestID, VoteId: linkID})
+				return err
+			},
+		},
+		{
+			name: "add note",
+			call: func() error {
+				_, err := handler.AddNote(ctx, &attunev1.AddCustomerRequestNoteRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "delete note",
+			call: func() error {
+				_, err := handler.DeleteNote(ctx, &attunev1.DeleteCustomerRequestNoteRequest{Id: requestID, NoteId: linkID})
+				return err
+			},
+		},
+		{
+			name: "merge",
+			call: func() error {
+				_, err := handler.Merge(ctx, &attunev1.MergeCustomerRequestsRequest{SourceId: requestID, TargetId: targetID})
+				return err
+			},
+		},
+		{
+			name: "link issue",
+			call: func() error {
+				_, err := handler.LinkIssue(ctx, &attunev1.LinkCustomerRequestIssueRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "unlink issue",
+			call: func() error {
+				_, err := handler.UnlinkIssue(ctx, &attunev1.UnlinkCustomerRequestIssueRequest{Id: requestID, IssueLinkId: linkID})
+				return err
+			},
+		},
+		{
+			name: "record issue sync",
+			call: func() error {
+				_, err := handler.RecordIssueSync(ctx, &attunev1.RecordCustomerRequestIssueSyncRequest{Id: requestID, IssueLinkId: linkID})
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertDispatcherError(t, tc.call(), http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL)
+		})
+	}
+}
+
+func TestHandlerRejectsInvalidListAndMutationFields(t *testing.T) {
+	h := newHandlerHarness()
+	status := attunev1.CustomerRequestStatus(99)
+	priority := attunev1.CustomerRequestPriority(99)
+	requestID := h.requestID.String()
+
+	runHandlerErrorCases(t, []handlerErrorCase{
+		{
+			name: "list invalid status",
+			call: func() error {
+				_, err := h.handler.List(h.ctx, &attunev1.ListCustomerRequestsRequest{Status: []attunev1.CustomerRequestStatus{status}})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "list invalid priority",
+			call: func() error {
+				_, err := h.handler.List(h.ctx, &attunev1.ListCustomerRequestsRequest{Priority: []attunev1.CustomerRequestPriority{priority}})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "list invalid owner",
+			call: func() error {
+				_, err := h.handler.List(h.ctx, &attunev1.ListCustomerRequestsRequest{OwnerMemberId: ptrext.Of("bad-owner")})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "create invalid owner",
+			call: func() error {
+				_, err := h.handler.Create(h.ctx, &attunev1.CreateCustomerRequestRequest{OwnerMemberId: ptrext.Of("bad-owner")})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "create invalid status",
+			call: func() error {
+				_, err := h.handler.Create(h.ctx, &attunev1.CreateCustomerRequestRequest{Status: status})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "create invalid priority",
+			call: func() error {
+				_, err := h.handler.Create(h.ctx, &attunev1.CreateCustomerRequestRequest{Priority: priority})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "update invalid request id",
+			call: func() error {
+				_, err := h.handler.Update(h.ctx, &attunev1.UpdateCustomerRequestRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "update invalid owner",
+			call: func() error {
+				_, err := h.handler.Update(h.ctx, &attunev1.UpdateCustomerRequestRequest{Id: requestID, OwnerMemberId: ptrext.Of("bad-owner")})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "update invalid status",
+			call: func() error {
+				_, err := h.handler.Update(h.ctx, &attunev1.UpdateCustomerRequestRequest{Id: requestID, Status: &status})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "update invalid priority",
+			call: func() error {
+				_, err := h.handler.Update(h.ctx, &attunev1.UpdateCustomerRequestRequest{Id: requestID, Priority: &priority})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "promote invalid owner",
+			call: func() error {
+				_, err := h.handler.PromoteFeedback(h.ctx, &attunev1.PromoteFeedbackToCustomerRequestRequest{OwnerMemberId: ptrext.Of("bad-owner")})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "promote invalid status",
+			call: func() error {
+				_, err := h.handler.PromoteFeedback(h.ctx, &attunev1.PromoteFeedbackToCustomerRequestRequest{Status: status})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "promote invalid priority",
+			call: func() error {
+				_, err := h.handler.PromoteFeedback(h.ctx, &attunev1.PromoteFeedbackToCustomerRequestRequest{Priority: priority})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+	})
+}
+
+func TestHandlerRejectsInvalidRelationshipFields(t *testing.T) {
+	h := newHandlerHarness()
+	requestID := h.requestID.String()
+	linkID := h.linkID.String()
+
+	runHandlerErrorCases(t, []handlerErrorCase{
+		{
+			name: "link feedback invalid request id",
+			call: func() error {
+				_, err := h.handler.LinkFeedback(h.ctx, &attunev1.LinkFeedbackToCustomerRequestRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "link feedback invalid importance",
+			call: func() error {
+				_, err := h.handler.LinkFeedback(h.ctx, &attunev1.LinkFeedbackToCustomerRequestRequest{
+					Id:         requestID,
+					Importance: attunev1.CustomerRequestImportance(99),
+				})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+		{
+			name: "unlink feedback invalid request id",
+			call: func() error {
+				_, err := h.handler.UnlinkFeedback(h.ctx, &attunev1.UnlinkFeedbackFromCustomerRequestRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "link customer invalid request id",
+			call: func() error {
+				_, err := h.handler.LinkCustomer(h.ctx, &attunev1.LinkCustomerToCustomerRequestRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "unlink customer invalid request id",
+			call: func() error {
+				_, err := h.handler.UnlinkCustomer(h.ctx, &attunev1.UnlinkCustomerFromCustomerRequestRequest{Id: "bad-id", CustomerLinkId: linkID})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "unlink customer invalid link id",
+			call: func() error {
+				_, err := h.handler.UnlinkCustomer(h.ctx, &attunev1.UnlinkCustomerFromCustomerRequestRequest{Id: requestID, CustomerLinkId: "bad-link"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+	})
+}
+
+func TestHandlerRejectsInvalidVoteAndNoteFields(t *testing.T) {
+	h := newHandlerHarness()
+	requestID := h.requestID.String()
+	linkID := h.linkID.String()
+
+	runHandlerErrorCases(t, []handlerErrorCase{
+		{
+			name: "add vote invalid request id",
+			call: func() error {
+				_, err := h.handler.AddVote(h.ctx, &attunev1.AddCustomerRequestVoteRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "remove vote invalid request id",
+			call: func() error {
+				_, err := h.handler.RemoveVote(h.ctx, &attunev1.RemoveCustomerRequestVoteRequest{Id: "bad-id", VoteId: linkID})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "remove vote invalid vote id",
+			call: func() error {
+				_, err := h.handler.RemoveVote(h.ctx, &attunev1.RemoveCustomerRequestVoteRequest{Id: requestID, VoteId: "bad-vote"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "add note invalid request id",
+			call: func() error {
+				_, err := h.handler.AddNote(h.ctx, &attunev1.AddCustomerRequestNoteRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "delete note invalid request id",
+			call: func() error {
+				_, err := h.handler.DeleteNote(h.ctx, &attunev1.DeleteCustomerRequestNoteRequest{Id: "bad-id", NoteId: linkID})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "delete note invalid note id",
+			call: func() error {
+				_, err := h.handler.DeleteNote(h.ctx, &attunev1.DeleteCustomerRequestNoteRequest{Id: requestID, NoteId: "bad-note"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+	})
+}
+
+func TestHandlerRejectsInvalidMergeAndIssueFields(t *testing.T) {
+	h := newHandlerHarness()
+	requestID := h.requestID.String()
+	linkID := h.linkID.String()
+
+	runHandlerErrorCases(t, []handlerErrorCase{
+		{
+			name: "merge invalid source id",
+			call: func() error {
+				_, err := h.handler.Merge(h.ctx, &attunev1.MergeCustomerRequestsRequest{SourceId: "bad-source", TargetId: requestID})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "merge invalid target id",
+			call: func() error {
+				_, err := h.handler.Merge(h.ctx, &attunev1.MergeCustomerRequestsRequest{SourceId: requestID, TargetId: "bad-target"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "link issue invalid request id",
+			call: func() error {
+				_, err := h.handler.LinkIssue(h.ctx, &attunev1.LinkCustomerRequestIssueRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "unlink issue invalid request id",
+			call: func() error {
+				_, err := h.handler.UnlinkIssue(h.ctx, &attunev1.UnlinkCustomerRequestIssueRequest{Id: "bad-id", IssueLinkId: linkID})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "unlink issue invalid link id",
+			call: func() error {
+				_, err := h.handler.UnlinkIssue(h.ctx, &attunev1.UnlinkCustomerRequestIssueRequest{Id: requestID, IssueLinkId: "bad-issue"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "record issue sync invalid request id",
+			call: func() error {
+				_, err := h.handler.RecordIssueSync(h.ctx, &attunev1.RecordCustomerRequestIssueSyncRequest{Id: "bad-id", IssueLinkId: linkID})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "record issue sync invalid link id",
+			call: func() error {
+				_, err := h.handler.RecordIssueSync(h.ctx, &attunev1.RecordCustomerRequestIssueSyncRequest{Id: requestID, IssueLinkId: "bad-issue"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "record issue sync invalid state",
+			call: func() error {
+				_, err := h.handler.RecordIssueSync(h.ctx, &attunev1.RecordCustomerRequestIssueSyncRequest{
+					Id:          requestID,
+					IssueLinkId: linkID,
+					SyncState:   attunev1.CustomerRequestIssueSyncState(99),
+				})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_REQUEST,
+		},
+	})
+}
+
+func TestHandlerMapsServiceErrorsFromOperations(t *testing.T) {
+	h := newHandlerHarness()
+	h.fake.err = repo.ErrConflict
+	requestID := h.requestID.String()
+	targetID := h.targetID.String()
+	linkID := h.linkID.String()
+
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "get",
+			call: func() error {
+				_, err := h.handler.Get(h.ctx, &attunev1.GetCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "create",
+			call: func() error {
+				_, err := h.handler.Create(h.ctx, &attunev1.CreateCustomerRequestRequest{})
+				return err
+			},
+		},
+		{
+			name: "update",
+			call: func() error {
+				_, err := h.handler.Update(h.ctx, &attunev1.UpdateCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "promote feedback",
+			call: func() error {
+				_, err := h.handler.PromoteFeedback(h.ctx, &attunev1.PromoteFeedbackToCustomerRequestRequest{})
+				return err
+			},
+		},
+		{
+			name: "link feedback",
+			call: func() error {
+				_, err := h.handler.LinkFeedback(h.ctx, &attunev1.LinkFeedbackToCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "unlink feedback",
+			call: func() error {
+				_, err := h.handler.UnlinkFeedback(h.ctx, &attunev1.UnlinkFeedbackFromCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "link customer",
+			call: func() error {
+				_, err := h.handler.LinkCustomer(h.ctx, &attunev1.LinkCustomerToCustomerRequestRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "unlink customer",
+			call: func() error {
+				_, err := h.handler.UnlinkCustomer(h.ctx, &attunev1.UnlinkCustomerFromCustomerRequestRequest{Id: requestID, CustomerLinkId: linkID})
+				return err
+			},
+		},
+		{
+			name: "add vote",
+			call: func() error {
+				_, err := h.handler.AddVote(h.ctx, &attunev1.AddCustomerRequestVoteRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "remove vote",
+			call: func() error {
+				_, err := h.handler.RemoveVote(h.ctx, &attunev1.RemoveCustomerRequestVoteRequest{Id: requestID, VoteId: linkID})
+				return err
+			},
+		},
+		{
+			name: "add note",
+			call: func() error {
+				_, err := h.handler.AddNote(h.ctx, &attunev1.AddCustomerRequestNoteRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "delete note",
+			call: func() error {
+				_, err := h.handler.DeleteNote(h.ctx, &attunev1.DeleteCustomerRequestNoteRequest{Id: requestID, NoteId: linkID})
+				return err
+			},
+		},
+		{
+			name: "merge",
+			call: func() error {
+				_, err := h.handler.Merge(h.ctx, &attunev1.MergeCustomerRequestsRequest{SourceId: requestID, TargetId: targetID})
+				return err
+			},
+		},
+		{
+			name: "link issue",
+			call: func() error {
+				_, err := h.handler.LinkIssue(h.ctx, &attunev1.LinkCustomerRequestIssueRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "unlink issue",
+			call: func() error {
+				_, err := h.handler.UnlinkIssue(h.ctx, &attunev1.UnlinkCustomerRequestIssueRequest{Id: requestID, IssueLinkId: linkID})
+				return err
+			},
+		},
+		{
+			name: "record issue sync",
+			call: func() error {
+				_, err := h.handler.RecordIssueSync(h.ctx, &attunev1.RecordCustomerRequestIssueSyncRequest{Id: requestID, IssueLinkId: linkID})
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertDispatcherError(t, tc.call(), http.StatusConflict, attunev1.ErrorCode_CONFLICT)
+		})
+	}
+}
+
+func TestHandlerMapsListAndScoringServiceErrors(t *testing.T) {
+	h := newHandlerHarness()
+	h.fake.err = repo.ErrInvalidInput
+
+	_, err := h.handler.List(h.ctx, &attunev1.ListCustomerRequestsRequest{})
+	assertDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST)
+
+	_, err = h.handler.GetScoringSettings(h.ctx, &attunev1.GetCustomerRequestScoringSettingsRequest{})
+	assertDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+
+	_, err = h.handler.UpdateScoringSettings(h.ctx, &attunev1.UpdateCustomerRequestScoringSettingsRequest{})
+	assertDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+}
+
+func TestSavedViewHandlerErrorMapping(t *testing.T) {
+	ctx := customerRequestHandlerContext()
+	handler := NewHandler(nil)
+	_, err := handler.ListSavedViews(ctx, &attunev1.ListCustomerRequestSavedViewsRequest{})
+	assertDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	_, err = handler.CreateSavedView(ctx, &attunev1.CreateCustomerRequestSavedViewRequest{})
+	assertDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+	_, err = handler.DeleteSavedView(ctx, &attunev1.DeleteCustomerRequestSavedViewRequest{Id: "view-1"})
+	assertDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+
+	h := newHandlerHarness()
+	h.views.listErr = errors.New("list failed")
+	_, err = h.handler.ListSavedViews(h.ctx, &attunev1.ListCustomerRequestSavedViewsRequest{})
+	assertDispatcherError(t, err, http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL)
+
+	saveCases := []struct {
+		name   string
+		err    error
+		status int
+		code   attunev1.ErrorCode
+	}{
+		{name: "validation", err: viewsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_BAD_REQUEST},
+		{name: "conflict", err: viewrepo.ErrConflict, status: http.StatusConflict, code: attunev1.ErrorCode_CONFLICT},
+		{name: "not found", err: viewrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND},
+		{name: "internal", err: errors.New("save failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL},
+	}
+	for _, tc := range saveCases {
+		t.Run("save "+tc.name, func(t *testing.T) {
+			h := newHandlerHarness()
+			h.views.saveErr = tc.err
+			_, err := h.handler.CreateSavedView(h.ctx, &attunev1.CreateCustomerRequestSavedViewRequest{Name: "Planning"})
+			assertDispatcherError(t, err, tc.status, tc.code)
+		})
+	}
+
+	deleteCases := []struct {
+		name   string
+		err    error
+		status int
+		code   attunev1.ErrorCode
+	}{
+		{name: "validation", err: viewsvc.ErrValidation, status: http.StatusBadRequest, code: attunev1.ErrorCode_BAD_REQUEST},
+		{name: "not found", err: viewrepo.ErrNotFound, status: http.StatusNotFound, code: attunev1.ErrorCode_NOT_FOUND},
+		{name: "internal", err: errors.New("delete failed"), status: http.StatusInternalServerError, code: attunev1.ErrorCode_INTERNAL},
+	}
+	for _, tc := range deleteCases {
+		t.Run("delete "+tc.name, func(t *testing.T) {
+			h := newHandlerHarness()
+			h.views.deleteErr = tc.err
+			_, err := h.handler.DeleteSavedView(h.ctx, &attunev1.DeleteCustomerRequestSavedViewRequest{Id: "view-1"})
+			assertDispatcherError(t, err, tc.status, tc.code)
+		})
+	}
+}
+
+func TestSavedViewStateValidationAndConversions(t *testing.T) {
+	h := newHandlerHarness()
+	_, err := h.handler.CreateSavedView(h.ctx, &attunev1.CreateCustomerRequestSavedViewRequest{
+		Name:  "Bad status",
+		State: &attunev1.CustomerRequestSavedViewState{Status: []attunev1.CustomerRequestStatus{attunev1.CustomerRequestStatus(99)}},
+	})
+	assertDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST)
+
+	_, err = h.handler.CreateSavedView(h.ctx, &attunev1.CreateCustomerRequestSavedViewRequest{
+		Name:  "Bad priority",
+		State: &attunev1.CustomerRequestSavedViewState{Priority: []attunev1.CustomerRequestPriority{attunev1.CustomerRequestPriority(99)}},
+	})
+	assertDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST)
+
+	if got := savedViewToProto(nil); got != nil {
+		t.Fatalf("savedViewToProto(nil) = %#v, want nil", got)
+	}
+	if _, err := h.handler.CreateSavedView(h.ctx, &attunev1.CreateCustomerRequestSavedViewRequest{Name: "Default state"}); err != nil {
+		t.Fatalf("CreateSavedView(default state) error = %v", err)
+	}
+
+	for _, value := range []repo.Visibility{repo.VisibilityActive, repo.VisibilityMerged, repo.VisibilityArchived, repo.VisibilityAll} {
+		_ = visibilityToProto(value)
+	}
+	for _, value := range []repo.Sort{repo.SortUpdatedAt, repo.SortCustomerCount, repo.SortSupportingFeedbackCount, repo.SortLatestFeedbackAt, repo.SortPriority, repo.SortRevenueImpact, repo.SortDecisionScore, repo.SortDeliveryHealth} {
+		_ = sortToProto(value)
 	}
 }
 
@@ -542,7 +1278,177 @@ func TestEnumToProtoConversions(t *testing.T) {
 	}
 }
 
-func TestQueryBindConversions(t *testing.T) {
+func TestProtoToDomainConversions(t *testing.T) {
+	statusCases := []struct {
+		in   attunev1.CustomerRequestStatus
+		want repo.Status
+	}{
+		{in: attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_UNSPECIFIED, want: ""},
+		{in: attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_OPEN, want: repo.StatusOpen},
+		{in: attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_PLANNED, want: repo.StatusPlanned},
+		{in: attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_IN_PROGRESS, want: repo.StatusInProgress},
+		{in: attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_SHIPPED, want: repo.StatusShipped},
+		{in: attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_CANCELLED, want: repo.StatusCancelled},
+	}
+	for _, tc := range statusCases {
+		if got, err := statusFromProto(tc.in); err != nil || got != tc.want {
+			t.Fatalf("statusFromProto(%v) = %q, %v; want %q", tc.in, got, err, tc.want)
+		}
+	}
+	if _, err := statusFromProto(attunev1.CustomerRequestStatus(99)); err == nil {
+		t.Fatal("statusFromProto(invalid) error = nil")
+	}
+
+	priorityCases := []struct {
+		in   attunev1.CustomerRequestPriority
+		want repo.Priority
+	}{
+		{in: attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED, want: ""},
+		{in: attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_NONE, want: repo.PriorityNone},
+		{in: attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_LOW, want: repo.PriorityLow},
+		{in: attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_MEDIUM, want: repo.PriorityMedium},
+		{in: attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_HIGH, want: repo.PriorityHigh},
+		{in: attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_URGENT, want: repo.PriorityUrgent},
+	}
+	for _, tc := range priorityCases {
+		if got, err := priorityFromProto(tc.in); err != nil || got != tc.want {
+			t.Fatalf("priorityFromProto(%v) = %q, %v; want %q", tc.in, got, err, tc.want)
+		}
+	}
+	if _, err := priorityFromProto(attunev1.CustomerRequestPriority(99)); err == nil {
+		t.Fatal("priorityFromProto(invalid) error = nil")
+	}
+
+	importanceCases := []struct {
+		in   attunev1.CustomerRequestImportance
+		want repo.Importance
+	}{
+		{in: attunev1.CustomerRequestImportance_CUSTOMER_REQUEST_IMPORTANCE_UNSPECIFIED, want: repo.ImportanceNormal},
+		{in: attunev1.CustomerRequestImportance_CUSTOMER_REQUEST_IMPORTANCE_NORMAL, want: repo.ImportanceNormal},
+		{in: attunev1.CustomerRequestImportance_CUSTOMER_REQUEST_IMPORTANCE_IMPORTANT, want: repo.ImportanceImportant},
+		{in: attunev1.CustomerRequestImportance_CUSTOMER_REQUEST_IMPORTANCE_CRITICAL, want: repo.ImportanceCritical},
+	}
+	for _, tc := range importanceCases {
+		if got, err := importanceFromProto(tc.in); err != nil || got != tc.want {
+			t.Fatalf("importanceFromProto(%v) = %q, %v; want %q", tc.in, got, err, tc.want)
+		}
+	}
+	if _, err := importanceFromProto(attunev1.CustomerRequestImportance(99)); err == nil {
+		t.Fatal("importanceFromProto(invalid) error = nil")
+	}
+}
+
+func TestFilterConversionsCoverAllBranches(t *testing.T) {
+	visibilityCases := []struct {
+		in   attunev1.CustomerRequestVisibility
+		want repo.Visibility
+	}{
+		{in: attunev1.CustomerRequestVisibility_CUSTOMER_REQUEST_VISIBILITY_ACTIVE, want: repo.VisibilityActive},
+		{in: attunev1.CustomerRequestVisibility_CUSTOMER_REQUEST_VISIBILITY_MERGED, want: repo.VisibilityMerged},
+		{in: attunev1.CustomerRequestVisibility_CUSTOMER_REQUEST_VISIBILITY_ARCHIVED, want: repo.VisibilityArchived},
+		{in: attunev1.CustomerRequestVisibility_CUSTOMER_REQUEST_VISIBILITY_ALL, want: repo.VisibilityAll},
+	}
+	for _, tc := range visibilityCases {
+		if got := visibilityFromProto(tc.in); got != tc.want {
+			t.Fatalf("visibilityFromProto(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	sortCases := []struct {
+		in   attunev1.CustomerRequestSort
+		want repo.Sort
+	}{
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_UPDATED_AT, want: repo.SortUpdatedAt},
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_CUSTOMER_COUNT, want: repo.SortCustomerCount},
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_SUPPORTING_FEEDBACK_COUNT, want: repo.SortSupportingFeedbackCount},
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_LATEST_FEEDBACK_AT, want: repo.SortLatestFeedbackAt},
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_PRIORITY, want: repo.SortPriority},
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_REVENUE_IMPACT, want: repo.SortRevenueImpact},
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE, want: repo.SortDecisionScore},
+		{in: attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DELIVERY_HEALTH, want: repo.SortDeliveryHealth},
+	}
+	for _, tc := range sortCases {
+		if got := sortFromProto(tc.in); got != tc.want {
+			t.Fatalf("sortFromProto(%v) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestFormattingAndOptionalHelpers(t *testing.T) {
+	if got := formatTime(nil); got != "" {
+		t.Fatalf("formatTime(nil) = %q, want empty", got)
+	}
+	zero := time.Time{}
+	if got := formatTime(&zero); got != "" {
+		t.Fatalf("formatTime(zero) = %q, want empty", got)
+	}
+	if got, err := optionalUUID(ptrext.Of("   ")); err != nil || got != nil {
+		t.Fatalf("optionalUUID(blank) = %#v, %v; want nil, nil", got, err)
+	}
+
+	now := time.Date(2026, 7, 8, 1, 2, 3, 0, time.UTC)
+	settings := repo.DefaultScoringSettings("tenant-a")
+	settings.UpdatedAt = now
+	if got := scoringSettingsToProto(settings); got.GetUpdatedAt() != "2026-07-08T01:02:03Z" {
+		t.Fatalf("scoringSettingsToProto().UpdatedAt = %q, want formatted timestamp", got.GetUpdatedAt())
+	}
+
+	if got := bindDirection("sort_direction_asc"); got != attunev1.SortDirection_SORT_DIRECTION_ASC {
+		t.Fatalf("bindDirection(sort_direction_asc) = %v, want asc", got)
+	}
+}
+
+func TestSyncStateFromProtoConversions(t *testing.T) {
+	cases := []struct {
+		name string
+		in   attunev1.CustomerRequestIssueSyncState
+		want repo.IssueSyncState
+	}{
+		{
+			name: "unspecified defaults synced",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED,
+			want: repo.IssueSyncStateSynced,
+		},
+		{
+			name: "manual",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL,
+			want: repo.IssueSyncStateManual,
+		},
+		{
+			name: "pending",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING,
+			want: repo.IssueSyncStatePending,
+		},
+		{
+			name: "synced",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+			want: repo.IssueSyncStateSynced,
+		},
+		{
+			name: "stale",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE,
+			want: repo.IssueSyncStateStale,
+		},
+		{
+			name: "failed",
+			in:   attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED,
+			want: repo.IssueSyncStateFailed,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := syncStateFromProto(tc.in)
+			if err != nil || got != tc.want {
+				t.Fatalf("syncStateFromProto(%v) = %q, %v; want %q", tc.in, got, err, tc.want)
+			}
+		})
+	}
+	if _, err := syncStateFromProto(attunev1.CustomerRequestIssueSyncState(99)); err == nil {
+		t.Fatal("syncStateFromProto(invalid) error = nil")
+	}
+}
+
+func TestQueryBindStatusAndPriorityConversions(t *testing.T) {
 	if parsed, err := statusesFromProto([]attunev1.CustomerRequestStatus{
 		attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_UNSPECIFIED,
 		attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_CANCELLED,
@@ -555,16 +1461,45 @@ func TestQueryBindConversions(t *testing.T) {
 	}); err != nil || len(parsed) != 1 || parsed[0] != repo.PriorityUrgent {
 		t.Fatalf("prioritiesFromProto() = %#v, %v; want one urgent priority", parsed, err)
 	}
+}
 
+func TestQueryBindVisibilitySortAndDirectionConversions(t *testing.T) {
 	for _, raw := range []string{"merged", "archived", "all", "anything"} {
 		_ = bindVisibility(raw)
 	}
 	for _, raw := range []string{"customer_count", "supporting_feedback_count", "latest_feedback_at", "priority", "revenue_impact", "decision_score", "delivery_health", "updated_at"} {
 		_ = bindSort(raw)
 	}
+	if got := bindDirection("desc"); got != attunev1.SortDirection_SORT_DIRECTION_DESC {
+		t.Fatalf("bindDirection(desc) = %v, want desc", got)
+	}
 	if got := values([]string{" open, planned ", "shipped"}); len(got) != 3 {
 		t.Fatalf("values() len = %d, want 3", len(got))
 	}
+}
+
+func TestQueryBindProtoAliasValues(t *testing.T) {
+	if got, err := bindStatusValues([]string{
+		"customer_request_status_open",
+		"customer_request_status_planned",
+		"customer_request_status_in_progress",
+		"customer_request_status_shipped",
+		"customer_request_status_cancelled",
+	}); err != nil || len(got) != 5 {
+		t.Fatalf("bindStatusValues(proto aliases) = %#v, %v; want five statuses", got, err)
+	}
+	if got, err := bindPriorityValues([]string{
+		"customer_request_priority_none",
+		"customer_request_priority_low",
+		"customer_request_priority_medium",
+		"customer_request_priority_high",
+		"customer_request_priority_urgent",
+	}); err != nil || len(got) != 5 {
+		t.Fatalf("bindPriorityValues(proto aliases) = %#v, %v; want five priorities", got, err)
+	}
+}
+
+func TestQueryBindRejectsInvalidValues(t *testing.T) {
 	if _, err := bindStatusValues([]string{"bad"}); err == nil {
 		t.Fatal("bindStatusValues() error = nil, want invalid status")
 	}
@@ -577,11 +1512,15 @@ type fakeCustomerRequestService struct {
 	list    repo.ListResult
 	detail  *svc.Detail
 	scoring repo.ScoringSettings
+	err     error
 	last    any
 }
 
 type fakeSavedViewService struct {
 	list        []viewsvc.View
+	listErr     error
+	saveErr     error
+	deleteErr   error
 	last        viewsvc.SaveInput
 	deletedID   string
 	deletedUser string
@@ -591,6 +1530,9 @@ func (f *fakeSavedViewService) List(_ context.Context, tenantID, userID string) 
 	if tenantID != "tenant-a" || userID != "user-a" {
 		return nil, errors.New("unexpected saved view tenant or user")
 	}
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.list, nil
 }
 
@@ -599,6 +1541,9 @@ func (f *fakeSavedViewService) Save(_ context.Context, tenantID, userID string, 
 		return nil, errors.New("unexpected saved view tenant or user")
 	}
 	f.last = in
+	if f.saveErr != nil {
+		return nil, f.saveErr
+	}
 	return ptrext.Of(viewsvc.View{
 		ID:        firstNonEmpty(in.ID, "view-created"),
 		Name:      in.Name,
@@ -614,6 +1559,9 @@ func (f *fakeSavedViewService) Delete(_ context.Context, tenantID, userID, id, u
 	}
 	f.deletedID = id
 	f.deletedUser = userID
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	return nil
 }
 
@@ -628,10 +1576,16 @@ func firstNonEmpty(values ...string) string {
 
 func (f *fakeCustomerRequestService) List(_ context.Context, in svc.ListInput) (repo.ListResult, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.ListResult{}, f.err
+	}
 	return f.list, nil
 }
 
 func (f *fakeCustomerRequestService) GetScoringSettings(_ context.Context, tenantID string) (repo.ScoringSettings, error) {
+	if f.err != nil {
+		return repo.ScoringSettings{}, f.err
+	}
 	if f.scoring.TenantID == "" {
 		return repo.DefaultScoringSettings(tenantID), nil
 	}
@@ -640,6 +1594,9 @@ func (f *fakeCustomerRequestService) GetScoringSettings(_ context.Context, tenan
 
 func (f *fakeCustomerRequestService) UpdateScoringSettings(_ context.Context, in svc.ScoringSettingsInput) (repo.ScoringSettings, error) {
 	f.last = in
+	if f.err != nil {
+		return repo.ScoringSettings{}, f.err
+	}
 	out := repo.DefaultScoringSettings(in.TenantID)
 	if in.FeedbackWeight != nil {
 		out.FeedbackWeight = ptrext.Indirect(in.FeedbackWeight)
@@ -651,81 +1608,129 @@ func (f *fakeCustomerRequestService) UpdateScoringSettings(_ context.Context, in
 }
 
 func (f *fakeCustomerRequestService) Get(_ context.Context, _ string, _ uuid.UUID, _ int) (*svc.Detail, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) Create(_ context.Context, in svc.CreateInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) Update(_ context.Context, in svc.UpdateInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) PromoteFeedback(_ context.Context, in svc.PromoteInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) LinkFeedback(_ context.Context, in svc.LinkFeedbackInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) UnlinkFeedback(_ context.Context, tenantID string, requestID uuid.UUID, feedbackID int64, actor auditlogsvc.Actor) (*svc.Detail, error) {
 	f.last = svc.LinkFeedbackInput{TenantID: tenantID, RequestID: requestID, FeedbackID: feedbackID, Actor: actor}
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) LinkCustomer(_ context.Context, in svc.LinkCustomerInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) UnlinkCustomer(_ context.Context, tenantID string, requestID, linkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error) {
 	f.last = svc.LinkCustomerInput{TenantID: tenantID, RequestID: requestID, Actor: actor, AccountProfile: svc.AccountProfileInput{CRMExternalID: linkID.String()}}
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) AddVote(_ context.Context, in svc.VoteInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) RemoveVote(_ context.Context, tenantID string, requestID, voteID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error) {
 	f.last = svc.VoteInput{TenantID: tenantID, RequestID: requestID, Actor: actor, AccountProfile: svc.AccountProfileInput{CRMExternalID: voteID.String()}}
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) AddNote(_ context.Context, in svc.NoteInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) DeleteNote(_ context.Context, tenantID string, requestID, noteID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error) {
 	f.last = svc.NoteInput{TenantID: tenantID, RequestID: requestID, Body: noteID.String(), Actor: actor}
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) Merge(_ context.Context, in svc.MergeInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) LinkIssue(_ context.Context, in svc.LinkIssueInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) UnlinkIssue(_ context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error) {
 	f.last = svc.LinkIssueInput{TenantID: tenantID, RequestID: requestID, ExternalKey: issueLinkID.String(), Actor: actor}
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
 func (f *fakeCustomerRequestService) RecordIssueSync(_ context.Context, in svc.IssueSyncInput) (*svc.Detail, error) {
 	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
 	return f.detail, nil
 }
 
@@ -906,5 +1911,21 @@ func assertDispatcherError(t *testing.T, err error, status int, code attunev1.Er
 	}
 	if got.Status != status || got.Code != code {
 		t.Fatalf("dispatcher error = (%d, %v), want (%d, %v)", got.Status, got.Code, status, code)
+	}
+}
+
+type handlerErrorCase struct {
+	name   string
+	call   func() error
+	status int
+	code   attunev1.ErrorCode
+}
+
+func runHandlerErrorCases(t *testing.T, cases []handlerErrorCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertDispatcherError(t, tc.call(), tc.status, tc.code)
+		})
 	}
 }

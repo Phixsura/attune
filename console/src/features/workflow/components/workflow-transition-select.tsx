@@ -32,6 +32,7 @@ export function WorkflowTransitionSelect({
   const selectedState = allowedNext.find((state) => state.id === toStateId)
 
   const handleTransition = () => {
+    /* v8 ignore next -- @preserve: transition button is disabled until a target state is selected. */
     if (!toStateId) return
     transition.mutate(
       { feedbackId: Number(feedbackId), toStateId, comment: comment.trim() },

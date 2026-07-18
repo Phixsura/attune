@@ -2,10 +2,38 @@
 
 import { configure } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
-import { MembersPage } from '@/features/members/components/members-page'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MembersPage, membersPageTestables } from '@/features/members/components/members-page'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+
+type PermissionsMock = {
+  role: string
+  userId: string
+  isAdmin: boolean
+  isMember: boolean
+  isViewer: boolean
+  can: () => boolean
+  canView: () => boolean
+  canEdit: () => boolean
+  canManage: () => boolean
+  canDelete: () => boolean
+}
+
+const permissionsState = vi.hoisted((): { current: PermissionsMock } => ({
+  current: {
+    role: 'admin',
+    userId: 'current-user',
+    isAdmin: true,
+    isMember: false,
+    isViewer: false,
+    can: () => true,
+    canView: () => true,
+    canEdit: () => true,
+    canManage: () => true,
+    canDelete: () => true,
+  },
+}))
 
 // Spy on toast so error-path assertions can verify a notification fired.
 const toastError = vi.fn()
@@ -19,7 +47,13 @@ vi.mock('sonner', () => ({
 
 // Mock usePermissions hook
 vi.mock('@/features/session/hooks/use-permissions', () => ({
-  usePermissions: () => ({
+  usePermissions: () => permissionsState.current,
+}))
+
+configure({ asyncUtilTimeout: 10_000 })
+
+afterEach(() => {
+  permissionsState.current = {
     role: 'admin',
     userId: 'current-user',
     isAdmin: true,
@@ -30,10 +64,10 @@ vi.mock('@/features/session/hooks/use-permissions', () => ({
     canEdit: () => true,
     canManage: () => true,
     canDelete: () => true,
-  }),
-}))
-
-configure({ asyncUtilTimeout: 10_000 })
+  }
+  toastError.mockClear()
+  toastSuccess.mockClear()
+})
 
 // i18n translations are in zh-CN
 const TEXT = {
@@ -89,6 +123,177 @@ const mockMembers = [
     acceptedAt: '0',
   },
 ]
+
+const helperT = (key: string, options?: Record<string, string>) =>
+  options ? `${key}:${Object.values(options).join(':')}` : key
+
+describe('membersPageTestables', () => {
+  it('validates email, builds stats, filters members, and formats identity labels', () => {
+    expect(membersPageTestables.isValidEmail('valid@example.com')).toBe(true)
+    expect(membersPageTestables.isValidEmail('bad')).toBe(false)
+
+    expect(membersPageTestables.buildMemberStats(mockMembers as never)).toMatchObject({
+      total: 4,
+      active: 3,
+      pending: 1,
+      admins: 1,
+      delegatedAdmins: 1,
+      members: 1,
+      viewers: 1,
+    })
+
+    expect(
+      membersPageTestables.filterMembers(mockMembers as never, {
+        query: '',
+        scopeFilter: 'active',
+        roleFilter: 'all',
+        sourceFilter: 'all',
+        t: helperT as never,
+      }),
+    ).toHaveLength(3)
+    expect(
+      membersPageTestables.filterMembers(mockMembers as never, {
+        query: '',
+        scopeFilter: 'pending',
+        roleFilter: 'all',
+        sourceFilter: 'all',
+        t: helperT as never,
+      }),
+    ).toHaveLength(1)
+    expect(
+      membersPageTestables.filterMembers(mockMembers as never, {
+        query: '',
+        scopeFilter: 'all',
+        roleFilter: 'delegated_admin',
+        sourceFilter: 'all',
+        t: helperT as never,
+      }),
+    ).toHaveLength(1)
+    expect(
+      membersPageTestables.filterMembers(mockMembers as never, {
+        query: '',
+        scopeFilter: 'all',
+        roleFilter: 'all',
+        sourceFilter: 'idp',
+        t: helperT as never,
+      }),
+    ).toHaveLength(1)
+    expect(
+      membersPageTestables.filterMembers(mockMembers as never, {
+        query: '身份提供方',
+        scopeFilter: 'all',
+        roleFilter: 'all',
+        sourceFilter: 'all',
+        t: ((key: string) => (key === 'members.source.idp' ? '身份提供方' : key)) as never,
+      }),
+    ).toHaveLength(1)
+
+    expect(
+      membersPageTestables.getMemberPrimaryLabel(mockMembers[0] as never, helperT as never),
+    ).toBe('admin@example.com')
+    expect(
+      membersPageTestables.getMemberPrimaryLabel(
+        { memberType: 'admin', roleSource: 'bootstrap', userId: '', email: '' } as never,
+        helperT as never,
+      ),
+    ).toBe('members.bootstrap_identity')
+    expect(
+      membersPageTestables.getMemberPrimaryLabel(
+        {
+          memberType: 'tenant_user',
+          roleSource: 'manual',
+          userId: '1234567890abcdef',
+          email: '',
+        } as never,
+        helperT as never,
+      ),
+    ).toBe('members.fallback_identity:12345678…cdef')
+    expect(
+      membersPageTestables.getMemberPrimaryLabel(
+        { memberType: 'tenant_user', roleSource: 'manual', userId: '', email: '' } as never,
+        helperT as never,
+      ),
+    ).toBe('members.unknown_identity')
+
+    expect(
+      membersPageTestables.getMemberSecondaryLabel(mockMembers[0] as never, helperT as never),
+    ).toBe('admin-user')
+    expect(
+      membersPageTestables.getMemberSecondaryLabel(
+        { userId: 'user-only', email: '' } as never,
+        helperT as never,
+      ),
+    ).toBe('members.user_id_value:user-only')
+    expect(
+      membersPageTestables.getMemberSecondaryLabel(
+        { userId: '', email: 'invite@example.com' } as never,
+        helperT as never,
+      ),
+    ).toBe('members.invite_email_value:invite@example.com')
+    expect(
+      membersPageTestables.getMemberSecondaryLabel(
+        { userId: '', email: '' } as never,
+        helperT as never,
+      ),
+    ).toBe('members.no_secondary_identity')
+    expect(membersPageTestables.abbreviateId('short-id')).toBe('short-id')
+    expect(membersPageTestables.abbreviateId('1234567890abcdef')).toBe('12345678…cdef')
+  })
+
+  it('explains member lock reasons across privilege, self, hierarchy, and last-admin cases', () => {
+    const member = { userId: 'target-user', role: 'member' }
+    expect(
+      membersPageTestables.getMemberLockReason({
+        member: member as never,
+        activeAdminCount: 2,
+        actorRole: 'admin',
+        actorUserId: 'actor',
+        isAdmin: false,
+        t: helperT as never,
+      }),
+    ).toBe('members.role_locked_privilege')
+    expect(
+      membersPageTestables.getMemberLockReason({
+        member: { ...member, userId: 'actor' } as never,
+        activeAdminCount: 2,
+        actorRole: 'admin',
+        actorUserId: 'actor',
+        isAdmin: true,
+        t: helperT as never,
+      }),
+    ).toBe('members.role_locked_self')
+    expect(
+      membersPageTestables.getMemberLockReason({
+        member: { ...member, role: 'admin' } as never,
+        activeAdminCount: 2,
+        actorRole: 'member',
+        actorUserId: 'actor',
+        isAdmin: true,
+        t: helperT as never,
+      }),
+    ).toBe('members.role_locked_privilege')
+    expect(
+      membersPageTestables.getMemberLockReason({
+        member: { ...member, role: 'admin' } as never,
+        activeAdminCount: 1,
+        actorRole: 'admin',
+        actorUserId: 'actor',
+        isAdmin: true,
+        t: helperT as never,
+      }),
+    ).toBe('members.role_locked_last_admin')
+    expect(
+      membersPageTestables.getMemberLockReason({
+        member: member as never,
+        activeAdminCount: 2,
+        actorRole: 'admin',
+        actorUserId: 'actor',
+        isAdmin: true,
+        t: helperT as never,
+      }),
+    ).toBeNull()
+  })
+})
 
 describe('MembersPage', () => {
   it('renders member list with emails', async () => {
@@ -150,6 +355,29 @@ describe('MembersPage', () => {
 
     expect(screen.queryByText('member@example.com')).not.toBeInTheDocument()
     expect(screen.getByText('pending@example.com')).toBeInTheDocument()
+  })
+
+  it('filters members by role and source, then resets filters', async () => {
+    setupMembersResponse(mockMembers)
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('ops@example.com')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('combobox', { name: '角色' }))
+    await user.click(await screen.findByRole('option', { name: '委派管理员' }))
+    expect(screen.getByText('ops@example.com')).toBeInTheDocument()
+    expect(screen.queryByText('member@example.com')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('combobox', { name: '来源' }))
+    await user.click(await screen.findByRole('option', { name: '身份提供方' }))
+    expect(screen.getByText('没有匹配结果')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '清空筛选' }))
+    await waitFor(() => {
+      expect(screen.getByText('member@example.com')).toBeInTheDocument()
+    })
   })
 
   it('warns when the tenant only has one active admin', async () => {
@@ -293,6 +521,32 @@ describe('MembersPage invite dialog', () => {
     await user.type(emailInput, 'new@test.com')
     expect(emailInput).toHaveValue('new@test.com')
   })
+
+  it('shows an email-required error when submitting a blank invite', async () => {
+    setupMembersResponse(mockMembers)
+    toastError.mockClear()
+    let postCalled = false
+    server.use(
+      http.post('/fb/v1/console/members', () => {
+        postCalled = true
+        return HttpResponse.json({ member: {} })
+      }),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText(TEXT.invite))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '发送邀请' }))
+
+    expect(postCalled).toBe(false)
+    expect(toastError).toHaveBeenCalledWith('请输入邮箱地址')
+  })
 })
 
 describe('MembersPage empty state', () => {
@@ -304,30 +558,69 @@ describe('MembersPage empty state', () => {
       expect(screen.getByText(TEXT.noMembers)).toBeInTheDocument()
     })
   })
+
+  it('opens the invite dialog from the active-members empty state action', async () => {
+    setupMembersResponse([])
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText(TEXT.noMembers)).toBeInTheDocument()
+    })
+
+    const inviteButtons = screen.getAllByRole('button', { name: TEXT.invite })
+    await user.click(inviteButtons.at(-1) ?? inviteButtons[0])
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+  })
 })
 
 describe('MembersPage current user', () => {
   it('shows "you" badge for current user', async () => {
-    vi.doMock('@/features/session/hooks/use-permissions', () => ({
-      usePermissions: () => ({
-        role: 'admin',
-        userId: 'admin-user',
-        isAdmin: true,
-        isMember: false,
-        isViewer: false,
-        can: () => true,
-        canView: () => true,
-        canEdit: () => true,
-        canManage: () => true,
-        canDelete: () => true,
-      }),
-    }))
+    permissionsState.current = {
+      role: 'admin',
+      userId: 'admin-user',
+      isAdmin: true,
+      isMember: false,
+      isViewer: false,
+      can: () => true,
+      canView: () => true,
+      canEdit: () => true,
+      canManage: () => true,
+      canDelete: () => true,
+    }
     setupMembersResponse(mockMembers)
     renderWithProviders(<MembersPage />)
 
     await waitFor(() => {
       expect(screen.getByText('admin@example.com')).toBeInTheDocument()
     })
+    expect(screen.getByText('你')).toBeInTheDocument()
+    expect(screen.getAllByText('不可操作').length).toBeGreaterThan(0)
+  })
+
+  it('renders a read-only view for non-admin users', async () => {
+    permissionsState.current = {
+      role: 'viewer',
+      userId: 'viewer-user',
+      isAdmin: false,
+      isMember: false,
+      isViewer: true,
+      can: () => false,
+      canView: () => true,
+      canEdit: () => false,
+      canManage: () => false,
+      canDelete: () => false,
+    }
+    setupMembersResponse(mockMembers)
+    renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('member@example.com')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(TEXT.invite)).not.toBeInTheDocument()
+    expect(screen.getAllByText('不可操作').length).toBeGreaterThanOrEqual(2)
   })
 })
 
@@ -349,6 +642,58 @@ describe('MembersPage remove dialog', () => {
     // The remove dialog should open
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    })
+  })
+
+  it('revokes a pending invitation', async () => {
+    setupMembersResponse(mockMembers)
+    let deletedId = ''
+    server.use(
+      http.delete('/fb/v1/console/members/:id', ({ params }) => {
+        deletedId = String(params.id)
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('pending@example.com')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '撤销邀请' }))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: '撤销邀请' })).toBeInTheDocument()
+    })
+    expect(
+      screen.getByText(
+        '确定要撤销发给 pending@example.com 的邀请吗？对方将无法继续使用当前邀请链接。',
+      ),
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '撤销' }))
+    await waitFor(() => expect(deletedId).toBe('m3'))
+  })
+
+  it('closes the remove confirmation with Escape', async () => {
+    setupMembersResponse(mockMembers)
+    const { user } = renderWithProviders(<MembersPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('member@example.com')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: '移除成员 member@example.com' }))
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    await user.keyboard('{Escape}')
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
   })
 })

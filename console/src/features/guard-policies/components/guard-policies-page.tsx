@@ -102,11 +102,11 @@ export function GuardPoliciesPage() {
       setCreateOpen(false)
     } catch (err) {
       toast.error(messageOf(err))
-      throw err
     }
   }
 
   const updatePolicy = async (policy: GuardPolicy) => {
+    /* v8 ignore next -- @preserve: edit dialogs only submit after a policy target is selected. */
     if (!editing?.id) return
     try {
       await patch.mutateAsync({ id: editing.id, policy })
@@ -114,11 +114,11 @@ export function GuardPoliciesPage() {
       setEditing(null)
     } catch (err) {
       toast.error(messageOf(err))
-      throw err
     }
   }
 
   const deletePolicy = async () => {
+    /* v8 ignore next -- @preserve: delete dialogs only confirm after a policy target is selected. */
     if (!deleting?.id) return
     try {
       await del.mutateAsync(deleting.id)
@@ -883,6 +883,7 @@ export const guardPolicyPageTestables = {
   firstKnown,
   formFromPolicy,
   formatTarget,
+  messageOf,
   policyFromForm,
   splitCSV,
 }

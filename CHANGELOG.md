@@ -17,6 +17,38 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Request notification previews now wrap long JSON fields inside the card,
+  preventing horizontal overflow in deployed Console pages on narrow viewports.
+
+- Request notification settings saves now normalize malformed consent-mode
+  values before submitting them, preventing fresh Console loads from sending a
+  backend-rejected value.
+
+- Request notification worker email resolution now writes tenant-wide
+  unsubscribe tokens with the database token scope (`tenant`) instead of the
+  subscription scope (`tenant_updates`), so published updates can create email
+  deliveries instead of failing event resolution; resolved notification events
+  now also clear stale failure text after a successful retry.
+
+- Request notification sender setup now keeps the pending sender visible in
+  Console after save, so administrators can verify it before the worker uses it.
+
+- Request notification sender config and delivery payload JSON construction is
+  now deterministic and no longer depends on unreachable marshal fallbacks.
+
+- Secret keyset parsing now correctly skips unknown AES-GCM key proto fields
+  instead of re-reading skipped bytes as field tags.
+
+- Request notification target test/delete and delivery retry buttons now only
+  enter their disabled spinner state while the matching mutation is pending,
+  instead of staying disabled after a completed attempt.
+
+- Audit-log saved view save/delete actions no longer leave an unhandled
+  rejection when the server reports a mutation error.
+
+- Guard-policy create/update failures now keep the active dialog open without
+  emitting an unhandled promise rejection after showing the error toast.
+
 - Public visibility portal submission form normalization now clears boolean
   field options correctly while continuing to trim and validate submission
   field choices.
@@ -34,6 +66,21 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   repo query instead of being dropped after binding.
 
 ### Added
+
+- **Close-the-loop request notifications.**
+  Added tenant-scoped request notification settings, sender configuration,
+  public request subscriptions, unsubscribe and contact-confirmation flows,
+  email and webhook delivery adapters, retryable delivery logs, Console
+  operations, and public update publishing for notifying request submitters,
+  voters, commenters, and followers. Email deliveries now carry one-click
+  list-unsubscribe headers backed by tenant-wide unsubscribe tokens, enforce
+  tenant-hourly and contact-daily send limits with visible suppressed delivery
+  records, require explicit confirmation for large recipient audiences, and
+  expose a Console provider event endpoint for bounce, complaint, and
+  suppression feedback. Preview, publish, automatic status-change recording,
+  and worker resolution now all enforce tenant event-type and status policies
+  before notification deliveries are created, and Console settings expose the
+  same event-type and request-status policy controls.
 
 - **Reply-send-hook batch recovery tools.**
   The reply-send-hook delivery log now supports multi-select recovery actions

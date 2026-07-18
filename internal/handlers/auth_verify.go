@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/infra/apikey"
@@ -13,12 +16,20 @@ import (
 
 // AuthVerifyHandler handles GET /v1/auth/verify.
 type AuthVerifyHandler struct {
-	repo *apikeyrepo.APIKeyRepo
+	repo apiKeyDetailStore
+}
+
+type apiKeyDetailStore interface {
+	GetByID(ctx context.Context, tenantID string, id uuid.UUID) (*apikeyrepo.APIKeyListRow, error)
 }
 
 // NewAuthVerifyHandler creates a new AuthVerifyHandler.
 func NewAuthVerifyHandler(repo *apikeyrepo.APIKeyRepo) *AuthVerifyHandler {
-	return ptrext.Of(AuthVerifyHandler{repo: repo})
+	var store apiKeyDetailStore
+	if repo != nil {
+		store = repo
+	}
+	return ptrext.Of(AuthVerifyHandler{repo: store})
 }
 
 // Verify returns details about the current API key.

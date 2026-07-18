@@ -2,6 +2,7 @@
 package apikey
 
 import (
+	"context"
 	"net/http"
 	"testing"
 	"time"
@@ -14,7 +15,26 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
+
+type noopAPIKeyAuditRecorder struct{}
+
+func (noopAPIKeyAuditRecorder) Record(context.Context, auditlogsvc.Event) error {
+	return nil
+}
+
+func TestAPIKeysHandlerConstructorAndAuditLogger(t *testing.T) {
+	t.Parallel()
+
+	h := NewAPIKeysHandler(nil)
+	require.NotNil(t, h)
+	require.Nil(t, h.audit)
+
+	recorder := noopAPIKeyAuditRecorder{}
+	h.SetAuditLogger(recorder)
+	require.Equal(t, recorder, h.audit)
+}
 
 // ---------- toProtoPolicy ----------
 

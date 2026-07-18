@@ -118,6 +118,26 @@ func TestMemoryTokenBucketLimiter_Cleanup(t *testing.T) {
 	require.False(t, loaded)
 }
 
+func TestMemoryTokenBucketLimiter_StartCleanup(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	limiter := ptrext.Of(MemoryTokenBucketLimiter{
+		nowFunc: func() time.Time { return now },
+	})
+	_, _, _ = limiter.AllowWithInfo(context.Background(), "stale", 60, 5)
+
+	now = now.Add(2 * time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	limiter.StartCleanup(ctx, time.Millisecond, time.Hour)
+
+	require.Eventually(t, func() bool {
+		_, loaded := limiter.buckets.Load("stale")
+		return !loaded
+	}, time.Second, time.Millisecond)
+}
+
 func TestMemoryTokenBucketLimiter_ReconfigStricter(t *testing.T) {
 	t.Parallel()
 

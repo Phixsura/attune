@@ -1,3 +1,4 @@
+import { fireEvent } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it, vi } from 'vitest'
 import {
@@ -35,8 +36,20 @@ const mockPresets = {
 
 const mockScopes = {
   scopes: [
-    { id: 'ingest:write', resource: 'ingest', action: 'write', description: 'Write ingest' },
-    { id: 'feedback:read', resource: 'feedback', action: 'read', description: 'Read feedback' },
+    {
+      id: 'ingest:write',
+      scope: 'ingest:write',
+      resource: 'ingest',
+      action: 'write',
+      description: 'Write ingest',
+    },
+    {
+      id: 'feedback:read',
+      scope: 'feedback:read',
+      resource: 'feedback',
+      action: 'read',
+      description: 'Read feedback',
+    },
   ],
 }
 
@@ -50,6 +63,21 @@ describe('CreateKeyDialog', () => {
     expect(submit).toBeDisabled()
     await user.type(screen.getByRole('textbox'), '   ')
     expect(submit).toBeDisabled()
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('ignores defensive form submits without a label', () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    const form = screen.getByTestId('create-key-submit').closest('form')
+    expect(form).toBeTruthy()
+    if (!form) return
+
+    fireEvent.submit(form)
+
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -91,6 +119,35 @@ describe('CreateKeyDialog', () => {
     expect(onSubmit).toHaveBeenCalledWith({
       label: 'test-key',
       scopes: ['ingest:write', 'feedback:read'],
+    })
+  })
+
+  it('submits explicitly selected custom scopes and supports deselecting one', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json(mockPresets)),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json(mockScopes)),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: '权限模板' })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('combobox', { name: '权限模板' }))
+    await user.click(await screen.findByRole('option', { name: '自定义权限' }))
+
+    const ingestScope = screen.getByLabelText(/ingest:write/)
+    await user.click(ingestScope)
+    await user.click(ingestScope)
+    await user.click(screen.getByLabelText(/feedback:read/))
+    await user.type(screen.getByRole('textbox'), 'custom-key')
+    await user.click(screen.getByTestId('create-key-submit'))
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      label: 'custom-key',
+      scopes: ['feedback:read'],
     })
   })
 
@@ -162,6 +219,17 @@ describe('CreateKeyDialog', () => {
     })
   })
 
+  it('calls onOpenChange when create is cancelled', async () => {
+    const onOpenChange = vi.fn()
+    const { user } = renderWithProviders(
+      <CreateKeyDialog open onOpenChange={onOpenChange} onSubmit={vi.fn()} pending={false} />,
+    )
+
+    await user.click(screen.getByTestId('create-key-cancel'))
+
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
   it('handles empty scopes data gracefully', async () => {
     server.use(
       http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
@@ -202,6 +270,15 @@ describe('SecretKeyDialog', () => {
     expect(writeSpy).toHaveBeenCalledWith(issued.secret)
   })
 
+  it('closes the secret dialog through Escape', async () => {
+    const onClose = vi.fn()
+    const { user } = renderWithProviders(<SecretKeyDialog issued={issued} onClose={onClose} />)
+
+    await user.keyboard('{Escape}')
+
+    expect(onClose).toHaveBeenCalledOnce()
+  })
+
   it('issued=null renders no secret content', () => {
     renderWithProviders(<SecretKeyDialog issued={null} onClose={vi.fn()} />)
     expect(screen.queryByText(/sk_/)).toBeNull()
@@ -236,6 +313,17 @@ describe('RevokeKeyDialog', () => {
       <RevokeKeyDialog target={target} onCancel={onCancel} onConfirm={vi.fn()} pending={false} />,
     )
     await user.click(screen.getByTestId('revoke-key-cancel'))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('Escape closes through onOpenChange', async () => {
+    const onCancel = vi.fn()
+    const { user } = renderWithProviders(
+      <RevokeKeyDialog target={target} onCancel={onCancel} onConfirm={vi.fn()} pending={false} />,
+    )
+
+    await user.keyboard('{Escape}')
+
     expect(onCancel).toHaveBeenCalledTimes(1)
   })
 

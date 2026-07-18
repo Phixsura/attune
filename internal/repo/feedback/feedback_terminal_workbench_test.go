@@ -1,6 +1,7 @@
 package feedback
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -50,4 +51,27 @@ func TestTerminalFailureClusterQueryArgs_LengthMatchesDimension(t *testing.T) {
 
 	require.Len(t, terminalFailureClusterQueryArgs("tenant-1", now.Add(-time.Hour), now, now, false), 4)
 	require.Len(t, terminalFailureClusterQueryArgs("tenant-1", now.Add(-time.Hour), now, now, true), 5)
+}
+
+func TestTerminalFailureClusterSQLAndExpressions(t *testing.T) {
+	t.Parallel()
+
+	for _, expr := range []string{
+		terminalFailureClusterReasonClassExpr(),
+		terminalFailureClusterModelChannelExpr(),
+		terminalFailureClusterConfigFingerprintExpr(),
+		terminalFailureClusterAgeBucketExpr(),
+	} {
+		require.NotEmpty(t, expr)
+		sql := terminalFailureClusterSQL(expr)
+		require.Contains(t, sql, expr)
+		require.Contains(t, sql, "terminal_scope")
+		require.Contains(t, sql, "enrichment_attempts >= $2")
+		require.Contains(t, sql, "LIMIT 10")
+	}
+
+	require.Contains(t, terminalFailureClusterReasonClassExpr(), "enrichment_failure_reason_class")
+	require.Contains(t, terminalFailureClusterModelChannelExpr(), "enrichment_failure_channel_name")
+	require.Contains(t, terminalFailureClusterConfigFingerprintExpr(), "enrichment_failure_config_fingerprint")
+	require.True(t, strings.Contains(terminalFailureClusterAgeBucketExpr(), "$5 - created_at"))
 }

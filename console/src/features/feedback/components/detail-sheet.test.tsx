@@ -1,9 +1,13 @@
 import userEvent from '@testing-library/user-event'
+import type { TFunction } from 'i18next'
 import { delay, HttpResponse, http } from 'msw'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
+import {
+  FeedbackDetailSheet,
+  feedbackDetailSheetTestables,
+} from '@/features/feedback/components/detail-sheet'
 import type { Dimension } from '@/proto/attune/v1/common'
 import {
   CustomerRequestDeliveryHealth,
@@ -12,9 +16,10 @@ import {
   CustomerRequestStatus,
   type CustomerRequestSummary,
 } from '@/proto/attune/v1/customer_request'
+import type { FeedbackDetail, ReplyDraftWorkflow } from '@/proto/attune/v1/ingest'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
-import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
+import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
 
 vi.mock('@tanstack/react-router', async () => {
   const actual =
@@ -88,6 +93,259 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.queryByText(/payment failed/i)).toBeNull()
   })
 
+  it('covers detail helper state matrices and defensive parsing', () => {
+    const t = ((key: string) => key) as TFunction
+    const keyT = (key: string) => key
+    const base = feedbackRow('helper')
+
+    expect(
+      feedbackDetailSheetTestables.customerRequestStatusLabel(
+        CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_PLANNED,
+        t,
+      ),
+    ).toBe('customer_requests.statuses.planned')
+    expect(
+      feedbackDetailSheetTestables.customerRequestStatusLabel(
+        CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_IN_PROGRESS,
+        t,
+      ),
+    ).toBe('customer_requests.statuses.in_progress')
+    expect(
+      feedbackDetailSheetTestables.customerRequestStatusLabel(
+        CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_SHIPPED,
+        t,
+      ),
+    ).toBe('customer_requests.statuses.shipped')
+    expect(
+      feedbackDetailSheetTestables.customerRequestStatusLabel(
+        CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_CANCELLED,
+        t,
+      ),
+    ).toBe('customer_requests.statuses.cancelled')
+    expect(
+      feedbackDetailSheetTestables.customerRequestStatusLabel(
+        99 as unknown as CustomerRequestStatus,
+        t,
+      ),
+    ).toBe('customer_requests.statuses.open')
+
+    expect(
+      feedbackDetailSheetTestables.customerRequestPriorityLabel(
+        CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_LOW,
+        t,
+      ),
+    ).toBe('customer_requests.priorities.low')
+    expect(
+      feedbackDetailSheetTestables.customerRequestPriorityLabel(
+        CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_MEDIUM,
+        t,
+      ),
+    ).toBe('customer_requests.priorities.medium')
+    expect(
+      feedbackDetailSheetTestables.customerRequestPriorityLabel(
+        CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+        t,
+      ),
+    ).toBe('customer_requests.priorities.high')
+    expect(
+      feedbackDetailSheetTestables.customerRequestPriorityLabel(
+        CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_URGENT,
+        t,
+      ),
+    ).toBe('customer_requests.priorities.urgent')
+    expect(
+      feedbackDetailSheetTestables.customerRequestPriorityLabel(
+        99 as unknown as CustomerRequestPriority,
+        t,
+      ),
+    ).toBe('customer_requests.priorities.none')
+
+    expect(
+      feedbackDetailSheetTestables.detailSummaryState(
+        { ...base, enrichmentError: 'failed' },
+        false,
+        keyT,
+      ),
+    ).toEqual({ tone: 'error', label: 'feedback.row.classification_failed' })
+    expect(feedbackDetailSheetTestables.detailSummaryState(base, true, keyT)).toEqual({
+      tone: 'success',
+      label: 'feedback.row.classification_ready',
+    })
+    expect(
+      feedbackDetailSheetTestables.detailSummaryState(
+        { ...base, enrichmentStatus: 'enriching' },
+        false,
+        keyT,
+      ),
+    ).toEqual({ tone: 'muted', label: 'feedback.row.classification_enriching' })
+    expect(
+      feedbackDetailSheetTestables.detailSummaryState(
+        { ...base, enrichmentStatus: 'pending' },
+        false,
+        keyT,
+      ),
+    ).toEqual({ tone: 'muted', label: 'feedback.row.classification_pending' })
+
+    expect(feedbackDetailSheetTestables.workbenchModeLabel('urgent', keyT)).toBe(
+      'feedback.queue_mode.urgent',
+    )
+    expect(feedbackDetailSheetTestables.workbenchModeLabel('active', keyT)).toBe(
+      'feedback.queue_mode.active',
+    )
+    expect(feedbackDetailSheetTestables.workbenchModeLabel('failed', keyT)).toBe(
+      'feedback.queue_mode.failed',
+    )
+    expect(feedbackDetailSheetTestables.workbenchModeLabel('terminal', keyT)).toBe(
+      'feedback.queue_mode.terminal',
+    )
+    expect(feedbackDetailSheetTestables.workbenchModeLabel('ready', keyT)).toBe(
+      'feedback.queue_mode.ready',
+    )
+    expect(feedbackDetailSheetTestables.workbenchModeLabel('all', keyT)).toBe(
+      'feedback.queue_mode.all',
+    )
+    expect(feedbackDetailSheetTestables.detailWorkbenchCue('all', false, keyT)).toBeNull()
+    expect(feedbackDetailSheetTestables.detailWorkbenchCue('urgent', false, keyT)).toMatchObject({
+      tone: 'danger',
+      title: 'feedback.detail.workbench_urgent_title',
+    })
+    expect(feedbackDetailSheetTestables.detailWorkbenchCue('ready', true, keyT)).toMatchObject({
+      tone: 'success',
+      body: 'feedback.detail.workbench_ready_body',
+    })
+    expect(feedbackDetailSheetTestables.detailWorkbenchCue('ready', false, keyT)).toMatchObject({
+      tone: 'warning',
+      body: 'feedback.detail.workbench_ready_missing_body',
+    })
+    expect(
+      feedbackDetailSheetTestables.detailWorkbenchCue('unknown' as never, false, keyT),
+    ).toBeNull()
+
+    expect(
+      feedbackDetailSheetTestables.terminalFailureSnapshotPresent({
+        ...base,
+        enrichmentFailureModel: 'gpt-test',
+      }),
+    ).toBe(true)
+    expect(feedbackDetailSheetTestables.terminalFailureSnapshotPresent(base)).toBe(false)
+    expect(feedbackDetailSheetTestables.terminalFailureReasonClassLabel('llm_err', keyT)).toBe(
+      'feedback.detail.failure_reason_class_llm',
+    )
+    expect(feedbackDetailSheetTestables.terminalFailureReasonClassLabel('parse_err', keyT)).toBe(
+      'feedback.detail.failure_reason_class_parse',
+    )
+    expect(feedbackDetailSheetTestables.terminalFailureReasonClassLabel('other_err', keyT)).toBe(
+      'feedback.detail.failure_reason_class_other',
+    )
+    expect(feedbackDetailSheetTestables.terminalFailureReasonClassLabel('', keyT)).toBe('—')
+
+    expect(feedbackDetailSheetTestables.isPositiveIntString(' 42 ')).toBe(true)
+    expect(feedbackDetailSheetTestables.isPositiveIntString('0')).toBe(false)
+    expect(feedbackDetailSheetTestables.relativeTime('')).toBeNull()
+    expect(feedbackDetailSheetTestables.relativeTime('not-a-date')).toBeNull()
+
+    const workflow: ReplyDraftWorkflow = {
+      draftId: 'draft-1',
+      feedbackId: 'helper',
+      cycleNo: 1,
+      status: 'sent',
+      activeRevisionId: 'rev-2',
+      approvedRevisionId: 'rev-2',
+      sentRevisionId: 'rev-2',
+      activeText: 'Human reply',
+      allowedActions: [],
+      blockers: [],
+      hookConfigured: true,
+      revision: '3',
+      updatedAt: '2026-07-03T10:00:00Z',
+      revisions: [
+        {
+          id: 'rev-1',
+          draftId: 'draft-1',
+          cycleNo: 1,
+          revisionNo: 1,
+          origin: 'ai',
+          content: 'AI reply',
+          createdBy: 'assistant',
+          createdAt: '2026-07-03T09:55:00Z',
+        },
+        {
+          id: 'rev-2',
+          draftId: 'draft-1',
+          cycleNo: 1,
+          revisionNo: 2,
+          origin: 'human',
+          content: 'Human reply',
+          createdBy: 'member-1',
+          createdAt: '2026-07-03T10:00:00Z',
+        },
+      ],
+      events: [
+        {
+          id: 'evt-1',
+          draftId: 'draft-1',
+          eventType: 'sent',
+          actorType: 'user',
+          actorId: 'member-1',
+          blocker: '',
+          createdAt: '2026-07-03T10:05:00Z',
+        },
+      ],
+    }
+
+    expect(feedbackDetailSheetTestables.isCompleteReplyDraftWorkflow(workflow)).toBe(true)
+    expect(feedbackDetailSheetTestables.isCompleteReplyDraftWorkflow(undefined)).toBe(false)
+    expect(feedbackDetailSheetTestables.latestRevisionByOrigin(workflow, 'ai')?.id).toBe('rev-1')
+    expect(feedbackDetailSheetTestables.revisionByID(workflow, 'rev-2')?.origin).toBe('human')
+    expect(feedbackDetailSheetTestables.revisionByID(workflow, undefined)).toBeUndefined()
+    expect(feedbackDetailSheetTestables.replyDraftTimelineItems(workflow)[0].key).toBe('evt-1')
+    expect(feedbackDetailSheetTestables.isReplyDraftHardBlocker('send_hook_changed')).toBe(true)
+    expect(feedbackDetailSheetTestables.isReplyDraftHardBlocker('send_failed')).toBe(false)
+
+    expect(
+      feedbackDetailSheetTestables.portalSubmissionMeta({
+        portal_submission: {
+          kind: 'general',
+          title: '  Hello  ',
+          details: '  Details  ',
+          custom_fields: { z: 1, a: null },
+        },
+      }),
+    ).toMatchObject({
+      kind: 'general',
+      title: 'Hello',
+      details: 'Details',
+      customFields: { z: 1, a: null },
+    })
+    expect(feedbackDetailSheetTestables.portalSubmissionMeta({ portal_submission: {} })).toBeNull()
+    expect(feedbackDetailSheetTestables.portalSubmissionEntries({ b: 2, a: 1 })).toEqual([
+      ['a', 1],
+      ['b', 2],
+    ])
+    expect(feedbackDetailSheetTestables.portalSubmissionKindLabel('general', t)).toBe(
+      'feedback.type.general',
+    )
+    expect(feedbackDetailSheetTestables.portalSubmissionKindLabel('', t)).toBe('—')
+    expect(feedbackDetailSheetTestables.portalSubmissionContactFieldLabel('display_name', t)).toBe(
+      'feedback.detail.portal_submission_display_name',
+    )
+    expect(feedbackDetailSheetTestables.portalSubmissionContactFieldLabel('organization', t)).toBe(
+      'feedback.detail.portal_submission_organization',
+    )
+    expect(feedbackDetailSheetTestables.portalSubmissionContactFieldLabel('email', t)).toBe('email')
+    expect(feedbackDetailSheetTestables.portalSubmissionValueNode(null)).toBe('—')
+    expect(feedbackDetailSheetTestables.portalSubmissionValueNode('   ')).toBe('—')
+    expect(feedbackDetailSheetTestables.portalSubmissionValueNode(7)).toBe('7')
+    expect(feedbackDetailSheetTestables.portalSubmissionValueNode(Symbol('x'))).toBe('Symbol(x)')
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    expect(feedbackDetailSheetTestables.portalSubmissionValueNode(circular)).toBe('—')
+    expect(feedbackDetailSheetTestables.portalSubmissionText(42)).toBe('')
+    expect(feedbackDetailSheetTestables.portalSubmissionText('  value  ', true)).toBe('value')
+    expect(feedbackDetailSheetTestables.isPortalRecord({ ok: true })).toBe(true)
+    expect(feedbackDetailSheetTestables.isPortalRecord(['nope'])).toBe(false)
+  })
+
   it('id set → renders feedback fields after the detail query resolves', async () => {
     server.use(
       http.get('/fb/v1/console/feedback/:id', () =>
@@ -122,6 +380,86 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getByText(/AI 中文解读/i)).toBeInTheDocument()
     expect(screen.getByText(/AI rationale/i)).toBeInTheDocument()
     expect(screen.getAllByTitle('原文语言：英文').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('treats array-valued dimensions as classification signal', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          feedbackRow('array-attrs', {
+            enrichedRationale: '',
+            enrichedDisplayRationale: '',
+            enrichedAttrs: { severity: ['P0'] },
+            classificationConfidence: undefined,
+          }),
+        ),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="array-attrs"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('分类已就绪').length).toBeGreaterThanOrEqual(1))
+    expect(screen.queryByText('暂未分类')).not.toBeInTheDocument()
+  })
+
+  it('hides customer-request linking controls when the operator lacks edit permission', async () => {
+    server.use(
+      http.get('/fb/v1/console/me', () =>
+        HttpResponse.json({
+          tenant: {
+            id: 'tenant-1',
+            name: 'Tenant',
+            slug: 'tenant',
+            locale: 'zh-CN',
+            timezone: 'UTC',
+          },
+          user: { openId: 'viewer-1', name: 'Viewer', role: 'viewer' },
+          csrfToken: 'csrf-test-token',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Need CSV export').length).toBeGreaterThan(0))
+    expect(screen.getByText('关联客户需求')).toBeInTheDocument()
+    expect(screen.queryByLabelText('搜索客户需求')).not.toBeInTheDocument()
+  })
+
+  it('hides customer-request links completely when the operator cannot view them', async () => {
+    server.use(
+      http.get('/fb/v1/console/me', () =>
+        HttpResponse.json({
+          tenant: {
+            id: 'tenant-1',
+            name: 'Tenant',
+            slug: 'tenant',
+            locale: 'zh-CN',
+            timezone: 'UTC',
+          },
+          user: { openId: 'guest-1', name: 'Guest', role: 'guest' },
+          csrfToken: 'csrf-test-token',
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await waitFor(() => expect(screen.getAllByText('Need CSV export').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.queryByText('关联客户需求')).not.toBeInTheDocument())
   })
 
   it('renders structured portal submission evidence when source meta contains portal data', async () => {
@@ -304,6 +642,118 @@ describe('FeedbackDetailSheet', () => {
     })
   })
 
+  it('ignores customer-request link submit when no request is selected', async () => {
+    const candidate = customerRequestSummary()
+    let posted = false
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+      http.get(customerRequestsURL, ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.get('feedback_id') === '42') {
+          return HttpResponse.json({ requests: [] })
+        }
+        return HttpResponse.json({ requests: [candidate] })
+      }),
+      http.post(`${customerRequestsURL}/${candidate.id}/feedback`, () => {
+        posted = true
+        return HttpResponse.json(customerRequestDetail(candidate))
+      }),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    const search = await screen.findByLabelText('搜索客户需求')
+    await userEvent.type(search, 'Export')
+    const form = screen.getByRole('button', { name: /关联需求/ }).closest('form')
+    expect(form).not.toBeNull()
+    fireEvent.submit(form as HTMLFormElement)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /关联需求/ })).toBeDisabled())
+    expect(posted).toBe(false)
+  })
+
+  it('shows linked-request load errors and retries the query', async () => {
+    const linkedRequest = customerRequestSummary()
+    let failLinkedLoad = true
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+      http.get(customerRequestsURL, ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.get('feedback_id') === '42') {
+          if (failLinkedLoad) {
+            failLinkedLoad = false
+            return HttpResponse.json({ message: 'linked load failed' }, { status: 500 })
+          }
+          return HttpResponse.json({ requests: [linkedRequest] })
+        }
+        return HttpResponse.json({ requests: [] })
+      }),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await waitFor(() => expect(screen.getByText('客户需求加载失败')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(screen.getByText('CR-9')).toBeInTheDocument())
+  })
+
+  it('shows an error toast when linking a customer request fails', async () => {
+    const candidate = customerRequestSummary()
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+      http.get(customerRequestsURL, ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.get('feedback_id') === '42') {
+          return HttpResponse.json({ requests: [] })
+        }
+        return HttpResponse.json({ requests: [candidate] })
+      }),
+      http.post(`${customerRequestsURL}/${candidate.id}/feedback`, () =>
+        HttpResponse.json({ message: 'link denied' }, { status: 500 }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await userEvent.type(await screen.findByLabelText('搜索客户需求'), 'Export')
+    await userEvent.click(await screen.findByRole('button', { name: /CR-9.*Export bundles/s }))
+    await userEvent.click(screen.getByRole('button', { name: '关联需求' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('link denied'))
+  })
+
+  it('shows an error toast when unlinking a customer request fails', async () => {
+    const linkedRequest = customerRequestSummary()
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+      http.get(customerRequestsURL, ({ request }) => {
+        const url = new URL(request.url)
+        if (url.searchParams.get('feedback_id') === '42') {
+          return HttpResponse.json({ requests: [linkedRequest] })
+        }
+        return HttpResponse.json({ requests: [] })
+      }),
+      http.delete(`${customerRequestsURL}/${linkedRequest.id}/feedback/42`, () =>
+        HttpResponse.json({ message: 'unlink denied' }, { status: 500 }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    await waitFor(() => expect(screen.getByText('CR-9')).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: '解除关联' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('unlink denied'))
+  })
+
   it('does not show a source-language rationale block for same-language rows', async () => {
     server.use(
       http.get('/fb/v1/console/feedback/:id', () =>
@@ -432,7 +882,18 @@ describe('FeedbackDetailSheet', () => {
       ).length,
     ).toBeGreaterThan(0)
 
-    await userEvent.click(screen.getByTitle('复制'))
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementation(((
+      handler: TimerHandler,
+    ) => {
+      if (typeof handler === 'function') handler()
+      return 1
+    }) as typeof window.setTimeout)
+    try {
+      await userEvent.click(screen.getByTitle('复制'))
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1500)
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
   })
 
   it('closes the detail sheet when the visible close button is used', async () => {
@@ -502,15 +963,17 @@ describe('FeedbackDetailSheet', () => {
 
     function SheetHarness() {
       const [id, setId] = useState<string | null>(null)
+      const openerRef = useRef<HTMLButtonElement>(null)
       return (
         <>
-          <button type="button" onClick={() => setId('f-focus')}>
+          <button ref={openerRef} type="button" onClick={() => setId('f-focus')}>
             Open feedback detail
           </button>
           <FeedbackDetailSheet
             id={id}
             dims={dims}
             availableTags={[]}
+            restoreFocusRef={openerRef}
             onOpenChange={(open) => setId(open ? 'f-focus' : null)}
           />
         </>
@@ -798,9 +1261,104 @@ describe('FeedbackDetailSheet', () => {
     const preflight = await screen.findByRole('dialog', { name: '确认发送回复' })
     expect(screen.getByText('最终发送文本')).toBeInTheDocument()
     expect(within(preflight).getByText('Human edited reply ready to send')).toBeInTheDocument()
+    await userEvent.click(within(preflight).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '确认发送回复' })).toBeNull())
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
     await userEvent.click(screen.getByRole('button', { name: /确认发送/ }))
 
     await waitFor(() => expect(requestBody).toMatchObject({ expectedRevision: '7' }))
+  })
+
+  it('surfaces reply draft edit, approve, reject, and send failures', async () => {
+    const workflow = {
+      draftId: 'draft-1',
+      feedbackId: 'f-draft-errors',
+      cycleNo: 1,
+      status: 'approved',
+      activeRevisionId: 'rev-2',
+      approvedRevisionId: 'rev-2',
+      activeText: 'Human edited reply',
+      allowedActions: ['edit', 'approve', 'send', 'reject', 'regenerate'],
+      blockers: [],
+      hookConfigured: true,
+      approvedBy: 'member-1',
+      revision: '13',
+      updatedAt: '2026-07-03T10:00:00Z',
+      revisions: [
+        {
+          id: 'rev-2',
+          draftId: 'draft-1',
+          cycleNo: 1,
+          revisionNo: 2,
+          origin: 'human',
+          content: 'Human edited reply',
+          createdBy: 'member-1',
+          createdAt: '2026-07-03T10:00:00Z',
+        },
+        {
+          id: 'rev-1',
+          draftId: 'draft-1',
+          cycleNo: 1,
+          revisionNo: 1,
+          origin: 'ai',
+          content: 'AI suggested reply',
+          createdBy: 'assistant',
+          createdAt: '2026-07-03T09:55:00Z',
+        },
+      ],
+      events: [],
+    }
+
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-draft-errors', {
+            replyDraft: 'legacy projection',
+            replyDraftWorkflow: workflow,
+          }),
+        ),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/edit', () =>
+        HttpResponse.json({ message: 'edit denied' }, { status: 500 }),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/approve', () =>
+        HttpResponse.json({ message: 'approve denied' }, { status: 500 }),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/reject', () =>
+        HttpResponse.json({ message: 'reject denied' }, { status: 500 }),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/send', () =>
+        HttpResponse.json({ message: 'send blocked' }, { status: 409 }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-draft-errors"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /编辑/ })).toBeInTheDocument())
+    await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
+    const editor = screen.getByRole('textbox')
+    await userEvent.clear(editor)
+    await userEvent.type(editor, 'Edited but rejected by server')
+    await userEvent.click(screen.getByRole('button', { name: /保存/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('保存失败'))
+    await userEvent.click(screen.getByRole('button', { name: /取消/ }))
+
+    await userEvent.click(screen.getByRole('button', { name: /批准/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('批准失败'))
+
+    await userEvent.click(screen.getByRole('button', { name: /拒绝/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('拒绝失败'))
+
+    await userEvent.click(screen.getByRole('button', { name: '发送' }))
+    await userEvent.click(await screen.findByRole('button', { name: /确认发送/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('当前草稿暂不可发送'))
   })
 
   it('labels sent text separately from the AI suggestion and human edit', async () => {
@@ -1173,6 +1731,156 @@ describe('FeedbackDetailSheet', () => {
     await waitFor(() => expect(screen.getByText('new draft')).toBeInTheDocument())
   })
 
+  it('uses the workflow returned by a successful regenerate immediately', async () => {
+    const baseWorkflow = {
+      draftId: 'draft-regen',
+      feedbackId: 'f-regenerate-workflow',
+      cycleNo: 1,
+      status: 'suggested',
+      activeRevisionId: 'rev-1',
+      activeText: 'old workflow draft',
+      allowedActions: ['edit', 'approve', 'reject', 'regenerate'],
+      blockers: [],
+      hookConfigured: true,
+      revision: '1',
+      updatedAt: '2026-07-03T10:00:00Z',
+      revisions: [
+        {
+          id: 'rev-1',
+          draftId: 'draft-regen',
+          cycleNo: 1,
+          revisionNo: 1,
+          origin: 'ai',
+          content: 'old workflow draft',
+          createdBy: 'assistant',
+          createdAt: '2026-07-03T10:00:00Z',
+        },
+      ],
+      events: [],
+    }
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-regenerate-workflow', {
+            replyDraftWorkflow: baseWorkflow,
+          }),
+        ),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/regenerate', () =>
+        HttpResponse.json({
+          workflow: {
+            ...baseWorkflow,
+            activeRevisionId: 'rev-2',
+            activeText: 'regenerated workflow draft',
+            revision: '2',
+            updatedAt: '2026-07-03T10:01:00Z',
+            revisions: [
+              {
+                id: 'rev-2',
+                draftId: 'draft-regen',
+                cycleNo: 1,
+                revisionNo: 2,
+                origin: 'ai',
+                content: 'regenerated workflow draft',
+                createdBy: 'assistant',
+                createdAt: '2026-07-03T10:01:00Z',
+              },
+              ...baseWorkflow.revisions,
+            ],
+          },
+          fromCache: false,
+        }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-regenerate-workflow"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getAllByText('old workflow draft').length).toBeGreaterThanOrEqual(1),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /重新生成/ }))
+
+    await waitFor(() =>
+      expect(screen.getAllByText('regenerated workflow draft').length).toBeGreaterThanOrEqual(1),
+    )
+    expect(screen.getByText('rev 2')).toBeInTheDocument()
+  })
+
+  it('uses the workflow returned by a successful reject immediately', async () => {
+    const baseWorkflow = {
+      draftId: 'draft-reject',
+      feedbackId: 'f-reject-workflow',
+      cycleNo: 1,
+      status: 'suggested',
+      activeRevisionId: 'rev-1',
+      activeText: 'rejectable workflow draft',
+      allowedActions: ['edit', 'approve', 'reject', 'regenerate'],
+      blockers: [],
+      hookConfigured: true,
+      revision: '1',
+      updatedAt: '2026-07-03T10:00:00Z',
+      revisions: [
+        {
+          id: 'rev-1',
+          draftId: 'draft-reject',
+          cycleNo: 1,
+          revisionNo: 1,
+          origin: 'ai',
+          content: 'rejectable workflow draft',
+          createdBy: 'assistant',
+          createdAt: '2026-07-03T10:00:00Z',
+        },
+      ],
+      events: [],
+    }
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          draftRow('f-reject-workflow', {
+            replyDraftWorkflow: baseWorkflow,
+          }),
+        ),
+      ),
+      http.post('/fb/v1/console/feedback/:id/reply-draft/reject', () =>
+        HttpResponse.json({
+          workflow: {
+            ...baseWorkflow,
+            status: 'rejected',
+            allowedActions: ['regenerate'],
+            revision: '2',
+            updatedAt: '2026-07-03T10:01:00Z',
+          },
+          fromCache: false,
+        }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-reject-workflow"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+
+    await waitFor(() =>
+      expect(screen.getAllByText('rejectable workflow draft').length).toBeGreaterThanOrEqual(1),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /拒绝/ }))
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('草稿已拒绝'))
+    expect(screen.getByText('已拒绝')).toBeInTheDocument()
+    expect(screen.getByText('rev 2')).toBeInTheDocument()
+  })
+
   it('enabled-but-empty draft offers a Generate entry point and no copy button', async () => {
     server.use(
       http.get('/fb/v1/console/feedback/:id', () =>
@@ -1217,6 +1925,28 @@ describe('FeedbackDetailSheet', () => {
     await waitFor(() => expect(screen.getByText('a draft to copy')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /复制/ }))
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('草稿已复制到剪贴板'))
+  })
+
+  it('shows a copy error toast when clipboard write fails', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(draftRow('f-copy-fail', { replyDraft: 'cannot copy this' })),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet
+        id="f-copy-fail"
+        dims={dims}
+        availableTags={[]}
+        onOpenChange={vi.fn()}
+      />,
+    )
+    await waitFor(() => expect(screen.getByText('cannot copy this')).toBeInTheDocument())
+    vi.spyOn(navigator.clipboard, 'writeText').mockRejectedValueOnce(
+      new Error('clipboard unavailable'),
+    )
+    await userEvent.click(screen.getByRole('button', { name: /复制/ }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('复制失败'))
   })
 
   it('regenerate failure shows an error toast', async () => {
@@ -1272,6 +2002,31 @@ describe('FeedbackDetailSheet', () => {
     await waitFor(() => expect(screen.getByText('copy me')).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /复制/ }))
     await waitFor(() => expect(screen.getByRole('button', { name: /已复制/ })).toBeInTheDocument())
+  })
+
+  it('resets the copied confirmation when the copy timer fires', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(draftRow('f-11b', { replyDraft: 'copy then reset' })),
+      ),
+    )
+    renderWithProviders(
+      <FeedbackDetailSheet id="f-11b" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+    await waitFor(() => expect(screen.getByText('copy then reset')).toBeInTheDocument())
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementation(((
+      handler: TimerHandler,
+    ) => {
+      if (typeof handler === 'function') handler()
+      return 1
+    }) as typeof window.setTimeout)
+    try {
+      await userEvent.click(screen.getByRole('button', { name: /复制/ }))
+      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), 1500)
+    } finally {
+      setTimeoutSpy.mockRestore()
+    }
+    await waitFor(() => expect(screen.getByRole('button', { name: /^复制$/ })).toBeInTheDocument())
   })
 
   it('renders the generated-at provenance when the draft carries a timestamp', async () => {
@@ -1410,7 +2165,7 @@ function draftRow(id: string, over: Record<string, unknown> = {}) {
     userId: 'u-1',
     pageUrl: '',
     createdAt: '2026-06-07T10:00:00Z',
-    sourceMeta: null,
+    sourceMeta: undefined,
     attachments: [],
     enrichmentError: '',
     replyDraftEnabled: true,
@@ -1418,10 +2173,11 @@ function draftRow(id: string, over: Record<string, unknown> = {}) {
   }
 }
 
-function feedbackRow(id: string, over: Record<string, unknown> = {}) {
+function feedbackRow(id: string, over: Partial<FeedbackDetail> = {}): FeedbackDetail {
   return {
     id,
     content: 'Need CSV export',
+    type: 'feature',
     enrichedTitle: 'CSV export',
     enrichedDisplayTitle: 'CSV export',
     enrichedRationale: 'Enterprise customers need export bundles.',
@@ -1435,9 +2191,13 @@ function feedbackRow(id: string, over: Record<string, unknown> = {}) {
     userId: 'u-42',
     pageUrl: '',
     createdAt: '2026-07-07T10:00:00Z',
-    sourceMeta: null,
+    sourceMeta: undefined,
     attachments: [],
     enrichmentError: '',
+    enrichmentStatus: 'done',
+    replyDraftEnabled: true,
+    tags: [],
+    allowedNextStates: [],
     ...over,
   }
 }

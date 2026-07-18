@@ -568,3 +568,12 @@ function formatLatency(value: number) {
   if (value >= 1000) return `${(value / 1000).toFixed(1)}s`
   return `${Math.round(value)}ms`
 }
+
+export const controlTowerPageTestables = {
+  clampUnit,
+  formatLatency,
+  metricTone,
+  normalizeSeverity,
+  toNumber,
+  worstSeverity,
+}

@@ -3,8 +3,10 @@
 // Package outbound is attune's channel-adapter framework for delivery.
 //
 // "Outbound" covers ANY notification leaving attune — per-event webhooks,
-// daily digests, GitHub issues, Lark cards, Slack Block Kit messages.
-// Each destination type implements EventChannel and/or DigestChannel;
+// daily digests, GitHub issues, Lark cards, Slack Block Kit messages,
+// and customer-facing close-the-loop request notifications.
+// Each destination type implements EventChannel, DigestChannel, and/or
+// NotificationChannel;
 // adapters self-register via init() and are blank-imported by cmd/attune.
 //
 // Hard rule: no package under internal/service|handlers|repo|notify may
@@ -31,6 +33,14 @@ type DigestChannel interface {
 	RenderDigest(view any, dst Target) (Rendered, error)
 }
 
+// NotificationChannel — adapters that deliver customer-facing request
+// notifications implement this. The request notification worker calls
+// RenderNotification for email or webhook deliveries.
+type NotificationChannel interface {
+	ID() string
+	RenderNotification(envelope *NotificationEnvelope, dst Target) (Rendered, error)
+}
+
 // Target — the destination for a delivery. Mirrors notifytarget.NotifyTarget
 // but decoupled from the repo layer so adapters don't import repo.
 type Target struct {
@@ -55,6 +65,27 @@ type Envelope struct {
 	// DeliveryID identifies one outbox row. It is stable across the at-least-once
 	// retries of that row, so a webhook consumer can dedup replays on it. Set at
 	// send time (the row id isn't known at enqueue), not persisted in the payload.
+	DeliveryID string `json:"-"`
+}
+
+// NotificationEnvelope is the public-safe request notification payload passed
+// to NotificationChannel.RenderNotification. Sensitive destination details stay
+// in Target; this envelope is the content sent to the configured channel.
+type NotificationEnvelope struct {
+	Version            string         `json:"version"`
+	Timestamp          string         `json:"timestamp"`
+	EventID            string         `json:"event_id"`
+	EventType          string         `json:"event_type"`
+	TenantID           string         `json:"tenant_id"`
+	Request            map[string]any `json:"request,omitempty"`
+	Update             map[string]any `json:"update,omitempty"`
+	Recipient          map[string]any `json:"recipient,omitempty"`
+	WebhookTarget      map[string]any `json:"webhook_target,omitempty"`
+	UnsubscribeURL     string         `json:"unsubscribe_url,omitempty"`
+	ListUnsubscribeURL string         `json:"list_unsubscribe_url,omitempty"`
+
+	// DeliveryID identifies one request-notification delivery row. It is stable
+	// across retries of that row, so receivers can deduplicate replays on it.
 	DeliveryID string `json:"-"`
 }
 

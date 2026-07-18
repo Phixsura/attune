@@ -48,6 +48,7 @@ import (
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
 	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
+	consolerequestnotification "github.com/Phixsura/attune/internal/handlers/console/requestnotification"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -72,42 +73,43 @@ type (
 // Constructor re-exports so cmd/attune/setup.go can keep building
 // handlers via `console.NewXHandler(...)` after the split.
 var (
-	NewSigner                    = session.NewSigner
-	NewAuthHandler               = auth.NewHandler
-	NewAuditLogHandler           = consoleauditlog.NewHandler
-	NewAuditEvidenceHandler      = consoleauditevidence.NewHandler
-	NewChangePasswordHandler     = auth.NewChangePasswordHandler
-	NewBreakGlassHandler         = auth.NewBreakGlassHandler
-	NewBreakGlassAPIHandler      = auth.NewBreakGlassAPIHandler
-	NewSSOCutoverHandler         = auth.NewSSOCutoverHandler
-	NewMeHandler                 = me.NewMeHandler
-	NewAPIKeysHandler            = apikey.NewAPIKeysHandler
-	NewNotifyTargetsHandler      = notifytarget.NewNotifyTargetsHandler
-	NewFeedbackHandler           = feedback.NewFeedbackHandler
-	NewBatchHandler              = feedback.NewBatchHandler
-	NewSearchHandler             = feedback.NewSearchHandler
-	NewQualityActionHandler      = feedback.NewQualityActionHandler
-	NewFeedbackJobHandler        = feedbackjob.NewHandler
-	NewGDPRHandler               = consolegdpr.NewHandler
-	NewUsageHandler              = usage.NewUsageHandler
-	NewEnrichConfigHandler       = enrichconfig.NewHandler
-	NewEnrichmentRuntimeHandler  = consoleenrichmentruntime.NewHandler
-	NewExternalSyncHandler       = consoleexternalsync.NewHandler
-	NewGuardPolicyHandler        = consoleguardpolicy.NewHandler
-	NewInboundHandler            = consoleinbound.NewHandler
-	NewLLMConfigHandler          = consolellmconfig.NewHandler
-	NewClustersHandler           = clusters.NewClustersHandler
-	NewCustomerRequestHandler    = consolecustomerrequest.NewHandler
-	NewPublicVisibilityHandler   = consolepublicvisibility.NewHandler
-	NewDigestSubscriptionHandler = digestsubscription.NewHandler
-	NewOutboxHandler             = consoleoutbox.NewHandler
-	NewTagHandler                = consoletag.NewHandler
-	NewTagAssignmentHandler      = consoletagassignment.NewHandler
-	NewWorkflowHandler           = consoleworkflow.NewHandler
-	NewOIDCHandler               = consoleoidc.NewHandler
-	NewMemberHandler             = member.NewHandler
-	NewMCPClientHandler          = consolemcpclient.NewHandler
-	BootstrapAdmin               = auth.BootstrapAdmin
+	NewSigner                     = session.NewSigner
+	NewAuthHandler                = auth.NewHandler
+	NewAuditLogHandler            = consoleauditlog.NewHandler
+	NewAuditEvidenceHandler       = consoleauditevidence.NewHandler
+	NewChangePasswordHandler      = auth.NewChangePasswordHandler
+	NewBreakGlassHandler          = auth.NewBreakGlassHandler
+	NewBreakGlassAPIHandler       = auth.NewBreakGlassAPIHandler
+	NewSSOCutoverHandler          = auth.NewSSOCutoverHandler
+	NewMeHandler                  = me.NewMeHandler
+	NewAPIKeysHandler             = apikey.NewAPIKeysHandler
+	NewNotifyTargetsHandler       = notifytarget.NewNotifyTargetsHandler
+	NewFeedbackHandler            = feedback.NewFeedbackHandler
+	NewBatchHandler               = feedback.NewBatchHandler
+	NewSearchHandler              = feedback.NewSearchHandler
+	NewQualityActionHandler       = feedback.NewQualityActionHandler
+	NewFeedbackJobHandler         = feedbackjob.NewHandler
+	NewGDPRHandler                = consolegdpr.NewHandler
+	NewUsageHandler               = usage.NewUsageHandler
+	NewEnrichConfigHandler        = enrichconfig.NewHandler
+	NewEnrichmentRuntimeHandler   = consoleenrichmentruntime.NewHandler
+	NewExternalSyncHandler        = consoleexternalsync.NewHandler
+	NewGuardPolicyHandler         = consoleguardpolicy.NewHandler
+	NewInboundHandler             = consoleinbound.NewHandler
+	NewLLMConfigHandler           = consolellmconfig.NewHandler
+	NewClustersHandler            = clusters.NewClustersHandler
+	NewCustomerRequestHandler     = consolecustomerrequest.NewHandler
+	NewPublicVisibilityHandler    = consolepublicvisibility.NewHandler
+	NewRequestNotificationHandler = consolerequestnotification.NewHandler
+	NewDigestSubscriptionHandler  = digestsubscription.NewHandler
+	NewOutboxHandler              = consoleoutbox.NewHandler
+	NewTagHandler                 = consoletag.NewHandler
+	NewTagAssignmentHandler       = consoletagassignment.NewHandler
+	NewWorkflowHandler            = consoleworkflow.NewHandler
+	NewOIDCHandler                = consoleoidc.NewHandler
+	NewMemberHandler              = member.NewHandler
+	NewMCPClientHandler           = consolemcpclient.NewHandler
+	BootstrapAdmin                = auth.BootstrapAdmin
 )
 
 // Router wires every console endpoint into a single chi.Router.
@@ -163,46 +165,47 @@ var (
 //	 GET /clusters -> dispatcher.Bind(clusters.Handler.List)
 //	 GET /clusters/{cluster_id}/members -> dispatcher.Bind(clusters.Handler.GetMembers)
 type Router struct {
-	signer             *session.Signer
-	login              *auth.Handler
-	changePassword     *auth.ChangePasswordHandler
-	breakglass         *auth.BreakGlassHandler
-	breakglassAPI      *auth.BreakGlassAPIHandler
-	ssoCutover         *auth.SSOCutoverHandler
-	me                 *me.MeHandler
-	auditLog           *consoleauditlog.Handler
-	apiKeys            *apikey.APIKeysHandler
-	notifyTargets      *notifytarget.NotifyTargetsHandler
-	feedback           *feedback.FeedbackHandler
-	feedbackBatch      *feedback.BatchHandler
-	feedbackSearch     *feedback.SearchHandler
-	qualityActions     *feedback.QualityActionHandler
-	customerRequests   *consolecustomerrequest.Handler
-	publicVisibility   *consolepublicvisibility.Handler
-	feedbackJob        *feedbackjob.Handler
-	gdpr               *consolegdpr.Handler
-	usage              *usage.UsageHandler
-	enrichConfig       *enrichconfig.Handler
-	enrichmentRuntime  *consoleenrichmentruntime.Handler
-	externalSync       *consoleexternalsync.Handler
-	guardPolicies      *consoleguardpolicy.Handler
-	inbound            *consoleinbound.Handler
-	llmConfig          *consolellmconfig.Handler
-	clusters           *clusters.ClustersHandler
-	digestSubscription *digestsubscription.Handler
-	outbox             *consoleoutbox.Handler
-	tags               *consoletag.Handler
-	tagAssignments     *consoletagassignment.Handler
-	workflow           *consoleworkflow.Handler
-	oidc               *consoleoidc.Handler
-	members            *member.Handler
-	mcpClients         *consolemcpclient.Handler
-	auditEvidence      *consoleauditevidence.Handler
-	preflight          http.Handler
-	recovery           http.Handler
-	releaseInfo        http.Handler
-	admins             adminReader
-	rbac               *rbac.Middleware
+	signer               *session.Signer
+	login                *auth.Handler
+	changePassword       *auth.ChangePasswordHandler
+	breakglass           *auth.BreakGlassHandler
+	breakglassAPI        *auth.BreakGlassAPIHandler
+	ssoCutover           *auth.SSOCutoverHandler
+	me                   *me.MeHandler
+	auditLog             *consoleauditlog.Handler
+	apiKeys              *apikey.APIKeysHandler
+	notifyTargets        *notifytarget.NotifyTargetsHandler
+	feedback             *feedback.FeedbackHandler
+	feedbackBatch        *feedback.BatchHandler
+	feedbackSearch       *feedback.SearchHandler
+	qualityActions       *feedback.QualityActionHandler
+	customerRequests     *consolecustomerrequest.Handler
+	publicVisibility     *consolepublicvisibility.Handler
+	requestNotifications *consolerequestnotification.Handler
+	feedbackJob          *feedbackjob.Handler
+	gdpr                 *consolegdpr.Handler
+	usage                *usage.UsageHandler
+	enrichConfig         *enrichconfig.Handler
+	enrichmentRuntime    *consoleenrichmentruntime.Handler
+	externalSync         *consoleexternalsync.Handler
+	guardPolicies        *consoleguardpolicy.Handler
+	inbound              *consoleinbound.Handler
+	llmConfig            *consolellmconfig.Handler
+	clusters             *clusters.ClustersHandler
+	digestSubscription   *digestsubscription.Handler
+	outbox               *consoleoutbox.Handler
+	tags                 *consoletag.Handler
+	tagAssignments       *consoletagassignment.Handler
+	workflow             *consoleworkflow.Handler
+	oidc                 *consoleoidc.Handler
+	members              *member.Handler
+	mcpClients           *consolemcpclient.Handler
+	auditEvidence        *consoleauditevidence.Handler
+	preflight            http.Handler
+	recovery             http.Handler
+	releaseInfo          http.Handler
+	admins               adminReader
+	rbac                 *rbac.Middleware
 }
 
 type adminReader interface {
@@ -352,6 +355,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountDigestSubscription(m)
 	r.mountCustomerRequests(m)
 	r.mountPublicVisibility(m)
+	r.mountRequestNotifications(m)
 	r.mountFeedback(m)
 	r.mountReplySendHook(m)
 	m.Group(func(u chi.Router) {
@@ -428,6 +432,10 @@ func (r *Router) SetPublicVisibilityHandler(h *consolepublicvisibility.Handler) 
 	r.publicVisibility = h
 }
 
+func (r *Router) SetRequestNotificationHandler(h *consolerequestnotification.Handler) {
+	r.requestNotifications = h
+}
+
 func (r *Router) mountPublicVisibility(m chi.Router) {
 	if r.publicVisibility == nil {
 		return
@@ -438,6 +446,243 @@ func (r *Router) mountPublicVisibility(m chi.Router) {
 		r.mountPublicVisibilityRequests(pv)
 		r.mountPublicVisibilityModeration(pv)
 	})
+}
+
+func (r *Router) mountRequestNotifications(m chi.Router) {
+	if r.requestNotifications == nil {
+		return
+	}
+	m.Route("/request-notifications", func(rn chi.Router) {
+		rn.With(r.requireDelegatedAdmin).Get("/settings", dispatcher.Bind(
+			"console.RequestNotificationHandler.GetSettings",
+			dispatcher.Empty(func() *attunev1.GetRequestNotificationSettingsRequest {
+				return ptrext.Of(attunev1.GetRequestNotificationSettingsRequest{})
+			}),
+			r.requestNotifications.GetSettings,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetRequestNotificationSettingsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		rn.With(r.requireDelegatedAdminStrict).Put("/settings", dispatcher.Bind(
+			"console.RequestNotificationHandler.UpdateSettings",
+			dispatcher.JSON(func() *attunev1.UpdateRequestNotificationSettingsRequest {
+				return ptrext.Of(attunev1.UpdateRequestNotificationSettingsRequest{})
+			}),
+			r.requestNotifications.UpdateSettings,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateRequestNotificationSettingsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		r.mountRequestNotificationSender(rn)
+		r.mountRequestNotificationWebhookTargets(rn)
+		r.mountRequestNotificationPublishing(rn)
+		r.mountRequestNotificationDeliveries(rn)
+		r.mountRequestNotificationSubscribers(rn)
+		r.mountRequestNotificationProviderEvents(rn)
+	})
+}
+
+func (r *Router) mountRequestNotificationSender(rn chi.Router) {
+	rn.With(r.requireDelegatedAdmin).Get("/sender", dispatcher.Bind(
+		"console.RequestNotificationHandler.GetSender",
+		dispatcher.Empty(func() *attunev1.GetRequestNotificationSenderRequest {
+			return ptrext.Of(attunev1.GetRequestNotificationSenderRequest{})
+		}),
+		r.requestNotifications.GetSender,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetRequestNotificationSenderRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Put("/sender", dispatcher.Bind(
+		"console.RequestNotificationHandler.UpsertSender",
+		dispatcher.JSON(func() *attunev1.UpsertRequestNotificationSenderRequest {
+			return ptrext.Of(attunev1.UpsertRequestNotificationSenderRequest{})
+		}),
+		r.requestNotifications.UpsertSender,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpsertRequestNotificationSenderRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Post("/sender:verify", dispatcher.Bind(
+		"console.RequestNotificationHandler.VerifySender",
+		dispatcher.JSON(func() *attunev1.VerifyRequestNotificationSenderRequest {
+			return ptrext.Of(attunev1.VerifyRequestNotificationSenderRequest{})
+		}),
+		r.requestNotifications.VerifySender,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.VerifyRequestNotificationSenderRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountRequestNotificationWebhookTargets(rn chi.Router) {
+	rn.With(r.requireDelegatedAdmin).Get("/webhook-targets", dispatcher.Bind(
+		"console.RequestNotificationHandler.ListWebhookTargets",
+		dispatcher.Empty(func() *attunev1.ListRequestNotificationWebhookTargetsRequest {
+			return ptrext.Of(attunev1.ListRequestNotificationWebhookTargetsRequest{})
+		}),
+		r.requestNotifications.ListWebhookTargets,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListRequestNotificationWebhookTargetsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Post("/webhook-targets", dispatcher.Bind(
+		"console.RequestNotificationHandler.CreateWebhookTarget",
+		dispatcher.JSON(func() *attunev1.CreateRequestNotificationWebhookTargetRequest {
+			return ptrext.Of(attunev1.CreateRequestNotificationWebhookTargetRequest{})
+		}),
+		r.requestNotifications.CreateWebhookTarget,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateRequestNotificationWebhookTargetRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Patch("/webhook-targets/{id}", dispatcher.Bind(
+		"console.RequestNotificationHandler.UpdateWebhookTarget",
+		dispatcher.Combine(
+			func() *attunev1.UpdateRequestNotificationWebhookTargetRequest {
+				return ptrext.Of(attunev1.UpdateRequestNotificationWebhookTargetRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateRequestNotificationWebhookTargetRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateRequestNotificationWebhookTargetRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.requestNotifications.UpdateWebhookTarget,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateRequestNotificationWebhookTargetRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Delete("/webhook-targets/{id}", dispatcher.Bind(
+		"console.RequestNotificationHandler.DeleteWebhookTarget",
+		dispatcher.Path(
+			func() *attunev1.DeleteRequestNotificationWebhookTargetRequest {
+				return ptrext.Of(attunev1.DeleteRequestNotificationWebhookTargetRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.DeleteRequestNotificationWebhookTargetRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.requestNotifications.DeleteWebhookTarget,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteRequestNotificationWebhookTargetRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Post("/webhook-targets/{id}:test", dispatcher.Bind(
+		"console.RequestNotificationHandler.TestWebhookTarget",
+		dispatcher.Path(
+			func() *attunev1.TestRequestNotificationWebhookTargetRequest {
+				return ptrext.Of(attunev1.TestRequestNotificationWebhookTargetRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.TestRequestNotificationWebhookTargetRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.requestNotifications.TestWebhookTarget,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.TestRequestNotificationWebhookTargetRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountRequestNotificationPublishing(rn chi.Router) {
+	rn.With(r.requireMember).Post("/preview", dispatcher.Bind(
+		"console.RequestNotificationHandler.Preview",
+		dispatcher.JSON(func() *attunev1.PreviewRequestNotificationRequest {
+			return ptrext.Of(attunev1.PreviewRequestNotificationRequest{})
+		}),
+		r.requestNotifications.Preview,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PreviewRequestNotificationRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Post("/publish", dispatcher.Bind(
+		"console.RequestNotificationHandler.Publish",
+		dispatcher.JSON(func() *attunev1.PublishRequestUpdateRequest {
+			return ptrext.Of(attunev1.PublishRequestUpdateRequest{})
+		}),
+		r.requestNotifications.Publish,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PublishRequestUpdateRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountRequestNotificationDeliveries(rn chi.Router) {
+	rn.With(r.requireDelegatedAdmin).Get("/deliveries", dispatcher.Bind(
+		"console.RequestNotificationHandler.ListDeliveries",
+		dispatcher.Query(
+			func() *attunev1.ListRequestNotificationDeliveriesRequest {
+				return ptrext.Of(attunev1.ListRequestNotificationDeliveriesRequest{})
+			},
+			consolerequestnotification.BindListDeliveries,
+		),
+		r.requestNotifications.ListDeliveries,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListRequestNotificationDeliveriesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Post("/deliveries/{id}:retry", dispatcher.Bind(
+		"console.RequestNotificationHandler.RetryDelivery",
+		dispatcher.Path(
+			func() *attunev1.RetryRequestNotificationDeliveryRequest {
+				return ptrext.Of(attunev1.RetryRequestNotificationDeliveryRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.RetryRequestNotificationDeliveryRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.requestNotifications.RetryDelivery,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RetryRequestNotificationDeliveryRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountRequestNotificationSubscribers(rn chi.Router) {
+	rn.With(r.requireMember).Get("/requests/{request_id}/subscribers", dispatcher.Bind(
+		"console.RequestNotificationHandler.ListSubscribers",
+		dispatcher.Path(
+			func() *attunev1.ListRequestSubscribersRequest {
+				return ptrext.Of(attunev1.ListRequestSubscribersRequest{})
+			},
+			dispatcher.Param("request_id", func(req *attunev1.ListRequestSubscribersRequest, id string) {
+				req.RequestId = id
+			}),
+		),
+		r.requestNotifications.ListSubscribers,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListRequestSubscribersRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	rn.With(r.requireDelegatedAdminStrict).Post("/subscribers/{contact_id}:suppress", dispatcher.Bind(
+		"console.RequestNotificationHandler.SuppressSubscriber",
+		dispatcher.Combine(
+			func() *attunev1.SuppressRequestSubscriberRequest {
+				return ptrext.Of(attunev1.SuppressRequestSubscriberRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.SuppressRequestSubscriberRequest],
+			dispatcher.Param("contact_id", func(req *attunev1.SuppressRequestSubscriberRequest, id string) {
+				req.ContactId = id
+			}),
+		),
+		r.requestNotifications.SuppressSubscriber,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SuppressRequestSubscriberRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
+func (r *Router) mountRequestNotificationProviderEvents(rn chi.Router) {
+	rn.With(r.requireDelegatedAdminStrict).Post("/provider-events:suppress", dispatcher.Bind(
+		"console.RequestNotificationHandler.RecordProviderEvent",
+		dispatcher.JSON(func() *attunev1.RecordRequestNotificationProviderEventRequest {
+			return ptrext.Of(attunev1.RecordRequestNotificationProviderEventRequest{})
+		}),
+		r.requestNotifications.RecordProviderEvent,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecordRequestNotificationProviderEventRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountPublicVisibilityPolicy(pv chi.Router) {

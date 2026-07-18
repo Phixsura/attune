@@ -68,6 +68,7 @@ export function ServiceAccountStatusDialog({
         role="alertdialog"
         showCloseButton={false}
         onCloseAutoFocus={(event) => {
+          /* v8 ignore next -- @preserve: parent dialogs opt out of Radix focus restore in browser-only flows. */
           if (!restoreFocusOnClose) {
             event.preventDefault()
             return

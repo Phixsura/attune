@@ -2115,6 +2115,30 @@ function isPortalRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+export const feedbackDetailSheetTestables = {
+  customerRequestPriorityLabel,
+  customerRequestStatusLabel,
+  detailSummaryState,
+  detailWorkbenchCue,
+  isCompleteReplyDraftWorkflow,
+  isPortalRecord,
+  isPositiveIntString,
+  isReplyDraftHardBlocker,
+  latestRevisionByOrigin,
+  portalSubmissionContactFieldLabel,
+  portalSubmissionEntries,
+  portalSubmissionKindLabel,
+  portalSubmissionMeta,
+  portalSubmissionText,
+  portalSubmissionValueNode,
+  relativeTime,
+  replyDraftTimelineItems,
+  revisionByID,
+  terminalFailureReasonClassLabel,
+  terminalFailureSnapshotPresent,
+  workbenchModeLabel,
+}
+
 function EnrichmentStatusBanner({
   data,
   isTerminalFailure: terminal,

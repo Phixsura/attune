@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 func TestNormalizePromoteDedupeAndDefaults(t *testing.T) {
@@ -57,6 +59,23 @@ func TestNormalizePromoteRejectsEmptyEvidence(t *testing.T) {
 	})
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizePromote() error = %v, want ErrValidation", err)
+	}
+}
+
+func TestNormalizePromoteRejectsTooManyFeedbackIDs(t *testing.T) {
+	ids := make([]int64, 101)
+	for i := range ids {
+		ids[i] = int64(i + 1)
+	}
+
+	_, err := normalizePromote(PromoteInput{
+		TenantID:       "tenant-a",
+		FeedbackIDs:    ids,
+		Title:          "Request title",
+		IdempotencyKey: "promote_123",
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizePromote(101 ids) error = %v, want ErrValidation", err)
 	}
 }
 
@@ -200,6 +219,43 @@ func TestNormalizeUpdateTrimsPointerFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeUpdateRejectsInvalidPatchFields(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	for name, in := range map[string]UpdateInput{
+		"empty title": {
+			TenantID: "tenant-a",
+			ID:       requestID,
+			Title:    ptrext.Of("  "),
+		},
+		"long title": {
+			TenantID: "tenant-a",
+			ID:       requestID,
+			Title:    ptrext.Of(strings.Repeat("x", 201)),
+		},
+		"long description": {
+			TenantID:    "tenant-a",
+			ID:          requestID,
+			Description: ptrext.Of(strings.Repeat("x", 10001)),
+		},
+		"bad status": {
+			TenantID: "tenant-a",
+			ID:       requestID,
+			Status:   ptrext.Of(repo.Status("bad")),
+		},
+		"bad priority": {
+			TenantID: "tenant-a",
+			ID:       requestID,
+			Priority: ptrext.Of(repo.Priority("bad")),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := normalizeUpdate(in); !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizeUpdate() error = %v, want ErrValidation", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeCreateDefaultsAndValidation(t *testing.T) {
 	got, err := normalizeCreate(CreateInput{
 		TenantID:       "tenant-a",
@@ -224,6 +280,7 @@ func TestNormalizeCreateDefaultsAndValidation(t *testing.T) {
 		"bad key":        {TenantID: "tenant-a", Title: "title", IdempotencyKey: "short"},
 		"bad status":     {TenantID: "tenant-a", Title: "title", Status: repo.Status("bad"), IdempotencyKey: "valid_key"},
 		"bad priority":   {TenantID: "tenant-a", Title: "title", Priority: repo.Priority("bad"), IdempotencyKey: "valid_key"},
+		"long desc":      {TenantID: "tenant-a", Title: "title", Description: strings.Repeat("x", 10001), IdempotencyKey: "valid_key"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := normalizeCreate(in); !errors.Is(err, ErrValidation) {
@@ -263,6 +320,13 @@ func TestNormalizeNoteAndListDefaults(t *testing.T) {
 	}
 	if _, err := normalizeNote(NoteInput{TenantID: "tenant-a", RequestID: requestID}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizeNote(empty) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeNote(NoteInput{
+		TenantID:  "tenant-a",
+		RequestID: requestID,
+		Body:      strings.Repeat("x", 5001),
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeNote(long body) error = %v, want ErrValidation", err)
 	}
 
 	if defaultVisibility("") != repo.VisibilityActive || defaultSort("") != repo.SortUpdatedAt || defaultDirection("") != repo.DirectionDesc {
@@ -320,9 +384,7 @@ func TestNormalizeScoringSettingsPatchAndValidation(t *testing.T) {
 	}
 }
 
-func TestNormalizeIssueSyncAndAccountProfiles(t *testing.T) {
-	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	linkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+func TestNormalizeAccountProfiles(t *testing.T) {
 	revenue := int64(12345)
 	profile, err := normalizeAccountProfile(" acme ", AccountProfileInput{
 		RevenueCents:    ptrext.Of(revenue),
@@ -339,6 +401,9 @@ func TestNormalizeIssueSyncAndAccountProfiles(t *testing.T) {
 	if profile.RevenueCurrency != "USD" || profile.Tier != "enterprise" || accountRevenueCents(profile) != revenue {
 		t.Fatalf("normalizeAccountProfile() = %+v, want normalized profile", profile)
 	}
+	if accountRevenueCents(AccountProfileInput{}) != 0 {
+		t.Fatal("accountRevenueCents(nil) != 0")
+	}
 	if !hasAccountProfileInput(profile) {
 		t.Fatal("hasAccountProfileInput() = false, want true")
 	}
@@ -351,7 +416,14 @@ func TestNormalizeIssueSyncAndAccountProfiles(t *testing.T) {
 	if _, err := normalizeAccountProfile("acme", AccountProfileInput{RevenueCurrency: "US"}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizeAccountProfile(bad currency) error = %v, want ErrValidation", err)
 	}
+	if _, err := normalizeAccountProfile("acme", AccountProfileInput{CRMExternalID: strings.Repeat("x", 513)}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeAccountProfile(long crm id) error = %v, want ErrValidation", err)
+	}
+}
 
+func TestNormalizeIssueSync(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	got, err := normalizeIssueSync(IssueSyncInput{
 		TenantID:               "tenant-a",
 		RequestID:              requestID,
@@ -374,6 +446,9 @@ func TestNormalizeIssueSyncAndAccountProfiles(t *testing.T) {
 	if _, err := normalizeIssueSync(IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, ExternalUpdatedAt: "yesterday"}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizeIssueSync(bad time) error = %v, want ErrValidation", err)
 	}
+	if _, err := normalizeIssueSync(IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, SyncError: strings.Repeat("x", 2001)}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeIssueSync(long sync error) error = %v, want ErrValidation", err)
+	}
 }
 
 func TestIssueKeyDerivation(t *testing.T) {
@@ -389,6 +464,12 @@ func TestIssueKeyDerivation(t *testing.T) {
 	}
 	if _, err := normalizeIssueInput(LinkIssueInput{TenantID: "tenant-a", RequestID: requestID, Provider: "github", ExternalURL: "ftp://github.com/x/y/issues/1"}); !errors.Is(err, ErrInvalidIssueURL) {
 		t.Fatalf("normalizeIssueInput(bad url) error = %v, want ErrInvalidIssueURL", err)
+	}
+	if _, err := normalizeIssueInput(LinkIssueInput{TenantID: "tenant-a", RequestID: requestID, Provider: "other", ExternalURL: "https://tracker.example.com/items/1", ExternalKey: strings.Repeat("x", 513)}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeIssueInput(long key) error = %v, want ErrValidation", err)
+	}
+	if got := deriveExternalKey("github", mustParseCustomerRequestIssueURL(t, "https://github.com/Phixsura/attune/pull/1")); got != "https://github.com/Phixsura/attune/pull/1" {
+		t.Fatalf("deriveExternalKey(non-issue github) = %q", got)
 	}
 }
 
@@ -463,6 +544,9 @@ func TestIdempotencyPayloadAndTimeHelpers(t *testing.T) {
 	if parseOptionalTime(now.Format(time.RFC3339)) == nil {
 		t.Fatal("parseOptionalTime(valid) = nil")
 	}
+	if _, err := hashPayload("bad", map[string]any{"fn": func() {}}); err == nil {
+		t.Fatal("hashPayload(unmarshalable) error = nil, want error")
+	}
 }
 
 func TestAcquireIdempotencyCompleted(t *testing.T) {
@@ -486,8 +570,13 @@ func TestAcquireIdempotencyCompleted(t *testing.T) {
 
 func TestAcquireIdempotencyStates(t *testing.T) {
 	ctx := context.Background()
+	service := New(nil, nil, nil)
+	if cached, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", nil); cached != nil || acquired || err != nil {
+		t.Fatalf("acquireIdempotency(no store) = cached:%+v acquired:%v err:%v", cached, acquired, err)
+	}
+
 	store := &fakeIdempotencyStore{acquired: true}
-	service := New(nil, store, nil)
+	service = New(nil, store, nil)
 	cached, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"})
 	if err != nil || cached != nil || !acquired {
 		t.Fatalf("acquireIdempotency(acquired) = cached:%+v acquired:%v err:%v", cached, acquired, err)
@@ -510,13 +599,30 @@ func TestAcquireIdempotencyStates(t *testing.T) {
 	if _, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); err != nil || !acquired || !store.deleted {
 		t.Fatalf("acquireIdempotency(expired) acquired:%v deleted:%v err:%v", acquired, store.deleted, err)
 	}
+
+	store = &fakeIdempotencyStore{acquireErr: idempotency.ErrExpired, deleteErr: errors.New("delete failed")}
+	service = New(nil, store, nil)
+	if _, _, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", nil); err == nil || !strings.Contains(err.Error(), "delete failed") {
+		t.Fatalf("acquireIdempotency(expired delete error) error = %v", err)
+	}
+
+	store = &fakeIdempotencyStore{record: &idempotency.Key{Status: idempotency.StatusCompleted, ResponseBody: []byte("{")}}
+	service = New(nil, store, nil)
+	if _, _, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", nil); err == nil {
+		t.Fatal("acquireIdempotency(bad cached json) error = nil, want error")
+	}
 }
 
 func TestCompleteIdempotencyBranches(t *testing.T) {
 	ctx := context.Background()
 	detail := ptrext.Of(Detail{Request: repo.Detail{Summary: repo.Summary{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111")}}})
+	service := New(nil, nil, nil)
+	if got, err := service.completeIdempotency(ctx, "tenant-a", "key", false, detail, nil); err != nil || got != detail {
+		t.Fatalf("completeIdempotency(no store) = %+v, %v", got, err)
+	}
+
 	store := &fakeIdempotencyStore{}
-	service := New(nil, store, nil)
+	service = New(nil, store, nil)
 	if _, err := service.completeIdempotency(ctx, "tenant-a", "key", true, detail, nil); err != nil || !store.completed {
 		t.Fatalf("completeIdempotency(success) completed:%v err:%v", store.completed, err)
 	}
@@ -525,16 +631,127 @@ func TestCompleteIdempotencyBranches(t *testing.T) {
 	if _, err := service.completeIdempotency(ctx, "tenant-a", "key", true, detail, errors.New("operation failed")); err == nil || !store.failed {
 		t.Fatalf("completeIdempotency(error) failed:%v err:%v", store.failed, err)
 	}
+	store = &fakeIdempotencyStore{completeErr: errors.New("complete failed")}
+	service = New(nil, store, nil)
+	if _, err := service.completeIdempotency(ctx, "tenant-a", "key", true, detail, nil); err == nil || !strings.Contains(err.Error(), "complete failed") {
+		t.Fatalf("completeIdempotency(complete error) error = %v", err)
+	}
+}
+
+func TestServiceMethodsRejectInvalidInputsBeforeRepoUse(t *testing.T) {
+	ctx := context.Background()
+	service := New(nil, nil, nil)
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
+	cases := map[string]func() error{
+		"list": func() error {
+			_, err := service.List(ctx, ListInput{})
+			return err
+		},
+		"get scoring settings": func() error {
+			_, err := service.GetScoringSettings(ctx, " ")
+			return err
+		},
+		"update scoring settings": func() error {
+			_, err := service.UpdateScoringSettings(ctx, ScoringSettingsInput{})
+			return err
+		},
+		"create": func() error {
+			_, err := service.Create(ctx, CreateInput{})
+			return err
+		},
+		"update": func() error {
+			_, err := service.Update(ctx, UpdateInput{})
+			return err
+		},
+		"promote feedback": func() error {
+			_, err := service.PromoteFeedback(ctx, PromoteInput{})
+			return err
+		},
+		"link feedback": func() error {
+			_, err := service.LinkFeedback(ctx, LinkFeedbackInput{})
+			return err
+		},
+		"unlink feedback": func() error {
+			_, err := service.UnlinkFeedback(ctx, "", requestID, 1, repoActor())
+			return err
+		},
+		"link customer": func() error {
+			_, err := service.LinkCustomer(ctx, LinkCustomerInput{TenantID: "tenant-a", RequestID: requestID})
+			return err
+		},
+		"unlink customer": func() error {
+			_, err := service.UnlinkCustomer(ctx, "tenant-a", uuid.Nil, linkID, repoActor())
+			return err
+		},
+		"add vote": func() error {
+			_, err := service.AddVote(ctx, VoteInput{TenantID: "tenant-a", RequestID: requestID, Weight: 101})
+			return err
+		},
+		"remove vote": func() error {
+			_, err := service.RemoveVote(ctx, "tenant-a", requestID, uuid.Nil, repoActor())
+			return err
+		},
+		"add note": func() error {
+			_, err := service.AddNote(ctx, NoteInput{TenantID: "tenant-a", RequestID: requestID})
+			return err
+		},
+		"delete note": func() error {
+			_, err := service.DeleteNote(ctx, "tenant-a", requestID, uuid.Nil, repoActor())
+			return err
+		},
+		"merge": func() error {
+			_, err := service.Merge(ctx, MergeInput{TenantID: "tenant-a", SourceID: requestID, TargetID: requestID, IdempotencyKey: "merge_key"})
+			return err
+		},
+		"link issue": func() error {
+			_, err := service.LinkIssue(ctx, LinkIssueInput{TenantID: "tenant-a", RequestID: requestID, Provider: "github", ExternalURL: "ftp://example.test/repo/issues/1"})
+			return err
+		},
+		"unlink issue": func() error {
+			_, err := service.UnlinkIssue(ctx, "tenant-a", requestID, uuid.Nil, repoActor())
+			return err
+		},
+		"record issue sync": func() error {
+			_, err := service.RecordIssueSync(ctx, IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, SyncState: repo.IssueSyncState("bad")})
+			return err
+		},
+	}
+
+	for name, call := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			if !errors.Is(err, ErrValidation) && !errors.Is(err, ErrInvalidIssueURL) {
+				t.Fatalf("%s error = %v, want validation error", name, err)
+			}
+		})
+	}
+}
+
+func mustParseCustomerRequestIssueURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("url.Parse(%q) error = %v", raw, err)
+	}
+	return parsed
+}
+
+func repoActor() auditlogsvc.Actor {
+	return auditlogsvc.Actor{ID: "actor-1"}
 }
 
 type fakeIdempotencyStore struct {
-	record     *idempotency.Key
-	acquired   bool
-	acquireErr error
-	reacquire  bool
-	deleted    bool
-	completed  bool
-	failed     bool
+	record      *idempotency.Key
+	acquired    bool
+	acquireErr  error
+	reacquire   bool
+	deleteErr   error
+	completeErr error
+	deleted     bool
+	completed   bool
+	failed      bool
 }
 
 func (f *fakeIdempotencyStore) Acquire(_ context.Context, tenantID, key string, requestHash []byte, ttl time.Duration) (*idempotency.Key, bool, error) {
@@ -554,7 +771,7 @@ func (f *fakeIdempotencyStore) Acquire(_ context.Context, tenantID, key string, 
 
 func (f *fakeIdempotencyStore) Complete(_ context.Context, _ string, _ string, _ int, _ []byte) error {
 	f.completed = true
-	return nil
+	return f.completeErr
 }
 
 func (f *fakeIdempotencyStore) Fail(_ context.Context, _ string, _ string) error {
@@ -568,7 +785,7 @@ func (f *fakeIdempotencyStore) Get(_ context.Context, _ string, _ string) (*idem
 
 func (f *fakeIdempotencyStore) Delete(_ context.Context, _ string, _ string) error {
 	f.deleted = true
-	return nil
+	return f.deleteErr
 }
 
 func (f *fakeIdempotencyStore) CleanupExpired(context.Context) (int64, error) {

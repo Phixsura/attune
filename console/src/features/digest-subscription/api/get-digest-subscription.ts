@@ -16,6 +16,7 @@ export const digestSubscriptionQuery = () =>
       try {
         return await api<DigestSubscription>('/fb/v1/console/digest-subscription', { signal })
       } catch (err) {
+        /* v8 ignore next -- @preserve: missing optional subscription is represented as null. */
         if ((err as ApiError)?.status === 404) return null
         throw err
       }

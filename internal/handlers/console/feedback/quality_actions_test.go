@@ -320,6 +320,15 @@ func TestQualityActionUpdateValidation(t *testing.T) {
 	require.JSONEq(t, `{}`, got.EvidenceJSON)
 }
 
+func TestNormalizeQualityActionEvidenceEmpty(t *testing.T) {
+	t.Parallel()
+
+	got, err := normalizeQualityActionEvidence("   ")
+
+	require.NoError(t, err)
+	require.JSONEq(t, `{}`, got)
+}
+
 func bindQualityActionListHandler(h *QualityActionHandler) http.HandlerFunc {
 	return dispatcher.Bind(
 		"console.QualityActionHandler.ListQualityActions",

@@ -4,7 +4,9 @@ package checks
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/preflight"
@@ -87,4 +89,44 @@ func TestMigrationChecksRegistered(t *testing.T) {
 	for _, want := range []string{"migration:pending", "migration:integrity", "migration:dirty", "migration:manifest"} {
 		require.True(t, names[want], "expected check %q to be registered", want)
 	}
+}
+
+func TestMigrationChecksReturnDatabaseFailures(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	env := &preflight.Environment{Pool: newUnreachablePreflightPool(t)}
+	SetMigrationTotal(100)
+	t.Cleanup(func() { SetMigrationTotal(0) })
+
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context, *preflight.Environment) preflight.Result
+		want string
+	}{
+		{name: "pending", run: checkMigrationPending, want: "Cannot read migration tracker table"},
+		{name: "integrity", run: checkMigrationIntegrity, want: "Migration checksum drift detected"},
+		{name: "dirty", run: checkMigrationDirty, want: "Failed to check dirty migrations"},
+		{name: "manifest", run: checkMigrationManifest, want: "Failed to verify manifest hash"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := tc.run(ctx, env)
+			require.Equal(t, preflight.StatusFail, r.Status)
+			require.Contains(t, r.Message, tc.want)
+		})
+	}
+}
+
+func newUnreachablePreflightPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
+	require.NoError(t, err)
+	cfg.ConnConfig.ConnectTimeout = 25 * time.Millisecond
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	return pool
 }

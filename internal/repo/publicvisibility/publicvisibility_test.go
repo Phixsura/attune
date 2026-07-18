@@ -150,6 +150,79 @@ func TestPublicBoardSimilarityClauseWithoutTermsReturnsFalse(t *testing.T) {
 	}
 }
 
+func TestPublicBoardContainsAndSearchClauses(t *testing.T) {
+	t.Parallel()
+
+	args := []any{"tenant-a"}
+	clause, args := publicBoardContainsClause("prp.public_state", " planned ", args)
+	if !strings.Contains(clause, "prp.public_state ILIKE $2") || args[1] != "%planned%" {
+		t.Fatalf("publicBoardContainsClause() = %q args=%#v, want contains clause", clause, args)
+	}
+	clause, args = publicBoardContainsClause("prp.public_state", " ", args)
+	if clause != "" || len(args) != 2 {
+		t.Fatalf("publicBoardContainsClause(empty) = %q args=%#v, want no-op", clause, args)
+	}
+
+	clause, args = publicBoardSearchClause(" billing ", args)
+	if !strings.Contains(clause, "public_title ILIKE $3") || args[2] != "%billing%" {
+		t.Fatalf("publicBoardSearchClause() = %q args=%#v, want search clause", clause, args)
+	}
+	clause, args = publicBoardSearchClause("", args)
+	if clause != "" || len(args) != 3 {
+		t.Fatalf("publicBoardSearchClause(empty) = %q args=%#v, want no-op", clause, args)
+	}
+}
+
+func TestPublicBoardSimilarityAndExcludeClauses(t *testing.T) {
+	t.Parallel()
+
+	args := []any{"tenant-a"}
+	clause, args := publicBoardSimilarityClause("API latency and timeout", args)
+	if !strings.Contains(clause, "public_summary ILIKE $2") || !strings.Contains(clause, "public_summary ILIKE $5") {
+		t.Fatalf("publicBoardSimilarityClause() = %q args=%#v, want term clauses", clause, args)
+	}
+
+	clause, args = publicBoardExcludeClause(" old-slug ", args)
+	if !strings.Contains(clause, "prp.public_slug <> $6") || args[5] != "old-slug" {
+		t.Fatalf("publicBoardExcludeClause() = %q args=%#v, want exclude clause", clause, args)
+	}
+	clause, args = publicBoardExcludeClause(" ", args)
+	if clause != "" || len(args) != 6 {
+		t.Fatalf("publicBoardExcludeClause(empty) = %q args=%#v, want no-op", clause, args)
+	}
+}
+
+func TestPublicBoardViewerVoteAndOrderingClauses(t *testing.T) {
+	t.Parallel()
+
+	args := []any{"tenant-a"}
+	clause, args := publicBoardViewerVoteClause(true, " viewer-1 ", args)
+	if !strings.Contains(clause, "vv.subject_key = $2") || args[1] != "viewer-1" {
+		t.Fatalf("publicBoardViewerVoteClause() = %q args=%#v, want vote clause", clause, args)
+	}
+	clause, args = publicBoardViewerVoteClause(false, "viewer-1", args)
+	if clause != "" || len(args) != 2 {
+		t.Fatalf("publicBoardViewerVoteClause(disabled) = %q args=%#v, want no-op", clause, args)
+	}
+	clause, args = publicBoardViewerVoteClause(true, " ", args)
+	if !strings.Contains(clause, "FALSE") || len(args) != 2 {
+		t.Fatalf("publicBoardViewerVoteClause(no viewer) = %q args=%#v, want false guard", clause, args)
+	}
+
+	if got := normalizePublicBoardSort(" Latest "); got != "recent" {
+		t.Fatalf("normalizePublicBoardSort(latest) = %q, want recent", got)
+	}
+	if got := normalizePublicBoardSort("votes"); got != "top" {
+		t.Fatalf("normalizePublicBoardSort(votes) = %q, want top", got)
+	}
+	if got := publicBoardOrderByClause("recent", true); !strings.Contains(got, "roadmap_order") || !strings.Contains(got, "updated_at DESC") {
+		t.Fatalf("publicBoardOrderByClause(roadmap recent) = %q, want roadmap recent ordering", got)
+	}
+	if got := publicBoardOrderByClause("top", false); strings.Contains(got, "roadmap_order") || !strings.Contains(got, "vote_count") {
+		t.Fatalf("publicBoardOrderByClause(top) = %q, want vote ordering without roadmap prefix", got)
+	}
+}
+
 func TestScanPolicyHelper(t *testing.T) {
 	t.Parallel()
 
@@ -306,6 +379,354 @@ func TestScanPublicRequestListCandidates(t *testing.T) {
 	}
 }
 
+func TestPolicyAndSubjectTxMethodsUseTransaction(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repository := Repo{}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	subjectID := uuid.New()
+	tx := ptrext.Of(fakeTx{
+		rows: []pgx.Row{
+			fakeRow{values: policyValues(now)},
+			fakeRow{values: subjectValues(subjectID, now)},
+			fakeRow{values: subjectValues(subjectID, now)},
+			fakeRow{values: subjectValues(subjectID, now)},
+		},
+	})
+
+	policy, err := repository.UpsertPolicyTx(ctx, tx, Policy{
+		TenantID:              "tenant-a",
+		PortalAccessMode:      AccessModePublic,
+		SearchIndexingEnabled: true,
+		RequestsEnabled:       true,
+		CommentsEnabled:       true,
+		RoadmapEnabled:        true,
+		SubmissionWriteMode:   WriteModeIdentified,
+		CommentWriteMode:      WriteModeDisabled,
+		VoteWriteMode:         WriteModeAnonymous,
+		DefaultRequestState:   ModerationStateApproved,
+		DefaultCommentState:   ModerationStatePending,
+		SubmitterIdentityMode: IdentityModeDisplayName,
+		ShowVoteCount:         true,
+		ShowSubmitterDisplay:  true,
+		PortalSubmissionForm:  PortalSubmissionForm{Headline: "Share feedback"},
+		UpdatedBy:             "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("UpsertPolicyTx() error = %v", err)
+	}
+	if policy.TenantID != "tenant-a" || len(tx.args[0]) != 20 {
+		t.Fatalf("UpsertPolicyTx() = %#v args=%#v, want policy insert args", policy, tx.args[0])
+	}
+
+	subject, err := repository.GetSubjectForUpdateTx(ctx, tx, "tenant-a", subjectID)
+	if err != nil {
+		t.Fatalf("GetSubjectForUpdateTx() error = %v", err)
+	}
+	if subject.ID != subjectID || !strings.Contains(tx.queries[1], "FOR UPDATE") {
+		t.Fatalf("GetSubjectForUpdateTx() = %#v sql=%q, want locked subject", subject, tx.queries[1])
+	}
+
+	reviewedAt := now.Add(time.Hour)
+	subject, err = repository.UpdateSubjectStateTx(
+		ctx,
+		tx,
+		"tenant-a",
+		subjectID,
+		ModerationStateApproved,
+		"valid",
+		"looks good",
+		"reviewer-1",
+		reviewedAt,
+	)
+	if err != nil {
+		t.Fatalf("UpdateSubjectStateTx() error = %v", err)
+	}
+	if subject.ID != subjectID || tx.args[2][5] != "reviewer-1" || tx.args[2][6] != reviewedAt {
+		t.Fatalf("UpdateSubjectStateTx() = %#v args=%#v, want review metadata", subject, tx.args[2])
+	}
+
+	subject, err = repository.CreateModerationSubjectTx(ctx, tx, ModerationSubject{
+		TenantID:               "tenant-a",
+		Surface:                SurfaceRequest,
+		SubjectID:              "request-profile-1",
+		State:                  ModerationStatePending,
+		SubmittedByDisplay:     "Ada",
+		SubmittedByFingerprint: "fingerprint-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateModerationSubjectTx() error = %v", err)
+	}
+	if subject.ID != subjectID || tx.args[3][5] != "fingerprint-1" {
+		t.Fatalf("CreateModerationSubjectTx() = %#v args=%#v, want moderation subject", subject, tx.args[3])
+	}
+}
+
+func TestPolicyAndSubjectTxMethodsMapErrors(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repository := Repo{}
+	subjectID := uuid.New()
+	const constraint = "public_visibility_policy_tenant_id_fkey"
+	pgErr := ptrext.Of(pgconn.PgError{Code: "23503", ConstraintName: constraint})
+
+	if _, err := repository.UpsertPolicyTx(ctx, ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgErr}}}), Policy{
+		TenantID: "tenant-a",
+	}); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), constraint) {
+		t.Fatalf("UpsertPolicyTx(error) = %v, want invalid input with constraint", err)
+	}
+	if _, err := repository.GetSubjectForUpdateTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgx.ErrNoRows}}}),
+		"tenant-a",
+		subjectID,
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetSubjectForUpdateTx(missing) = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repository.UpdateSubjectStateTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgx.ErrNoRows}}}),
+		"tenant-a",
+		subjectID,
+		ModerationStateRejected,
+		"spam",
+		"bad",
+		"reviewer-1",
+		time.Now(),
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateSubjectStateTx(missing) = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repository.CreateModerationSubjectTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgErr}}}),
+		ModerationSubject{TenantID: "tenant-a"},
+	); !errors.Is(err, ErrInvalidInput) || !strings.Contains(err.Error(), constraint) {
+		t.Fatalf("CreateModerationSubjectTx(error) = %v, want invalid input with constraint", err)
+	}
+}
+
+func TestUpsertRequestPublicationTxUsesTransaction(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repository := Repo{}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	requestID := uuid.New()
+	subjectID := uuid.New()
+	tx := ptrext.Of(fakeTx{
+		rows: []pgx.Row{
+			fakeRow{values: []any{true}},
+			fakeRow{values: profileValues(requestID, now)},
+			fakeRow{values: subjectValues(subjectID, now)},
+		},
+	})
+
+	publication, err := repository.UpsertRequestPublicationTx(
+		ctx,
+		tx,
+		RequestProfile{
+			TenantID:          "tenant-a",
+			RequestID:         requestID,
+			PublicSlug:        "pricing-api",
+			PublicTitle:       "Pricing API",
+			PublicSummary:     "Summary",
+			PublicState:       "planned",
+			RoadmapColumn:     "next",
+			IncludedInPortal:  true,
+			IncludedInRoadmap: true,
+			UpdatedBy:         "admin-1",
+		},
+		ModerationStatePending,
+		"Ada",
+		"fingerprint-1",
+	)
+	if err != nil {
+		t.Fatalf("UpsertRequestPublicationTx() error = %v", err)
+	}
+	if publication.Profile.RequestID != requestID || publication.Moderation.ID != subjectID || len(tx.queries) != 3 {
+		t.Fatalf("UpsertRequestPublicationTx() = %#v queries=%d, want publication", publication, len(tx.queries))
+	}
+}
+
+func TestUpsertRequestPublicationTxMapsFailures(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repository := Repo{}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	requestID := uuid.New()
+	pgErr := ptrext.Of(pgconn.PgError{Code: "23505", ConstraintName: "public_request_profiles_public_slug_key"})
+	profile := RequestProfile{TenantID: "tenant-a", RequestID: requestID, PublicSlug: "pricing-api"}
+
+	if _, err := repository.UpsertRequestPublicationTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{values: []any{false}}}}),
+		profile,
+		ModerationStatePending,
+		"Ada",
+		"fingerprint-1",
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpsertRequestPublicationTx(missing request) = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repository.UpsertRequestPublicationTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: errors.New("exists failed")}}}),
+		profile,
+		ModerationStatePending,
+		"Ada",
+		"fingerprint-1",
+	); err == nil || !strings.Contains(err.Error(), "exists failed") {
+		t.Fatalf("UpsertRequestPublicationTx(exists error) = %v, want raw error", err)
+	}
+	if _, err := repository.UpsertRequestPublicationTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{
+			fakeRow{values: []any{true}},
+			fakeRow{err: pgErr},
+		}}),
+		profile,
+		ModerationStatePending,
+		"Ada",
+		"fingerprint-1",
+	); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("UpsertRequestPublicationTx(profile error) = %v, want %v", err, ErrInvalidInput)
+	}
+	if _, err := repository.UpsertRequestPublicationTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{
+			fakeRow{values: []any{true}},
+			fakeRow{values: profileValues(requestID, now)},
+			fakeRow{err: pgErr},
+		}}),
+		profile,
+		ModerationStatePending,
+		"Ada",
+		"fingerprint-1",
+	); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("UpsertRequestPublicationTx(subject error) = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
+func TestPublicRequestVoteTxMethods(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repository := Repo{}
+	requestID := uuid.New()
+	pgErr := ptrext.Of(pgconn.PgError{Code: "23503", ConstraintName: "customer_request_votes_request_id_fkey"})
+
+	if err := repository.AddPublicRequestVoteTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{values: []any{uuid.New()}}}}),
+		"tenant-a",
+		requestID,
+		"portal:user-1",
+		"hash-1",
+		"Ada",
+		"portal",
+	); err != nil {
+		t.Fatalf("AddPublicRequestVoteTx() error = %v", err)
+	}
+	if err := repository.AddPublicRequestVoteTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgx.ErrNoRows}}}),
+		"tenant-a",
+		requestID,
+		"portal:user-1",
+		"hash-1",
+		"Ada",
+		"portal",
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AddPublicRequestVoteTx(missing) = %v, want %v", err, ErrNotFound)
+	}
+	if err := repository.AddPublicRequestVoteTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgErr}}}),
+		"tenant-a",
+		requestID,
+		"portal:user-1",
+		"hash-1",
+		"Ada",
+		"portal",
+	); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("AddPublicRequestVoteTx(error) = %v, want %v", err, ErrInvalidInput)
+	}
+
+	tx := ptrext.Of(fakeTx{})
+	if err := repository.RemovePublicRequestVoteTx(ctx, tx, "tenant-a", requestID, "portal:user-1"); err != nil {
+		t.Fatalf("RemovePublicRequestVoteTx() error = %v", err)
+	}
+	if tx.execs != 1 {
+		t.Fatalf("RemovePublicRequestVoteTx() execs = %d, want 1", tx.execs)
+	}
+	if err := repository.RemovePublicRequestVoteTx(
+		ctx,
+		ptrext.Of(fakeTx{execErr: errors.New("delete failed")}),
+		"tenant-a",
+		requestID,
+		"portal:user-1",
+	); err == nil || !strings.Contains(err.Error(), "remove public vote") {
+		t.Fatalf("RemovePublicRequestVoteTx(error) = %v, want wrapped delete error", err)
+	}
+}
+
+func TestPublicRequestCommentTxMethods(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repository := Repo{}
+	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	requestID := uuid.New()
+	commentID := uuid.New()
+	pgErr := ptrext.Of(pgconn.PgError{Code: "23503", ConstraintName: "customer_request_votes_request_id_fkey"})
+
+	comment, err := repository.AddPublicRequestCommentTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{values: []any{commentID, "hello", "Ada", now}}}}),
+		"tenant-a",
+		requestID,
+		"portal:user-1",
+		"hash-1",
+		"Ada",
+		"hello",
+		"portal",
+	)
+	if err != nil {
+		t.Fatalf("AddPublicRequestCommentTx() error = %v", err)
+	}
+	if comment.ID != commentID || comment.Body != "hello" || comment.SubmittedByDisplay != "Ada" {
+		t.Fatalf("AddPublicRequestCommentTx() = %#v, want comment", comment)
+	}
+	if _, err := repository.AddPublicRequestCommentTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgx.ErrNoRows}}}),
+		"tenant-a",
+		requestID,
+		"portal:user-1",
+		"hash-1",
+		"Ada",
+		"hello",
+		"portal",
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AddPublicRequestCommentTx(missing) = %v, want %v", err, ErrNotFound)
+	}
+	if _, err := repository.AddPublicRequestCommentTx(
+		ctx,
+		ptrext.Of(fakeTx{rows: []pgx.Row{fakeRow{err: pgErr}}}),
+		"tenant-a",
+		requestID,
+		"portal:user-1",
+		"hash-1",
+		"Ada",
+		"hello",
+		"portal",
+	); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("AddPublicRequestCommentTx(error) = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
 func TestPaginationAndWriteErrorHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -379,3 +800,51 @@ func profileValues(requestID uuid.UUID, now time.Time) []any {
 		now, now.Add(time.Minute),
 	}
 }
+
+type fakeTx struct {
+	rows    []pgx.Row
+	row     int
+	queries []string
+	args    [][]any
+	execs   int
+	execErr error
+}
+
+func (tx *fakeTx) Begin(context.Context) (pgx.Tx, error) { return tx, nil }
+func (tx *fakeTx) Commit(context.Context) error          { return nil }
+func (tx *fakeTx) Rollback(context.Context) error        { return nil }
+func (tx *fakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (tx *fakeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
+func (tx *fakeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+
+func (tx *fakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+
+func (tx *fakeTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx.execs++
+	tx.queries = append(tx.queries, sql)
+	tx.args = append(tx.args, args)
+	if tx.execErr != nil {
+		return pgconn.CommandTag{}, tx.execErr
+	}
+	return pgconn.NewCommandTag("DELETE 1"), nil
+}
+
+func (tx *fakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	return nil, errors.New("unexpected Query call in fakeTx")
+}
+
+func (tx *fakeTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
+	tx.queries = append(tx.queries, sql)
+	tx.args = append(tx.args, args)
+	if tx.row >= len(tx.rows) {
+		return fakeRow{err: errors.New("unexpected QueryRow call in fakeTx")}
+	}
+	row := tx.rows[tx.row]
+	tx.row++
+	return row
+}
+func (tx *fakeTx) Conn() *pgx.Conn { return nil }

@@ -2,6 +2,7 @@
 package database
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -86,6 +87,29 @@ func TestPoolHealth_JSONRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, original, decoded)
+}
+
+func TestCheckPoolHealth_UnconnectedPool(t *testing.T) {
+	t.Parallel()
+
+	pool := newUnreachableMigrationPool(t)
+	health := CheckPoolHealth(pool)
+
+	require.Equal(t, int32(1), health.MaxConns)
+	require.Zero(t, health.TotalConns)
+	require.Zero(t, health.AcquiredConns)
+	require.Zero(t, health.IdleConns)
+	require.False(t, health.Healthy)
+}
+
+func TestPing_ReturnsContextError(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := Ping(ctx, newUnreachableMigrationPool(t))
+	require.Error(t, err)
 }
 
 func TestNewPool_EmptyURL(t *testing.T) {

@@ -48,6 +48,23 @@ func TestCreateRecordsAudit(t *testing.T) {
 	require.NotNil(t, audit.events[0].After)
 }
 
+func TestSetAuditLoggerStoresRecorder(t *testing.T) {
+	t.Parallel()
+
+	audit := ptrext.Of(fakeAuditRecorder{})
+	h := ptrext.Of(Handler{})
+
+	h.SetAuditLogger(audit)
+
+	require.Same(t, audit, h.audit)
+}
+
+func TestNewHandlerCreatesHandler(t *testing.T) {
+	t.Parallel()
+
+	require.NotNil(t, NewHandler(nil))
+}
+
 func TestDeleteRecordsAuditBeforeSnapshot(t *testing.T) {
 	t.Parallel()
 

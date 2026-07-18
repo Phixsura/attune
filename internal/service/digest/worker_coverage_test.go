@@ -10,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/digestrun"
 	"github.com/Phixsura/attune/internal/repo/digestsubscription"
 )
 
@@ -219,6 +222,60 @@ func TestCoverage_DeferForBacklog(t *testing.T) {
 	})
 }
 
+func TestCoverage_WorkerProcessOnceHandlesRepoErrors(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	w := newUnreachableDigestWorker(t)
+	w.drainBatch = 1
+
+	w.ProcessOnce(ctx, time.Date(2026, 7, 16, 9, 0, 0, 0, time.UTC))
+}
+
+func TestCoverage_WorkerRunStopsWhenContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w := newUnreachableDigestWorker(t)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Run(ctx)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after context cancellation")
+	}
+}
+
+func TestCoverage_ScheduleOneErrorBranches(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	now := time.Date(2026, 7, 16, 9, 0, 0, 0, time.UTC)
+	w := newUnreachableDigestWorker(t)
+
+	w.scheduleOne(ctx, now, digestsubscription.DueSubscription{
+		Subscription: digestsubscription.Subscription{
+			ID:        uuid.MustParse("aaaaaaaa-1000-4000-8000-000000000001"),
+			TenantID:  "tenant-1",
+			Frequency: "daily",
+			SendHour:  9,
+		},
+		ResolvedTimezone: "not/a-zone",
+	})
+
+	w.scheduleOne(ctx, now, digestsubscription.DueSubscription{
+		Subscription: digestsubscription.Subscription{
+			ID:        uuid.MustParse("aaaaaaaa-1000-4000-8000-000000000002"),
+			TenantID:  "tenant-1",
+			Frequency: "daily",
+			SendHour:  9,
+		},
+		ResolvedTimezone: "UTC",
+	})
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -235,4 +292,34 @@ func TestCoverage_Constants(t *testing.T) {
 		t.Parallel()
 		require.Equal(t, 30*time.Second, drainTimeout)
 	})
+}
+
+func newUnreachableDigestWorker(t *testing.T) *Worker {
+	t.Helper()
+	pool := newUnreachableDigestPool(t)
+	return NewWorker(
+		digestsubscription.New(pool),
+		digestrun.New(pool),
+		nil,
+		nil,
+		nil,
+		nil,
+		"",
+	)
+}
+
+func newUnreachableDigestPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig("postgres://attune:attune@127.0.0.1:1/attune?sslmode=disable")
+	if err != nil {
+		t.Fatalf("pgxpool.ParseConfig() error = %v", err)
+	}
+	cfg.ConnConfig.ConnectTimeout = 25 * time.Millisecond
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("pgxpool.NewWithConfig() error = %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }

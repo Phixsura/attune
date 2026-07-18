@@ -376,6 +376,38 @@ describe('DimensionsEditor — identity tracking + sparse edits', () => {
     expect(last[0].urgentSet).toEqual([])
   })
 
+  it('edits new dimension metadata and toggles an urgent taxonomy back off', async () => {
+    const onChange = vi.fn()
+    const lastChange = () =>
+      onChange.mock.calls[onChange.mock.calls.length - 1][0] as EditableDimension[]
+    const { user } = renderWithProviders(<Harness initial={[]} onChange={onChange} />)
+
+    await user.click(screen.getByTestId('dim-editor-add-dim'))
+    await user.type(nameInput() as HTMLInputElement, 'severity')
+    await user.click(screen.getByRole('combobox'))
+    await user.click(screen.getByRole('option', { name: 'multi（多选）' }))
+    expect(lastChange()[0].kind).toBe('multi')
+
+    fireEvent.change(screen.getAllByPlaceholderText('severity')[0], {
+      target: { value: 'Severity label' },
+    })
+    expect(lastChange()[0].displayName?.entries.default).toBe('Severity label')
+
+    await user.click(screen.getByTestId('dim-editor-add-value'))
+    const valueInput = document.querySelector<HTMLInputElement>('input[id^="tax-value-"]')
+    await user.type(valueInput as HTMLInputElement, 'p0')
+    fireEvent.change(screen.getAllByPlaceholderText('p0')[0], {
+      target: { value: 'Priority Zero' },
+    })
+    expect(lastChange()[0].taxonomy[0].displayName?.entries.default).toBe('Priority Zero')
+
+    const chip = screen.getByRole('button', { name: 'Priority Zero' })
+    await user.click(chip)
+    expect(lastChange()[0].urgentSet).toEqual(['p0'])
+    await user.click(chip)
+    expect(lastChange()[0].urgentSet).toEqual([])
+  })
+
   it('removing a taxonomy row moves focus to the Add value button (WCAG 2.4.3)', async () => {
     const dim = makeDim({ name: 'severity', taxonomy: [makeTax({ value: 'P0' })] })
     const { user } = renderWithProviders(<Harness initial={[dim]} />)

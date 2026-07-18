@@ -3,7 +3,6 @@
 package feedback
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -334,15 +333,7 @@ func replyDraftEventsToProto(events []replydraftrepo.Event) []*attunev1.ReplyDra
 }
 
 func eventMetadataToStruct(raw []byte) *structpb.Struct {
-	var m map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &m) != nil {
-		m = map[string]any{}
-	}
-	s, err := structpb.NewStruct(m)
-	if err != nil {
-		s, _ = structpb.NewStruct(map[string]any{})
-	}
-	return s
+	return jsonObjectStruct(raw)
 }
 
 func replySendHookToProto(cfg replydraftsvc.HookConfig) *attunev1.ReplySendHook {

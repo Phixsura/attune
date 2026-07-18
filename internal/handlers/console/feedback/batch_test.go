@@ -5,6 +5,7 @@ package feedback
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -255,6 +256,18 @@ func TestBatchHandler_Execute(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
+	t.Run("429 concurrent job limit", func(t *testing.T) {
+		handler := newBatchHandler(&fakeBatchService{
+			err: feedbackbatch.ErrConcurrentJobLimit,
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/batch",
+			`{"feedback_ids":[1],"operation":{"delete":{}}}`))
+
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+	})
+
 	t.Run("400 no operation", func(t *testing.T) {
 		handler := newBatchHandler(&fakeBatchService{
 			err: feedbackbatch.ErrNoOperation,
@@ -289,6 +302,18 @@ func TestBatchHandler_Execute(t *testing.T) {
 			`{"feedback_ids":[1],"query":{},"operation":{"delete":{}}}`))
 
 		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("500 generic service error", func(t *testing.T) {
+		handler := newBatchHandler(&fakeBatchService{
+			err: errors.New("service failed"),
+		})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/batch",
+			`{"feedback_ids":[1],"operation":{"delete":{}}}`))
+
+		require.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
 	t.Run("400 invalid if_unmodified_since format", func(t *testing.T) {
@@ -373,4 +398,70 @@ func TestBatchHandler_Execute(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		require.Empty(t, audit.events)
 	})
+
+	t.Run("audit failure returns internal error", func(t *testing.T) {
+		handler := newBatchHandlerWithRecorder(&fakeBatchService{
+			resp: &feedbackbatch.BatchResponse{
+				TotalMatched: 1,
+				Succeeded:    1,
+			},
+		}, &fakeAuditRecorder{err: errors.New("audit failed")})
+
+		w := httptest.NewRecorder()
+		handler(w, dispatchtest.Request(http.MethodPost, "/feedback/batch",
+			`{"feedback_ids":[11],"operation":{"delete":{}}}`))
+
+		require.Equal(t, http.StatusInternalServerError, w.Code)
+	})
+}
+
+func TestBatchRecordDeleteAuditEdges(t *testing.T) {
+	t.Parallel()
+
+	ctx := replyWorkflowTestCtx()
+	deleteOp := ptrext.Of(attunev1.BatchOperation{
+		Op: &attunev1.BatchOperation_Delete{Delete: &attunev1.BatchDeleteOp{Hard: true}},
+	})
+	req := ptrext.Of(feedbackbatch.BatchRequest{
+		TenantID:    dispatchtest.TenantID,
+		CreatedBy:   dispatchtest.UserID,
+		FeedbackIDs: []int64{1, 2},
+		Operation:   deleteOp,
+	})
+	resp := ptrext.Of(feedbackbatch.BatchResponse{TotalMatched: 2, Succeeded: 2})
+
+	require.NoError(t, (&BatchHandler{}).recordDeleteAudit(ctx, req, resp))
+	audit := &fakeAuditRecorder{}
+	h := &BatchHandler{audit: audit}
+	require.NoError(t, h.recordDeleteAudit(ctx, nil, resp))
+	require.NoError(t, h.recordDeleteAudit(ctx, req, nil))
+	require.NoError(t, h.recordDeleteAudit(ctx, ptrext.Of(feedbackbatch.BatchRequest{
+		TenantID:  dispatchtest.TenantID,
+		DryRun:    true,
+		Operation: deleteOp,
+	}), resp))
+	require.NoError(t, h.recordDeleteAudit(ctx, req, ptrext.Of(feedbackbatch.BatchResponse{FromCache: true})))
+	require.NoError(t, h.recordDeleteAudit(ctx, ptrext.Of(feedbackbatch.BatchRequest{
+		TenantID:  dispatchtest.TenantID,
+		Operation: ptrext.Of(attunev1.BatchOperation{}),
+	}), resp))
+	require.Empty(t, audit.events)
+
+	asyncReq := ptrext.Of(feedbackbatch.BatchRequest{
+		TenantID:    dispatchtest.TenantID,
+		CreatedBy:   dispatchtest.UserID,
+		FeedbackIDs: make([]int64, 101),
+		Operation:   deleteOp,
+	})
+	asyncResp := ptrext.Of(feedbackbatch.BatchResponse{
+		TotalMatched: 150,
+		JobID:        "job-123",
+	})
+	require.NoError(t, h.recordDeleteAudit(ctx, asyncReq, asyncResp))
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "job-123", audit.events[0].TargetID)
+	require.Equal(t, "Queued batch feedback delete", audit.events[0].Summary)
+	before := audit.events[0].Before.(map[string]any)
+	require.NotContains(t, before, "feedback_ids")
+	require.Equal(t, true, before["hard_delete"])
 }

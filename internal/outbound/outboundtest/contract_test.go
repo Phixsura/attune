@@ -43,6 +43,17 @@ func TestConformanceRunnersExerciseGoldenAndResponseProfiles(t *testing.T) {
 			{Name: "ok", Status: http.StatusNoContent, WantOK: true},
 		},
 	})
+
+	TestNotificationChannel(t, NotificationCase{
+		Channel:       channel,
+		Target:        target,
+		Golden:        filepath.Join(t.TempDir(), "notification.json"),
+		ProviderShape: ProviderShapeRawWebhook,
+		Capabilities:  stubCapabilities(),
+		ResponseCases: []ResponseCase{
+			{Name: "ok", Status: http.StatusOK, WantOK: true},
+		},
+	})
 }
 
 func TestValidateRenderCaseRequiresExecutableContractInputs(t *testing.T) {
@@ -85,6 +96,8 @@ func TestValidateRenderCaseRequiresExecutableContractInputs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := validateRenderCase(tc.mut(valid)); err == nil {
 				t.Fatal("misconfigured render case accepted")
+			} else if !strings.Contains(err.Error(), "outbound conformance misconfigured") {
+				t.Fatalf("misconfiguration error = %q", err.Error())
 			}
 		})
 	}
@@ -120,6 +133,56 @@ func TestNormalizeHelpers(t *testing.T) {
 	if value["timestamp"] != "<timestamp>" || value["sign"] != "<signature>" {
 		t.Fatalf("dynamic fields not normalized: %#v", value)
 	}
+}
+
+func TestProviderShapeAssertionsAcceptValidProviderBodies(t *testing.T) {
+	target := stubTarget()
+	tests := []struct {
+		name  string
+		shape ProviderShape
+		body  string
+	}{
+		{
+			name:  "slack",
+			shape: ProviderShapeSlack,
+			body:  `{"blocks":[{"type":"section","text":{"type":"mrkdwn","text":"Checkout shipped"}}]}`,
+		},
+		{
+			name:  "discord",
+			shape: ProviderShapeDiscord,
+			body:  `{"embeds":[{"title":"Checkout shipped"}],"allowed_mentions":{"parse":[]}}`,
+		},
+		{
+			name:  "lark",
+			shape: ProviderShapeLark,
+			body:  `{"msg_type":"interactive","timestamp":"123","sign":"abc","card":{"header":{"title":{"tag":"plain_text","content":"Checkout shipped"}},"elements":[{"tag":"note","elements":[{"tag":"plain_text","content":"safe note"}]}]}}`,
+		},
+		{
+			name:  "github",
+			shape: ProviderShapeGitHubIssue,
+			body:  `{"title":"Checkout shipped","body":"Release details","labels":["attune","request-notification"]}`,
+		},
+		{
+			name:  "email",
+			shape: ProviderShapeEmail,
+			body:  `{"from_email":"attune@example.test","to_email":"customer@example.test","subject":"Checkout shipped","text_body":"Done","html_body":"<p>Done</p>","metadata":{"delivery_id":"d1"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertProviderShape(t, providerShapeRequest(t, tt.body), target, tt.shape)
+		})
+	}
+}
+
+func providerShapeRequest(t *testing.T, body string) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, "https://hooks.example.com/provider", bytes.NewReader([]byte(body)))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	return req
 }
 
 func TestFixturesExposeCanonicalShapes(t *testing.T) {
@@ -185,6 +248,10 @@ func (stubChannel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (out
 }
 
 func (stubChannel) RenderDigest(view any, dst outbound.Target) (outbound.Rendered, error) {
+	return stubRendered(dst.URL), nil
+}
+
+func (stubChannel) RenderNotification(env *outbound.NotificationEnvelope, dst outbound.Target) (outbound.Rendered, error) {
 	return stubRendered(dst.URL), nil
 }
 

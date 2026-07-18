@@ -171,6 +171,11 @@ export interface CreatePublicSubmissionRequest {
   customFields?: { [key: string]: any } | undefined;
   idempotencyKey: string;
   honeypot: string;
+  email?: string | undefined;
+  notifyMe: boolean;
+  notificationConsentTextVersion: string;
+  locale: string;
+  timezone: string;
 }
 
 export interface CreatePublicSubmissionResponse {
@@ -326,6 +331,13 @@ export interface GetPublicCustomerRequestRequest {
 export interface VotePublicCustomerRequest {
   tenantSlug: string;
   publicSlug: string;
+  email?: string | undefined;
+  notifyMe: boolean;
+  notificationConsentTextVersion: string;
+  displayName: string;
+  organization: string;
+  locale: string;
+  timezone: string;
 }
 
 export interface UnvotePublicCustomerRequest {
@@ -337,6 +349,13 @@ export interface CreatePublicCustomerCommentRequest {
   tenantSlug: string;
   publicSlug: string;
   body: string;
+  email?: string | undefined;
+  notifyMe: boolean;
+  notificationConsentTextVersion: string;
+  displayName: string;
+  organization: string;
+  locale: string;
+  timezone: string;
 }
 
 export interface ListPublicCustomerRequestsRequest {

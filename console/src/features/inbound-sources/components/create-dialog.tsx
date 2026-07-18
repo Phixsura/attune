@@ -148,7 +148,12 @@ export function CreateInboundSourceDialog({
     if (channel === 'slack' && (!slack.botToken.trim() || !slack.channelId.trim())) {
       return
     }
-    void onSubmit(buildBody()).then(() => reset())
+    void onSubmit(buildBody())
+      .then(() => reset())
+      .catch(() => {
+        // The parent mutation owns user-facing error handling; keep the
+        // dialog open with the operator's input intact.
+      })
   }
 
   const handleTest = () => {
@@ -198,6 +203,7 @@ export function CreateInboundSourceDialog({
   }
 
   const handleDiscoverSlack = () => {
+    /* v8 ignore next -- @preserve: discovery is disabled until a Slack bot token is entered. */
     if (!slack.botToken.trim()) return
     discover.mutate(
       {

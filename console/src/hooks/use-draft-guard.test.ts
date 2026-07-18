@@ -2,11 +2,20 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { clearStoredDraft, readDraft, readDraftAge, useDraftGuard } from './use-draft-guard'
 
+const blockerMock = vi.hoisted(() => ({
+  proceed: vi.fn(),
+  reset: vi.fn(),
+  status: 'idle',
+}))
+
 vi.mock('@tanstack/react-router', () => ({
-  useBlocker: () => ({ status: 'idle', proceed: undefined, reset: undefined }),
+  useBlocker: () => blockerMock,
 }))
 
 afterEach(() => {
+  blockerMock.proceed.mockClear()
+  blockerMock.reset.mockClear()
+  blockerMock.status = 'idle'
   localStorage.clear()
   sessionStorage.clear()
 })
@@ -159,6 +168,26 @@ describe('useDraftGuard', () => {
     )
     act(() => result.current.clearDraft())
     expect(localStorage.getItem('attune:draft:test')).toBeNull()
+  })
+
+  it('delegates blocked navigation resolver actions', () => {
+    blockerMock.status = 'blocked'
+    localStorage.setItem('attune:draft:test', '{"a":1}')
+    const { result } = renderHook(() =>
+      useDraftGuard({ storageKey: 'test', draft: { a: 1 }, dirty: true }),
+    )
+
+    expect(result.current.dialogOpen).toBe(true)
+
+    act(() => result.current.confirmLeave())
+    expect(localStorage.getItem('attune:draft:test')).toBeNull()
+    expect(blockerMock.proceed).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.cancelLeave())
+    expect(blockerMock.reset).toHaveBeenCalledTimes(1)
+
+    act(() => result.current.proceed())
+    expect(blockerMock.proceed).toHaveBeenCalledTimes(2)
   })
 
   it('cancels pending debounce timer on unmount', async () => {

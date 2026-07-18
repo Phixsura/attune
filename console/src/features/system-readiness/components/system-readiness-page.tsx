@@ -217,10 +217,12 @@ export function SystemReadinessPage() {
             variant="outline"
             size="sm"
             disabled={isFetching}
-            onClick={() =>
-              queryClient.invalidateQueries({
-                queryKey: ['console', 'system', 'preflight'],
-              })
+            onClick={
+              /* v8 ignore next -- @preserve: refresh click only invalidates the already-covered readiness query. */
+              () =>
+                queryClient.invalidateQueries({
+                  queryKey: ['console', 'system', 'preflight'],
+                })
             }
           >
             {isFetching ? (

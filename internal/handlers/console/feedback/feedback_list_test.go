@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,6 +106,70 @@ func TestQueryBool(t *testing.T) {
 		q := url.Values{"key": []string{""}}
 		result := queryBool(q, "key")
 		require.Nil(t, result)
+	})
+}
+
+func TestQueryIDs(t *testing.T) {
+	t.Parallel()
+
+	t.Run("parses comma separated repeated values and skips invalid", func(t *testing.T) {
+		t.Parallel()
+		q := url.Values{"ids": []string{"1, nope, 2", "0,-1,3"}}
+
+		require.Equal(t, []int64{1, 2, 3}, queryIDs(q, "ids"))
+	})
+
+	t.Run("caps returned ids at fifty", func(t *testing.T) {
+		t.Parallel()
+		values := make([]string, 0, 55)
+		for i := 1; i <= 55; i++ {
+			values = append(values, strconv.Itoa(i))
+		}
+		q := url.Values{"ids": []string{strings.Join(values, ",")}}
+
+		got := queryIDs(q, "ids")
+
+		require.Len(t, got, 50)
+		require.Equal(t, int64(1), got[0])
+		require.Equal(t, int64(50), got[49])
+	})
+
+	t.Run("returns nil when missing", func(t *testing.T) {
+		t.Parallel()
+		require.Nil(t, queryIDs(url.Values{}, "ids"))
+	})
+}
+
+func TestBindListRequestSkipsEmptyDynamicAttrs(t *testing.T) {
+	t.Parallel()
+
+	req := ptrext.Of(attunev1.ListFeedbackRequest{})
+	httpReq := httptest.NewRequest(http.MethodGet, "/feedback?severity=&severity=critical&limit=20", nil)
+
+	require.NoError(t, BindListRequest(httpReq, req))
+	require.Len(t, req.GetAttrs(), 1)
+	require.Equal(t, "severity", req.GetAttrs()[0].GetDim())
+	require.Equal(t, "critical", req.GetAttrs()[0].GetValue())
+	require.Equal(t, int32(20), req.GetLimit())
+}
+
+func TestQueryFloat64(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns value when valid", func(t *testing.T) {
+		t.Parallel()
+		q := url.Values{"confidence_lte": []string{"0.42"}}
+
+		got := queryFloat64(q, "confidence_lte")
+
+		require.NotNil(t, got)
+		require.InDelta(t, 0.42, *got, 1e-9)
+	})
+
+	t.Run("returns nil when invalid or missing", func(t *testing.T) {
+		t.Parallel()
+		require.Nil(t, queryFloat64(url.Values{"confidence_lte": []string{"bad"}}, "confidence_lte"))
+		require.Nil(t, queryFloat64(url.Values{}, "confidence_lte"))
 	})
 }
 

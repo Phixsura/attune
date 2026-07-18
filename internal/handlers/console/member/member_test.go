@@ -20,6 +20,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 // inviteCtx builds a RequestContext with a default (viewer) role in context.
@@ -31,6 +32,28 @@ func inviteCtx() *dispatcher.RequestContext[*session.AuthCtx] {
 		Context: context.Background(),
 		Auth:    ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1", UserType: "oidc"}),
 	})
+}
+
+type memberAuditRecorder struct {
+	events []auditlogsvc.Event
+}
+
+func (f *memberAuditRecorder) Record(_ context.Context, event auditlogsvc.Event) error {
+	f.events = append(f.events, event)
+	return nil
+}
+
+func TestNewHandlerAndSetAuditLogger(t *testing.T) {
+	t.Parallel()
+
+	audit := ptrext.Of(memberAuditRecorder{})
+	h := NewHandler(nil)
+
+	h.SetAuditLogger(audit)
+
+	require.NotNil(t, h)
+	require.Nil(t, h.members)
+	require.Same(t, audit, h.audit)
 }
 
 func TestInvite_RejectsEmptyEmail(t *testing.T) {

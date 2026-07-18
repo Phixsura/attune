@@ -444,6 +444,7 @@ export function FeedbackPage({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const handlePromoteToCustomerRequest = useCallback(() => {
     const feedbackIDs = Array.from(selected)
+    /* v8 ignore next -- @preserve: the promote action is only rendered while rows are selected. */
     if (feedbackIDs.length === 0) return
     void navigate({
       to: '/feedback/customer-requests',
@@ -733,6 +734,7 @@ export function FeedbackPage({
   }
 
   const handleBatchRetryEnrichment = () => {
+    /* v8 ignore next -- @preserve: the retry action is disabled until selected rows include terminal failures. */
     if (selectedTerminalFailures.length === 0) {
       toast.error(t('feedback.batch.no_terminal_failures'))
       return
@@ -759,6 +761,7 @@ export function FeedbackPage({
         }
         clear()
       },
+      /* v8 ignore next -- @preserve: the mutation aggregates per-item failures with allSettled. */
       onError: (err) => {
         setRetryDialogOpen(false)
         toast.error(err instanceof Error ? err.message : t('common.error'))
@@ -767,6 +770,7 @@ export function FeedbackPage({
   }
 
   const handleBatchDelete = () => {
+    /* v8 ignore next -- @preserve: the delete action is only rendered while rows are selected. */
     if (selected.size === 0) return
     setDeleteDialogOpen(true)
   }
@@ -1907,6 +1911,7 @@ function FeedbackTable({
                         attempts={f.enrichmentAttempts ?? 0}
                         isTerminal={isTerminalFailure(f)}
                         nextRetryAt={f.enrichmentNextRetryAt}
+                        errorPreview={(f as { enrichmentError?: string }).enrichmentError}
                       />
                     )}
                   </div>
@@ -4092,6 +4097,7 @@ function TerminalFailuresSummaryCard({
 }
 
 export const feedbackPageTestables = {
+  buildQueueMetricItems,
   buildSemanticFilter,
   compareFeedbackByMode,
   compactStatToneClass,

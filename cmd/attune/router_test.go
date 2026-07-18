@@ -9,6 +9,11 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/infra/config"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // TestMountHealth is a contract test for the liveness probe. The deploy kit
@@ -94,4 +99,51 @@ type readyFunc func(context.Context) error
 
 func (f readyFunc) Ping(ctx context.Context) error {
 	return f(ctx)
+}
+
+func TestBuildRouterMinimalServerSurface(t *testing.T) {
+	cfg := ptrext.Of(config.Config{
+		RateLimitDisabled:  true,
+		RateLimitPerMinute: 60,
+		RateLimitBurst:     1,
+	})
+	ingestHandler := handlers.NewIngestHandler(nil, domain.DefaultSourceSet())
+
+	r, err := buildRouter(
+		context.Background(),
+		cfg,
+		ingestHandler,
+		nil,
+		nil,
+		readyFunc(func(context.Context) error { return nil }),
+		nil,
+		chi.NewRouter(),
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		domain.DefaultSourceSet(),
+	)
+	if err != nil {
+		t.Fatalf("buildRouter: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/healthz status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/metrics status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("/mcp status = %d, want %d when MCP is disabled", rec.Code, http.StatusNotFound)
+	}
 }

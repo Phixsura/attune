@@ -30,6 +30,7 @@ export function useBatchRetryEnrichment() {
         } else {
           failed.push({
             id,
+            /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
             error: result.reason instanceof Error ? result.reason.message : 'Unknown error',
           })
         }

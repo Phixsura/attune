@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/service/semanticsearch/searchquality"
 )
 
 func TestRunWritesAndVerifiesBaseline(t *testing.T) {
@@ -163,4 +164,71 @@ func TestRunDetectsRankingVersionMismatch(t *testing.T) {
 	require.Contains(t, err.Error(), "baseline ranking version mismatch")
 	require.Contains(t, err.Error(), `current="test.rank.v2"`)
 	require.Contains(t, err.Error(), `baseline="test.rank.v1"`)
+}
+
+func TestParseFlagsRejectsInvalidValues(t *testing.T) {
+	t.Parallel()
+
+	_, err := parseFlags([]string{"--k", "0"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "k must be positive")
+
+	_, err = parseFlags([]string{"--tolerance", "-0.1"})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "tolerance must be non-negative")
+
+	_, err = parseFlags([]string{"--unknown"})
+	require.Error(t, err)
+}
+
+func TestBuildReportSurfacesFixtureLoadErrors(t *testing.T) {
+	t.Parallel()
+
+	_, err := buildReport(config{feedbackPath: filepath.Join(t.TempDir(), "missing.jsonl")})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "missing.jsonl")
+}
+
+func TestValidateBaselineContractRejectsShapeMismatches(t *testing.T) {
+	t.Parallel()
+
+	baseline := searchquality.Report{
+		RankingVersion: "rank.v1",
+		K:              10,
+		QueryCount:     2,
+	}
+	current := baseline
+
+	current.K = 5
+	err := validateBaselineContract(current, baseline)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "baseline k mismatch")
+
+	current = baseline
+	current.QueryCount = 3
+	err = validateBaselineContract(current, baseline)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "baseline query count mismatch")
+}
+
+func TestFormatRegressions(t *testing.T) {
+	t.Parallel()
+
+	got := formatRegressions([]searchquality.Regression{
+		{
+			Scope:    "aggregate",
+			Metric:   "ndcg_at_k",
+			Current:  0.875,
+			Baseline: 0.9,
+		},
+		{
+			Scope:    "query:q1",
+			Metric:   "recall_at_k",
+			Current:  0.5,
+			Baseline: 1,
+		},
+	})
+
+	require.Contains(t, got, "- aggregate ndcg_at_k current=0.875000 baseline=0.900000")
+	require.Contains(t, got, "- query:q1 recall_at_k current=0.500000 baseline=1.000000")
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 )
 
@@ -210,6 +212,26 @@ func TestBindBeforeHandlerCanReject(t *testing.T) {
 	require.Contains(t, rec.Body.String(), `"code":"FORBIDDEN"`)
 }
 
+func TestBindPanicsOnMismatchedBeforeAuth(t *testing.T) {
+	t.Parallel()
+
+	require.PanicsWithValue(t, "dispatcher: WithBefore auth type does not match WithAuth", func() {
+		_ = Bind(
+			"dispatcher.BindBeforeMismatch",
+			Empty(func() *attunev1.GetUsageRequest { return &attunev1.GetUsageRequest{} }),
+			func(*RequestContext[testAuth], *attunev1.GetUsageRequest) (Result[*attunev1.GetUsageResponse], error) {
+				return OK(&attunev1.GetUsageResponse{})
+			},
+			contextAuth[testAuth, *attunev1.GetUsageRequest](func(context.Context) testAuth {
+				return testAuth{TenantID: "tenant-1"}
+			}),
+			WithBefore(func(*RequestContext[struct{}], *attunev1.GetUsageRequest) error {
+				return nil
+			}),
+		)
+	})
+}
+
 func TestBindBadJSONBody(t *testing.T) {
 	t.Parallel()
 
@@ -381,6 +403,55 @@ func TestPathParamBindsRouteParam(t *testing.T) {
 	require.Equal(t, want, pb.GetId())
 }
 
+func TestQueryRunsBinders(t *testing.T) {
+	t.Parallel()
+
+	input := Query(
+		func() *attunev1.ListFeedbackRequest { return &attunev1.ListFeedbackRequest{} },
+		func(r *http.Request, req *attunev1.ListFeedbackRequest) error {
+			req.Q = ptrext.Of(r.URL.Query().Get("q"))
+			return nil
+		},
+		func(r *http.Request, req *attunev1.ListFeedbackRequest) error {
+			limit, err := strconv.ParseInt(r.URL.Query().Get("limit"), 10, 32)
+			if err != nil {
+				return err
+			}
+			req.Limit = ptrext.Of(int32(limit))
+			return nil
+		},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/fb/v1/console/feedback?q=latency&limit=25", nil)
+	pb := input.new()
+
+	err := input.bind(req, pb)
+
+	require.NoError(t, err)
+	require.Equal(t, "latency", pb.GetQ())
+	require.EqualValues(t, 25, pb.GetLimit())
+}
+
+func TestParamInt64BindsRouteParam(t *testing.T) {
+	t.Parallel()
+
+	input := Path(
+		func() *attunev1.GetFeedbackRequest { return &attunev1.GetFeedbackRequest{} },
+		ParamInt64("id", func(req *attunev1.GetFeedbackRequest, id int64) {
+			req.Id = id
+		}, "id must be an integer"),
+	)
+	req := httptest.NewRequest(http.MethodGet, "/fb/v1/console/feedback/42", nil)
+	routeCtx := chi.NewRouteContext()
+	routeCtx.URLParams.Add("id", "42")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeCtx))
+	pb := input.new()
+
+	err := input.bind(req, pb)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 42, pb.GetId())
+}
+
 func TestParamInt64RejectsBadRouteParam(t *testing.T) {
 	t.Parallel()
 
@@ -471,6 +542,25 @@ func TestBindMapsContextCancellationErrors(t *testing.T) {
 			require.Contains(t, rec.Body.String(), `"code":"`+tt.code+`"`)
 		})
 	}
+}
+
+func TestIsRequestContextError(t *testing.T) {
+	t.Parallel()
+
+	require.True(t, IsRequestContextError(context.Canceled))
+	require.True(t, IsRequestContextError(context.DeadlineExceeded))
+	require.False(t, IsRequestContextError(NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "bad")))
+}
+
+func TestAuthTypeMismatchError(t *testing.T) {
+	t.Parallel()
+
+	err := authTypeMismatchError[testAuth]()
+	var typed *Error
+	require.ErrorAs(t, err, &typed)
+	require.Equal(t, http.StatusInternalServerError, typed.Status)
+	require.Equal(t, attunev1.ErrorCode_INTERNAL, typed.Code)
+	require.Equal(t, "dispatcher auth option type mismatch", typed.Message)
 }
 
 func TestErrorImplementsErrorInterface(t *testing.T) {

@@ -68,6 +68,36 @@ func TestRuntimeSemantics_ReturnsCanonicalVocabulary(t *testing.T) {
 	}
 }
 
+func TestLifecycleStateStringAndValid(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		state LifecycleState
+		want  string
+		valid bool
+	}{
+		{state: LifecycleStateSupported, want: "supported", valid: true},
+		{state: LifecycleStateDeprecated, want: "deprecated", valid: true},
+		{state: LifecycleStateMigrating, want: "migrating", valid: true},
+		{state: LifecycleStateRecovering, want: "recovering", valid: true},
+		{state: LifecycleStateBlocked, want: "blocked", valid: true},
+		{state: LifecycleState("unknown"), want: "unknown", valid: false},
+		{state: LifecycleState(""), want: "", valid: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.state.String(); got != tt.want {
+				t.Fatalf("String() = %q, want %q", got, tt.want)
+			}
+			if got := tt.state.Valid(); got != tt.valid {
+				t.Fatalf("Valid() = %v, want %v", got, tt.valid)
+			}
+		})
+	}
+}
+
 func TestPlatformGlossaryAndCompatibilityRulesReturnCopies(t *testing.T) {
 	t.Parallel()
 

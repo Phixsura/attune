@@ -1,5 +1,6 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ServiceAccountsCard } from '@/features/api-keys/components/service-accounts-card'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
@@ -8,6 +9,11 @@ import { renderWithProviders, screen, waitFor, within } from '@/testing/test-uti
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+beforeEach(() => {
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.error).mockClear()
+})
 
 describe('ServiceAccountsCard', () => {
   it('renders service accounts and toggles active state', async () => {
@@ -186,6 +192,57 @@ describe('ServiceAccountsCard', () => {
       expect(screen.getByText('还没有服务账号')).toBeInTheDocument()
     })
     expect(attempts).toBe(2)
+  })
+
+  it('surfaces create, toggle, and delete failures', async () => {
+    server.use(
+      http.get('/fb/v1/console/service-accounts', () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: 'sa-1',
+              name: 'ci-bot',
+              description: 'deployment pipeline',
+              isActive: true,
+              createdAt: '2026-06-07T00:00:00Z',
+              updatedAt: '2026-06-08T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.post('/fb/v1/console/service-accounts', () =>
+        HttpResponse.json({ message: 'create failed' }, { status: 500 }),
+      ),
+      http.patch('/fb/v1/console/service-accounts/sa-1', () =>
+        HttpResponse.json({ message: 'toggle failed' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/service-accounts/sa-1', () =>
+        HttpResponse.json({ message: 'delete failed' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<ServiceAccountsCard canEdit={true} />)
+
+    await screen.findByText('ci-bot')
+    await user.click(screen.getByRole('button', { name: '新增服务账号' }))
+    const createDialog = screen.getByRole('dialog', { name: '新增服务账号' })
+    await user.type(within(createDialog).getByLabelText('名称'), 'deploy-bot')
+    await user.click(within(createDialog).getByTestId('create-service-account-submit'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('create failed'))
+    await user.click(within(createDialog).getByTestId('create-service-account-cancel'))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '新增服务账号' })).not.toBeInTheDocument(),
+    )
+
+    await user.click(screen.getByRole('button', { name: '停用服务账号 ci-bot' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '停用' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('toggle failed'))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+
+    await user.click(screen.getByRole('button', { name: '删除服务账号 ci-bot' }))
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: '删除' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('delete failed'))
   })
 
   it('does not mount the panel for non-editors', () => {

@@ -38,6 +38,7 @@ export function SecretRevealDialog({
     try {
       await navigator.clipboard.writeText(value)
       setCopied(which)
+      /* v8 ignore next -- @preserve: timer reset is browser time behavior; copy state assertion covers the user path. */
       setTimeout(() => setCopied(null), 1500)
     } catch {
       // Clipboard may be blocked (insecure context, denied permission).

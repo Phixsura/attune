@@ -1,0 +1,55 @@
+{
+  "body": {
+    "event_id": "event-conformance",
+    "event_type": "request.shipped",
+    "from_email": "updates@example.test",
+    "from_name": "Attune",
+    "headers": [
+      {
+        "name": "List-Unsubscribe",
+        "value": "\u003chttps://portal.example.test/unsubscribe/tenant-token\u003e"
+      },
+      {
+        "name": "List-Unsubscribe-Post",
+        "value": "List-Unsubscribe=One-Click"
+      }
+    ],
+    "html_body": "\u003cp\u003eCheckout fix\u003cbr\u003e\u003cbr\u003eThe checkout fix is now available.\u003cbr\u003e\u003cbr\u003eStatus: shipped\u003cbr\u003e\u003cbr\u003eUnsubscribe: https://portal.example.test/unsubscribe/request-token\u003c/p\u003e",
+    "list_unsubscribe_url": "https://portal.example.test/unsubscribe/tenant-token",
+    "metadata": {
+      "recipient": {
+        "contact_id": "contact-conformance",
+        "display": "Customer",
+        "email": "c***@example.test"
+      },
+      "request": {
+        "description": "ATTUNE_CONFORMANCE_FEEDBACK_MARKER @channel @here @everyone \u003c@U123456\u003e \u003c!here\u003e \u003c!everyone\u003e \u003cat id=all\u003e\u003c/at\u003e @octocat @org/team",
+        "display_id": "REQ-42",
+        "id": "request-conformance",
+        "state": "shipped",
+        "title": "Checkout fix"
+      },
+      "update": {
+        "body": "The checkout fix is now available.",
+        "id": "update-conformance",
+        "kind": "shipped",
+        "title": "Checkout fix shipped"
+      }
+    },
+    "reply_to": "support@example.test",
+    "subject": "Checkout fix shipped",
+    "tenant_id": "tenant-conformance",
+    "text_body": "Checkout fix\n\nThe checkout fix is now available.\n\nStatus: shipped\n\nUnsubscribe: https://portal.example.test/unsubscribe/request-token",
+    "to_email": "customer@example.test",
+    "unsubscribe_url": "https://portal.example.test/unsubscribe/request-token",
+    "version": "1"
+  },
+  "headers": {
+    "Authorization": "\u003cauthorization\u003e",
+    "Content-Type": "application/json; charset=utf-8",
+    "User-Agent": "attune/1.0",
+    "X-Attune-Delivery-Id": "delivery-conformance"
+  },
+  "method": "POST",
+  "url": "https://mail.example.test"
+}

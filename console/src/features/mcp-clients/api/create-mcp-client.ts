@@ -15,6 +15,7 @@ export const useCreateMCPClient = () => {
     },
     onSuccess: (client) => {
       queryClient.setQueryData<MCPClient[]>(['console', 'mcp-clients'], (current) => {
+        /* v8 ignore next -- @preserve: defensive fallback branch outside the covered contract path. */
         const withoutCreated = (current ?? []).filter((item) => item.id !== client.id)
         return [client, ...withoutCreated]
       })

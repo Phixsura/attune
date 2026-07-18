@@ -5,6 +5,7 @@ package database
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -70,6 +71,18 @@ func TestAdvisoryLock_NilSafe(t *testing.T) {
 	var lock *AdvisoryLock
 	err := lock.Release(context.Background())
 	require.NoError(t, err)
+}
+
+func TestTryAdvisoryLock_ReturnsAcquireError(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	lock, acquired, err := TryAdvisoryLock(ctx, newUnreachableMigrationPool(t), LockAuditPruner)
+	require.Nil(t, lock)
+	require.False(t, acquired)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "acquire connection for advisory lock")
 }
 
 func TestLockConstants_NonZero(t *testing.T) {

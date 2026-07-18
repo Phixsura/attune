@@ -1,4 +1,5 @@
 import { HttpResponse, http } from 'msw'
+import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 import { ApiKeysPage } from '@/features/api-keys/components/api-keys-page'
 import { expectNoA11yViolations } from '@/testing/a11y'
@@ -127,5 +128,37 @@ describe('ApiKeysPage user flow', () => {
     })
     expect(screen.getByText('服务账号目录')).toBeInTheDocument()
     await expectNoA11yViolations(container)
+  })
+
+  it('surfaces API key create and revoke failures from page handlers', async () => {
+    server.use(
+      http.get('/fb/v1/console/api-keys', () => HttpResponse.json({ items: [keyFixture] })),
+      http.get('/fb/v1/console/service-accounts', () => HttpResponse.json({ items: [] })),
+      http.get('/fb/v1/console/api-keys/presets', () => HttpResponse.json({ presets: [] })),
+      http.get('/fb/v1/console/api-keys/scopes', () => HttpResponse.json({ scopes: [] })),
+      http.post('/fb/v1/console/api-keys', () =>
+        HttpResponse.json({ message: 'create denied' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/api-keys/:id', () =>
+        HttpResponse.json({ message: 'revoke denied' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<ApiKeysPage />)
+
+    await screen.findByText('prod ingest', {}, { timeout: 5_000 })
+    await user.click(screen.getByRole('button', { name: '+ 签发新 key' }))
+    const createDialog = screen.getByRole('dialog', { name: '签发新 API key' })
+    await user.type(within(createDialog).getByLabelText('用途备注'), 'ci ingest')
+    await user.click(within(createDialog).getByTestId('create-key-submit'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('create denied'))
+
+    vi.mocked(toast.error).mockClear()
+    await user.click(within(createDialog).getByTestId('create-key-cancel'))
+    await user.click(screen.getByRole('button', { name: '撤销 API key prod ingest' }))
+    const revokeDialog = screen.getByRole('dialog', { name: '撤销这把 key？' })
+    await user.click(within(revokeDialog).getByTestId('revoke-key-confirm'))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('revoke denied'))
   })
 })

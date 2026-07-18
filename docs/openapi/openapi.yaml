@@ -6100,6 +6100,439 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/deliveries:
+        get:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_ListRequestNotificationDeliveries
+            parameters:
+                - name: status
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: beforeId
+                  in: query
+                  schema:
+                    type: string
+                - name: requestId
+                  in: query
+                  schema:
+                    type: string
+                - name: channel
+                  in: query
+                  schema:
+                    enum:
+                        - REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED
+                        - REQUEST_NOTIFICATION_CHANNEL_EMAIL
+                        - REQUEST_NOTIFICATION_CHANNEL_WEBHOOK
+                    type: string
+                    format: enum
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListRequestNotificationDeliveriesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/deliveries/{id}:retry:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_RetryRequestNotificationDelivery
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RetryRequestNotificationDeliveryRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationDelivery'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/preview:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_PreviewRequestNotification
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PreviewRequestNotificationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PreviewRequestNotificationResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/provider-events:suppress:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_RecordRequestNotificationProviderEvent
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/RecordRequestNotificationProviderEventRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestSubscriber'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/publish:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_PublishRequestUpdate
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/PublishRequestUpdateRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationEvent'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/requests/{requestId}/subscribers:
+        get:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_ListRequestSubscribers
+            parameters:
+                - name: requestId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListRequestSubscribersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/sender:
+        get:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_GetRequestNotificationSender
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationSender'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        put:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_UpsertRequestNotificationSender
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpsertRequestNotificationSenderRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationSender'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/sender:verify:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_VerifyRequestNotificationSender
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/VerifyRequestNotificationSenderRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationSender'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/settings:
+        get:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_GetRequestNotificationSettings
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationSettings'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        put:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_UpdateRequestNotificationSettings
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateRequestNotificationSettingsRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationSettings'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/subscribers/{contactId}:suppress:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_SuppressRequestSubscriber
+            parameters:
+                - name: contactId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SuppressRequestSubscriberRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestSubscriber'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/webhook-targets:
+        get:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_ListRequestNotificationWebhookTargets
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListRequestNotificationWebhookTargetsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_CreateRequestNotificationWebhookTarget
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateRequestNotificationWebhookTargetRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationWebhookTarget'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/webhook-targets/{id}:
+        delete:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_DeleteRequestNotificationWebhookTarget
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteRequestNotificationWebhookTargetResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        patch:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_UpdateRequestNotificationWebhookTarget
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateRequestNotificationWebhookTargetRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationWebhookTarget'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/request-notifications/webhook-targets/{id}:test:
+        post:
+            tags:
+                - RequestNotificationService
+            operationId: RequestNotificationService_TestRequestNotificationWebhookTarget
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TestRequestNotificationWebhookTargetRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RequestNotificationWebhookTestResult'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/secret-managers:
         get:
             tags:
@@ -8543,6 +8976,71 @@ paths:
                             description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
                             schema:
                                 type: string
+    /v1/portal/{tenantSlug}/notification-contact/confirm:
+        post:
+            tags:
+                - PublicRequestNotificationService
+            operationId: PublicRequestNotificationService_ConfirmPublicNotificationContact
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConfirmPublicNotificationContactRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicNotificationContact'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
     /v1/portal/{tenantSlug}/requests:
         get:
             tags:
@@ -8765,6 +9263,76 @@ paths:
                             description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
                             schema:
                                 type: string
+    /v1/portal/{tenantSlug}/requests/{publicSlug}/subscribe:
+        post:
+            tags:
+                - PublicRequestNotificationService
+            operationId: PublicRequestNotificationService_SubscribePublicCustomerRequest
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: publicSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SubscribePublicCustomerRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicRequestSubscription'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
     /v1/portal/{tenantSlug}/requests/{publicSlug}/votes:
         post:
             tags:
@@ -8779,6 +9347,34 @@ paths:
                 - name: publicSlug
                   in: path
                   required: true
+                  schema:
+                    type: string
+                - name: email
+                  in: query
+                  schema:
+                    type: string
+                - name: notifyMe
+                  in: query
+                  schema:
+                    type: boolean
+                - name: notificationConsentTextVersion
+                  in: query
+                  schema:
+                    type: string
+                - name: displayName
+                  in: query
+                  schema:
+                    type: string
+                - name: organization
+                  in: query
+                  schema:
+                    type: string
+                - name: locale
+                  in: query
+                  schema:
+                    type: string
+                - name: timezone
+                  in: query
                   schema:
                     type: string
                 - name: X-Attune-Api-Version
@@ -9070,6 +9666,71 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/CreatePublicSubmissionResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/portal/{tenantSlug}/unsubscribe:
+        post:
+            tags:
+                - PublicRequestNotificationService
+            operationId: PublicRequestNotificationService_UnsubscribePublicCustomerRequest
+            parameters:
+                - name: tenantSlug
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UnsubscribePublicCustomerRequestRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PublicRequestSubscription'
                     headers:
                         X-Attune-Api-Version:
                             description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
@@ -9981,6 +10642,16 @@ components:
                 sampleTitle:
                     type: string
             description: ClusterSummary is a condensed view of a feedback cluster.
+        ConfirmPublicNotificationContactRequest:
+            required:
+                - tenantSlug
+                - token
+            type: object
+            properties:
+                tenantSlug:
+                    type: string
+                token:
+                    type: string
         CreateAIAgentConfigRequest:
             required:
                 - name
@@ -10373,6 +11044,20 @@ components:
                     type: string
                 body:
                     type: string
+                email:
+                    type: string
+                notifyMe:
+                    type: boolean
+                notificationConsentTextVersion:
+                    type: string
+                displayName:
+                    type: string
+                organization:
+                    type: string
+                locale:
+                    type: string
+                timezone:
+                    type: string
         CreatePublicSubmissionRequest:
             required:
                 - tenantSlug
@@ -10407,6 +11092,16 @@ components:
                     type: string
                 honeypot:
                     type: string
+                email:
+                    type: string
+                notifyMe:
+                    type: boolean
+                notificationConsentTextVersion:
+                    type: string
+                locale:
+                    type: string
+                timezone:
+                    type: string
         CreatePublicSubmissionResponse:
             type: object
             properties:
@@ -10432,6 +11127,22 @@ components:
                     format: enum
                 acknowledgement:
                     type: string
+        CreateRequestNotificationWebhookTargetRequest:
+            required:
+                - name
+                - url
+            type: object
+            properties:
+                name:
+                    type: string
+                url:
+                    type: string
+                secret:
+                    type: string
+                eventMask:
+                    type: object
+                includeRecipientIdentity:
+                    type: boolean
         CreateRotationScheduleRequest:
             type: object
             properties:
@@ -11170,6 +11881,9 @@ components:
             type: object
             properties: {}
         DeleteNotifyTargetResponse:
+            type: object
+            properties: {}
+        DeleteRequestNotificationWebhookTargetResponse:
             type: object
             properties: {}
         DeleteSavedAuditLogViewResponse:
@@ -13605,6 +14319,29 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ReplySendHookDelivery'
+        ListRequestNotificationDeliveriesResponse:
+            type: object
+            properties:
+                deliveries:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RequestNotificationDelivery'
+                nextBeforeId:
+                    type: string
+        ListRequestNotificationWebhookTargetsResponse:
+            type: object
+            properties:
+                targets:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RequestNotificationWebhookTarget'
+        ListRequestSubscribersResponse:
+            type: object
+            properties:
+                subscribers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/RequestSubscriber'
         ListSIEMIntegrationsResponse:
             type: object
             properties:
@@ -14297,6 +15034,37 @@ components:
                     type: array
                     items:
                         type: string
+        PreviewRequestNotificationRequest:
+            required:
+                - update
+            type: object
+            properties:
+                update:
+                    $ref: '#/components/schemas/RequestNotificationUpdateDraft'
+                channels:
+                    type: array
+                    items:
+                        enum:
+                            - REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED
+                            - REQUEST_NOTIFICATION_CHANNEL_EMAIL
+                            - REQUEST_NOTIFICATION_CHANNEL_WEBHOOK
+                        type: string
+                        format: enum
+        PreviewRequestNotificationResponse:
+            type: object
+            properties:
+                eligibleRecipients:
+                    type: integer
+                    format: int32
+                excludedRecipients:
+                    type: integer
+                    format: int32
+                excludedByReason:
+                    type: object
+                emailPayload:
+                    type: object
+                webhookPayload:
+                    type: object
         Project:
             type: object
             properties:
@@ -14442,6 +15210,17 @@ components:
                     type: string
                 viewerHasVoted:
                     type: boolean
+        PublicNotificationContact:
+            type: object
+            properties:
+                id:
+                    type: string
+                emailRedacted:
+                    type: string
+                consentState:
+                    type: string
+                verified:
+                    type: boolean
         PublicRequestProfile:
             type: object
             properties:
@@ -14480,6 +15259,19 @@ components:
                     $ref: '#/components/schemas/PublicRequestProfile'
                 moderation:
                     $ref: '#/components/schemas/ModerationSubject'
+        PublicRequestSubscription:
+            type: object
+            properties:
+                id:
+                    type: string
+                requestId:
+                    type: string
+                status:
+                    type: string
+                scope:
+                    type: string
+                emailRedacted:
+                    type: string
         PublicRoadmapColumn:
             type: object
             properties:
@@ -14603,6 +15395,24 @@ components:
                             - PUBLIC_SURFACE_PORTAL_SUBMISSION
                         type: string
                         format: enum
+        PublishRequestUpdateRequest:
+            required:
+                - update
+            type: object
+            properties:
+                update:
+                    $ref: '#/components/schemas/RequestNotificationUpdateDraft'
+                channels:
+                    type: array
+                    items:
+                        enum:
+                            - REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED
+                            - REQUEST_NOTIFICATION_CHANNEL_EMAIL
+                            - REQUEST_NOTIFICATION_CHANNEL_WEBHOOK
+                        type: string
+                        format: enum
+                confirmLargeAudience:
+                    type: boolean
         QualifyExternalConnectionRequest:
             type: object
             properties:
@@ -14685,6 +15495,22 @@ components:
                 externalUpdatedAt:
                     type: string
                 syncError:
+                    type: string
+        RecordRequestNotificationProviderEventRequest:
+            required:
+                - email
+                - eventType
+            type: object
+            properties:
+                email:
+                    type: string
+                eventType:
+                    type: string
+                reason:
+                    type: string
+                provider:
+                    type: string
+                providerMessageId:
                     type: string
         RecordSearchEventRequest:
             type: object
@@ -15110,6 +15936,222 @@ components:
                         - EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL
                     type: string
                     format: enum
+        RequestNotificationDelivery:
+            type: object
+            properties:
+                id:
+                    type: string
+                eventId:
+                    type: string
+                channel:
+                    enum:
+                        - REQUEST_NOTIFICATION_CHANNEL_UNSPECIFIED
+                        - REQUEST_NOTIFICATION_CHANNEL_EMAIL
+                        - REQUEST_NOTIFICATION_CHANNEL_WEBHOOK
+                    type: string
+                    format: enum
+                status:
+                    type: string
+                attempts:
+                    type: integer
+                    format: int32
+                failureKind:
+                    type: string
+                httpStatus:
+                    type: integer
+                    format: int32
+                lastError:
+                    type: string
+                deadReason:
+                    type: string
+                traceId:
+                    type: string
+                destinationHash:
+                    type: string
+                createdAt:
+                    type: string
+                deliveredAt:
+                    type: string
+                nextRetryAt:
+                    type: string
+                lastManualRetryAt:
+                    type: string
+                retriedBy:
+                    type: string
+                manualRetryCount:
+                    type: integer
+                    format: int32
+                payload:
+                    type: object
+        RequestNotificationEvent:
+            type: object
+            properties:
+                id:
+                    type: string
+                eventType:
+                    enum:
+                        - REQUEST_NOTIFICATION_EVENT_TYPE_UNSPECIFIED
+                        - REQUEST_NOTIFICATION_EVENT_TYPE_STATUS_CHANGED
+                        - REQUEST_NOTIFICATION_EVENT_TYPE_SHIPPED
+                        - REQUEST_NOTIFICATION_EVENT_TYPE_NEED_INFO_DIRECT
+                        - REQUEST_NOTIFICATION_EVENT_TYPE_MODERATOR_RESPONSE
+                        - REQUEST_NOTIFICATION_EVENT_TYPE_CHANGELOG_POST_PUBLISHED
+                    type: string
+                    format: enum
+                status:
+                    type: string
+                requestId:
+                    type: string
+                updateId:
+                    type: string
+                directFollowupId:
+                    type: string
+                dedupeKey:
+                    type: string
+                recipientSnapshot:
+                    type: object
+                createdAt:
+                    type: string
+        RequestNotificationSender:
+            type: object
+            properties:
+                id:
+                    type: string
+                fromName:
+                    type: string
+                fromEmailRedacted:
+                    type: string
+                replyToRedacted:
+                    type: string
+                domain:
+                    type: string
+                dkimStatus:
+                    type: string
+                spfStatus:
+                    type: string
+                dmarcStatus:
+                    type: string
+                provider:
+                    type: string
+                status:
+                    type: string
+                verifiedAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        RequestNotificationSettings:
+            type: object
+            properties:
+                tenantId:
+                    type: string
+                emailEnabled:
+                    type: boolean
+                webhookEnabled:
+                    type: boolean
+                enabledEventTypes:
+                    type: object
+                statusPolicy:
+                    type: object
+                defaultConsentMode:
+                    type: string
+                requirePublicUpdateForStatus:
+                    type: boolean
+                maxRecipientsWithoutConfirm:
+                    type: integer
+                    format: int32
+                tenantHourlySendLimit:
+                    type: integer
+                    format: int32
+                contactDailySendLimit:
+                    type: integer
+                    format: int32
+                updatedBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        RequestNotificationUpdateDraft:
+            required:
+                - requestId
+                - title
+                - body
+            type: object
+            properties:
+                requestId:
+                    type: string
+                title:
+                    type: string
+                body:
+                    type: string
+                kind:
+                    type: string
+                notifySubscribers:
+                    type: boolean
+        RequestNotificationWebhookTarget:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                url:
+                    type: string
+                urlHost:
+                    type: string
+                signatureVersion:
+                    type: string
+                eventMask:
+                    type: object
+                includeRecipientIdentity:
+                    type: boolean
+                status:
+                    type: string
+                verifiedAt:
+                    type: string
+                lastTestedAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        RequestNotificationWebhookTestResult:
+            type: object
+            properties:
+                ok:
+                    type: boolean
+                statusCode:
+                    type: integer
+                    format: int32
+                latencyMs:
+                    type: string
+                message:
+                    type: string
+        RequestSubscriber:
+            type: object
+            properties:
+                contactId:
+                    type: string
+                displayName:
+                    type: string
+                organization:
+                    type: string
+                emailRedacted:
+                    type: string
+                consentState:
+                    type: string
+                subscriptionStatus:
+                    type: string
+                sources:
+                    type: array
+                    items:
+                        type: string
+                createdAt:
+                    type: string
+                unsubscribedAt:
+                    type: string
         ResetEnrichmentRuntimeRequest:
             type: object
             properties:
@@ -15231,6 +16273,13 @@ components:
                 id:
                     type: string
         RetryExternalSyncRunRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        RetryRequestNotificationDeliveryRequest:
+            required:
+                - id
             type: object
             properties:
                 id:
@@ -15892,6 +16941,31 @@ components:
                         $ref: '#/components/schemas/GoogleProtobufAny'
                     description: A list of messages that carry the error details.  There is a common set of message types for APIs to use.
             description: 'The `Status` type defines a logical error model suitable for REST APIs and RPC APIs. It contains error code, error message, and error details.'
+        SubscribePublicCustomerRequestRequest:
+            required:
+                - tenantSlug
+                - publicSlug
+                - email
+            type: object
+            properties:
+                tenantSlug:
+                    type: string
+                publicSlug:
+                    type: string
+                email:
+                    type: string
+                notifyMe:
+                    type: boolean
+                notificationConsentTextVersion:
+                    type: string
+                displayName:
+                    type: string
+                organization:
+                    type: string
+                locale:
+                    type: string
+                timezone:
+                    type: string
         SuggestedCandidate:
             type: object
             properties:
@@ -15923,6 +16997,16 @@ components:
                 impact:
                     type: string
             description: SuggestedRecommendation is an actionable suggestion for the operator.
+        SuppressRequestSubscriberRequest:
+            required:
+                - contactId
+                - reason
+            type: object
+            properties:
+                contactId:
+                    type: string
+                reason:
+                    type: string
         Tag:
             type: object
             properties:
@@ -16078,6 +17162,13 @@ components:
             properties:
                 idempotencyKey:
                     type: string
+        TestRequestNotificationWebhookTargetRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
         TransitionFeedbackRequest:
             type: object
             properties:
@@ -16096,6 +17187,18 @@ components:
                     $ref: '#/components/schemas/WorkflowState'
                 toState:
                     $ref: '#/components/schemas/WorkflowState'
+        UnsubscribePublicCustomerRequestRequest:
+            required:
+                - tenantSlug
+                - token
+            type: object
+            properties:
+                tenantSlug:
+                    type: string
+                token:
+                    type: string
+                scope:
+                    type: string
         UpdateApiKeyEnvironmentRequest:
             type: object
             properties:
@@ -16510,6 +17613,49 @@ components:
                     type: string
                 expectedRevision:
                     type: string
+        UpdateRequestNotificationSettingsRequest:
+            type: object
+            properties:
+                emailEnabled:
+                    type: boolean
+                webhookEnabled:
+                    type: boolean
+                enabledEventTypes:
+                    type: object
+                statusPolicy:
+                    type: object
+                defaultConsentMode:
+                    type: string
+                requirePublicUpdateForStatus:
+                    type: boolean
+                maxRecipientsWithoutConfirm:
+                    type: integer
+                    format: int32
+                tenantHourlySendLimit:
+                    type: integer
+                    format: int32
+                contactDailySendLimit:
+                    type: integer
+                    format: int32
+        UpdateRequestNotificationWebhookTargetRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                url:
+                    type: string
+                secret:
+                    type: string
+                eventMask:
+                    type: object
+                includeRecipientIdentity:
+                    type: boolean
+                status:
+                    type: string
         UpdateSavedAuditLogViewRequest:
             type: object
             properties:
@@ -16669,6 +17815,24 @@ components:
                     type: string
                 enabled:
                     type: boolean
+        UpsertRequestNotificationSenderRequest:
+            required:
+                - fromName
+                - fromEmail
+            type: object
+            properties:
+                fromName:
+                    type: string
+                fromEmail:
+                    type: string
+                replyTo:
+                    type: string
+                provider:
+                    type: string
+                providerUrl:
+                    type: string
+                providerSecret:
+                    type: string
         UsageBucket:
             type: object
             properties:
@@ -16714,6 +17878,11 @@ components:
             properties:
                 stepUp:
                     $ref: '#/components/schemas/GdprStepUpStatus'
+        VerifyRequestNotificationSenderRequest:
+            type: object
+            properties:
+                id:
+                    type: string
         WebhookCreateConfig:
             type: object
             properties: {}
@@ -16870,12 +18039,14 @@ tags:
     - name: NotifyTargetService
       description: NotifyTargetService manages a tenant's outbound notification destinations.
     - name: PortalService
+    - name: PublicRequestNotificationService
     - name: PublicVisibilityService
     - name: QualityActionService
       description: |-
         QualityActionService stores the operator action ledger behind the control
          tower. Signals still come from the dedicated quality APIs; this service keeps
          the human workflow state for each recommended action.
+    - name: RequestNotificationService
     - name: SearchService
       description: |-
         SearchService provides semantic search over feedback (#30).

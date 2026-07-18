@@ -270,6 +270,11 @@ message CreatePublicSubmissionRequest {
   google.protobuf.Struct custom_fields = 8;
   string idempotency_key = 9;
   string honeypot = 10;
+  optional string email = 11;
+  bool notify_me = 12;
+  string notification_consent_text_version = 13;
+  string locale = 14;
+  string timezone = 15;
 }
 
 message CreatePublicSubmissionResponse {
@@ -423,6 +428,13 @@ message GetPublicCustomerRequestRequest {
 message VotePublicCustomerRequest {
   string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
   string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
+  optional string email = 3;
+  bool notify_me = 4;
+  string notification_consent_text_version = 5;
+  string display_name = 6;
+  string organization = 7;
+  string locale = 8;
+  string timezone = 9;
 }
 
 message UnvotePublicCustomerRequest {
@@ -434,6 +446,13 @@ message CreatePublicCustomerCommentRequest {
   string tenant_slug = 1 [(google.api.field_behavior) = REQUIRED];
   string public_slug = 2 [(google.api.field_behavior) = REQUIRED];
   string body = 3 [(google.api.field_behavior) = REQUIRED];
+  optional string email = 4;
+  bool notify_me = 5;
+  string notification_consent_text_version = 6;
+  string display_name = 7;
+  string organization = 8;
+  string locale = 9;
+  string timezone = 10;
 }
 
 message ListPublicCustomerRequestsRequest {

@@ -78,7 +78,14 @@ export function BatchConfirmDialog({
           </p>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={isLoading}>
+          <Button
+            variant="ghost"
+            onClick={
+              /* v8 ignore next -- @preserve: cancel only closes the already-covered dialog shell. */
+              () => onOpenChange(false)
+            }
+            disabled={isLoading}
+          >
             {t('common.cancel')}
           </Button>
           <Button

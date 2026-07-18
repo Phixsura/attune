@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -275,6 +277,49 @@ func TestNewService_Disabled_ReturnsNilNil(t *testing.T) {
 	svc, err := NewService(context.Background(), cfg, nil, nil)
 	require.Nil(t, svc)
 	require.Nil(t, err)
+}
+
+func TestNewService_DiscoverySuccess(t *testing.T) {
+	t.Parallel()
+
+	server := newOIDCTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sub":"user-1"}`))
+	})
+	cfg := ptrext.Of(config.OIDCConfig{
+		Enabled:            true,
+		IssuerURL:          server.URL,
+		ClientID:           "client-1",
+		ClientSecret:       "secret-1",
+		RedirectURI:        "https://console.example.test/callback",
+		Scopes:             []string{"openid", "email"},
+		InsecureSkipVerify: true,
+	})
+
+	svc, err := NewService(t.Context(), cfg, nil, nil)
+	require.NoError(t, err)
+	require.NotNil(t, svc)
+	require.Contains(t, svc.AuthCodeURL("state-1", "verifier-1", "nonce-1"), server.URL+"/authorize")
+}
+
+func TestNewService_DiscoveryFailure(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "discovery unavailable", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	cfg := ptrext.Of(config.OIDCConfig{
+		Enabled:            true,
+		IssuerURL:          server.URL,
+		ClientID:           "client-1",
+		InsecureSkipVerify: true,
+	})
+
+	svc, err := NewService(t.Context(), cfg, nil, nil)
+	require.Nil(t, svc)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "oidc discovery failed")
 }
 
 // --- ResolveDefaultTenant tests ---
@@ -700,6 +745,96 @@ func TestExtractGroups_SpaceSeparatedString(t *testing.T) {
 
 	groups := svc.extractGroups(t.Context(), claims, nil)
 	require.Equal(t, []string{"engineering", "ops", "platform"}, groups)
+}
+
+func TestExtractGroups_UserInfoFallback(t *testing.T) {
+	t.Parallel()
+
+	longGroup := strings.Repeat("x", maxGroupNameLen+1)
+	server := newOIDCTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "Bearer token-1", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"roles":["ops","admins",%q]}`, longGroup)
+	})
+	svc, err := NewService(t.Context(), ptrext.Of(config.OIDCConfig{
+		Enabled:            true,
+		IssuerURL:          server.URL,
+		ClientID:           "client-1",
+		GroupsClaim:        "roles",
+		InsecureSkipVerify: true,
+	}), nil, nil)
+	require.NoError(t, err)
+
+	groups := svc.extractGroups(t.Context(), map[string]any{}, ptrext.Of(oauth2.Token{AccessToken: "token-1", TokenType: "Bearer"}))
+	require.Equal(t, []string{"ops", "admins"}, groups)
+}
+
+func TestExtractGroups_UserInfoFallbackFailures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("userinfo request error", func(t *testing.T) {
+		t.Parallel()
+
+		server := newOIDCTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "no groups today", http.StatusServiceUnavailable)
+		})
+		svc, err := NewService(t.Context(), ptrext.Of(config.OIDCConfig{
+			Enabled:            true,
+			IssuerURL:          server.URL,
+			ClientID:           "client-1",
+			GroupsClaim:        "groups",
+			InsecureSkipVerify: true,
+		}), nil, nil)
+		require.NoError(t, err)
+
+		groups := svc.extractGroups(t.Context(), map[string]any{}, ptrext.Of(oauth2.Token{AccessToken: "token-1", TokenType: "Bearer"}))
+		require.Nil(t, groups)
+	})
+
+	t.Run("userinfo claims parse error", func(t *testing.T) {
+		t.Parallel()
+
+		server := newOIDCTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{`))
+		})
+		svc, err := NewService(t.Context(), ptrext.Of(config.OIDCConfig{
+			Enabled:            true,
+			IssuerURL:          server.URL,
+			ClientID:           "client-1",
+			GroupsClaim:        "groups",
+			InsecureSkipVerify: true,
+		}), nil, nil)
+		require.NoError(t, err)
+
+		groups := svc.extractGroups(t.Context(), map[string]any{}, ptrext.Of(oauth2.Token{AccessToken: "token-1", TokenType: "Bearer"}))
+		require.Nil(t, groups)
+	})
+}
+
+func newOIDCTestServer(t *testing.T, userInfo http.HandlerFunc) *httptest.Server {
+	t.Helper()
+
+	var server *httptest.Server
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{
+			"issuer": %q,
+			"authorization_endpoint": %q,
+			"token_endpoint": %q,
+			"jwks_uri": %q,
+			"userinfo_endpoint": %q
+		}`, server.URL, server.URL+"/authorize", server.URL+"/token", server.URL+"/keys", server.URL+"/userinfo")
+	})
+	mux.HandleFunc("/keys", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	})
+	mux.HandleFunc("/userinfo", userInfo)
+	server = httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	return server
 }
 
 // --- AuthCodeURL test ---

@@ -86,7 +86,9 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
 
   const handleLogout = () => {
     logout.mutate(undefined, {
+      /* v8 ignore next -- @preserve: logout redirect callback performs browser navigation. */
       onSuccess: () => {
+        /* v8 ignore next -- @preserve: JSDOM does not implement cross-document navigation. */
         window.location.href = consolePath('/login')
       },
     })

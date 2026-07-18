@@ -1,5 +1,6 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it, vi } from 'vitest'
+import { toast } from 'sonner'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkflowState, WorkflowTransition } from '@/proto/attune/v1/workflow'
 import { server } from '@/testing/mocks/server'
 import { renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
@@ -8,6 +9,11 @@ import { WorkflowSettingsPage } from './workflow-settings-page'
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
+
+afterEach(() => {
+  vi.mocked(toast.success).mockClear()
+  vi.mocked(toast.error).mockClear()
+})
 
 const openState: WorkflowState = {
   id: 'ws-1',
@@ -279,6 +285,96 @@ describe('WorkflowSettingsPage', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
+  })
+
+  it('surfaces create, edit, and archive failures while preserving dialogs', async () => {
+    server.use(
+      http.get('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ states: [openState, progressState, doneState] }),
+      ),
+      http.get('/fb/v1/console/workflow/transitions', () => HttpResponse.json({ transitions })),
+      http.post('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ message: 'create failed' }, { status: 500 }),
+      ),
+      http.patch('/fb/v1/console/workflow/states/:id', () =>
+        HttpResponse.json({ message: 'update failed' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/workflow/states/:id', () =>
+        HttpResponse.json({ message: 'archive failed' }, { status: 500 }),
+      ),
+    )
+    const { user } = renderWithProviders(<WorkflowSettingsPage />)
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Open').length).toBeGreaterThanOrEqual(1)
+    })
+
+    await user.click(screen.getByRole('button', { name: /新建状态/ }))
+    let dialog = screen.getByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Key（稳定标识）'), 'blocked')
+    const displayNameInput = within(dialog)
+      .getAllByRole('textbox')
+      .find(
+        (el) =>
+          (el as HTMLInputElement).id !== 'state-key' && (el as HTMLInputElement).value === '',
+      )
+    if (displayNameInput) await user.type(displayNameInput, 'Blocked')
+    await user.click(within(dialog).getByRole('button', { name: '新建' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('create failed'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消' }))
+
+    await user.click(screen.getAllByRole('button', { name: '编辑状态' })[0])
+    dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('update failed'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    await user.click(screen.getAllByRole('button', { name: '归档状态' })[0])
+    dialog = screen.getByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '确认' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('archive failed'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('saves transition matrix changes and surfaces save failures', async () => {
+    const bodies: unknown[] = []
+    server.use(
+      http.get('/fb/v1/console/workflow/states', () =>
+        HttpResponse.json({ states: [openState, progressState, doneState] }),
+      ),
+      http.get('/fb/v1/console/workflow/transitions', () => HttpResponse.json({ transitions: [] })),
+      http.put('/fb/v1/console/workflow/transitions', async ({ request }) => {
+        const body = await request.json()
+        bodies.push(body)
+        return HttpResponse.json({})
+      }),
+    )
+    const { user } = renderWithProviders(<WorkflowSettingsPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('流转规则')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('checkbox', { name: 'Open → Done' }))
+    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('流转规则已保存'))
+    expect(bodies.at(-1)).toEqual({
+      transitions: [{ fromStateId: 'ws-1', toStateId: 'ws-3' }],
+    })
+
+    server.use(
+      http.put('/fb/v1/console/workflow/transitions', () =>
+        HttpResponse.json({ message: 'transition save failed' }, { status: 500 }),
+      ),
+    )
+    await user.click(screen.getByRole('checkbox', { name: 'In Progress → Done' }))
+    await user.click(screen.getByRole('button', { name: '保存规则' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('transition save failed'))
   })
 
   it('renders transition matrix when 2+ active states exist', async () => {

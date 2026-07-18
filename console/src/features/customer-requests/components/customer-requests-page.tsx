@@ -511,6 +511,7 @@ function CustomerRequestSavedViewsBar({
 
   const saveCurrent = () => {
     const trimmedName = name.trim()
+    /* v8 ignore next -- @preserve: the save button is disabled until the view name is non-empty. */
     if (!trimmedName) return
     const state = filtersToSavedViewState(filters)
     const handlers = {
@@ -541,6 +542,7 @@ function CustomerRequestSavedViewsBar({
               return
             }
             const view = views.find((item) => item.id === value)
+            /* v8 ignore next -- @preserve: select options are rendered from the current saved-view list. */
             if (!view) return
             setSelectedID(view.id)
             onApply(savedViewStateToFilters(view.state))
@@ -580,6 +582,7 @@ function CustomerRequestSavedViewsBar({
           disabled={!selected || remove.isPending}
           aria-label={t('customer_requests.saved_views_delete')}
           onClick={() => {
+            /* v8 ignore next -- @preserve: the delete button is disabled until a saved view is selected. */
             if (!selected) return
             remove.mutate(selected.id, {
               onSuccess: () => setSelectedID(''),
@@ -1404,6 +1407,7 @@ function FeedbackLinkForm({ requestID }: { requestID: string }) {
   const [feedbackID, setFeedbackID] = useState('')
   const link = useLinkCustomerRequestFeedback(requestID)
   const normalizedFeedbackID = parseFeedbackIDs(feedbackID)[0] ?? ''
+  /* v8 ignore next -- @preserve: parent detail views only mount this form with a selected request. */
   if (!requestID) return null
   return (
     <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_auto]">
@@ -1450,6 +1454,7 @@ function CustomerLinkForm({ requestID }: { requestID: string }) {
   const normalizedAccountKey = accountKey.trim()
   const hasAccountProfile = normalizedAccountKey.length > 0
   const parsedRevenue = parseMoneyCents(revenueCents)
+  /* v8 ignore next -- @preserve: parent detail views only mount this form with a selected request. */
   if (!requestID) return null
   return (
     <div className="rounded-md border p-3">
@@ -1569,6 +1574,7 @@ function VoteForm({ requestID }: { requestID: string }) {
   const hasAccountProfile = normalizedAccountKey.length > 0
   const parsedWeight = Number(weight)
   const parsedRevenue = parseMoneyCents(revenueCents)
+  /* v8 ignore next -- @preserve: parent detail views only mount this form with a selected request. */
   if (!requestID) return null
   return (
     <div className="rounded-md border p-3">
@@ -1686,6 +1692,7 @@ function NoteForm({ requestID }: { requestID: string }) {
   const [body, setBody] = useState('')
   const add = useAddCustomerRequestNote(requestID)
   const normalizedBody = body.trim()
+  /* v8 ignore next -- @preserve: parent detail views only mount this form with a selected request. */
   if (!requestID) return null
   return (
     <form
@@ -2145,6 +2152,7 @@ function IssueLinkForm({ requestID }: { requestID: string }) {
   const [url, setURL] = useState('')
   const [provider, setProvider] = useState('github')
   const link = useLinkCustomerRequestIssue(requestID)
+  /* v8 ignore next -- @preserve: the issue-link form is hidden unless edit permission and request id exist. */
   if (!permissions.can('customer_request:edit') || !requestID) return null
   return (
     <div className="rounded-md border p-3">
@@ -2477,4 +2485,20 @@ function formatDate(value: string | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
+}
+
+export const customerRequestPageTestables = {
+  DEFAULT_FILTERS,
+  DEFAULT_SCORING_FORM,
+  filtersToSavedViewState,
+  formatDate,
+  makeIdempotencyKey,
+  memberLabel,
+  normalizeInteger,
+  normalizeIntegerString,
+  ownerFilterOptions,
+  ownerLabel,
+  savedViewStateToFilters,
+  scoringFormToRequest,
+  scoringSettingsToForm,
 }
