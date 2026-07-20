@@ -458,6 +458,22 @@ export interface LinkCustomerRequestIssueRequest {
   externalKey?: string | undefined;
   title?: string | undefined;
   status?: string | undefined;
+  connectionId?: string | undefined;
+  mappingId?: string | undefined;
+  issueNumber?: string | undefined;
+}
+
+export interface CreateCustomerRequestGitHubIssueRequest {
+  id: string;
+  connectionId?: string | undefined;
+  mappingId?: string | undefined;
+}
+
+export interface CreateCustomerRequestGitHubIssueResponse {
+  detail?: CustomerRequestDetail | undefined;
+  runId: string;
+  connectionId: string;
+  mappingId: string;
 }
 
 export interface UnlinkCustomerRequestIssueRequest {
@@ -510,6 +526,9 @@ export interface CustomerRequestService {
   DeleteCustomerRequestNote(request: DeleteCustomerRequestNoteRequest): Promise<CustomerRequestDetail>;
   MergeCustomerRequests(request: MergeCustomerRequestsRequest): Promise<CustomerRequestDetail>;
   LinkCustomerRequestIssue(request: LinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
+  CreateCustomerRequestGitHubIssue(
+    request: CreateCustomerRequestGitHubIssueRequest,
+  ): Promise<CreateCustomerRequestGitHubIssueResponse>;
   UnlinkCustomerRequestIssue(request: UnlinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
   RecordCustomerRequestIssueSync(request: RecordCustomerRequestIssueSyncRequest): Promise<CustomerRequestDetail>;
 }

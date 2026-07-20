@@ -11,22 +11,42 @@ import (
 
 	core "github.com/Phixsura/attune/internal/externalsync"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 const defaultAPIBase = "https://api.github.com"
 
+const (
+	defaultManagedLabelPrefix        = "attune/"
+	defaultLinkedExistingWritePolicy = "read_state_with_backlink"
+	linkedExistingWriteManagedFields = "write_managed_fields"
+	defaultBodySectionMode           = "managed_section"
+)
+
 type providerConfig struct {
-	RepoURL    string `json:"repo_url,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	Repo       string `json:"repo,omitempty"`
-	APIBaseURL string `json:"api_base_url,omitempty"`
+	RepoURL                   string   `json:"repo_url,omitempty"`
+	Owner                     string   `json:"owner,omitempty"`
+	Repo                      string   `json:"repo,omitempty"`
+	APIBaseURL                string   `json:"api_base_url,omitempty"`
+	ManagedLabelPrefix        string   `json:"managed_label_prefix,omitempty"`
+	DefaultLabels             []string `json:"default_labels,omitempty"`
+	SyncComments              *bool    `json:"sync_comments,omitempty"`
+	AllowReopen               bool     `json:"allow_reopen,omitempty"`
+	LinkedExistingWritePolicy string   `json:"linked_existing_write_policy,omitempty"`
+	BodySectionMode           string   `json:"body_section_mode,omitempty"`
 }
 
 type settings struct {
-	owner   string
-	repo    string
-	apiBase string
-	token   string
+	owner                     string
+	repo                      string
+	apiBase                   string
+	token                     string
+	managedLabelPrefix        string
+	defaultLabels             []string
+	syncComments              bool
+	allowReopen               bool
+	linkedExistingWritePolicy string
+	bodySectionMode           string
 }
 
 type cursorState struct {
@@ -51,7 +71,23 @@ func settingsFromConnection(conn core.Connection) (settings, error) {
 	if token == "" {
 		return settings{}, fmt.Errorf("github credential is required")
 	}
-	return settings{owner: owner, repo: repo, apiBase: apiBase, token: token}, nil
+	cfg, err = normalizeProviderOptions(cfg)
+	if err != nil {
+		return settings{}, err
+	}
+	syncComments := ptrext.IndirectOr(cfg.SyncComments, true)
+	return settings{
+		owner:                     owner,
+		repo:                      repo,
+		apiBase:                   apiBase,
+		token:                     token,
+		managedLabelPrefix:        cfg.ManagedLabelPrefix,
+		defaultLabels:             cfg.DefaultLabels,
+		syncComments:              syncComments,
+		allowReopen:               cfg.AllowReopen,
+		linkedExistingWritePolicy: cfg.LinkedExistingWritePolicy,
+		bodySectionMode:           cfg.BodySectionMode,
+	}, nil
 }
 
 func decodeProviderConfig(raw []byte) (providerConfig, error) {
@@ -66,6 +102,34 @@ func decodeProviderConfig(raw []byte) (providerConfig, error) {
 	cfg.Owner = strings.TrimSpace(cfg.Owner)
 	cfg.Repo = strings.TrimSpace(cfg.Repo)
 	cfg.APIBaseURL = strings.TrimSpace(cfg.APIBaseURL)
+	cfg.ManagedLabelPrefix = strings.TrimSpace(cfg.ManagedLabelPrefix)
+	cfg.LinkedExistingWritePolicy = strings.TrimSpace(cfg.LinkedExistingWritePolicy)
+	cfg.BodySectionMode = strings.TrimSpace(cfg.BodySectionMode)
+	return cfg, nil
+}
+
+func normalizeProviderOptions(cfg providerConfig) (providerConfig, error) {
+	if cfg.ManagedLabelPrefix == "" {
+		cfg.ManagedLabelPrefix = defaultManagedLabelPrefix
+	}
+	if strings.ContainsAny(cfg.ManagedLabelPrefix, "\x00\r\n") {
+		return providerConfig{}, fmt.Errorf("github managed_label_prefix contains control characters")
+	}
+	cfg.DefaultLabels = cleanLabels(cfg.DefaultLabels)
+	if cfg.LinkedExistingWritePolicy == "" {
+		cfg.LinkedExistingWritePolicy = defaultLinkedExistingWritePolicy
+	}
+	switch cfg.LinkedExistingWritePolicy {
+	case defaultLinkedExistingWritePolicy, linkedExistingWriteManagedFields:
+	default:
+		return providerConfig{}, fmt.Errorf("github linked_existing_write_policy is unsupported")
+	}
+	if cfg.BodySectionMode == "" {
+		cfg.BodySectionMode = defaultBodySectionMode
+	}
+	if cfg.BodySectionMode != defaultBodySectionMode {
+		return providerConfig{}, fmt.Errorf("github body_section_mode is unsupported")
+	}
 	return cfg, nil
 }
 

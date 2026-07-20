@@ -5,6 +5,7 @@ import {
   ClipboardList,
   DollarSign,
   ExternalLink,
+  Github,
   GitMerge,
   Loader2,
   Plus,
@@ -47,12 +48,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   type CustomerRequestFilters,
   customerRequestDetailQuery,
+  customerRequestGitHubIssueConnectionsQuery,
   customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
+  useCreateCustomerRequestGitHubIssue,
   useCreateCustomerRequestSavedView,
   useDeleteCustomerRequestNote,
   useDeleteCustomerRequestSavedView,
@@ -1111,7 +1114,12 @@ function CustomerRequestDetailSheet({
             {canEdit ? <FeedbackLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
             {canEdit ? <CustomerLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
             {canEdit ? <VoteForm requestID={detail.data.request?.id ?? ''} /> : null}
-            {canEdit ? <IssueLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
+            {canEdit ? (
+              <IssueLinkForm
+                requestID={detail.data.request?.id ?? ''}
+                hasGitHubIssueLink={detail.data.issueLinks.some(isGitHubIssueLink)}
+              />
+            ) : null}
             <DetailSection title={t('customer_requests.notes')}>
               {canEdit ? <NoteForm requestID={detail.data.request?.id ?? ''} /> : null}
               {(detail.data.notes ?? []).length === 0 ? (
@@ -2146,17 +2154,65 @@ function DuplicateRow({ item }: { item: CustomerRequestDuplicate }) {
   )
 }
 
-function IssueLinkForm({ requestID }: { requestID: string }) {
+function isGitHubIssueLink(item: CustomerRequestIssueLink) {
+  return item.provider.toLowerCase() === 'github'
+}
+
+function IssueLinkForm({
+  requestID,
+  hasGitHubIssueLink,
+}: {
+  requestID: string
+  hasGitHubIssueLink: boolean
+}) {
   const { t } = useTranslation()
   const permissions = usePermissions()
   const [url, setURL] = useState('')
   const [provider, setProvider] = useState('github')
+  const [connectionID, setConnectionID] = useState('')
+  const [issueNumber, setIssueNumber] = useState('')
   const link = useLinkCustomerRequestIssue(requestID)
+  const createGitHubIssue = useCreateCustomerRequestGitHubIssue(requestID)
+  const githubConnectionsQuery = useQuery(customerRequestGitHubIssueConnectionsQuery())
+  const githubConnections = githubConnectionsQuery.data ?? []
+  const canUseManagedGitHubLink =
+    provider === 'github' && url.trim() === '' && connectionID !== '' && issueNumber.trim() !== ''
+  const canLinkIssue = url.trim() !== '' || canUseManagedGitHubLink
+  useEffect(() => {
+    if (provider !== 'github' || connectionID !== '' || githubConnections.length === 0) return
+    setConnectionID(githubConnections[0]?.id ?? '')
+  }, [connectionID, githubConnections, provider])
   /* v8 ignore next -- @preserve: the issue-link form is hidden unless edit permission and request id exist. */
   if (!permissions.can('customer_request:edit') || !requestID) return null
+  const handleLinkIssue = () => {
+    const trimmedURL = url.trim()
+    const body =
+      trimmedURL === ''
+        ? {
+            provider: 'github',
+            externalUrl: '',
+            connectionId: connectionID,
+            issueNumber: issueNumber.trim(),
+          }
+        : { provider, externalUrl: trimmedURL }
+    link.mutate(body, {
+      onSuccess: () => {
+        setURL('')
+        setIssueNumber('')
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+    })
+  }
   return (
     <div className="rounded-md border p-3">
-      <div className="grid gap-2 sm:grid-cols-[9rem_minmax(0,1fr)_auto]">
+      <div
+        className={cn(
+          'grid gap-2',
+          hasGitHubIssueLink
+            ? 'sm:grid-cols-[9rem_minmax(0,1fr)_auto]'
+            : 'sm:grid-cols-[9rem_minmax(0,1fr)_auto_auto]',
+        )}
+      >
         <Select value={provider} onValueChange={setProvider}>
           <SelectTrigger>
             <SelectValue />
@@ -2174,17 +2230,8 @@ function IssueLinkForm({ requestID }: { requestID: string }) {
           onChange={(event) => setURL(event.target.value)}
         />
         <Button
-          disabled={link.isPending || url.trim().length === 0}
-          onClick={() =>
-            link.mutate(
-              { provider, externalUrl: url },
-              {
-                onSuccess: () => setURL(''),
-                onError: (err) =>
-                  toast.error(err instanceof Error ? err.message : t('common.error')),
-              },
-            )
-          }
+          disabled={link.isPending || createGitHubIssue.isPending || !canLinkIssue}
+          onClick={handleLinkIssue}
         >
           {link.isPending ? (
             <Loader2 className="size-4 animate-spin" />
@@ -2193,7 +2240,62 @@ function IssueLinkForm({ requestID }: { requestID: string }) {
           )}
           {t('customer_requests.link_issue')}
         </Button>
+        {hasGitHubIssueLink ? null : (
+          <Button
+            variant="secondary"
+            disabled={link.isPending || createGitHubIssue.isPending}
+            onClick={() =>
+              createGitHubIssue.mutate(
+                {},
+                {
+                  onSuccess: () => toast.success(t('customer_requests.create_github_issue_queued')),
+                  onError: (err) =>
+                    toast.error(err instanceof Error ? err.message : t('common.error')),
+                },
+              )
+            }
+          >
+            {createGitHubIssue.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Github className="size-4" />
+            )}
+            {t('customer_requests.create_github_issue')}
+          </Button>
+        )}
       </div>
+      {provider === 'github' ? (
+        <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
+          <Select value={connectionID} onValueChange={setConnectionID}>
+            <SelectTrigger>
+              <SelectValue placeholder={t('customer_requests.github_connection')} />
+            </SelectTrigger>
+            <SelectContent>
+              {githubConnectionsQuery.isLoading ? (
+                <SelectItem disabled value="__loading">
+                  {t('customer_requests.github_connection_loading')}
+                </SelectItem>
+              ) : null}
+              {!githubConnectionsQuery.isLoading && githubConnections.length === 0 ? (
+                <SelectItem disabled value="__empty">
+                  {t('customer_requests.no_github_connections')}
+                </SelectItem>
+              ) : null}
+              {githubConnections.map((connection) => (
+                <SelectItem key={connection.id} value={connection.id}>
+                  {connection.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            value={issueNumber}
+            inputMode="numeric"
+            placeholder={t('customer_requests.issue_number')}
+            onChange={(event) => setIssueNumber(event.target.value)}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

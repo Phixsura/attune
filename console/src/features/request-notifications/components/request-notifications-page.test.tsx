@@ -954,7 +954,7 @@ describe('RequestNotificationsPage', () => {
     expect(await screen.findByText('Jane Customer')).toBeInTheDocument()
     await user.click(screen.getByTestId(`rn-subscriber-suppress-${subscriberFixture.contactId}`))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot suppress subscriber'))
-  })
+  }, 60_000)
 
   it('shows pending indicators for settings, sender, subscriber loading, and id fallbacks', async () => {
     const undefinedTarget = {

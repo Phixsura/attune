@@ -105,6 +105,12 @@ service CustomerRequestService {
       body: "*"
     };
   }
+  rpc CreateCustomerRequestGitHubIssue(CreateCustomerRequestGitHubIssueRequest) returns (CreateCustomerRequestGitHubIssueResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/issue-links:create-github"
+      body: "*"
+    };
+  }
   rpc UnlinkCustomerRequestIssue(UnlinkCustomerRequestIssueRequest) returns (CustomerRequestDetail) {
     option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/issue-links/{issue_link_id}"};
   }
@@ -551,10 +557,26 @@ message MergeCustomerRequestsRequest {
 message LinkCustomerRequestIssueRequest {
   string id = 1 [(google.api.field_behavior) = REQUIRED];
   string provider = 2 [(google.api.field_behavior) = REQUIRED];
-  string external_url = 3 [(google.api.field_behavior) = REQUIRED];
+  string external_url = 3;
   optional string external_key = 4;
   optional string title = 5;
   optional string status = 6;
+  optional string connection_id = 7;
+  optional string mapping_id = 8;
+  optional string issue_number = 9;
+}
+
+message CreateCustomerRequestGitHubIssueRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string connection_id = 2;
+  optional string mapping_id = 3;
+}
+
+message CreateCustomerRequestGitHubIssueResponse {
+  CustomerRequestDetail detail = 1;
+  string run_id = 2;
+  string connection_id = 3;
+  string mapping_id = 4;
 }
 
 message UnlinkCustomerRequestIssueRequest {

@@ -59,6 +59,32 @@ func TestConfigParsesRepoURLsAndDiscoversSchema(t *testing.T) {
 		settings.apiBase != defaultAPIBase || settings.token != "github-token" {
 		t.Fatalf("settings = %+v; want parsed repo and trimmed token", settings)
 	}
+}
+
+func TestSettingsFromConnectionAppliesSafeDefaults(t *testing.T) {
+	settings, err := settingsFromConnection(core.Connection{
+		Credential:     []byte("github-token"),
+		ProviderConfig: marshalPayload(t, providerConfig{Owner: "acme", Repo: "app"}),
+	})
+	if err != nil {
+		t.Fatalf("settingsFromConnection returned error: %v", err)
+	}
+	if !settings.syncComments || settings.managedLabelPrefix != defaultManagedLabelPrefix ||
+		settings.linkedExistingWritePolicy != defaultLinkedExistingWritePolicy {
+		t.Fatalf("settings defaults = %+v; want comment sync and safe write policy", settings)
+	}
+}
+
+func TestNormalizeProviderOptionsRejectsUnsafeManagedLabelPrefix(t *testing.T) {
+	_, err := normalizeProviderOptions(providerConfig{
+		ManagedLabelPrefix: "attune/\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "control characters") {
+		t.Fatalf("normalizeProviderOptions error = %v; want control character rejection", err)
+	}
+}
+
+func TestDiscoverReturnsIssueSchema(t *testing.T) {
 	provider := NewProvider(WithHTTPClient(nil))
 	schemas, err := provider.Discover(context.Background(), core.Connection{})
 	if err != nil {
@@ -91,6 +117,22 @@ func TestConfigRejectsInvalidConnectionSettings(t *testing.T) {
 				ProviderConfig: marshalPayload(t, providerConfig{Owner: "acme", Repo: "app"}),
 			},
 			want: "credential is required",
+		},
+		{
+			name: "unsupported linked existing policy",
+			conn: core.Connection{
+				Credential:     []byte("token"),
+				ProviderConfig: marshalPayload(t, providerConfig{Owner: "acme", Repo: "app", LinkedExistingWritePolicy: "replace_everything"}),
+			},
+			want: "linked_existing_write_policy is unsupported",
+		},
+		{
+			name: "unsupported body section mode",
+			conn: core.Connection{
+				Credential:     []byte("token"),
+				ProviderConfig: marshalPayload(t, providerConfig{Owner: "acme", Repo: "app", BodySectionMode: "replace"}),
+			},
+			want: "body_section_mode is unsupported",
 		},
 	}
 	for _, tt := range tests {
@@ -328,45 +370,7 @@ func TestCheckAndPullIssues(t *testing.T) {
 	setLoopbackEgress(t)
 	requestID := "req-check-1"
 	customerRequestID := uuid.NewString()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-GitHub-Request-Id", requestID)
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app":
-			assertGitHubHeaders(t, r)
-			_, _ = w.Write([]byte(`{"full_name":"acme/app"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues":
-			assertGitHubHeaders(t, r)
-			if got := r.URL.Query().Get("since"); got != "2026-07-07T00:00:00Z" {
-				t.Fatalf("since query = %q, want cursor value", got)
-			}
-			writeJSON(t, w, []map[string]any{
-				{
-					"number":       7,
-					"html_url":     "https://github.com/acme/app/issues/7",
-					"title":        "Sync me",
-					"state":        "open",
-					"state_reason": nil,
-					"locked":       false,
-					"assignee":     map[string]any{"login": "alice"},
-					"assignees":    []map[string]any{{"login": "alice"}, {"login": "bob"}},
-					"labels":       []map[string]any{{"name": "bug"}, {"name": "urgent"}},
-					"updated_at":   "2026-07-08T10:00:00Z",
-					"closed_at":    nil,
-					"body":         "<!-- attune:customer_request_id=" + customerRequestID + " -->",
-				},
-				{
-					"number":       8,
-					"html_url":     "https://github.com/acme/app/pull/8",
-					"title":        "Skip pull request",
-					"state":        "open",
-					"updated_at":   "2026-07-08T11:00:00Z",
-					"pull_request": map[string]any{"url": "https://api.github.com/repos/acme/app/pulls/8"},
-				},
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	server := newCheckAndPullIssuesServer(t, requestID, customerRequestID)
 	t.Cleanup(server.Close)
 
 	provider := NewProvider(WithHTTPClient(server.Client()))
@@ -386,6 +390,13 @@ func TestCheckAndPullIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pull: %v", err)
 	}
+	assertPulledIssueRecord(t, result, customerRequestID)
+	assertPulledIssueComment(t, result)
+	assertPulledIssueCursor(t, result.NextCursor)
+}
+
+func assertPulledIssueRecord(t *testing.T, result core.PullResult, customerRequestID string) {
+	t.Helper()
 	if len(result.Records) != 1 {
 		t.Fatalf("records len = %d, want 1", len(result.Records))
 	}
@@ -400,13 +411,101 @@ func TestCheckAndPullIssues(t *testing.T) {
 	if payload.Title != "Sync me" || payload.Assignee != "alice" || len(payload.Labels) != 2 {
 		t.Fatalf("payload = %+v, want normalized issue fields", payload)
 	}
+}
+
+func assertPulledIssueComment(t *testing.T, result core.PullResult) {
+	t.Helper()
+	if len(result.Children) != 1 {
+		t.Fatalf("children len = %d, want 1", len(result.Children))
+	}
+	child := result.Children[0]
+	if child.ParentKey != "7" || child.Type != "comment" || child.Key != "9001" {
+		t.Fatalf("child = %+v, want issue comment child", child)
+	}
+	commentPayload := normalizedComment{}
+	if err := json.Unmarshal(child.Payload, &commentPayload); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("decode comment payload: %v", err)
+	}
+	if commentPayload.AuthorLogin != "octo" || commentPayload.Marker != "cr-note-1" || commentPayload.BodyDigest == "" {
+		t.Fatalf("comment payload = %+v, want normalized comment fields", commentPayload)
+	}
+}
+
+func assertPulledIssueCursor(t *testing.T, nextCursor []byte) {
+	t.Helper()
 	cursor := cursorState{}
-	if err := json.Unmarshal(result.NextCursor, &cursor); err != nil { // ptrext:allow unmarshal-out-param
+	if err := json.Unmarshal(nextCursor, &cursor); err != nil { // ptrext:allow unmarshal-out-param
 		t.Fatalf("decode cursor: %v", err)
 	}
 	if cursor.UpdatedSince != "2026-07-08T11:00:00Z" || cursor.NextURL != "" {
 		t.Fatalf("cursor = %+v, want high watermark from last page", cursor)
 	}
+}
+
+func newCheckAndPullIssuesServer(t *testing.T, requestID, customerRequestID string) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/app", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-GitHub-Request-Id", requestID)
+		assertGitHubHeaders(t, r)
+		_, _ = w.Write([]byte(`{"full_name":"acme/app"}`))
+	})
+	mux.HandleFunc("/repos/acme/app/issues", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-GitHub-Request-Id", requestID)
+		assertGitHubHeaders(t, r)
+		if got := r.URL.Query().Get("since"); got != "2026-07-07T00:00:00Z" {
+			t.Fatalf("since query = %q, want cursor value", got)
+		}
+		writeJSON(t, w, pullIssuesPayload(customerRequestID))
+	})
+	mux.HandleFunc("/repos/acme/app/issues/7/comments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-GitHub-Request-Id", requestID)
+		assertGitHubHeaders(t, r)
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Fatalf("comments per_page = %q, want 100", got)
+		}
+		writeJSON(t, w, pullIssueCommentsPayload())
+	})
+	return httptest.NewServer(mux)
+}
+
+func pullIssuesPayload(customerRequestID string) []map[string]any {
+	return []map[string]any{
+		{
+			"number":       7,
+			"html_url":     "https://github.com/acme/app/issues/7",
+			"title":        "Sync me",
+			"state":        "open",
+			"state_reason": nil,
+			"locked":       false,
+			"assignee":     map[string]any{"login": "alice"},
+			"assignees":    []map[string]any{{"login": "alice"}, {"login": "bob"}},
+			"labels":       []map[string]any{{"name": "bug"}, {"name": "urgent"}},
+			"updated_at":   "2026-07-08T10:00:00Z",
+			"closed_at":    nil,
+			"comments":     1,
+			"body":         "<!-- attune:customer_request_id=" + customerRequestID + " -->",
+		},
+		{
+			"number":       8,
+			"html_url":     "https://github.com/acme/app/pull/8",
+			"title":        "Skip pull request",
+			"state":        "open",
+			"updated_at":   "2026-07-08T11:00:00Z",
+			"pull_request": map[string]any{"url": "https://api.github.com/repos/acme/app/pulls/8"},
+		},
+	}
+}
+
+func pullIssueCommentsPayload() []map[string]any {
+	return []map[string]any{{
+		"id":         9001,
+		"html_url":   "https://github.com/acme/app/issues/7#issuecomment-9001",
+		"body":       "Please sync this.\n\n<!-- attune:comment_id=cr-note-1 -->",
+		"user":       map[string]any{"id": 123, "login": "octo", "html_url": "https://github.com/octo"},
+		"created_at": "2026-07-08T10:05:00Z",
+		"updated_at": "2026-07-08T10:06:00Z",
+	}}
 }
 
 func TestPullFailureBranches(t *testing.T) {
@@ -469,7 +568,121 @@ func TestPullUsesNextLinkCursor(t *testing.T) {
 	}
 }
 
-func TestIssueURLAndCursorHelpers(t *testing.T) {
+func TestPullUsesIssueHintWithoutAdvancingCursor(t *testing.T) {
+	setLoopbackEgress(t)
+	requests := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.String())
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/42":
+			writeJSON(t, w, map[string]any{
+				"number":     42,
+				"html_url":   "https://github.com/acme/app/issues/42",
+				"title":      "Webhook issue",
+				"state":      "open",
+				"updated_at": "2026-07-08T10:00:00Z",
+				"comments":   1,
+				"body":       "",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/42/comments":
+			writeJSON(t, w, []map[string]any{{
+				"id":         777,
+				"html_url":   "https://github.com/acme/app/issues/42#issuecomment-777",
+				"body":       "A webhook comment",
+				"user":       map[string]any{"login": "octo"},
+				"created_at": "2026-07-08T10:01:00Z",
+				"updated_at": "2026-07-08T10:02:00Z",
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewProvider(WithHTTPClient(server.Client()))
+	result, err := provider.Pull(t.Context(), core.PullRequest{
+		Connection:    testConnection(server.URL),
+		Cursor:        []byte(`{"updated_since":"2026-07-07T00:00:00Z"}`),
+		InputMetadata: []byte(`{"event_type":"issue_comment","external_key":"acme/app#42","comment_id":"777"}`),
+	})
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if len(result.Records) != 1 || result.Records[0].Key != "42" || len(result.Children) != 1 {
+		t.Fatalf("result = %+v, want one issue and one comment", result)
+	}
+	cursor := cursorState{}
+	if err := json.Unmarshal(result.NextCursor, &cursor); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("decode cursor: %v", err)
+	}
+	if cursor.UpdatedSince != "2026-07-07T00:00:00Z" {
+		t.Fatalf("cursor = %+v, want original cursor", cursor)
+	}
+	if len(requests) != 2 || strings.Contains(requests[0], "/issues?") {
+		t.Fatalf("requests = %#v, want single issue pull", requests)
+	}
+}
+
+func TestPullDeletedIssueCommentHintEmitsTombstone(t *testing.T) {
+	setLoopbackEgress(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/42":
+			writeJSON(t, w, map[string]any{
+				"number":     42,
+				"html_url":   "https://github.com/acme/app/issues/42",
+				"title":      "Webhook issue",
+				"state":      "open",
+				"updated_at": "2026-07-08T10:00:00Z",
+				"comments":   0,
+				"body":       "",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/42/comments":
+			writeJSON(t, w, []map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewProvider(WithHTTPClient(server.Client()))
+	result, err := provider.Pull(t.Context(), core.PullRequest{
+		Connection:    testConnection(server.URL),
+		Cursor:        []byte(`{"updated_since":"2026-07-07T00:00:00Z"}`),
+		InputMetadata: []byte(`{"event_type":"issue_comment","action":"deleted","issue_number":42,"comment_id":777}`),
+	})
+	if err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if len(result.Children) != 1 || !result.Children[0].Deleted || result.Children[0].Key != "777" {
+		t.Fatalf("children = %+v, want deleted comment tombstone", result.Children)
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(result.Children[0].Payload, &payload); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("decode deleted comment payload: %v", err)
+	}
+	if payload["deleted"] != true {
+		t.Fatalf("deleted payload = %+v, want deleted=true", payload)
+	}
+}
+
+func TestIssueURLHelpers(t *testing.T) {
+	cfg := settings{owner: "acme", repo: "app", apiBase: "https://api.github.com"}
+	if _, err := issueURL(cfg, 0); err == nil {
+		t.Fatal("issueURL accepted non-positive issue number")
+	}
+	if got, err := issueURL(cfg, 42); err != nil || !strings.HasSuffix(got, "/repos/acme/app/issues/42") {
+		t.Fatalf("issueURL = %q err=%v; want repository issue URL", got, err)
+	}
+	if _, err := issueCommentsURL(settings{apiBase: "%"}, 42); err == nil {
+		t.Fatal("issueCommentsURL accepted malformed API base")
+	}
+	if _, err := repoAPIURL(settings{apiBase: "%"}); err == nil {
+		t.Fatal("repoAPIURL accepted malformed API base")
+	}
+}
+
+func TestValidateNextURLHelpers(t *testing.T) {
 	cfg := settings{owner: "acme", repo: "app", apiBase: "https://api.github.com"}
 	if _, err := validateNextURL(cfg, "https://api.github.com/repos/acme/other/issues?page=2"); err == nil {
 		t.Fatal("validateNextURL returned nil error, want repository path validation error")
@@ -486,6 +699,10 @@ func TestIssueURLAndCursorHelpers(t *testing.T) {
 	if !pathHasBase("/anything", "") || pathHasBase("/repos/acme/app/issues-old", "/repos/acme/app/issues") {
 		t.Fatal("pathHasBase did not honor empty base and segment boundaries")
 	}
+}
+
+func TestIssuesURLAndCursorHelpers(t *testing.T) {
+	cfg := settings{owner: "acme", repo: "app", apiBase: "https://api.github.com"}
 	url, err := issuesURL(cfg, cursorState{UpdatedSince: "2026-07-08T01:02:03Z"})
 	if err != nil {
 		t.Fatalf("issuesURL returned error: %v", err)
@@ -493,8 +710,9 @@ func TestIssueURLAndCursorHelpers(t *testing.T) {
 	if !strings.Contains(url, "since=2026-07-08T01%3A02%3A03Z") || !strings.Contains(url, "per_page=100") {
 		t.Fatalf("issuesURL = %q; want since and pagination parameters", url)
 	}
-	if _, err := repoAPIURL(settings{apiBase: "%"}); err == nil {
-		t.Fatal("repoAPIURL accepted malformed API base")
+	if got, err := issuesURL(cfg, cursorState{NextURL: "https://api.github.com/repos/acme/app/issues?page=2"}); err != nil ||
+		got != "https://api.github.com/repos/acme/app/issues?page=2" {
+		t.Fatalf("issuesURL next cursor = %q err=%v; want validated cursor URL", got, err)
 	}
 	next, err := nextCursor(cfg, cursorState{UpdatedSince: "2026-07-07T00:00:00Z"}, time.Time{}, "")
 	if err != nil || string(next) != `{"updated_since":"2026-07-07T00:00:00Z"}` {
@@ -508,46 +726,9 @@ func TestIssueURLAndCursorHelpers(t *testing.T) {
 func TestPushCreatesAndUpdatesIssues(t *testing.T) {
 	setLoopbackEgress(t)
 	customerRequestID := uuid.NewString()
-	seenCreate := false
-	seenUpdate := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assertGitHubHeaders(t, r)
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/app/issues":
-			seenCreate = true
-			req := ptrext.Of(issueWriteRequest{})
-			decodeRequest(t, r, req)
-			if req.Title != "Create issue" || !strings.Contains(req.Body, customerRequestID) {
-				t.Fatalf("create request = %+v, want title and customer request marker", req)
-			}
-			writeJSON(t, w, map[string]any{
-				"number":     42,
-				"html_url":   "https://github.com/acme/app/issues/42",
-				"title":      req.Title,
-				"state":      "open",
-				"updated_at": "2026-07-08T12:00:00Z",
-			})
-		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/app/issues/42":
-			seenUpdate = true
-			req := ptrext.Of(issueWriteRequest{})
-			decodeRequest(t, r, req)
-			if req.State != "closed" {
-				t.Fatalf("update state = %q, want closed", req.State)
-			}
-			if req.Body != "" {
-				t.Fatalf("update body = %q, want omitted body for state-only update", req.Body)
-			}
-			writeJSON(t, w, map[string]any{
-				"number":     42,
-				"html_url":   "https://github.com/acme/app/issues/42",
-				"title":      "Create issue",
-				"state":      "closed",
-				"updated_at": "2026-07-08T13:00:00Z",
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
+	commentMarker := managedCommentID(customerRequestID)
+	state := ptrext.Of(pushIssueServerState{customerRequestID: customerRequestID, commentMarker: commentMarker})
+	server := newPushIssueServer(t, state)
 	t.Cleanup(server.Close)
 
 	createPayload := marshalPayload(t, localIssuePayload{
@@ -556,7 +737,14 @@ func TestPushCreatesAndUpdatesIssues(t *testing.T) {
 		Labels:            []string{"attune/request"},
 		CustomerRequestID: customerRequestID,
 	})
-	updatePayload := marshalPayload(t, localIssuePayload{ExternalKey: "42", State: "closed"})
+	updatePayload := marshalPayload(t, localIssuePayload{
+		ExternalKey:       "acme/app#42",
+		State:             "closed",
+		Title:             "Should not overwrite",
+		Body:              "Updated request context",
+		Labels:            []string{"attune/status/shipped"},
+		CustomerRequestID: customerRequestID,
+	})
 	provider := NewProvider(WithHTTPClient(server.Client()))
 	result, err := provider.Push(t.Context(), core.PushRequest{
 		Connection: testConnection(server.URL),
@@ -568,11 +756,288 @@ func TestPushCreatesAndUpdatesIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Push: %v", err)
 	}
-	if !seenCreate || !seenUpdate {
-		t.Fatalf("seen create/update = %t/%t, want both", seenCreate, seenUpdate)
+	if !state.seenCreate || !state.seenUpdate {
+		t.Fatalf("seen create/update = %t/%t, want both", state.seenCreate, state.seenUpdate)
+	}
+	if !state.seenCreateComment || !state.seenUpdateComment || state.commentLists != 2 {
+		t.Fatalf("comment sync seen create/update/lists = %t/%t/%d; want create, update, two lists",
+			state.seenCreateComment, state.seenUpdateComment, state.commentLists)
 	}
 	if len(result.Results) != 2 || result.Results[0].Key != "42" || result.Results[1].Version != "2026-07-08T13:00:00Z" {
 		t.Fatalf("push results = %+v, want create and update result metadata", result.Results)
+	}
+}
+
+type pushIssueServerState struct {
+	customerRequestID string
+	commentMarker     string
+	seenCreate        bool
+	seenUpdate        bool
+	seenCreateComment bool
+	seenUpdateComment bool
+	commentLists      int
+}
+
+func newPushIssueServer(t *testing.T, state *pushIssueServerState) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/app/issues", func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubHeaders(t, r)
+		if r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		state.handleCreateIssue(t, w, r)
+	})
+	mux.HandleFunc("/repos/acme/app/issues/42", func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubHeaders(t, r)
+		if r.Method == http.MethodGet {
+			state.handleGetIssue(t, w)
+			return
+		}
+		if r.Method == http.MethodPatch {
+			state.handleUpdateIssue(t, w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/repos/acme/app/issues/42/comments", func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubHeaders(t, r)
+		if r.Method == http.MethodGet {
+			state.handleListComments(t, w, r)
+			return
+		}
+		if r.Method == http.MethodPost {
+			state.handleCreateComment(t, w, r)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/repos/acme/app/issues/comments/9001", func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubHeaders(t, r)
+		if r.Method != http.MethodPatch {
+			http.NotFound(w, r)
+			return
+		}
+		state.handleUpdateComment(t, w, r)
+	})
+	return httptest.NewServer(mux)
+}
+
+func (s *pushIssueServerState) handleCreateIssue(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	s.seenCreate = true
+	req := ptrext.Of(issueWriteRequest{})
+	decodeRequest(t, r, req)
+	if req.Title != "Create issue" || !strings.Contains(req.Body, s.customerRequestID) {
+		t.Fatalf("create request = %+v, want title and customer request marker", req)
+	}
+	writeJSON(t, w, map[string]any{
+		"number":     42,
+		"html_url":   "https://github.com/acme/app/issues/42",
+		"title":      req.Title,
+		"state":      "open",
+		"updated_at": "2026-07-08T12:00:00Z",
+	})
+}
+
+func (s *pushIssueServerState) handleGetIssue(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+	writeJSON(t, w, map[string]any{
+		"number":     42,
+		"html_url":   "https://github.com/acme/app/issues/42",
+		"title":      "Engineer title",
+		"state":      "open",
+		"updated_at": "2026-07-08T12:30:00Z",
+		"labels":     []map[string]string{{"name": "engineer"}, {"name": "attune/status/open"}},
+	})
+}
+
+func (s *pushIssueServerState) handleUpdateIssue(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	s.seenUpdate = true
+	req := ptrext.Of(issueWriteRequest{})
+	decodeRequest(t, r, req)
+	if req.State != "closed" {
+		t.Fatalf("update state = %q, want closed", req.State)
+	}
+	if req.Title != "" || req.Body != "" || len(req.Labels) != 0 {
+		t.Fatalf("safe update request = %+v; want no title/body/labels overwrite", req)
+	}
+	writeJSON(t, w, map[string]any{
+		"number":     42,
+		"html_url":   "https://github.com/acme/app/issues/42",
+		"title":      "Create issue",
+		"state":      "closed",
+		"updated_at": "2026-07-08T13:00:00Z",
+	})
+}
+
+func (s *pushIssueServerState) handleListComments(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	s.commentLists++
+	if got := r.URL.Query().Get("per_page"); got != "100" {
+		t.Fatalf("comment list per_page = %q, want 100", got)
+	}
+	if s.commentLists == 1 {
+		writeJSON(t, w, []map[string]any{})
+		return
+	}
+	writeJSON(t, w, []map[string]any{{
+		"id":         9001,
+		"html_url":   "https://github.com/acme/app/issues/42#issuecomment-9001",
+		"body":       "Old Attune context\n\n<!-- attune:comment_id=" + s.commentMarker + " -->",
+		"created_at": "2026-07-08T12:01:00Z",
+		"updated_at": "2026-07-08T12:01:00Z",
+	}})
+}
+
+func (s *pushIssueServerState) handleCreateComment(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	s.seenCreateComment = true
+	req := ptrext.Of(commentWriteRequest{})
+	decodeRequest(t, r, req)
+	if !strings.Contains(req.Body, s.commentMarker) || !strings.Contains(req.Body, s.customerRequestID) {
+		t.Fatalf("create comment body = %q; want Attune markers", req.Body)
+	}
+	writeJSON(t, w, map[string]any{
+		"id":         9001,
+		"html_url":   "https://github.com/acme/app/issues/42#issuecomment-9001",
+		"body":       req.Body,
+		"updated_at": "2026-07-08T12:02:00Z",
+	})
+}
+
+func (s *pushIssueServerState) handleUpdateComment(t *testing.T, w http.ResponseWriter, r *http.Request) {
+	t.Helper()
+	s.seenUpdateComment = true
+	req := ptrext.Of(commentWriteRequest{})
+	decodeRequest(t, r, req)
+	if !strings.Contains(req.Body, "Updated request context") || !strings.Contains(req.Body, s.commentMarker) {
+		t.Fatalf("update comment body = %q; want refreshed context and marker", req.Body)
+	}
+	writeJSON(t, w, map[string]any{
+		"id":         9001,
+		"html_url":   "https://github.com/acme/app/issues/42#issuecomment-9001",
+		"body":       req.Body,
+		"updated_at": "2026-07-08T13:01:00Z",
+	})
+}
+
+func TestPushWriteManagedFieldsMergesLabelsAndAllowsReopen(t *testing.T) {
+	setLoopbackEgress(t)
+	customerRequestID := uuid.NewString()
+	seenUpdate := false
+	syncComments := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubHeaders(t, r)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/42":
+			writeJSON(t, w, map[string]any{
+				"number":     42,
+				"html_url":   "https://github.com/acme/app/issues/42",
+				"title":      "Existing title",
+				"state":      "closed",
+				"updated_at": "2026-07-08T12:30:00Z",
+				"labels":     []map[string]string{{"name": "engineer"}, {"name": "attune/status/old"}},
+			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/app/issues/42":
+			seenUpdate = true
+			req := ptrext.Of(issueWriteRequest{})
+			decodeRequest(t, r, req)
+			if req.Title != "Managed title" || req.State != "open" ||
+				!strings.Contains(req.Body, customerRequestID) {
+				t.Fatalf("managed update request = %+v; want title, reopen, and marked body", req)
+			}
+			wantLabels := []string{"attune/request", "attune/status/open", "engineer"}
+			if strings.Join(req.Labels, ",") != strings.Join(wantLabels, ",") {
+				t.Fatalf("managed labels = %v; want %v", req.Labels, wantLabels)
+			}
+			writeJSON(t, w, map[string]any{
+				"number":     42,
+				"html_url":   "https://github.com/acme/app/issues/42",
+				"title":      req.Title,
+				"state":      "open",
+				"updated_at": "2026-07-08T13:00:00Z",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewProvider(WithHTTPClient(server.Client()))
+	result, err := provider.Push(t.Context(), core.PushRequest{
+		Connection: testConnectionWithConfig(providerConfig{
+			Owner:                     "acme",
+			Repo:                      "app",
+			APIBaseURL:                server.URL,
+			DefaultLabels:             []string{"attune/request"},
+			SyncComments:              ptrext.Of(syncComments),
+			AllowReopen:               true,
+			LinkedExistingWritePolicy: linkedExistingWriteManagedFields,
+		}),
+		Records: []core.LocalRecord{{
+			ID: customerRequestID,
+			Payload: marshalPayload(t, localIssuePayload{
+				ExternalKey:       "42",
+				Title:             "Managed title",
+				Body:              "Managed body",
+				Status:            "open",
+				Labels:            []string{"attune/status/open"},
+				CustomerRequestID: customerRequestID,
+			}),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Push returned error: %v", err)
+	}
+	if !seenUpdate || len(result.Results) != 1 || result.Results[0].Version != "2026-07-08T13:00:00Z" {
+		t.Fatalf("push result = %+v seenUpdate=%t; want managed update", result, seenUpdate)
+	}
+}
+
+func TestPushReturnsIssueMetadataWhenManagedCommentFails(t *testing.T) {
+	setLoopbackEgress(t)
+	customerRequestID := uuid.NewString()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubHeaders(t, r)
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/app/issues":
+			writeJSON(t, w, map[string]any{
+				"number":     42,
+				"html_url":   "https://github.com/acme/app/issues/42",
+				"title":      "Create issue",
+				"state":      "open",
+				"updated_at": "2026-07-08T12:00:00Z",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/42/comments":
+			http.Error(w, `{"message":"comment outage"}`, http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewProvider(WithHTTPClient(server.Client()))
+	result, err := provider.Push(t.Context(), core.PushRequest{
+		Connection: testConnection(server.URL),
+		Records: []core.LocalRecord{{
+			ID: customerRequestID,
+			Payload: marshalPayload(t, localIssuePayload{
+				Title:             "Create issue",
+				Body:              "Issue body",
+				CustomerRequestID: customerRequestID,
+			}),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Push returned top-level error: %v", err)
+	}
+	if len(result.Results) != 1 || result.Results[0].Key != "42" ||
+		result.Results[0].URL != "https://github.com/acme/app/issues/42" ||
+		result.Results[0].Error == nil || !result.Results[0].Retryable {
+		t.Fatalf("push result = %+v; want issue metadata plus retryable comment failure", result)
 	}
 }
 
@@ -664,7 +1129,10 @@ func TestClassifyHTTPErrorRedactsURL(t *testing.T) {
 }
 
 func testConnection(apiBase string) core.Connection {
-	cfg := providerConfig{Owner: "acme", Repo: "app", APIBaseURL: apiBase}
+	return testConnectionWithConfig(providerConfig{Owner: "acme", Repo: "app", APIBaseURL: apiBase})
+}
+
+func testConnectionWithConfig(cfg providerConfig) core.Connection {
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		panic(err)
@@ -735,14 +1203,26 @@ func TestMarkerRoundTrip(t *testing.T) {
 	}
 }
 
-func TestIssuePayloadTimeAndDecodeBranches(t *testing.T) {
+func TestIssuePayloadTimeBranches(t *testing.T) {
 	now := time.Date(2026, 7, 8, 1, 2, 3, 4, time.FixedZone("SGT", 8*60*60))
 	if issueVersion(apiIssue{}) != "" {
 		t.Fatal("zero issue version should be empty")
 	}
+	if got := commentVersion(apiComment{}); got != "" {
+		t.Fatalf("commentVersion zero = %q; want empty", got)
+	}
+	if got := optionalNonZeroTimeString(time.Time{}); got != "" {
+		t.Fatalf("optionalNonZeroTimeString zero = %q; want empty", got)
+	}
+	if got := optionalTimeString(nil); got != "" {
+		t.Fatalf("optionalTimeString nil = %q; want empty", got)
+	}
 	if got := optionalTimeString(ptrext.Of(now)); got != "2026-07-07T17:02:03.000000004Z" {
 		t.Fatalf("optionalTimeString = %q; want UTC timestamp", got)
 	}
+}
+
+func TestDecodeLocalPayloadBranches(t *testing.T) {
 	payload, err := decodeLocalPayload(core.LocalRecord{Payload: []byte(`{"external_key":" 42 ","body":"","state":" ","status":"shipped","priority":" high ","display_id":" CR-1 ","labels":[" bug ",""],"customer_request_id":" id "}`)})
 	if err != nil {
 		t.Fatalf("decodeLocalPayload returned error: %v", err)
@@ -758,6 +1238,34 @@ func TestIssuePayloadTimeAndDecodeBranches(t *testing.T) {
 	if _, err := decodeLocalPayload(core.LocalRecord{Payload: []byte(`{`)}); err == nil {
 		t.Fatal("decodeLocalPayload accepted invalid JSON")
 	}
+	noBody, err := decodeLocalPayload(core.LocalRecord{Payload: []byte(`{"title":"No body"}`)})
+	if err != nil {
+		t.Fatalf("decodeLocalPayload without body returned error: %v", err)
+	}
+	if noBody.BodySet {
+		t.Fatal("decodeLocalPayload marked absent body as present")
+	}
+}
+
+func TestDecodeCommentPayloadBranches(t *testing.T) {
+	now := time.Date(2026, 7, 8, 1, 2, 3, 4, time.FixedZone("SGT", 8*60*60))
+	if _, err := decodeCommentsResponse([]byte(`not-json`)); err == nil {
+		t.Fatal("decodeCommentsResponse accepted invalid JSON")
+	}
+	if _, err := decodeCommentResponse([]byte(`not-json`)); err == nil {
+		t.Fatal("decodeCommentResponse accepted invalid JSON")
+	}
+	comment := normalizedCommentPayload(apiComment{
+		ID:        77,
+		Body:      "hello",
+		HTMLURL:   "https://github.com/acme/app/issues/42#issuecomment-77",
+		CreatedAt: now,
+		UpdatedAt: now,
+		User:      nil,
+	})
+	if comment.AuthorLogin != "" || comment.CreatedAt == "" || comment.UpdatedAt == "" {
+		t.Fatalf("normalizedCommentPayload = %+v; want anonymous timestamped comment", comment)
+	}
 }
 
 func TestIssuePayloadBuildUpdateRequestBranches(t *testing.T) {
@@ -765,21 +1273,58 @@ func TestIssuePayloadBuildUpdateRequestBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeLocalPayload returned error: %v", err)
 	}
-	req, err := buildUpdateRequest(core.LocalRecord{ID: uuid.NewString()}, payload)
+	req, err := buildUpdateRequest(settings{linkedExistingWritePolicy: defaultLinkedExistingWritePolicy}, core.LocalRecord{ID: uuid.NewString()}, payload, apiIssue{})
 	if err != nil {
 		t.Fatalf("buildUpdateRequest returned error: %v", err)
 	}
-	if req.State != "closed" || req.Body == "" || len(req.Labels) != 1 {
-		t.Fatalf("update request = %+v; want status-derived state, body marker, labels", req)
+	if req.State != "closed" || req.Body != "" || len(req.Labels) != 0 {
+		t.Fatalf("safe update request = %+v; want close-only update", req)
 	}
-	if _, err := buildUpdateRequest(core.LocalRecord{}, localIssuePayload{ExternalKey: "ISS-1"}); err == nil {
+	managedReq, err := buildUpdateRequest(
+		settings{
+			linkedExistingWritePolicy: linkedExistingWriteManagedFields,
+			managedLabelPrefix:        defaultManagedLabelPrefix,
+			defaultLabels:             []string{"attune/request"},
+		},
+		core.LocalRecord{ID: uuid.NewString()},
+		payload,
+		apiIssue{Labels: []apiLabel{{Name: "engineer"}, {Name: "attune/status/old"}}},
+	)
+	if err != nil {
+		t.Fatalf("managed buildUpdateRequest returned error: %v", err)
+	}
+	if managedReq.State != "closed" || managedReq.Body == "" ||
+		strings.Join(managedReq.Labels, ",") != "attune/request,bug,engineer" {
+		t.Fatalf("managed update request = %+v; want marked body and merged labels", managedReq)
+	}
+	if _, err := buildUpdateRequest(settings{}, core.LocalRecord{}, localIssuePayload{ExternalKey: "ISS-1"}, apiIssue{}); err == nil {
 		t.Fatal("buildUpdateRequest accepted non-numeric external key")
 	}
 }
 
-func TestIssuePayloadMarkerAndStateBranches(t *testing.T) {
+func TestNormalizeIssueWriteKey(t *testing.T) {
+	cfg := settings{owner: "acme", repo: "app"}
+	if _, key, err := normalizeIssueWriteKey(cfg, " 42 "); err != nil || key != "42" {
+		t.Fatalf("numeric issue key = %q, %v; want 42", key, err)
+	}
+	if number, key, err := normalizeIssueWriteKey(cfg, "Acme/app.git#42"); err != nil || number != 42 || key != "42" {
+		t.Fatalf("repository issue key = %d/%q, %v; want 42/42", number, key, err)
+	}
+	if _, _, err := normalizeIssueWriteKey(cfg, "other/app#42"); err == nil {
+		t.Fatal("normalizeIssueWriteKey accepted a different owner")
+	}
+	if _, _, err := normalizeIssueWriteKey(cfg, "acme/app#0"); err == nil {
+		t.Fatal("normalizeIssueWriteKey accepted a non-positive issue number")
+	}
+}
+
+func TestIssuePayloadMarkerBranches(t *testing.T) {
 	if got := withCustomerRequestMarker("", "not-a-uuid", ""); got != "" {
 		t.Fatalf("marker with invalid IDs = %q; want empty body", got)
+	}
+	requestID := uuid.NewString()
+	if got := withCustomerRequestMarker("already marked <!-- attune:customer_request_id="+requestID+" -->", requestID, ""); !strings.Contains(got, requestID) {
+		t.Fatalf("withCustomerRequestMarker removed existing marker: %q", got)
 	}
 	if got := markerID(uuid.NewString(), "not-a-uuid"); got == "" {
 		t.Fatal("markerID did not fall back to record ID")
@@ -790,14 +1335,54 @@ func TestIssuePayloadMarkerAndStateBranches(t *testing.T) {
 	if got := extractCustomerRequestID("<!-- attune:customer_request_id=000000000000000000000000000000000000 -->"); got != "" {
 		t.Fatalf("extractCustomerRequestID = %q; want empty for malformed uuid", got)
 	}
+	if got := extractAttuneCommentID("<!-- attune:comment_id=comment-1 -->"); got != "comment-1" {
+		t.Fatalf("extractAttuneCommentID = %q; want comment-1", got)
+	}
+}
+
+func TestManagedCommentBodyBranches(t *testing.T) {
+	requestID := uuid.NewString()
+	if body, marker := managedCommentBody(core.LocalRecord{}, localIssuePayload{}); body != "" || marker != "" {
+		t.Fatalf("managedCommentBody without uuid = %q/%q; want empty", body, marker)
+	}
+	body, marker := managedCommentBody(core.LocalRecord{ID: requestID}, localIssuePayload{})
+	if marker == "" || !strings.Contains(body, "No request context provided.") {
+		t.Fatalf("managedCommentBody empty body = %q/%q; want fallback context", body, marker)
+	}
+	longBody, _ := managedCommentBody(core.LocalRecord{ID: requestID}, localIssuePayload{Body: strings.Repeat("x", 5000)})
+	if !strings.Contains(longBody, strings.Repeat("x", 4500)) ||
+		strings.Contains(longBody, strings.Repeat("x", 4501)) {
+		t.Fatal("managedCommentBody did not truncate long body to 4500 runes")
+	}
+	if got := truncateString("hello", 0); got != "" {
+		t.Fatalf("truncateString max=0 = %q; want empty", got)
+	}
+	if got := truncateString("hi", 10); got != "hi" {
+		t.Fatalf("truncateString short = %q; want original", got)
+	}
+}
+
+func TestGitHubStateBranches(t *testing.T) {
 	if got := githubState(localIssuePayload{Status: "cancelled"}); got != "closed" {
 		t.Fatalf("githubState cancelled = %q; want closed", got)
 	}
-	if got := githubState(localIssuePayload{Status: "triaged"}); got != "open" {
-		t.Fatalf("githubState default = %q; want open", got)
+	if got := githubState(localIssuePayload{Status: "triaged"}); got != "" {
+		t.Fatalf("githubState default = %q; want no implicit reopen", got)
 	}
 	if got := githubState(localIssuePayload{State: "closed", Status: "open"}); got != "closed" {
 		t.Fatalf("githubState explicit = %q; want explicit state", got)
+	}
+	if got := githubStateForUpdate(localIssuePayload{Status: "open"}, false); got != "" {
+		t.Fatalf("githubStateForUpdate reopen disabled = %q; want omitted", got)
+	}
+	if got := githubStateForUpdate(localIssuePayload{Status: "open"}, true); got != "open" {
+		t.Fatalf("githubStateForUpdate reopen enabled = %q; want open", got)
+	}
+	if got := githubStateForUpdate(localIssuePayload{State: "OPEN"}, false); got != "" {
+		t.Fatalf("githubStateForUpdate explicit reopen disabled = %q; want omitted", got)
+	}
+	if got := githubState(localIssuePayload{}); got != "open" {
+		t.Fatalf("githubState empty payload = %q; want open", got)
 	}
 }
 
@@ -809,8 +1394,52 @@ func TestIssuePayloadWriteAndTargetBranches(t *testing.T) {
 		!strings.Contains(string(body), `"title":"Bug"`) {
 		t.Fatalf("writeRequestPayload = %s err=%v", string(body), err)
 	}
-	if _, _, err := writeTarget(settings{apiBase: "%"}, core.LocalRecord{}, localIssuePayload{Title: "Bug"}); err == nil {
-		t.Fatal("writeTarget accepted malformed API base")
+	if body, err := writeCommentPayload("hello"); err != nil ||
+		!strings.Contains(string(body), `"body":"hello"`) {
+		t.Fatalf("writeCommentPayload = %s err=%v", string(body), err)
+	}
+	if _, err := issueCommentURL(settings{apiBase: "%"}, 1); err == nil {
+		t.Fatal("issueCommentURL accepted malformed API base")
+	}
+	if _, err := issueCommentURL(settings{}, 0); err == nil {
+		t.Fatal("issueCommentURL accepted non-positive comment id")
+	}
+}
+
+func TestPositiveNumberHelpers(t *testing.T) {
+	if got := positiveInt(float64(42)); got != 42 {
+		t.Fatalf("positiveInt float64 = %d; want 42", got)
+	}
+	if got := positiveInt(42); got != 42 {
+		t.Fatalf("positiveInt int = %d; want 42", got)
+	}
+	if got := positiveInt(" 42 "); got != 42 {
+		t.Fatalf("positiveInt string = %d; want 42", got)
+	}
+	for _, value := range []any{float64(-1), -1, "nope", nil} {
+		if got := positiveInt(value); got != 0 {
+			t.Fatalf("positiveInt(%v) = %d; want 0", value, got)
+		}
+	}
+	if got := positiveInt64(float64(42)); got != 42 {
+		t.Fatalf("positiveInt64 float64 = %d; want 42", got)
+	}
+	if got := positiveInt64(int64(42)); got != 42 {
+		t.Fatalf("positiveInt64 int64 = %d; want 42", got)
+	}
+	if got := positiveInt64(42); got != 42 {
+		t.Fatalf("positiveInt64 int = %d; want 42", got)
+	}
+	if got := positiveInt64(" 42 "); got != 42 {
+		t.Fatalf("positiveInt64 string = %d; want 42", got)
+	}
+	for _, value := range []any{float64(-1), int64(-1), -1, "nope", nil} {
+		if got := positiveInt64(value); got != 0 {
+			t.Fatalf("positiveInt64(%v) = %d; want 0", value, got)
+		}
+	}
+	if got := issueNumberFromExternalKey("not-a-repo-key"); got != 0 {
+		t.Fatalf("issueNumberFromExternalKey invalid = %d; want 0", got)
 	}
 }
 

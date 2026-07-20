@@ -1190,6 +1190,22 @@ func (r *Router) mountCustomerRequestNotes(cr chi.Router) {
 }
 
 func (r *Router) mountCustomerRequestIssues(cr chi.Router) {
+	cr.With(r.requireMember).Post("/{id}/issue-links:create-github", dispatcher.Bind(
+		"console.CustomerRequestHandler.CreateGitHubIssue",
+		dispatcher.Combine(
+			func() *attunev1.CreateCustomerRequestGitHubIssueRequest {
+				return ptrext.Of(attunev1.CreateCustomerRequestGitHubIssueRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.CreateCustomerRequestGitHubIssueRequest],
+			dispatcher.Param("id", func(req *attunev1.CreateCustomerRequestGitHubIssueRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.CreateGitHubIssue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateCustomerRequestGitHubIssueRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 	cr.With(r.requireMember).Post("/{id}/issue-links", dispatcher.Bind(
 		"console.CustomerRequestHandler.LinkIssue",
 		dispatcher.Combine(

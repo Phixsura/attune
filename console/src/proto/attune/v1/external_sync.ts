@@ -154,6 +154,7 @@ export interface ExternalSyncRun {
   createdAt: string;
   updatedAt: string;
   inFlight: boolean;
+  inputMetadataJson: string;
 }
 
 export interface ExternalSyncAttempt {
@@ -395,6 +396,8 @@ export interface RequestExternalSyncRunRequest {
   connectionId: string;
   mappingId: string;
   direction: ExternalSyncDirection;
+  localObjectId: string;
+  externalKey: string;
 }
 
 export interface ListExternalSyncRunsRequest {

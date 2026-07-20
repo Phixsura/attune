@@ -95,7 +95,7 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 111, count, "should match current migration count")
+	require.Equal(t, 112, count, "should match current migration count")
 }
 
 func TestPublicVisibilityMigrationAllowsPublicModerationAuditActions(t *testing.T) {
@@ -141,6 +141,14 @@ func TestExternalSyncMigrationAllowsAllExternalSyncAuditActions(t *testing.T) {
 	} {
 		require.Contains(t, sql, "'"+action+"'", "audit action must be accepted by chk_audit_action_value")
 	}
+}
+
+func TestGitHubBidirectionalSyncMigrationAllowsCreateIssueAuditAction(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/112_github_bidirectional_issue_sync.sql")
+	require.NoError(t, err)
+	require.Contains(t, string(body), "'customer_request.create_github_issue'")
 }
 
 func TestRecordMigrationSQL(t *testing.T) {

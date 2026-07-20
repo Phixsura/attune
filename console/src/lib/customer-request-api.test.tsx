@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   customerRequestDetailQuery,
+  customerRequestGitHubIssueConnectionsQuery,
   customerRequestKeys,
   customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
@@ -11,6 +12,7 @@ import {
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
+  useCreateCustomerRequestGitHubIssue,
   useCreateCustomerRequestSavedView,
   useDeleteCustomerRequestNote,
   useDeleteCustomerRequestSavedView,
@@ -62,6 +64,77 @@ function wrapperFor(queryClient: QueryClient) {
 }
 
 describe('customer request API', () => {
+  it('filters GitHub issue connections to pull-capable request mappings', async () => {
+    const connection = (id: string, provider = 'github', enabled = true, status = 'active') => ({
+      id,
+      tenantId: 't-1',
+      provider,
+      name: id,
+      enabled,
+      status,
+      authType: 'token',
+      baseUrl: '',
+      providerConfigJson: '{"repo_url":"https://github.com/Phixsura/attune"}',
+      scopes: ['issues'],
+      lastTestedAt: '',
+      lastTestStatus: 'ok',
+      lastError: '',
+      createdBy: 'tester',
+      updatedBy: 'tester',
+      createdAt: '2026-07-07T00:00:00Z',
+      updatedAt: '2026-07-07T00:00:00Z',
+      webhookSecretConfigured: true,
+    })
+    const mapping = (connectionId: string, direction: string, enabled = true) => ({
+      id: `mapping-${connectionId}`,
+      tenantId: 't-1',
+      connectionId,
+      localObjectType: 'customer_request',
+      externalObjectType: 'issue',
+      direction,
+      fieldMappingJson: '{}',
+      statusMappingJson: '{}',
+      conflictPolicy: 'manual',
+      tombstonePolicy: 'mark_stale',
+      enabled,
+      mappingVersion: 1,
+      createdAt: '2026-07-07T00:00:00Z',
+      updatedAt: '2026-07-07T00:00:00Z',
+    })
+    const mappings: Record<string, unknown[]> = {
+      'github-pull': [mapping('github-pull', 'EXTERNAL_SYNC_DIRECTION_PULL')],
+      'github-bidirectional': [
+        mapping('github-bidirectional', 'EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL'),
+      ],
+      'github-push': [mapping('github-push', 'EXTERNAL_SYNC_DIRECTION_PUSH')],
+      'github-disabled-mapping': [
+        mapping('github-disabled-mapping', 'EXTERNAL_SYNC_DIRECTION_PULL', false),
+      ],
+    }
+    server.use(
+      http.get('/fb/v1/console/external-sync/connections', () =>
+        HttpResponse.json({
+          connections: [
+            connection('github-pull'),
+            connection('github-bidirectional'),
+            connection('github-push'),
+            connection('github-disabled-mapping'),
+            connection('github-disabled', 'github', false),
+            connection('jira-active', 'jira'),
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/external-sync/mappings', ({ request }) => {
+        const connectionID = new URL(request.url).searchParams.get('connection_id') ?? ''
+        return HttpResponse.json({ mappings: mappings[connectionID] ?? [] })
+      }),
+    )
+
+    const got = await makeQueryClient().fetchQuery(customerRequestGitHubIssueConnectionsQuery())
+
+    expect(got.map((item) => item.id)).toEqual(['github-pull', 'github-bidirectional'])
+  })
+
   it('builds list query params for filters and pagination', async () => {
     const urls: string[] = []
     server.use(
@@ -340,6 +413,7 @@ describe('customer request API', () => {
         deleteNote: useDeleteCustomerRequestNote(requestID),
         merge: useMergeCustomerRequests(requestID),
         linkIssue: useLinkCustomerRequestIssue(requestID),
+        createGitHubIssue: useCreateCustomerRequestGitHubIssue(requestID),
         unlinkIssue: useUnlinkCustomerRequestIssue(requestID),
         recordSync: useRecordCustomerRequestIssueSync(requestID),
       }),
@@ -383,8 +457,14 @@ describe('customer request API', () => {
       provider: 'github',
       externalUrl: 'https://github.com/Phixsura/attune/issues/212',
       externalKey: '212',
+      connectionId: 'connection-1',
+      issueNumber: '212',
       title: 'Customer requests',
       status: 'open',
+    })
+    await result.current.createGitHubIssue.mutateAsync({
+      connectionId: 'connection-1',
+      mappingId: 'mapping-1',
     })
     await result.current.unlinkIssue.mutateAsync('issue-link-1')
     await result.current.recordSync.mutateAsync({
@@ -393,7 +473,7 @@ describe('customer request API', () => {
       status: 'done',
     })
 
-    await waitFor(() => expect(calls).toHaveLength(15))
+    await waitFor(() => expect(calls).toHaveLength(16))
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       `POST ${baseURL}`,
       `POST ${baseURL}:promote-feedback`,
@@ -408,12 +488,28 @@ describe('customer request API', () => {
       `DELETE ${baseURL}/${requestID}/notes/note-1`,
       `POST ${baseURL}/${requestID}:merge`,
       `POST ${baseURL}/${requestID}/issue-links`,
+      `POST ${baseURL}/${requestID}/issue-links:create-github`,
       `DELETE ${baseURL}/${requestID}/issue-links/issue-link-1`,
       `POST ${baseURL}/${requestID}/issue-links/issue-link-1:record-sync`,
     ])
     expect(calls[2].body).toEqual({ id: requestID, title: 'Renamed' })
     expect(calls[9].body).toEqual({ id: requestID, body: 'Coordinate with ACME.' })
-    expect(calls[14].body).toEqual({
+    expect(calls[12].body).toEqual({
+      id: requestID,
+      provider: 'github',
+      externalUrl: 'https://github.com/Phixsura/attune/issues/212',
+      externalKey: '212',
+      connectionId: 'connection-1',
+      issueNumber: '212',
+      title: 'Customer requests',
+      status: 'open',
+    })
+    expect(calls[13].body).toEqual({
+      id: requestID,
+      connectionId: 'connection-1',
+      mappingId: 'mapping-1',
+    })
+    expect(calls[15].body).toEqual({
       id: requestID,
       issueLinkId: 'issue-link-1',
       syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,

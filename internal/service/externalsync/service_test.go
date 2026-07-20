@@ -643,10 +643,12 @@ func TestRequestRunResolvesDefaultMapping(t *testing.T) {
 	service := New(repository, ptrext.Of(fakeSecretStore{}))
 
 	run, err := service.RequestRun(context.Background(), RequestRunInput{
-		TenantID:     "tenant-1",
-		ConnectionID: connectionID,
-		Actor:        Actor{ID: "admin-1"},
-		AuditActor:   auditlogsvc.Actor{Type: "admin", ID: "admin-1"},
+		TenantID:      "tenant-1",
+		ConnectionID:  connectionID,
+		LocalObjectID: " 22222222-2222-2222-2222-222222222222 ",
+		ExternalKey:   " 42 ",
+		Actor:         Actor{ID: "admin-1"},
+		AuditActor:    auditlogsvc.Actor{Type: "admin", ID: "admin-1"},
 	})
 	if err != nil {
 		t.Fatalf("RequestRun returned error: %v", err)
@@ -660,6 +662,9 @@ func TestRequestRunResolvesDefaultMapping(t *testing.T) {
 	if len(repository.insertedRuns) != 1 || repository.insertedRuns[0].MappingID == nil ||
 		ptrext.Indirect(repository.insertedRuns[0].MappingID) != mappingID {
 		t.Fatalf("inserted runs = %#v; want one run with resolved mapping", repository.insertedRuns)
+	}
+	if got := string(repository.insertedRuns[0].InputMetadata); got != `{"external_key":"42","local_object_id":"22222222-2222-2222-2222-222222222222"}` {
+		t.Fatalf("input metadata = %s; want trimmed run selector", got)
 	}
 }
 
@@ -1204,6 +1209,7 @@ func TestRecordEventCapturesFailedSignatureAsTerminalEvent(t *testing.T) {
 
 func TestRecordGitHubWebhookVerifiesSignatureAndStoresRawDigest(t *testing.T) {
 	connectionID := uuid.New()
+	mappingID := uuid.New()
 	repository := newFakeRepo()
 	repository.connections[connectionID] = repo.Connection{
 		ID:                      connectionID,
@@ -1213,6 +1219,15 @@ func TestRecordGitHubWebhookVerifiesSignatureAndStoresRawDigest(t *testing.T) {
 		AuthType:                "token",
 		WebhookSecretKeyID:      "kid-1",
 		WebhookSecretCiphertext: []byte("ciphertext"),
+	}
+	repository.mappings[mappingID] = repo.Mapping{
+		ID:                 mappingID,
+		TenantID:           "tenant-1",
+		ConnectionID:       connectionID,
+		LocalObjectType:    "customer_request",
+		ExternalObjectType: "issue",
+		Direction:          repo.DirectionBidirectional,
+		Enabled:            true,
 	}
 	secret := []byte("webhook-secret-123")
 	store := ptrext.Of(fakeSecretStore{decryptPlaintext: secret})
@@ -1231,8 +1246,12 @@ func TestRecordGitHubWebhookVerifiesSignatureAndStoresRawDigest(t *testing.T) {
 		t.Fatalf("RecordGitHubWebhook returned error: %v", err)
 	}
 
-	if event.SignatureStatus != repo.EventSignatureVerified || event.Status != repo.EventStatusReceived {
-		t.Fatalf("event = %#v; want verified received event", event)
+	if event.SignatureStatus != repo.EventSignatureVerified || event.Status != repo.EventStatusReplayed {
+		t.Fatalf("event = %#v; want verified replayed event", event)
+	}
+	if len(repository.insertedRuns) != 1 || repository.insertedRuns[0].Trigger != repo.TriggerWebhook ||
+		repository.insertedRuns[0].ActorID != "github-webhook" {
+		t.Fatalf("inserted runs = %#v; want one webhook run", repository.insertedRuns)
 	}
 	if event.PayloadDigest != eventPayloadDigest(body) {
 		t.Fatalf("payload digest = %q; want raw body digest %q", event.PayloadDigest, eventPayloadDigest(body))
@@ -1276,6 +1295,41 @@ func TestRecordGitHubWebhookRecordsFailedSignature(t *testing.T) {
 		event.SignatureStatus != repo.EventSignatureFailed ||
 		event.FailureReason == "" {
 		t.Fatalf("event = %#v; want failed signature event", event)
+	}
+}
+
+func TestRecordGitHubWebhookStoresPingWithoutEnqueue(t *testing.T) {
+	connectionID := uuid.New()
+	repository := newFakeRepo()
+	repository.connections[connectionID] = repo.Connection{
+		ID:                      connectionID,
+		TenantID:                "tenant-1",
+		Provider:                "github",
+		Name:                    "GitHub",
+		AuthType:                "token",
+		WebhookSecretKeyID:      "kid-1",
+		WebhookSecretCiphertext: []byte("ciphertext"),
+	}
+	secret := []byte("webhook-secret-123")
+	service := New(repository, ptrext.Of(fakeSecretStore{decryptPlaintext: secret}))
+	body := []byte(`{"zen":"Approachable is better than simple."}`)
+
+	event, err := service.RecordGitHubWebhook(context.Background(), GitHubWebhookInput{
+		TenantID:        "tenant-1",
+		ConnectionID:    connectionID,
+		EventType:       "ping",
+		DeliveryID:      "delivery-ping",
+		SignatureSHA256: githubSignature(secret, body),
+		Body:            body,
+	})
+	if err != nil {
+		t.Fatalf("RecordGitHubWebhook returned error: %v", err)
+	}
+	if event.SignatureStatus != repo.EventSignatureVerified || event.Status != repo.EventStatusReceived {
+		t.Fatalf("event = %#v; want verified received ping", event)
+	}
+	if len(repository.insertedRuns) != 0 {
+		t.Fatalf("inserted runs = %#v; want no run for ping", repository.insertedRuns)
 	}
 }
 
@@ -1466,11 +1520,21 @@ func TestWorkerProcessOnceMarksSuccess(t *testing.T) {
 			if string(req.Cursor) != `{"page":1}` {
 				t.Fatalf("pull cursor = %s; want page 1 cursor", string(req.Cursor))
 			}
+			if string(req.InputMetadata) != `{"issue_number":42}` {
+				t.Fatalf("pull input metadata = %s; want issue hint", string(req.InputMetadata))
+			}
 			return core.PullResult{
 				Records: []core.ExternalRecord{{
 					Key:     "ISSUE-1",
 					Version: "v1",
 					Payload: []byte(`{"title":"Sync me"}`),
+				}},
+				Children: []core.ExternalChildRecord{{
+					ParentKey: "ISSUE-1",
+					Type:      repo.ChildTypeComment,
+					Key:       "COMMENT-1",
+					Version:   "v1",
+					Payload:   []byte(`{"body":"Please sync me"}`),
 				}},
 				NextCursor: []byte(`{"page":2}`),
 			}, nil
@@ -1506,12 +1570,13 @@ func TestWorkerProcessOnceMarksSuccess(t *testing.T) {
 		Enabled:            true,
 	}
 	repository.claimedRuns = []repo.SyncRun{{
-		ID:           runID,
-		TenantID:     "tenant-1",
-		ConnectionID: connectionID,
-		MappingID:    ptrext.Of(mappingID),
-		Direction:    repo.DirectionPull,
-		Attempts:     1,
+		ID:            runID,
+		TenantID:      "tenant-1",
+		ConnectionID:  connectionID,
+		MappingID:     ptrext.Of(mappingID),
+		Direction:     repo.DirectionPull,
+		Attempts:      1,
+		InputMetadata: []byte(`{"issue_number":42}`),
 	}}
 	worker := NewWorker(New(repository, ptrext.Of(fakeSecretStore{decryptPlaintext: []byte("worker-token")})))
 	worker.Configure(time.Hour, 10, 5)
@@ -1529,20 +1594,31 @@ func TestWorkerProcessOnceMarksSuccess(t *testing.T) {
 	if len(repository.applyPullInputs) != 1 {
 		t.Fatalf("apply pull inputs = %#v; want one applied pull result", repository.applyPullInputs)
 	}
-	gotApply := repository.applyPullInputs[0]
-	if gotApply.MappingID != mappingID || string(gotApply.CursorAfter) != `{"page":2}` || len(gotApply.Records) != 1 {
-		t.Fatalf("applied pull = %#v; want mapping, next cursor, and one record", gotApply)
-	}
+	assertWorkerPullApply(t, repository.applyPullInputs[0], mappingID)
 	if len(repository.attempts) != 1 || repository.attempts[0].Result != "succeeded" {
 		t.Fatalf("attempts = %#v; want one succeeded attempt", repository.attempts)
 	}
 	if len(repository.failedMarks) != 0 {
 		t.Fatalf("failed marks = %#v; want none", repository.failedMarks)
 	}
+	assertWorkerPullMetrics(t, providerName, beforeSeen, beforeChanged)
+}
+
+func assertWorkerPullApply(t *testing.T, gotApply repo.ApplyPullInput, mappingID uuid.UUID) {
+	t.Helper()
+	if gotApply.MappingID != mappingID || string(gotApply.CursorAfter) != `{"page":2}` ||
+		string(gotApply.InputMetadata) != `{"issue_number":42}` ||
+		len(gotApply.Records) != 1 || len(gotApply.Children) != 1 {
+		t.Fatalf("applied pull = %#v; want mapping, next cursor, input metadata, one record, and one child", gotApply)
+	}
+}
+
+func assertWorkerPullMetrics(t *testing.T, providerName string, beforeSeen, beforeChanged float64) {
+	t.Helper()
 	afterSeen := testutil.ToFloat64(infraMetrics.ExternalSyncRecordsTotal.WithLabelValues(providerName, "issue", "pull", "seen"))
 	afterChanged := testutil.ToFloat64(infraMetrics.ExternalSyncRecordsTotal.WithLabelValues(providerName, "issue", "pull", "changed"))
-	if afterSeen-beforeSeen != 1 || afterChanged-beforeChanged != 1 {
-		t.Fatalf("record metrics delta seen=%v changed=%v; want 1/1", afterSeen-beforeSeen, afterChanged-beforeChanged)
+	if afterSeen-beforeSeen != 2 || afterChanged-beforeChanged != 2 {
+		t.Fatalf("record metrics delta seen=%v changed=%v; want 2/2", afterSeen-beforeSeen, afterChanged-beforeChanged)
 	}
 	if got := testutil.ToFloat64(infraMetrics.ExternalSyncDeadRuns.WithLabelValues(providerName, "issue")); got != 2 {
 		t.Fatalf("dead run gauge = %v; want 2", got)
@@ -3128,6 +3204,7 @@ type fakeRepo struct {
 	insertRunErr           error
 	updateMappingErr       error
 	recordEventErr         error
+	enqueueEventErr        error
 	replayEventErr         error
 	retryRunErr            error
 	retryFailureErr        error
@@ -3449,6 +3526,64 @@ func (r *fakeRepo) ReplayEvent(_ context.Context, tenantID string, id uuid.UUID,
 	return ptrext.Of(event), ptrext.Of(run), nil
 }
 
+func (r *fakeRepo) EnqueueEventRun(_ context.Context, tenantID string, id uuid.UUID, actor string) (*repo.SyncEvent, *repo.SyncRun, error) {
+	if r.enqueueEventErr != nil {
+		return nil, nil, r.enqueueEventErr
+	}
+	event, ok := r.events[id]
+	if !ok || event.TenantID != tenantID {
+		return nil, nil, repo.ErrEventNotFound
+	}
+	if event.RunID != nil || event.Status != repo.EventStatusReceived {
+		return ptrext.Of(event), nil, nil
+	}
+	mapping, ok := r.issuePullMapping(tenantID, event.ConnectionID, event.MappingID)
+	if !ok {
+		event.Status = repo.EventStatusIgnored
+		event.FailureReason = "no enabled pull issue mapping"
+		r.events[id] = event
+		return ptrext.Of(event), nil, nil
+	}
+	run := repo.SyncRun{
+		ID:            uuid.New(),
+		TenantID:      tenantID,
+		ConnectionID:  event.ConnectionID,
+		MappingID:     ptrext.Of(mapping.ID),
+		Direction:     repo.DirectionPull,
+		Trigger:       repo.TriggerWebhook,
+		Status:        repo.RunStatusQueued,
+		ActorID:       actor,
+		InputMetadata: []byte(`{"issue_number":42}`),
+	}
+	event.MappingID = ptrext.Of(mapping.ID)
+	event.Status = repo.EventStatusReplayed
+	event.ReplayedAt = ptrext.Of(time.Date(2026, 7, 8, 6, 7, 8, 0, time.UTC))
+	event.ReplayedBy = actor
+	event.RunID = ptrext.Of(run.ID)
+	r.events[id] = event
+	r.insertedRuns = append(r.insertedRuns, run)
+	return ptrext.Of(event), ptrext.Of(run), nil
+}
+
+func (r *fakeRepo) issuePullMapping(tenantID string, connectionID uuid.UUID, mappingID *uuid.UUID) (repo.Mapping, bool) {
+	for _, mapping := range r.mappings {
+		if mapping.TenantID != tenantID || mapping.ConnectionID != connectionID || !mapping.Enabled {
+			continue
+		}
+		if mapping.LocalObjectType != "customer_request" || mapping.ExternalObjectType != "issue" {
+			continue
+		}
+		if mapping.Direction != repo.DirectionPull && mapping.Direction != repo.DirectionBidirectional {
+			continue
+		}
+		if mappingID != nil && mapping.ID != ptrext.Indirect(mappingID) {
+			continue
+		}
+		return mapping, true
+	}
+	return repo.Mapping{}, false
+}
+
 func (r *fakeRepo) ClaimBatch(context.Context, int, string) ([]repo.SyncRun, error) {
 	if r.claimErr != nil {
 		return nil, r.claimErr
@@ -3475,7 +3610,8 @@ func (r *fakeRepo) ApplyPullResult(_ context.Context, in repo.ApplyPullInput) (r
 	if r.applyPullErr != nil {
 		return repo.ApplyStats{}, r.applyPullErr
 	}
-	return repo.ApplyStats{RecordsSeen: len(in.Records), RecordsChanged: len(in.Records)}, nil
+	records := len(in.Records) + len(in.Children)
+	return repo.ApplyStats{RecordsSeen: records, RecordsChanged: records}, nil
 }
 
 func (r *fakeRepo) PreparePushRecords(context.Context, uuid.UUID, string, string, uuid.UUID, string, int) ([]repo.PushRecord, error) {

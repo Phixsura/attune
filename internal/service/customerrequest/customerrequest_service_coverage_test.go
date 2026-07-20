@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
@@ -98,6 +99,10 @@ func TestCustomerRequestServiceValidationGuards(t *testing.T) {
 		}},
 		{name: "LinkIssue invalid provider", call: func() error {
 			_, err := s.LinkIssue(ctx, LinkIssueInput{TenantID: "tenant-1", RequestID: requestID, Provider: "jira"})
+			return err
+		}},
+		{name: "CreateGitHubIssue invalid", call: func() error {
+			_, err := s.CreateGitHubIssue(ctx, CreateGitHubIssueInput{TenantID: "tenant-1", RequestID: requestID, Actor: actor})
 			return err
 		}},
 		{name: "UnlinkIssue invalid", call: func() error {
@@ -249,6 +254,7 @@ func TestCustomerRequestServiceIssueMethodsReturnRepoErrors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	s := newUnreachableCustomerRequestService(t)
+	s.SetIssueCreateRunStore(fakeIssueCreateRunStore{})
 	requestID := uuid.MustParse("aaaaaaaa-1000-4000-8000-000000000006")
 	linkID := uuid.MustParse("aaaaaaaa-1000-4000-8000-000000000007")
 	actor := testCustomerRequestActor()
@@ -262,6 +268,10 @@ func TestCustomerRequestServiceIssueMethodsReturnRepoErrors(t *testing.T) {
 				TenantID: "tenant-1", RequestID: requestID, Provider: "github",
 				ExternalURL: "https://github.com/Phixsura/attune/issues/224", Title: "Request notifications", Actor: actor,
 			})
+			return err
+		}},
+		{name: "CreateGitHubIssue", call: func() error {
+			_, err := s.CreateGitHubIssue(ctx, CreateGitHubIssueInput{TenantID: "tenant-1", RequestID: requestID, Actor: actor})
 			return err
 		}},
 		{name: "UnlinkIssue", call: func() error {
@@ -407,6 +417,22 @@ func expectCustomerRequestServiceError(t *testing.T, name string, call func() er
 	if err := call(); err == nil {
 		t.Fatalf("%s() error = nil, want repo error", name)
 	}
+}
+
+type fakeIssueCreateRunStore struct{}
+
+func (fakeIssueCreateRunStore) CreateCustomerRequestIssueRun(
+	context.Context,
+	externalsyncrepo.CustomerRequestIssueCreateRunInput,
+) (*externalsyncrepo.CustomerRequestIssueCreateRunResult, error) {
+	return nil, errors.New("unexpected issue create run store call")
+}
+
+func (fakeIssueCreateRunStore) CreateCustomerRequestIssuePullRun(
+	context.Context,
+	externalsyncrepo.CustomerRequestIssuePullRunInput,
+) (*externalsyncrepo.CustomerRequestIssuePullRunResult, error) {
+	return nil, errors.New("unexpected issue pull run store call")
 }
 
 type fakeCustomerRequestAuditWriter struct {

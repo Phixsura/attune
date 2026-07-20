@@ -17,6 +17,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
@@ -104,6 +105,61 @@ func TestNormalizeIssueInputDerivesExternalKey(t *testing.T) {
 	}
 	if got.Status != "open" {
 		t.Fatalf("Status = %q, want trimmed status", got.Status)
+	}
+}
+
+func TestResolveManagedIssueLinkTargetRejectsAmbiguousLocatorInput(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	connectionID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	service := &Service{}
+
+	tests := []struct {
+		name string
+		in   LinkIssueInput
+		want error
+	}{
+		{
+			name: "url and issue number",
+			in: LinkIssueInput{
+				TenantID:     "tenant-a",
+				RequestID:    requestID,
+				Provider:     "github",
+				ExternalURL:  "https://github.com/Phixsura/attune/issues/212",
+				ConnectionID: ptrext.Of(connectionID),
+				IssueNumber:  "212",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "issue number without connection",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "github",
+				IssueNumber: "212",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "non github provider with issue number",
+			in: LinkIssueInput{
+				TenantID:     "tenant-a",
+				RequestID:    requestID,
+				Provider:     "jira",
+				ConnectionID: ptrext.Of(connectionID),
+				IssueNumber:  "212",
+			},
+			want: ErrUnsupportedProvider,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := service.resolveManagedIssueLinkTarget(context.Background(), tt.in)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("resolveManagedIssueLinkTarget() error = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -470,6 +526,37 @@ func TestIssueKeyDerivation(t *testing.T) {
 	}
 	if got := deriveExternalKey("github", mustParseCustomerRequestIssueURL(t, "https://github.com/Phixsura/attune/pull/1")); got != "https://github.com/Phixsura/attune/pull/1" {
 		t.Fatalf("deriveExternalKey(non-issue github) = %q", got)
+	}
+}
+
+func TestGitHubIssueCreateHelpers(t *testing.T) {
+	if hasGitHubIssueLink(nil) {
+		t.Fatal("hasGitHubIssueLink(nil) = true, want false")
+	}
+	detail := &Detail{Request: repo.Detail{
+		IssueLinks: []repo.IssueLink{
+			{Provider: "jira"},
+			{Provider: "GitHub"},
+		},
+	}}
+	if !hasGitHubIssueLink(detail) {
+		t.Fatal("hasGitHubIssueLink() = false, want true for GitHub provider")
+	}
+	if hasGitHubIssueLink(&Detail{Request: repo.Detail{IssueLinks: []repo.IssueLink{{Provider: "linear"}}}}) {
+		t.Fatal("hasGitHubIssueLink(linear) = true, want false")
+	}
+
+	for _, err := range []error{externalsyncrepo.ErrMappingNotFound, externalsyncrepo.ErrConflict} {
+		if got := mapIssueCreateRunError(err); !errors.Is(got, repo.ErrConflict) {
+			t.Fatalf("mapIssueCreateRunError(%v) = %v, want repo.ErrConflict", err, got)
+		}
+	}
+	if got := mapIssueCreateRunError(externalsyncrepo.ErrLocalObjectNotFound); !errors.Is(got, repo.ErrNotFound) {
+		t.Fatalf("mapIssueCreateRunError(local object not found) = %v, want repo.ErrNotFound", got)
+	}
+	other := errors.New("boom")
+	if got := mapIssueCreateRunError(other); !errors.Is(got, other) {
+		t.Fatalf("mapIssueCreateRunError(other) = %v, want original error", got)
 	}
 }
 

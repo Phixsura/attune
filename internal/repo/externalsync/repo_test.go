@@ -116,6 +116,61 @@ func TestRepoNormalizeHelpers(t *testing.T) {
 	if got := string(normalizeCursorAfter([]byte(`{"page":1}`), nil)); got != `{"page":1}` {
 		t.Fatalf("empty cursor after should reuse cursor before, got %q", got)
 	}
+
+	hint := pushRunHintFromMetadata([]byte(`{"local_object_id":" cr-1 ","external_key":" ISS-1 ","source":" customer_request_issue_create "}`))
+	if hint.LocalObjectID != "cr-1" || hint.ExternalKey != "ISS-1" || hint.Source != "customer_request_issue_create" {
+		t.Fatalf("push run hint = %+v; want trimmed selector", hint)
+	}
+	if bad := pushRunHintFromMetadata([]byte(`not-json`)); bad != (pushRunHint{}) {
+		t.Fatalf("bad push run hint = %+v; want empty selector", bad)
+	}
+}
+
+func TestRunInputMetadataFromEventIncludesWebhookHints(t *testing.T) {
+	t.Parallel()
+
+	eventID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	raw := runInputMetadataFromEvent(SyncEvent{
+		ID:              eventID,
+		ExternalEventID: "delivery-1",
+		NormalizedPayload: []byte(`{
+			"event_type": "issue_comment",
+			"action": "deleted",
+			"repository": {
+				"full_name": "acme/app",
+				"html_url": "https://github.com/acme/app"
+			},
+			"issue": {
+				"number": 42,
+				"html_url": "https://github.com/acme/app/issues/42"
+			},
+			"comment": {
+				"id": 777
+			}
+		}`),
+	})
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("unmarshal run input metadata: %v", err)
+	}
+	wantStrings := map[string]string{
+		"external_sync_event_id": eventID.String(),
+		"provider_event_id":      "delivery-1",
+		"event_type":             "issue_comment",
+		"action":                 "deleted",
+		"repository_full_name":   "acme/app",
+		"repository_url":         "https://github.com/acme/app",
+		"issue_url":              "https://github.com/acme/app/issues/42",
+	}
+	for key, want := range wantStrings {
+		if got[key] != want {
+			t.Fatalf("metadata[%s] = %#v; want %q in %s", key, got[key], want, raw)
+		}
+	}
+	if got["issue_number"] != float64(42) || got["comment_id"] != float64(777) {
+		t.Fatalf("metadata numeric hints = issue:%#v comment:%#v; want 42/777 in %s",
+			got["issue_number"], got["comment_id"], raw)
+	}
 }
 
 func TestRepoPayloadDigestAndStringHelpers(t *testing.T) {
@@ -240,12 +295,12 @@ func TestRepoConnectionMappingRunEventScanners(t *testing.T) {
 		runID, tenantID, connectionID, ptrext.Of(mappingID), DirectionPull, TriggerManual, RunStatusRunning,
 		timePtr(now), stringPtr("worker-1"), 2, now.Add(time.Minute), timePtr(now),
 		timePtr(now.Add(time.Minute)), []byte(`{"before":1}`), []byte(`{"after":1}`),
-		5, 4, 1, 1, "rate_limited", "slow down", "admin", now, now,
+		[]byte(`{"issue_number":228}`), 5, 4, 1, 1, "rate_limited", "slow down", "admin", now, now,
 	}})
 	if err != nil {
 		t.Fatalf("scanRun returned error: %v", err)
 	}
-	if run.MappingID == nil || run.ClaimedBy != "worker-1" || run.RecordsSeen != 5 {
+	if run.MappingID == nil || run.ClaimedBy != "worker-1" || run.RecordsSeen != 5 || string(run.InputMetadata) == "" {
 		t.Fatalf("run = %+v", run)
 	}
 
@@ -322,7 +377,7 @@ func TestRepoConflictTimelineAndLinkScanners(t *testing.T) {
 
 	link, err := scanObjectLink(fakeRow{values: []any{
 		uuid.MustParse("77777777-7777-7777-7777-777777777777"), "cr-1", "ISS-1",
-		"https://github.com/acme/app/issues/1", "v1", SyncStatePending,
+		"https://github.com/acme/app/issues/1", "v1", SyncStatePending, false,
 	}})
 	if err != nil || link.SyncState != SyncStatePending {
 		t.Fatalf("link=%+v err=%v", link, err)
@@ -428,7 +483,7 @@ func TestApplyPullRecordBranches(t *testing.T) {
 
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{rows: []fakeRow{
-			{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStatePending}},
+			{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStatePending, false}},
 			{values: []any{1}},
 		}})
 		outcome, err := applyPullRecord(ctx, tx, input, mapping, PullRecord{
@@ -450,7 +505,7 @@ func TestApplyPullRecordBranches(t *testing.T) {
 
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{
-			rows:  []fakeRow{{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStateSynced}}},
+			rows:  []fakeRow{{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStateSynced, false}}},
 			execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 1")},
 		})
 		outcome, err := applyPullRecord(ctx, tx, input, mapping, PullRecord{
@@ -465,6 +520,28 @@ func TestApplyPullRecordBranches(t *testing.T) {
 		}
 		if outcome.changed != 0 || tx.execIdx != 1 {
 			t.Fatalf("outcome=%+v execs=%d", outcome, tx.execIdx)
+		}
+	})
+
+	t.Run("local tombstone skips existing external link", func(t *testing.T) {
+		t.Parallel()
+
+		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+		tx := ptrext.Of(fakeTx{rows: []fakeRow{
+			{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStateDeleted, true}},
+		}})
+		outcome, err := applyPullRecord(ctx, tx, input, mapping, PullRecord{
+			ExternalKey:       "ISS-1",
+			ExternalURL:       "https://example.test/1",
+			ExternalVersion:   "v2",
+			ExternalUpdatedAt: ptrext.Of(now),
+			Payload:           []byte(`{"title":"bug"}`),
+		})
+		if err != nil {
+			t.Fatalf("applyPullRecord returned error: %v", err)
+		}
+		if outcome != (pullApplyOutcome{}) || tx.execIdx != 0 {
+			t.Fatalf("outcome=%+v execs=%d, want skipped tombstone", outcome, tx.execIdx)
 		}
 	})
 
@@ -574,7 +651,7 @@ func TestApplyPushRecordBranches(t *testing.T) {
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{rows: []fakeRow{
 			{values: []any{true}},
-			{values: []any{linkID, "other-local", "ISS-1", "https://example.test/1", "v1", SyncStateSynced}},
+			{values: []any{linkID, "other-local", "ISS-1", "https://example.test/1", "v1", SyncStateSynced, false}},
 			{values: []any{1}},
 		}})
 		outcome, err := applyPushRecord(ctx, tx, input, mapping, record, PushResult{
@@ -684,7 +761,7 @@ func TestRepoLinkValidationHelpers(t *testing.T) {
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{rows: []fakeRow{
 			{err: pgx.ErrNoRows},
-			{values: []any{linkID, requestID.String(), "ISS-1", "https://example.test/1", "v1", SyncStateSynced}},
+			{values: []any{linkID, requestID.String(), "ISS-1", "https://example.test/1", "v1", SyncStateSynced, false}},
 		}})
 		link, err := findLinkByExternal(ctx, tx, input.TenantID, mapping.ID, mapping.ExternalObjectType, "ISS-1")
 		if link != nil || err != nil {
@@ -728,7 +805,7 @@ func TestRepoLinkMutationHelpers(t *testing.T) {
 		ExternalURL:       "https://example.test/1",
 		ExternalVersion:   now.Format(time.RFC3339Nano),
 		ExternalUpdatedAt: ptrext.Of(now),
-		Payload:           []byte(`{"title":"Bug","state":"open"}`),
+		Payload:           []byte(`{"title":"Bug","state":"closed","assignee":"octo"}`),
 	}
 	pushRecord := PushRecord{
 		LocalObjectID:  requestID.String(),
@@ -783,6 +860,10 @@ func TestRepoLinkMutationHelpers(t *testing.T) {
 		}})
 		if err := upsertCustomerRequestIssueLink(ctx, tx, pullInput, mapping, pullRecord, requestID.String(), linkID, pullRecord.Payload); err != nil {
 			t.Fatalf("upsert issue link returned error: %v", err)
+		}
+		if len(tx.execArgs) == 0 || len(tx.execArgs[0]) != 11 ||
+			tx.execArgs[0][8] != true || tx.execArgs[0][9] != "closed" || tx.execArgs[0][10] != "octo" {
+			t.Fatalf("issue link update args = %#v; want pull external fields", tx.execArgs)
 		}
 		if err := upsertCursor(ctx, tx, ApplyPullInput{
 			TenantID:    pullInput.TenantID,
@@ -848,10 +929,33 @@ func TestRepoLinkMutationHelpers(t *testing.T) {
 		if err := upsertCustomerRequestIssueLinkFromPush(ctx, tx, pushInput, pushRecord, pushResult, requestID, linkID); err != nil {
 			t.Fatalf("upsert from push returned error: %v", err)
 		}
+		if len(tx.execArgs) == 0 || len(tx.execArgs[0]) != 11 || tx.execArgs[0][8] != false {
+			t.Fatalf("push issue link update args = %#v; want external fields untouched", tx.execArgs)
+		}
 		if tx.execIdx != 1 {
 			t.Fatalf("exec count = %d, want 1", tx.execIdx)
 		}
 	})
+}
+
+func TestRepoIssueExternalProjectionHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got := issueExternalStatusCategory([]byte(`{"state":"open"}`)); got != "open" {
+		t.Fatalf("open status category = %q", got)
+	}
+	if got := issueExternalStatusCategory([]byte(`{"state":"closed"}`)); got != "closed" {
+		t.Fatalf("closed status category = %q", got)
+	}
+	if got := issueExternalStatusCategory([]byte(`{"state":"reopened"}`)); got != "unknown" {
+		t.Fatalf("unknown status category = %q", got)
+	}
+	if got := issueExternalAssignee([]byte(`{"assignee":" octo "}`)); got != "octo" {
+		t.Fatalf("single assignee = %q", got)
+	}
+	if got := issueExternalAssignee([]byte(`{"assignees":[" octo ","hubot",""]}`)); got != "octo, hubot" {
+		t.Fatalf("multi assignee = %q", got)
+	}
 }
 
 func TestRepoApplyHelperErrorBranches(t *testing.T) {
@@ -941,6 +1045,21 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		}
 	})
 
+	t.Run("push result against local tombstone records failure", func(t *testing.T) {
+		t.Parallel()
+
+		outcome, err := applyPushRecord(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{
+				{values: []any{true}},
+				{values: []any{linkID, requestID.String(), "ISS-1", "https://example.test/1", "v1", SyncStateDeleted, true}},
+			},
+			execs: []pgconn.CommandTag{pgxconnTag("INSERT 0 1")},
+		}), pushInput, mapping, pushRecord, pushResult)
+		if err != nil || outcome.failed != 1 {
+			t.Fatalf("outcome=%+v err=%v, want local tombstone failure", outcome, err)
+		}
+	})
+
 	t.Run("push downstream errors propagate from record apply", func(t *testing.T) {
 		t.Parallel()
 
@@ -978,7 +1097,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		outcome, err := applyPushRecord(ctx, ptrext.Of(fakeTx{rows: []fakeRow{
 			{values: []any{true}},
 			{err: pgx.ErrNoRows},
-			{values: []any{linkID, requestID.String(), "ISS-2", "https://example.test/2", "v1", SyncStateSynced}},
+			{values: []any{linkID, requestID.String(), "ISS-2", "https://example.test/2", "v1", SyncStateSynced, false}},
 			{values: []any{1}},
 		}}), pushInput, mapping, pushRecord, pushResult)
 		if err != nil || outcome.conflicts != 1 {
@@ -1018,7 +1137,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		if _, err := findLinkByLocal(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput.TenantID, mapping.ID, mapping.LocalObjectType, pullRecord.LocalObjectID); err == nil {
 			t.Fatal("findLinkByLocal error returned nil")
 		}
-		if _, err := insertExternalLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput, mapping, pullRecord, pullRecord.LocalObjectID); err == nil {
+		if _, err := insertExternalLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput, mapping, pullRecord, pullRecord.LocalObjectID, pullRecord.Payload); err == nil {
 			t.Fatal("insertExternalLink error returned nil")
 		}
 		if _, err := createConflict(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput, mapping, objectLinkRow{ID: linkID, LocalObjectID: pullRecord.LocalObjectID, ExternalKey: pullRecord.ExternalKey}, pullRecord, "version_mismatch", pullRecord.Payload); err == nil {
@@ -1105,7 +1224,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		outcome, err := applyPullRecord(ctx, ptrext.Of(fakeTx{rows: []fakeRow{
 			{values: []any{true}},
 			{err: pgx.ErrNoRows},
-			{values: []any{linkID, pullRecord.LocalObjectID, "ISS-2", "https://example.test/2", "v1", SyncStateSynced}},
+			{values: []any{linkID, pullRecord.LocalObjectID, "ISS-2", "https://example.test/2", "v1", SyncStateSynced, false}},
 			{values: []any{1}},
 		}}), pullInput, mapping, pullRecord)
 		if err != nil || outcome.conflicts != 1 {
@@ -1115,7 +1234,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 			rows: []fakeRow{
 				{values: []any{true}},
 				{err: pgx.ErrNoRows},
-				{values: []any{linkID, pullRecord.LocalObjectID, pullRecord.ExternalKey, "https://example.test/old", "v1", SyncStatePending}},
+				{values: []any{linkID, pullRecord.LocalObjectID, pullRecord.ExternalKey, "https://example.test/old", "v1", SyncStatePending, false}},
 			},
 			execs: []pgconn.CommandTag{pgxconnTag("UPDATE 1"), pgxconnTag("INSERT 0 1")},
 		}), pullInput, mapping, pullRecord)
@@ -1409,6 +1528,7 @@ type fakeTx struct {
 	rows     []fakeRow
 	execs    []pgconn.CommandTag
 	execErrs []error
+	execArgs [][]any
 	rowIdx   int
 	execIdx  int
 }
@@ -1427,7 +1547,8 @@ func (tx *fakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDes
 	return nil, nil
 }
 
-func (tx *fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (tx *fakeTx) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	tx.execArgs = append(tx.execArgs, args)
 	if tx.execIdx < len(tx.execErrs) && tx.execErrs[tx.execIdx] != nil {
 		err := tx.execErrs[tx.execIdx]
 		tx.execIdx++

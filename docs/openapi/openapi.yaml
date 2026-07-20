@@ -1839,6 +1839,36 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/issue-links:create-github:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_CreateCustomerRequestGitHubIssue
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateCustomerRequestGitHubIssueRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateCustomerRequestGitHubIssueResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/customer-requests/{id}/notes:
         post:
             tags:
@@ -10790,6 +10820,28 @@ components:
                 retryAfterSeconds:
                     type: integer
                     format: int32
+        CreateCustomerRequestGitHubIssueRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
+        CreateCustomerRequestGitHubIssueResponse:
+            type: object
+            properties:
+                detail:
+                    $ref: '#/components/schemas/CustomerRequestDetail'
+                runId:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
         CreateCustomerRequestRequest:
             required:
                 - title
@@ -12879,6 +12931,8 @@ components:
                     type: string
                 inFlight:
                     type: boolean
+                inputMetadataJson:
+                    type: string
         ExternalSyncRunDetail:
             type: object
             properties:
@@ -13975,7 +14029,6 @@ components:
             required:
                 - id
                 - provider
-                - externalUrl
             type: object
             properties:
                 id:
@@ -13989,6 +14042,12 @@ components:
                 title:
                     type: string
                 status:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
+                issueNumber:
                     type: string
         LinkCustomerToCustomerRequestRequest:
             required:
@@ -15968,6 +16027,10 @@ components:
                         - EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL
                     type: string
                     format: enum
+                localObjectId:
+                    type: string
+                externalKey:
+                    type: string
         RequestNotificationDelivery:
             type: object
             properties:

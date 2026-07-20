@@ -88,6 +88,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   the backend registry and hides the test-only `noop` provider, so GitHub and
   Jira are discoverable from the same create-connection dialog.
 
+- GitHub external sync now supports webhook-triggered bidirectional issue
+  refreshes and pulls issue comments into a deduplicated external comment
+  ledger, including event hints for single-issue replay, deleted-comment
+  tombstones, managed manual-link bridging, single-record manual run selectors,
+  a Customer Request detail action that queues single-request GitHub issue
+  creation through external sync, managed link-existing by GitHub connection
+  and issue number or by matching GitHub URL with an immediate targeted pull
+  run, ambiguous same-repository managed URL links and managed issue rebinding
+  conflicts are rejected, managed issue unlink writes a local tombstone so
+  later pulls and scheduled pushes do not silently relink or recreate it unless
+  an operator explicitly links or creates it again, GitHub status category
+  and assignee projection into Customer Request delivery links, provider payload
+  snapshots for delivery timeline labels and assignees, safe linked-issue
+  updates that avoid overwriting GitHub-authored title/body/labels by default,
+  marker-deduped managed request-context comments, run input metadata
+  diagnostics, and comment timeline entries without advancing the scheduled
+  cursor.
+
 - **Close-the-loop request notifications.**
   Added tenant-scoped request notification settings, sender configuration,
   public request subscriptions, unsubscribe and contact-confirmation flows,

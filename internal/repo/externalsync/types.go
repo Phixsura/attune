@@ -10,13 +10,14 @@ import (
 )
 
 var (
-	ErrConnectionNotFound = errors.New("external sync connection not found")
-	ErrMappingNotFound    = errors.New("external sync mapping not found")
-	ErrRunNotFound        = errors.New("external sync run not found")
-	ErrFailureNotFound    = errors.New("external sync failure not found")
-	ErrConflictNotFound   = errors.New("external sync conflict not found")
-	ErrEventNotFound      = errors.New("external sync event not found")
-	ErrConflict           = errors.New("external sync conflict")
+	ErrConnectionNotFound  = errors.New("external sync connection not found")
+	ErrMappingNotFound     = errors.New("external sync mapping not found")
+	ErrRunNotFound         = errors.New("external sync run not found")
+	ErrLocalObjectNotFound = errors.New("external sync local object not found")
+	ErrFailureNotFound     = errors.New("external sync failure not found")
+	ErrConflictNotFound    = errors.New("external sync conflict not found")
+	ErrEventNotFound       = errors.New("external sync event not found")
+	ErrConflict            = errors.New("external sync conflict")
 )
 
 const (
@@ -54,6 +55,8 @@ const (
 	SyncStateFailed   = "failed"
 	SyncStateConflict = "conflict"
 	SyncStateDeleted  = "deleted"
+
+	ChildTypeComment = "comment"
 
 	EventSignatureVerified    = "verified"
 	EventSignatureFailed      = "failed"
@@ -123,6 +126,7 @@ type SyncRun struct {
 	FinishedAt       *time.Time
 	CursorBefore     []byte
 	CursorAfter      []byte
+	InputMetadata    []byte
 	RecordsSeen      int
 	RecordsChanged   int
 	RecordsFailed    int
@@ -262,6 +266,33 @@ type BackfillResult struct {
 	Run     SyncRun
 }
 
+type CustomerRequestIssueCreateRunInput struct {
+	TenantID     string
+	RequestID    uuid.UUID
+	ConnectionID *uuid.UUID
+	MappingID    *uuid.UUID
+	ActorID      string
+}
+
+type CustomerRequestIssuePullRunInput struct {
+	TenantID     string
+	RequestID    uuid.UUID
+	ConnectionID uuid.UUID
+	MappingID    uuid.UUID
+	ExternalKey  string
+	ActorID      string
+}
+
+type CustomerRequestIssueCreateRunResult struct {
+	Mapping Mapping
+	Run     SyncRun
+}
+
+type CustomerRequestIssuePullRunResult struct {
+	Mapping Mapping
+	Run     SyncRun
+}
+
 type BatchResolveConflictsResult struct {
 	Conflicts []ConflictRow
 }
@@ -314,16 +345,29 @@ type PullRecord struct {
 	Payload           []byte
 }
 
+type PullChildRecord struct {
+	ParentExternalKey string
+	Type              string
+	ExternalKey       string
+	ExternalURL       string
+	ExternalVersion   string
+	ExternalUpdatedAt *time.Time
+	Deleted           bool
+	Payload           []byte
+}
+
 type ApplyPullInput struct {
-	TenantID     string
-	RunID        uuid.UUID
-	ConnectionID uuid.UUID
-	MappingID    uuid.UUID
-	Provider     string
-	StreamKey    string
-	CursorBefore []byte
-	CursorAfter  []byte
-	Records      []PullRecord
+	TenantID      string
+	RunID         uuid.UUID
+	ConnectionID  uuid.UUID
+	MappingID     uuid.UUID
+	Provider      string
+	StreamKey     string
+	CursorBefore  []byte
+	CursorAfter   []byte
+	InputMetadata []byte
+	Records       []PullRecord
+	Children      []PullChildRecord
 }
 
 type PushRecord struct {

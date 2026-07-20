@@ -590,6 +590,8 @@ export function ExternalSyncPage() {
                 mappingId: mapping?.id ?? '',
                 direction:
                   mapping?.direction ?? ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_UNSPECIFIED,
+                localObjectId: '',
+                externalKey: '',
               })
             }
           />
@@ -1699,7 +1701,7 @@ export function RunDetailCard({
           />
         ) : (
           <>
-            <div className="grid gap-2 text-xs sm:grid-cols-2">
+            <div className="grid gap-2 text-xs sm:grid-cols-3">
               <JsonBlock
                 label={t('external_sync.detail.cursor_before')}
                 value={run.cursorBeforeJson}
@@ -1707,6 +1709,10 @@ export function RunDetailCard({
               <JsonBlock
                 label={t('external_sync.detail.cursor_after')}
                 value={run.cursorAfterJson}
+              />
+              <JsonBlock
+                label={t('external_sync.detail.input_metadata')}
+                value={run.inputMetadataJson}
               />
             </div>
 

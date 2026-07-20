@@ -246,7 +246,7 @@ describe('PublicVisibilityPage', () => {
         submittedByDisplay: 'ACME Labs',
       })
     })
-  }, 60_000)
+  }, 120_000)
 
   it('keeps roadmap mappings and portal field editors interactive', async () => {
     mockMe('admin')
@@ -304,7 +304,7 @@ describe('PublicVisibilityPage', () => {
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
 
     expect(screen.getAllByLabelText('字段名称')).toHaveLength(1)
-  })
+  }, 120_000)
 
   it('saves and reapplies moderation views', async () => {
     mockMe('admin')

@@ -471,11 +471,341 @@ func TestVoteAndIssueTransactions(t *testing.T) {
 	require.Equal(t, linkID, issue.ID)
 	require.Equal(t, "github", issue.Provider)
 
-	unlinkIssueTx := &fakeRepoTx{rows: []fakeRepoRow{issueLinkRow(linkID, now, nil)}, execs: []pgconn.CommandTag{pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("UPDATE 1")}}
+	unlinkIssueTx := &fakeRepoTx{
+		rows: []fakeRepoRow{issueLinkRow(linkID, now, nil)},
+		execs: []pgconn.CommandTag{
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("DELETE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+		},
+	}
 	removedIssue, err := repo.UnlinkIssueTx(ctx, unlinkIssueTx, "tenant-a", requestID, linkID, "admin-1")
 	require.NoError(t, err)
 	require.Equal(t, linkID, removedIssue.ID)
 	require.NoError(t, upsertAccountProfileTx(ctx, &fakeRepoTx{}, "tenant-a", AccountProfileInput{}))
+}
+
+func TestLinkIssueBindsManagedGitHubExternalObjectLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 14, 0, 0, 0, time.UTC)
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{err: pgx.ErrNoRows},
+			{err: pgx.ErrNoRows},
+			{values: []any{externalLinkID}},
+			issueLinkRow(issueID, now, nil),
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"repo_url":"https://github.com/Phixsura/attune.git"}`),
+			"",
+		}}}},
+		execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 1"), pgconn.NewCommandTag("UPDATE 1")},
+	}
+
+	issue, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		Title:       "Customer request object",
+		Status:      "open",
+		ActorID:     "admin-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, issueID, issue.ID)
+	require.Equal(t, 5, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 2, tx.execIdx)
+}
+
+func TestLinkIssueRejectsManagedGitHubIssueAlreadyLinkedElsewhere(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, "11111111-1111-1111-1111-111111111111", false}},
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+	}
+
+	_, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.ErrorIs(t, err, ErrConflict)
+	require.Equal(t, 2, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 0, tx.execIdx)
+}
+
+func TestLinkIssueRefreshesExistingManagedGitHubExternalObjectLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 14, 0, 0, 0, time.UTC)
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, requestID.String(), false}},
+			issueLinkRow(issueID, now, nil),
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+		execs: []pgconn.CommandTag{
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+		},
+	}
+
+	issue, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, issueID, issue.ID)
+	require.Equal(t, 3, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 3, tx.execIdx)
+}
+
+func TestLinkIssueRebindsLocallyTombstonedGitHubExternalObjectLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 14, 0, 0, 0, time.UTC)
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	oldRequestID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, oldRequestID.String(), true}},
+			{err: pgx.ErrNoRows},
+			issueLinkRow(issueID, now, nil),
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+		execs: []pgconn.CommandTag{
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+		},
+	}
+
+	issue, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, issueID, issue.ID)
+	require.Equal(t, 4, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 3, tx.execIdx)
+}
+
+func TestLinkIssueRejectsLocallyTombstonedGitHubExternalObjectLinkWhenRequestHasDifferentActiveLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, requestID.String(), true}},
+			{values: []any{"213"}},
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+	}
+
+	_, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.ErrorIs(t, err, ErrConflict)
+	require.Equal(t, 3, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 0, tx.execIdx)
+}
+
+func TestGitHubRepoTargetFromConfigDerivesBrowserURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		cfg               githubExternalConnectionConfig
+		connectionBaseURL string
+		wantURL           string
+	}{
+		{
+			name:    "repo url",
+			cfg:     githubExternalConnectionConfig{RepoURL: "https://github.com/acme/app.git"},
+			wantURL: "https://github.com/acme/app/issues/42",
+		},
+		{
+			name:    "api github default",
+			cfg:     githubExternalConnectionConfig{Owner: "acme", Repo: "app", APIBaseURL: "https://api.github.com"},
+			wantURL: "https://github.com/acme/app/issues/42",
+		},
+		{
+			name:              "enterprise connection base",
+			cfg:               githubExternalConnectionConfig{Owner: "acme", Repo: "app"},
+			connectionBaseURL: "https://github.example.com/api/v3",
+			wantURL:           "https://github.example.com/acme/app/issues/42",
+		},
+		{
+			name:    "enterprise provider base",
+			cfg:     githubExternalConnectionConfig{Owner: "acme", Repo: "app", APIBaseURL: "https://github.example.com/api/v3"},
+			wantURL: "https://github.example.com/acme/app/issues/42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			target, ok := githubRepoTargetFromConfig(tt.cfg, tt.connectionBaseURL)
+			require.True(t, ok)
+			got, err := target.issueURL("42")
+			require.NoError(t, err)
+			require.Equal(t, tt.wantURL, got)
+		})
+	}
+}
+
+func TestGitHubConnectionMatchesIssueRefEnterpriseHosts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		raw               []byte
+		connectionBaseURL string
+		ref               githubIssueRef
+		want              bool
+	}{
+		{
+			name: "provider api base matches enterprise browser host",
+			raw:  []byte(`{"owner":"acme","repo":"app","api_base_url":"https://github.example.com/api/v3"}`),
+			ref: githubIssueRef{
+				host:        "github.example.com",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: true,
+		},
+		{
+			name: "enterprise repo rejects same repository on public github",
+			raw:  []byte(`{"owner":"acme","repo":"app","api_base_url":"https://github.example.com/api/v3"}`),
+			ref: githubIssueRef{
+				host:        "github.com",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: false,
+		},
+		{
+			name:              "connection base host with port matches browser hostname",
+			raw:               []byte(`{"owner":"acme","repo":"app"}`),
+			connectionBaseURL: "https://github.enterprise.test:8443/api/v3",
+			ref: githubIssueRef{
+				host:        "github.enterprise.test",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: true,
+		},
+		{
+			name: "repo url host matches",
+			raw:  []byte(`{"repo_url":"https://github.example.com/acme/app.git"}`),
+			ref: githubIssueRef{
+				host:        "github.example.com",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: true,
+		},
+		{
+			name: "owner mismatch rejects",
+			raw:  []byte(`{"repo_url":"https://github.example.com/acme/app.git"}`),
+			ref: githubIssueRef{
+				host:        "github.example.com",
+				owner:       "other",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := githubConnectionMatchesIssueRef(tt.raw, tt.connectionBaseURL, tt.ref)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestMergeTransactionMovesBacklinks(t *testing.T) {
@@ -680,6 +1010,12 @@ func TestAllocateAndWriteErrorBranches(t *testing.T) {
 
 	if err := repo.UnlinkFeedbackTx(ctx, &fakeRepoTx{execErrs: []error{boom}}, "tenant-a", requestID, 42, "admin-1"); !errors.Is(err, boom) {
 		t.Fatalf("UnlinkFeedbackTx(delete error) = %v, want boom", err)
+	}
+	if _, err := repo.UnlinkIssueTx(ctx, &fakeRepoTx{
+		rows:     []fakeRepoRow{issueLinkRow(uuid.New(), now, nil)},
+		execErrs: []error{boom},
+	}, "tenant-a", requestID, uuid.New(), "admin-1"); !errors.Is(err, boom) {
+		t.Fatalf("UnlinkIssueTx(tombstone error) = %v, want boom", err)
 	}
 }
 

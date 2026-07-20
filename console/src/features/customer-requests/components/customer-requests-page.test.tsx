@@ -5,6 +5,7 @@ import {
   CustomerRequestDeliveryHealth,
   type CustomerRequestDetail,
   CustomerRequestImportance,
+  type CustomerRequestIssueLink,
   CustomerRequestIssueSyncState,
   type CustomerRequestNote,
   type CustomerRequestOwner,
@@ -1015,6 +1016,78 @@ describe('CustomerRequestsPage', () => {
     await waitFor(() => expect(within(dialog).getByPlaceholderText('Issue URL')).toHaveValue(''))
   })
 
+  it('links a GitHub issue by managed connection and issue number', async () => {
+    let payload: Record<string, unknown> | undefined
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(sampleDetail())
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('GitHub Managed')).toBeInTheDocument()
+    await user.type(within(dialog).getByPlaceholderText('Issue 编号'), '224')
+    await user.click(within(dialog).getByRole('button', { name: '添加引用' }))
+
+    await waitFor(() =>
+      expect(payload).toMatchObject({
+        id: requestID,
+        provider: 'github',
+        externalUrl: '',
+        connectionId: 'connection-github',
+        issueNumber: '224',
+      }),
+    )
+    await waitFor(() => expect(within(dialog).getByPlaceholderText('Issue 编号')).toHaveValue(''))
+  })
+
+  it('queues GitHub issue creation from the detail drawer', async () => {
+    let payload: Record<string, unknown> | undefined
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail())
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          detail: sampleDetail(),
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '创建 GitHub Issue' }))
+
+    await waitFor(() => expect(payload).toEqual({ id: requestID }))
+  })
+
+  it('hides GitHub issue creation when a GitHub issue is already linked', async () => {
+    const detail = sampleDetail({ issueLinks: [sampleGitHubIssueLink()] })
+    mockList({ requests: [detail.request ?? sampleSummary()] })
+    mockDetail(detail)
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+
+    expect(await within(dialog).findByText('GitHub #212')).toBeInTheDocument()
+    expect(
+      within(dialog).queryByRole('button', { name: '创建 GitHub Issue' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('hides issue linking controls for read-only users', async () => {
     server.use(
       http.get('/fb/v1/console/me', () =>
@@ -1036,6 +1109,9 @@ describe('CustomerRequestsPage', () => {
     await waitFor(() =>
       expect(within(dialog).queryByPlaceholderText('Issue URL')).not.toBeInTheDocument(),
     )
+    expect(
+      within(dialog).queryByRole('button', { name: '创建 GitHub Issue' }),
+    ).not.toBeInTheDocument()
   })
 
   it('renders populated detail sections and removes linked records', async () => {
@@ -1249,10 +1325,10 @@ describe('CustomerRequestsPage', () => {
       issueLinks: [
         {
           id: 'issue-link-1',
-          provider: 'github',
-          externalKey: '212',
-          externalUrl: 'https://github.com/Phixsura/attune/issues/212',
-          title: 'GitHub #212',
+          provider: 'jira',
+          externalKey: 'ATT-212',
+          externalUrl: 'https://example.atlassian.net/browse/ATT-212',
+          title: 'Jira ATT-212',
           status: 'open',
           createdBy: 'tester',
           createdAt: '2026-07-07T00:25:00Z',
@@ -1280,6 +1356,9 @@ describe('CustomerRequestsPage', () => {
       http.post(`${baseURL}/${requestID}/votes`, () => fail('vote')),
       http.post(`${baseURL}/${requestID}/notes`, () => fail('note')),
       http.post(`${baseURL}/${requestID}/issue-links`, () => fail('issue-link')),
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        fail('create-github-issue'),
+      ),
       http.post(`${baseURL}/${requestID}/issue-links/issue-link-1:record-sync`, () =>
         fail('record-sync'),
       ),
@@ -1323,6 +1402,9 @@ describe('CustomerRequestsPage', () => {
     )
     await user.click(within(dialog).getByRole('button', { name: '添加引用' }))
     await waitFor(() => expect(failures).toContain('issue-link'))
+
+    await user.click(within(dialog).getByRole('button', { name: '创建 GitHub Issue' }))
+    await waitFor(() => expect(failures).toContain('create-github-issue'))
 
     await user.click(within(dialog).getByRole('button', { name: '记录同步' }))
     await waitFor(() => expect(failures).toContain('record-sync'))
@@ -1391,7 +1473,57 @@ function mockList(response: ListCustomerRequestsResponse) {
 }
 
 function mockDetail(detail: CustomerRequestDetail) {
-  server.use(http.get(`${baseURL}/${requestID}`, () => HttpResponse.json(detail)))
+  server.use(
+    http.get(`${baseURL}/${requestID}`, () => HttpResponse.json(detail)),
+    http.get('/fb/v1/console/external-sync/connections', () =>
+      HttpResponse.json({
+        connections: [
+          {
+            id: 'connection-github',
+            tenantId: 't-1',
+            provider: 'github',
+            name: 'GitHub Managed',
+            enabled: true,
+            status: 'active',
+            authType: 'token',
+            baseUrl: '',
+            providerConfigJson: '{"repo_url":"https://github.com/Phixsura/attune"}',
+            scopes: ['issues'],
+            lastTestedAt: '',
+            lastTestStatus: 'ok',
+            lastError: '',
+            createdBy: 'tester',
+            updatedBy: 'tester',
+            createdAt: '2026-07-07T00:00:00Z',
+            updatedAt: '2026-07-07T00:00:00Z',
+            webhookSecretConfigured: true,
+          },
+        ],
+      }),
+    ),
+    http.get('/fb/v1/console/external-sync/mappings', () =>
+      HttpResponse.json({
+        mappings: [
+          {
+            id: 'mapping-github',
+            tenantId: 't-1',
+            connectionId: 'connection-github',
+            localObjectType: 'customer_request',
+            externalObjectType: 'issue',
+            direction: 'EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL',
+            fieldMappingJson: '{}',
+            statusMappingJson: '{}',
+            conflictPolicy: 'manual',
+            tombstonePolicy: 'mark_stale',
+            enabled: true,
+            mappingVersion: 1,
+            createdAt: '2026-07-07T00:00:00Z',
+            updatedAt: '2026-07-07T00:00:00Z',
+          },
+        ],
+      }),
+    ),
+  )
 }
 
 function mockMembers(members: Member[]) {
@@ -1456,6 +1588,29 @@ function ownerFromMember(member: Member): CustomerRequestOwner {
     userId: member.userId,
     email: member.email,
     role: member.role,
+  }
+}
+
+function sampleGitHubIssueLink(
+  overrides: Partial<CustomerRequestIssueLink> = {},
+): CustomerRequestIssueLink {
+  return {
+    id: 'issue-link-1',
+    provider: 'github',
+    externalKey: '212',
+    externalUrl: 'https://github.com/Phixsura/attune/issues/212',
+    title: 'GitHub #212',
+    status: 'open',
+    createdBy: 'tester',
+    createdAt: '2026-07-07T00:25:00Z',
+    updatedAt: '2026-07-07T00:25:00Z',
+    lastSyncedAt: '2026-07-07T00:30:00Z',
+    syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+    externalStatusCategory: 'in_progress',
+    externalAssignee: 'ops@example.com',
+    externalUpdatedAt: '2026-07-07T00:30:00Z',
+    syncError: '',
+    ...overrides,
   }
 }
 

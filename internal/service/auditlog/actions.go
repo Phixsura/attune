@@ -32,6 +32,7 @@ var validActions = map[string]struct{}{
 	"customer_request.add_note":                  {},
 	"customer_request.delete_note":               {},
 	"customer_request.merge":                     {},
+	"customer_request.create_github_issue":       {},
 	"customer_request.link_issue":                {},
 	"customer_request.unlink_issue":              {},
 	"customer_request.record_issue_sync":         {},

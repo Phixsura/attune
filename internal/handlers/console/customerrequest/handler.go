@@ -41,6 +41,7 @@ type service interface {
 	DeleteNote(ctx context.Context, tenantID string, requestID, noteID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
 	Merge(ctx context.Context, in svc.MergeInput) (*svc.Detail, error)
 	LinkIssue(ctx context.Context, in svc.LinkIssueInput) (*svc.Detail, error)
+	CreateGitHubIssue(ctx context.Context, in svc.CreateGitHubIssueInput) (*svc.CreateGitHubIssueResult, error)
 	UnlinkIssue(ctx context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
 	RecordIssueSync(ctx context.Context, in svc.IssueSyncInput) (*svc.Detail, error)
 }
@@ -537,20 +538,68 @@ func (h *Handler) LinkIssue(
 	if err != nil {
 		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid customer request id")
 	}
+	connectionID, err := optionalUUID(req.ConnectionId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external connection id")
+	}
+	mappingID, err := optionalUUID(req.MappingId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external mapping id")
+	}
 	detail, err := h.service.LinkIssue(ctx, svc.LinkIssueInput{
-		TenantID:    ctx.Auth.TenantID,
-		RequestID:   id,
-		Provider:    req.GetProvider(),
-		ExternalURL: req.GetExternalUrl(),
-		ExternalKey: req.GetExternalKey(),
-		Title:       req.GetTitle(),
-		Status:      req.GetStatus(),
-		Actor:       actor(ctx),
+		TenantID:     ctx.Auth.TenantID,
+		RequestID:    id,
+		Provider:     req.GetProvider(),
+		ExternalURL:  req.GetExternalUrl(),
+		ExternalKey:  req.GetExternalKey(),
+		Title:        req.GetTitle(),
+		Status:       req.GetStatus(),
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+		IssueNumber:  req.GetIssueNumber(),
+		Actor:        actor(ctx),
 	})
 	if err != nil {
 		return h.detailError(ctx, err)
 	}
 	return dispatcher.OK(detailToProto(ptrext.Indirect(detail)))
+}
+
+func (h *Handler) CreateGitHubIssue(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.CreateCustomerRequestGitHubIssueRequest,
+) (dispatcher.Result[*attunev1.CreateCustomerRequestGitHubIssueResponse], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid customer request id")
+	}
+	connectionID, err := optionalUUID(req.ConnectionId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external connection id")
+	}
+	mappingID, err := optionalUUID(req.MappingId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external mapping id")
+	}
+	result, err := h.service.CreateGitHubIssue(ctx, svc.CreateGitHubIssueInput{
+		TenantID:     ctx.Auth.TenantID,
+		RequestID:    id,
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+		Actor:        actor(ctx),
+	})
+	if err != nil {
+		return h.createGitHubIssueError(ctx, err)
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.CreateCustomerRequestGitHubIssueResponse{
+		Detail:       detailToProto(ptrext.Indirect(result.Detail)),
+		RunId:        result.RunID.String(),
+		ConnectionId: result.ConnectionID.String(),
+		MappingId:    result.MappingID.String(),
+	}))
 }
 
 func (h *Handler) UnlinkIssue(
@@ -695,6 +744,24 @@ func (h *Handler) detailError(
 	default:
 		logext.Errorf(ctx, "[%s] failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "customer request operation failed")
+	}
+}
+
+func (h *Handler) createGitHubIssueError(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	err error,
+) (dispatcher.Result[*attunev1.CreateCustomerRequestGitHubIssueResponse], error) {
+	const where = "console.CustomerRequestHandler.CreateGitHubIssue"
+	switch {
+	case errors.Is(err, svc.ErrValidation), errors.Is(err, repo.ErrInvalidInput):
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid customer request input")
+	case errors.Is(err, repo.ErrNotFound), errors.Is(err, repo.ErrLinkNotFound), errors.Is(err, repo.ErrOwnerNotFound):
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "customer request resource not found")
+	case errors.Is(err, repo.ErrConflict):
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusConflict, attunev1.ErrorCode_CONFLICT, "customer request conflict")
+	default:
+		logext.Errorf(ctx, "[%s] failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "customer request operation failed")
 	}
 }
 

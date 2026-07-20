@@ -274,6 +274,7 @@ message ExternalSyncRun {
   string created_at = 21;
   string updated_at = 22;
   bool in_flight = 23;
+  string input_metadata_json = 24;
 }
 
 message ExternalSyncAttempt {
@@ -513,6 +514,8 @@ message RequestExternalSyncRunRequest {
   string connection_id = 1 [(google.api.field_behavior) = REQUIRED];
   string mapping_id = 2;
   ExternalSyncDirection direction = 3;
+  string local_object_id = 4;
+  string external_key = 5;
 }
 
 message ListExternalSyncRunsRequest {

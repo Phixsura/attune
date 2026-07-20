@@ -9,6 +9,8 @@ import { api } from '@/lib/api-client'
 import type {
   AddCustomerRequestNoteRequest,
   AddCustomerRequestVoteRequest,
+  CreateCustomerRequestGitHubIssueRequest,
+  CreateCustomerRequestGitHubIssueResponse,
   CreateCustomerRequestRequest,
   CreateCustomerRequestSavedViewRequest,
   CustomerRequestDetail,
@@ -32,8 +34,15 @@ import type {
   UpdateCustomerRequestSavedViewRequest,
   UpdateCustomerRequestScoringSettingsRequest,
 } from '@/proto/attune/v1/customer_request'
+import {
+  type ExternalObjectMapping,
+  ExternalSyncDirection,
+  type ListExternalConnectionsResponse,
+  type ListExternalObjectMappingsResponse,
+} from '@/proto/attune/v1/external_sync'
 
 const BASE = '/fb/v1/console/customer-requests'
+const EXTERNAL_SYNC_BASE = '/fb/v1/console/external-sync'
 
 export interface CustomerRequestFilters {
   q?: string
@@ -51,6 +60,8 @@ export const customerRequestKeys = {
   list: (filters: CustomerRequestFilters) =>
     ['console', 'customer-requests', 'list', filters] as const,
   detail: (id: string) => ['console', 'customer-requests', 'detail', id] as const,
+  githubIssueConnections: () =>
+    ['console', 'customer-requests', 'github-issue-connections'] as const,
   scoring: () => ['console', 'customer-requests', 'scoring-settings'] as const,
   savedViews: () => ['console', 'customer-requests', 'saved-views'] as const,
 }
@@ -80,6 +91,41 @@ export const customerRequestDetailQuery = (id: string | null) =>
       api<CustomerRequestDetail>(`${BASE}/${encodeURIComponent(id ?? '')}`, { signal }),
     staleTime: 10_000,
   })
+
+export const customerRequestGitHubIssueConnectionsQuery = () =>
+  queryOptions({
+    queryKey: customerRequestKeys.githubIssueConnections(),
+    queryFn: async ({ signal }) => {
+      const resp = await api<ListExternalConnectionsResponse>(`${EXTERNAL_SYNC_BASE}/connections`, {
+        signal,
+      })
+      const githubConnections = resp.connections.filter(
+        (connection) =>
+          connection.provider === 'github' && connection.enabled && connection.status === 'active',
+      )
+      const checked = await Promise.all(
+        githubConnections.map(async (connection) => {
+          const mappings = await api<ListExternalObjectMappingsResponse>(
+            `${EXTERNAL_SYNC_BASE}/mappings?connection_id=${encodeURIComponent(connection.id)}`,
+            { signal },
+          )
+          return mappings.mappings.some(isPullCapableGitHubIssueMapping) ? connection : null
+        }),
+      )
+      return checked.filter((connection) => connection !== null)
+    },
+    staleTime: 20_000,
+  })
+
+function isPullCapableGitHubIssueMapping(mapping: ExternalObjectMapping) {
+  return (
+    mapping.enabled &&
+    mapping.localObjectType === 'customer_request' &&
+    mapping.externalObjectType === 'issue' &&
+    (mapping.direction === ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_PULL ||
+      mapping.direction === ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL)
+  )
+}
 
 export const customerRequestScoringSettingsQuery = () =>
   queryOptions({
@@ -254,6 +300,23 @@ export function useLinkCustomerRequestIssue(id: string) {
         body: { id, ...body },
       }),
     onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+  })
+}
+
+export function useCreateCustomerRequestGitHubIssue(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: Omit<CreateCustomerRequestGitHubIssueRequest, 'id'> = {}) =>
+      api<CreateCustomerRequestGitHubIssueResponse>(
+        `${BASE}/${encodeURIComponent(id)}/issue-links:create-github`,
+        {
+          method: 'POST',
+          body: { id, ...body },
+        },
+      ),
+    onSuccess: (response) => {
+      if (response.detail) updateCustomerRequestCache(qc, response.detail)
+    },
   })
 }
 

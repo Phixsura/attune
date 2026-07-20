@@ -1043,10 +1043,24 @@ func TestHandlerRequestAndListRunEndpointsReturnRows(t *testing.T) {
 	fake := newRunEndpointFakeService(now, ids)
 	handler := ptrext.Of(Handler{service: fake})
 
+	assertHandlerRequestRunEndpoint(t, handler, fake, ids)
+	assertHandlerListRunsEndpoint(t, handler, fake, ids)
+}
+
+func assertHandlerRequestRunEndpoint(
+	t *testing.T,
+	handler *Handler,
+	fake *fakeHandlerService,
+	ids handlerRunEndpointIDs,
+) {
+	t.Helper()
+
 	requested, err := handler.RequestRun(handlerTestContext(), ptrext.Of(attunev1.RequestExternalSyncRunRequest{
-		ConnectionId: ids.connectionID.String(),
-		MappingId:    ids.mappingID.String(),
-		Direction:    attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH,
+		ConnectionId:  ids.connectionID.String(),
+		MappingId:     ids.mappingID.String(),
+		Direction:     attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH,
+		LocalObjectId: "cr-1",
+		ExternalKey:   "42",
 	}))
 	if err != nil {
 		t.Fatalf("RequestRun returned error: %v", err)
@@ -1060,9 +1074,24 @@ func TestHandlerRequestAndListRunEndpointsReturnRows(t *testing.T) {
 	if fake.requestRunInput.MappingID == nil || ptrext.Indirect(fake.requestRunInput.MappingID) != ids.mappingID {
 		t.Fatalf("request mapping id = %#v; want %s", fake.requestRunInput.MappingID, ids.mappingID)
 	}
+	if fake.requestRunInput.LocalObjectID != "cr-1" || fake.requestRunInput.ExternalKey != "42" {
+		t.Fatalf("request selector = %q/%q; want local/external selector", fake.requestRunInput.LocalObjectID, fake.requestRunInput.ExternalKey)
+	}
 	if requested.Body.GetDirection() != attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH {
 		t.Fatalf("request direction = %v; want push", requested.Body.GetDirection())
 	}
+	if requested.Body.GetInputMetadataJson() != `{"local_object_id":"cr-1"}` {
+		t.Fatalf("request input metadata = %s; want response metadata", requested.Body.GetInputMetadataJson())
+	}
+}
+
+func assertHandlerListRunsEndpoint(
+	t *testing.T,
+	handler *Handler,
+	fake *fakeHandlerService,
+	ids handlerRunEndpointIDs,
+) {
+	t.Helper()
 
 	runs, err := handler.ListRuns(handlerTestContext(), ptrext.Of(attunev1.ListExternalSyncRunsRequest{
 		ConnectionId: ids.connectionID.String(),
@@ -1307,16 +1336,17 @@ func newHandlerRunEndpointIDs() handlerRunEndpointIDs {
 func newRunEndpointFakeService(now time.Time, ids handlerRunEndpointIDs) *fakeHandlerService {
 	return ptrext.Of(fakeHandlerService{
 		requestRun: ptrext.Of(repo.SyncRun{
-			ID:           ids.runID,
-			TenantID:     "tenant-1",
-			ConnectionID: ids.connectionID,
-			MappingID:    ptrext.Of(ids.mappingID),
-			Direction:    repo.DirectionPush,
-			Trigger:      repo.TriggerManual,
-			Status:       repo.RunStatusQueued,
-			ActorID:      "admin-1",
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			ID:            ids.runID,
+			TenantID:      "tenant-1",
+			ConnectionID:  ids.connectionID,
+			MappingID:     ptrext.Of(ids.mappingID),
+			Direction:     repo.DirectionPush,
+			Trigger:       repo.TriggerManual,
+			Status:        repo.RunStatusQueued,
+			ActorID:       "admin-1",
+			InputMetadata: []byte(`{"local_object_id":"cr-1"}`),
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		}),
 		listRunsResult: repo.ListRunsResult{
 			Runs: []repo.SyncRun{{

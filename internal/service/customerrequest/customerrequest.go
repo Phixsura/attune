@@ -19,8 +19,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
@@ -57,6 +59,7 @@ type Service struct {
 	idempotency   idempotency.Store
 	audit         *auditlogsvc.Service
 	notifications notificationSink
+	issueCreates  issueCreateRunStore
 }
 
 func New(r *repo.Repo, idem idempotency.Store, audit *auditlogsvc.Service) *Service {
@@ -75,8 +78,23 @@ type notificationSink interface {
 	) error
 }
 
+type issueCreateRunStore interface {
+	CreateCustomerRequestIssueRun(
+		ctx context.Context,
+		in externalsyncrepo.CustomerRequestIssueCreateRunInput,
+	) (*externalsyncrepo.CustomerRequestIssueCreateRunResult, error)
+	CreateCustomerRequestIssuePullRun(
+		ctx context.Context,
+		in externalsyncrepo.CustomerRequestIssuePullRunInput,
+	) (*externalsyncrepo.CustomerRequestIssuePullRunResult, error)
+}
+
 func (s *Service) SetNotificationSink(sink notificationSink) {
 	s.notifications = sink
+}
+
+func (s *Service) SetIssueCreateRunStore(store issueCreateRunStore) {
+	s.issueCreates = store
 }
 
 type ListInput struct {
@@ -210,14 +228,32 @@ type MergeInput struct {
 }
 
 type LinkIssueInput struct {
-	TenantID    string
-	RequestID   uuid.UUID
-	Provider    string
-	ExternalURL string
-	ExternalKey string
-	Title       string
-	Status      string
-	Actor       auditlogsvc.Actor
+	TenantID     string
+	RequestID    uuid.UUID
+	Provider     string
+	ExternalURL  string
+	ExternalKey  string
+	Title        string
+	Status       string
+	ConnectionID *uuid.UUID
+	MappingID    *uuid.UUID
+	IssueNumber  string
+	Actor        auditlogsvc.Actor
+}
+
+type CreateGitHubIssueInput struct {
+	TenantID     string
+	RequestID    uuid.UUID
+	ConnectionID *uuid.UUID
+	MappingID    *uuid.UUID
+	Actor        auditlogsvc.Actor
+}
+
+type CreateGitHubIssueResult struct {
+	Detail       *Detail
+	RunID        uuid.UUID
+	ConnectionID uuid.UUID
+	MappingID    uuid.UUID
 }
 
 type IssueSyncInput struct {
@@ -676,7 +712,11 @@ func (s *Service) Merge(ctx context.Context, in MergeInput) (*Detail, error) {
 }
 
 func (s *Service) LinkIssue(ctx context.Context, in LinkIssueInput) (*Detail, error) {
-	normalized, err := normalizeIssueInput(in)
+	prepared, err := s.resolveManagedIssueLinkTarget(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := normalizeIssueInput(prepared)
 	if err != nil {
 		return nil, err
 	}
@@ -693,6 +733,7 @@ func (s *Service) LinkIssue(ctx context.Context, in LinkIssueInput) (*Detail, er
 		ExternalURL: normalized.ExternalURL,
 		Title:       normalized.Title,
 		Status:      normalized.Status,
+		MappingID:   normalized.MappingID,
 		ActorID:     normalized.Actor.ID,
 	})
 	if err != nil {
@@ -706,10 +747,121 @@ func (s *Service) LinkIssue(ctx context.Context, in LinkIssueInput) (*Detail, er
 		"Linked issue to customer request", issueAuditMetadata(normalized.RequestID, ptrext.Indirect(link))); err != nil {
 		return nil, err
 	}
+	pullTarget, err := s.repo.ManagedIssueSyncTargetTx(ctx, tx, normalized.TenantID, normalized.RequestID, link.ID)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.enqueueManagedIssuePull(ctx, normalized, pullTarget)
 	return s.detail(ctx, normalized.TenantID, normalized.RequestID, 50)
+}
+
+func (s *Service) resolveManagedIssueLinkTarget(ctx context.Context, in LinkIssueInput) (LinkIssueInput, error) {
+	in.IssueNumber = strings.TrimSpace(in.IssueNumber)
+	if in.IssueNumber == "" {
+		return in, nil
+	}
+	if strings.TrimSpace(in.ExternalURL) != "" {
+		return LinkIssueInput{}, ErrValidation
+	}
+	if in.ConnectionID == nil {
+		return LinkIssueInput{}, ErrValidation
+	}
+	if strings.TrimSpace(in.Provider) != "" && !strings.EqualFold(strings.TrimSpace(in.Provider), "github") {
+		return LinkIssueInput{}, ErrUnsupportedProvider
+	}
+	target, err := s.repo.ResolveGitHubIssueLinkTarget(ctx, repo.GitHubIssueLinkTargetInput{
+		TenantID:     in.TenantID,
+		ConnectionID: ptrext.Indirect(in.ConnectionID),
+		MappingID:    in.MappingID,
+		IssueNumber:  in.IssueNumber,
+	})
+	if err != nil {
+		return LinkIssueInput{}, err
+	}
+	in.Provider = "github"
+	in.ExternalURL = target.ExternalURL
+	if strings.TrimSpace(in.ExternalKey) == "" {
+		in.ExternalKey = target.ExternalKey
+	}
+	if strings.TrimSpace(in.Title) == "" {
+		in.Title = target.Title
+	}
+	if strings.TrimSpace(in.Status) == "" {
+		in.Status = target.Status
+	}
+	in.MappingID = ptrext.Of(target.MappingID)
+	in.IssueNumber = target.ExternalSyncKey
+	return in, nil
+}
+
+func (s *Service) enqueueManagedIssuePull(ctx context.Context, in LinkIssueInput, target *repo.ManagedIssueSyncTarget) {
+	if s.issueCreates == nil || !strings.EqualFold(in.Provider, "github") || target == nil {
+		return
+	}
+	managed := ptrext.Indirect(target)
+	if managed.ConnectionID == uuid.Nil || managed.MappingID == uuid.Nil ||
+		strings.TrimSpace(managed.ExternalKey) == "" {
+		return
+	}
+	_, err := s.issueCreates.CreateCustomerRequestIssuePullRun(ctx, externalsyncrepo.CustomerRequestIssuePullRunInput{
+		TenantID:     in.TenantID,
+		RequestID:    in.RequestID,
+		ConnectionID: managed.ConnectionID,
+		MappingID:    managed.MappingID,
+		ExternalKey:  managed.ExternalKey,
+		ActorID:      in.Actor.ID,
+	})
+	if err != nil {
+		logext.Warnf(ctx, "[customer_request.link_issue] enqueue managed issue pull failed,tenant_id:%s,request_id:%s,mapping_id:%s,external_key:%s,err:%s",
+			in.TenantID, in.RequestID.String(), managed.MappingID.String(), managed.ExternalKey, err.Error())
+	}
+}
+
+func (s *Service) CreateGitHubIssue(ctx context.Context, in CreateGitHubIssueInput) (*CreateGitHubIssueResult, error) {
+	if in.TenantID == "" || in.RequestID == uuid.Nil || in.Actor.ID == "" || s.issueCreates == nil {
+		return nil, ErrValidation
+	}
+	current, err := s.detail(ctx, in.TenantID, in.RequestID, 0)
+	if err != nil {
+		return nil, err
+	}
+	if hasGitHubIssueLink(current) {
+		return nil, repo.ErrConflict
+	}
+	result, err := s.issueCreates.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:     in.TenantID,
+		RequestID:    in.RequestID,
+		ConnectionID: in.ConnectionID,
+		MappingID:    in.MappingID,
+		ActorID:      in.Actor.ID,
+	})
+	if err != nil {
+		return nil, mapIssueCreateRunError(err)
+	}
+	if err := s.recordAudit(ctx, in.Actor, "customer_request.create_github_issue", current.Request.Summary,
+		"Queued GitHub issue creation for customer request",
+		map[string]any{
+			"request_id":    in.RequestID.String(),
+			"connection_id": result.Mapping.ConnectionID.String(),
+			"mapping_id":    result.Mapping.ID.String(),
+			"run_id":        result.Run.ID.String(),
+		}); err != nil {
+		logext.Warnf(ctx, "[customer_request.create_github_issue] record audit failed,tenant_id:%s,request_id:%s,run_id:%s,err:%s",
+			in.TenantID, in.RequestID.String(), result.Run.ID.String(), err.Error())
+	}
+	detail, err := s.detail(ctx, in.TenantID, in.RequestID, 50)
+	if err != nil {
+		return nil, err
+	}
+	return ptrext.Of(CreateGitHubIssueResult{
+		Detail:       detail,
+		RunID:        result.Run.ID,
+		ConnectionID: result.Mapping.ConnectionID,
+		MappingID:    result.Mapping.ID,
+	}), nil
 }
 
 func (s *Service) UnlinkIssue(ctx context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*Detail, error) {
@@ -1232,6 +1384,29 @@ func normalizeIssueSync(in IssueSyncInput) (IssueSyncInput, error) {
 	return in, nil
 }
 
+func hasGitHubIssueLink(detail *Detail) bool {
+	if detail == nil {
+		return false
+	}
+	for _, link := range detail.Request.IssueLinks {
+		if strings.EqualFold(link.Provider, "github") {
+			return true
+		}
+	}
+	return false
+}
+
+func mapIssueCreateRunError(err error) error {
+	switch {
+	case errors.Is(err, externalsyncrepo.ErrMappingNotFound), errors.Is(err, externalsyncrepo.ErrConflict):
+		return repo.ErrConflict
+	case errors.Is(err, externalsyncrepo.ErrLocalObjectNotFound):
+		return repo.ErrNotFound
+	default:
+		return err
+	}
+}
+
 func dedupeFeedbackIDs(ids []int64) []int64 {
 	out := make([]int64, 0, len(ids))
 	seen := make(map[int64]struct{}, len(ids))
@@ -1531,6 +1706,28 @@ func (s *Service) recordAuditTx(
 		actor.ID = "system"
 	}
 	return s.audit.RecordTx(ctx, tx, auditlogsvc.Event{
+		TenantID:   target.TenantID,
+		Actor:      actor,
+		Action:     action,
+		TargetType: "customer_request",
+		TargetID:   target.ID.String(),
+		Summary:    summary,
+		After:      after,
+	})
+}
+
+func (s *Service) recordAudit(
+	ctx context.Context,
+	actor auditlogsvc.Actor,
+	action string,
+	target repo.Summary,
+	summary string,
+	after any,
+) error {
+	if s.audit == nil {
+		return nil
+	}
+	return s.audit.Record(ctx, auditlogsvc.Event{
 		TenantID:   target.TenantID,
 		Actor:      actor,
 		Action:     action,

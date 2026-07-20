@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1139,55 +1140,31 @@ func TestRepoApplyPullResultIsIdempotentAndAdvancesCursor(t *testing.T) {
 	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "External sync idempotency")
 
 	run := insertExternalSyncRun(t, ctx, repository, tenantID, conn.ID, mapping.ID)
-	stats, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
-		TenantID:     tenantID,
-		RunID:        run.ID,
-		ConnectionID: conn.ID,
-		MappingID:    mapping.ID,
-		Provider:     "github",
-		StreamKey:    externalsyncrepo.StreamDefault,
-		CursorBefore: []byte(`{"page":1}`),
-		CursorAfter:  []byte(`{"page":2}`),
-		Records: []externalsyncrepo.PullRecord{{
-			LocalObjectID:     requestID.String(),
-			ExternalKey:       "ISSUE-1",
-			ExternalURL:       "https://github.example.test/org/repo/issues/1",
-			ExternalVersion:   "v1",
-			ExternalUpdatedAt: ptrext.Of(time.Date(2026, 7, 8, 4, 5, 6, 0, time.UTC)),
-			Payload:           []byte(`{"title":"Issue one","status":"open"}`),
-		}},
+	stats := applyGitHubIssuePullResult(t, ctx, repository, githubIssuePullResultInput{
+		tenantID:          tenantID,
+		runID:             run.ID,
+		connectionID:      conn.ID,
+		mappingID:         mapping.ID,
+		requestID:         requestID,
+		cursorBefore:      []byte(`{"page":1}`),
+		cursorAfter:       []byte(`{"page":2}`),
+		externalVersion:   "v1",
+		externalUpdatedAt: ptrext.Of(time.Date(2026, 7, 8, 4, 5, 6, 0, time.UTC)),
 	})
-	if err != nil {
-		t.Fatalf("ApplyPullResult returned error: %v", err)
-	}
-	if stats.RecordsSeen != 1 || stats.RecordsChanged != 1 || stats.RecordsFailed != 0 || stats.ConflictsCreated != 0 {
-		t.Fatalf("first apply stats = %#v; want one changed record", stats)
-	}
+	assertApplyStats(t, stats, externalsyncrepo.ApplyStats{RecordsSeen: 1, RecordsChanged: 1})
 
 	secondRun := insertExternalSyncRun(t, ctx, repository, tenantID, conn.ID, mapping.ID)
-	stats, err = repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
-		TenantID:     tenantID,
-		RunID:        secondRun.ID,
-		ConnectionID: conn.ID,
-		MappingID:    mapping.ID,
-		Provider:     "github",
-		StreamKey:    externalsyncrepo.StreamDefault,
-		CursorBefore: []byte(`{"page":2}`),
-		CursorAfter:  []byte(`{"page":2}`),
-		Records: []externalsyncrepo.PullRecord{{
-			LocalObjectID:   requestID.String(),
-			ExternalKey:     "ISSUE-1",
-			ExternalURL:     "https://github.example.test/org/repo/issues/1",
-			ExternalVersion: "v1",
-			Payload:         []byte(`{"title":"Issue one","status":"open"}`),
-		}},
+	stats = applyGitHubIssuePullResult(t, ctx, repository, githubIssuePullResultInput{
+		tenantID:        tenantID,
+		runID:           secondRun.ID,
+		connectionID:    conn.ID,
+		mappingID:       mapping.ID,
+		requestID:       requestID,
+		cursorBefore:    []byte(`{"page":2}`),
+		cursorAfter:     []byte(`{"page":2}`),
+		externalVersion: "v1",
 	})
-	if err != nil {
-		t.Fatalf("second ApplyPullResult returned error: %v", err)
-	}
-	if stats.RecordsSeen != 1 || stats.RecordsChanged != 0 {
-		t.Fatalf("second apply stats = %#v; want idempotent unchanged record", stats)
-	}
+	assertApplyStats(t, stats, externalsyncrepo.ApplyStats{RecordsSeen: 1})
 
 	if got := countExternalObjectLinks(t, ctx, pool, tenantID, mapping.ID); got != 1 {
 		t.Fatalf("external object links = %d; want one idempotent link", got)
@@ -1195,29 +1172,28 @@ func TestRepoApplyPullResultIsIdempotentAndAdvancesCursor(t *testing.T) {
 	if got := countIssueLinks(t, ctx, pool, tenantID, requestID); got != 1 {
 		t.Fatalf("customer request issue links = %d; want one bridged issue link", got)
 	}
+	assertIssueLinkSyncContext(t, ctx, pool, tenantID, requestID, "ISSUE-1", "open", "octo")
+	entries := recordGitHubIssueTimeline(t, ctx, repository, tenantID, mapping.ID, requestID)
+	assertTimelineProviderPayload(t, entries, []string{"bug", "customer"}, []string{"octo", "hubot"}, 2)
 	if got := externalSyncCursor(t, ctx, pool, tenantID, mapping.ID); got != `{"page": 2}` && got != `{"page":2}` {
 		t.Fatalf("cursor = %s; want page 2", got)
 	}
-	if _, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
+	assertApplyPullResultError(t, ctx, repository, externalsyncrepo.ApplyPullInput{
 		TenantID:     tenantID,
 		RunID:        uuid.New(),
 		ConnectionID: conn.ID,
 		MappingID:    mapping.ID,
 		Provider:     "github",
 		StreamKey:    externalsyncrepo.StreamDefault,
-	}); !errors.Is(err, externalsyncrepo.ErrRunNotFound) {
-		t.Fatalf("missing ApplyPullResult run error = %v; want ErrRunNotFound", err)
-	}
-	if _, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
+	}, externalsyncrepo.ErrRunNotFound)
+	assertApplyPullResultError(t, ctx, repository, externalsyncrepo.ApplyPullInput{
 		TenantID:     tenantID,
 		RunID:        uuid.New(),
 		ConnectionID: conn.ID,
 		MappingID:    uuid.New(),
 		Provider:     "github",
 		StreamKey:    externalsyncrepo.StreamDefault,
-	}); !errors.Is(err, externalsyncrepo.ErrMappingNotFound) {
-		t.Fatalf("missing ApplyPullResult mapping error = %v; want ErrMappingNotFound", err)
-	}
+	}, externalsyncrepo.ErrMappingNotFound)
 }
 
 func TestRepoResetCursorClearsCursorAndEnqueuesPullRun(t *testing.T) {
@@ -1407,6 +1383,101 @@ func TestRepoApplyPullResultRevivesTombstonedExternalLink(t *testing.T) {
 	}
 }
 
+func TestRepoApplyPullResultSkipsLocallyTombstonedExternalLink(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, "external-sync-local-tombstone")
+	insertExternalSyncKey(t, ctx, pool, "kid-external-sync-local-tombstone")
+	conn := createExternalSyncConnection(t, ctx, repository, tenantID, "kid-external-sync-local-tombstone")
+	mapping := firstExternalSyncMapping(t, ctx, repository, tenantID, conn.ID)
+	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "External sync local tombstone")
+
+	createRun := insertExternalSyncRun(t, ctx, repository, tenantID, conn.ID, mapping.ID)
+	if _, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
+		TenantID:     tenantID,
+		RunID:        createRun.ID,
+		ConnectionID: conn.ID,
+		MappingID:    mapping.ID,
+		Provider:     "github",
+		StreamKey:    externalsyncrepo.StreamDefault,
+		CursorAfter:  []byte(`{"page":1}`),
+		Records: []externalsyncrepo.PullRecord{{
+			LocalObjectID:   requestID.String(),
+			ExternalKey:     "ISSUE-LOCAL-TOMBSTONE",
+			ExternalURL:     "https://github.example.test/org/repo/issues/10",
+			ExternalVersion: "v1",
+			Payload:         []byte(`{"title":"Do not revive","status":"open"}`),
+		}},
+	}); err != nil {
+		t.Fatalf("create ApplyPullResult returned error: %v", err)
+	}
+	if got := countIssueLinks(t, ctx, pool, tenantID, requestID); got != 1 {
+		t.Fatalf("issue links before local tombstone = %d, want one", got)
+	}
+
+	mustExec(t, ctx, pool, `
+		UPDATE external_object_links
+		   SET local_deleted_at = NOW(),
+		       sync_state = 'deleted',
+		       tombstone_reason = 'local_unlinked'
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND external_key = 'ISSUE-LOCAL-TOMBSTONE'`,
+		tenantID, mapping.ID)
+	mustExec(t, ctx, pool, `
+		DELETE FROM customer_request_issue_links
+		 WHERE tenant_id = $1
+		   AND request_id = $2
+		   AND external_key = 'ISSUE-LOCAL-TOMBSTONE'`,
+		tenantID, requestID)
+
+	pullRun := insertExternalSyncRun(t, ctx, repository, tenantID, conn.ID, mapping.ID)
+	stats, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
+		TenantID:     tenantID,
+		RunID:        pullRun.ID,
+		ConnectionID: conn.ID,
+		MappingID:    mapping.ID,
+		Provider:     "github",
+		StreamKey:    externalsyncrepo.StreamDefault,
+		CursorAfter:  []byte(`{"page":2}`),
+		Records: []externalsyncrepo.PullRecord{{
+			LocalObjectID:   requestID.String(),
+			ExternalKey:     "ISSUE-LOCAL-TOMBSTONE",
+			ExternalURL:     "https://github.example.test/org/repo/issues/10",
+			ExternalVersion: "v2",
+			Payload:         []byte(`{"title":"Do not revive again","status":"open"}`),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("local tombstone ApplyPullResult returned error: %v", err)
+	}
+	if stats.RecordsSeen != 1 || stats.RecordsChanged != 0 || stats.RecordsFailed != 0 {
+		t.Fatalf("local tombstone stats = %#v; want seen without changed or failed", stats)
+	}
+	if got := countIssueLinks(t, ctx, pool, tenantID, requestID); got != 0 {
+		t.Fatalf("issue links after local tombstone pull = %d, want zero", got)
+	}
+	var state, reason string
+	var localDeleted, externalDeleted bool
+	if err := pool.QueryRow(ctx, `
+		SELECT sync_state,
+		       tombstone_reason,
+		       local_deleted_at IS NOT NULL,
+		       external_deleted_at IS NOT NULL
+		  FROM external_object_links
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND external_key = 'ISSUE-LOCAL-TOMBSTONE'`,
+		tenantID, mapping.ID).Scan(&state, &reason, &localDeleted, &externalDeleted); err != nil {
+		t.Fatalf("read local tombstone state: %v", err)
+	}
+	if state != externalsyncrepo.SyncStateDeleted || reason != "local_unlinked" || !localDeleted || externalDeleted {
+		t.Fatalf("local tombstone state=%q reason=%q local_deleted=%t external_deleted=%t; want local tombstone",
+			state, reason, localDeleted, externalDeleted)
+	}
+}
+
 func TestRepoApplyPullResultCreatesConflictForPendingLocalLink(t *testing.T) {
 	ctx := context.Background()
 	pool := testdb.NewPool(t)
@@ -1568,6 +1639,253 @@ func TestRepoPrepareAndApplyPushResult(t *testing.T) {
 		Provider:     conn.Provider,
 	}); !errors.Is(err, externalsyncrepo.ErrMappingNotFound) {
 		t.Fatalf("missing ApplyPushResult mapping error = %v; want ErrMappingNotFound", err)
+	}
+}
+
+func TestRepoPreparePushRecordsSkipsLocallyTombstonedIssueLink(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, "external-sync-push-local-tombstone")
+	insertExternalSyncKey(t, ctx, pool, "kid-external-sync-push-local-tombstone")
+	conn := createExternalSyncConnection(t, ctx, repository, tenantID, "kid-external-sync-push-local-tombstone")
+	mapping := updateExternalSyncMappingDirection(t, ctx, repository, tenantID, conn.ID, externalsyncrepo.DirectionPush)
+	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "External sync push")
+
+	createRun := insertExternalSyncRunWithDirection(t, ctx, repository, tenantID, conn.ID, mapping.ID, externalsyncrepo.DirectionPush)
+	claimed := claimExternalSyncRuns(t, ctx, repository, 1, "worker-push")
+	requireClaimedExternalSyncRun(t, claimed, createRun.ID, 1, "worker-push")
+	records := prepareExternalSyncPushRecords(t, ctx, repository, claimed[0].ID, tenantID, mapping.ID, conn.Provider)
+	requirePreparedCreatePushRecord(t, records, requestID)
+	if _, err := repository.ApplyPushResult(ctx, externalsyncrepo.ApplyPushInput{
+		TenantID:     tenantID,
+		RunID:        claimed[0].ID,
+		ConnectionID: conn.ID,
+		MappingID:    mapping.ID,
+		Provider:     conn.Provider,
+		Records:      records,
+		Results: []externalsyncrepo.PushResult{{
+			LocalObjectID:   requestID.String(),
+			ExternalKey:     "42",
+			ExternalURL:     "https://github.com/acme/app/issues/42",
+			ExternalVersion: "2026-07-08T12:00:00Z",
+		}},
+	}); err != nil {
+		t.Fatalf("ApplyPushResult returned error: %v", err)
+	}
+
+	mustExec(t, ctx, pool, `
+		UPDATE external_object_links
+		   SET local_deleted_at = NOW(),
+		       sync_state = 'deleted',
+		       tombstone_reason = 'local_unlinked'
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND local_object_id = $3::text`,
+		tenantID, mapping.ID, requestID.String())
+	mustExec(t, ctx, pool, `
+		DELETE FROM customer_request_issue_links
+		 WHERE tenant_id = $1
+		   AND request_id = $2`,
+		tenantID, requestID)
+	mustExec(t, ctx, pool, `
+		INSERT INTO external_object_links
+		 (id, tenant_id, mapping_id, local_object_type, local_object_id,
+		  external_object_type, external_key, external_url, sync_state,
+		  local_deleted_at, tombstone_reason)
+		VALUES ($1, $2, $3, 'customer_request', $4, 'issue', '43',
+		        'https://github.com/acme/app/issues/43', 'deleted',
+		        NOW(), 'local_unlinked')`,
+		uuid.New(), tenantID, mapping.ID, requestID.String())
+
+	scheduledRun := insertExternalSyncRunWithDirection(t, ctx, repository, tenantID, conn.ID, mapping.ID, externalsyncrepo.DirectionPush)
+	claimed = claimExternalSyncRuns(t, ctx, repository, 1, "worker-push")
+	requireClaimedExternalSyncRun(t, claimed, scheduledRun.ID, 1, "worker-push")
+	records = prepareExternalSyncPushRecords(t, ctx, repository, claimed[0].ID, tenantID, mapping.ID, conn.Provider)
+	requireNoPushRecords(t, records, "after local tombstone")
+	if _, err := repository.ApplyPushResult(ctx, externalsyncrepo.ApplyPushInput{
+		TenantID:     tenantID,
+		RunID:        claimed[0].ID,
+		ConnectionID: conn.ID,
+		MappingID:    mapping.ID,
+		Provider:     conn.Provider,
+	}); err != nil {
+		t.Fatalf("ApplyPushResult empty scheduled run returned error: %v", err)
+	}
+
+	broadCreateRun := insertExternalSyncRunWithDirection(t, ctx, repository, tenantID, conn.ID, mapping.ID, externalsyncrepo.DirectionPush)
+	mustExec(t, ctx, pool, `
+		UPDATE external_sync_runs
+		   SET input_metadata = '{"source":"customer_request_issue_create"}'::jsonb
+		 WHERE tenant_id = $1
+		   AND id = $2`,
+		tenantID, broadCreateRun.ID)
+	claimed = claimExternalSyncRuns(t, ctx, repository, 1, "worker-push")
+	requireClaimedExternalSyncRun(t, claimed, broadCreateRun.ID, 1, "worker-push")
+	records = prepareExternalSyncPushRecords(t, ctx, repository, claimed[0].ID, tenantID, mapping.ID, conn.Provider)
+	requireNoPushRecords(t, records, "after broad create metadata without local object id")
+
+	explicit, err := repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		MappingID: ptrext.Of(mapping.ID),
+		ActorID:   "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateCustomerRequestIssueRun after local tombstone returned error: %v", err)
+	}
+	claimed = claimExternalSyncRuns(t, ctx, repository, 1, "worker-push")
+	requireClaimedExternalSyncRun(t, claimed, ptrext.Indirect(explicit).Run.ID, 1, "worker-push")
+	records = prepareExternalSyncPushRecords(t, ctx, repository, claimed[0].ID, tenantID, mapping.ID, conn.Provider)
+	requirePreparedCreatePushRecord(t, records, requestID)
+}
+
+func TestRepoApplyPushResultKeepsIssueLinkWhenProviderReturnsMetadataWithError(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, "external-sync-push-partial")
+	insertExternalSyncKey(t, ctx, pool, "kid-external-sync-push-partial")
+	conn := createExternalSyncConnection(t, ctx, repository, tenantID, "kid-external-sync-push-partial")
+	mapping := updateExternalSyncMappingDirection(t, ctx, repository, tenantID, conn.ID, externalsyncrepo.DirectionPush)
+	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "External sync push")
+	run := insertExternalSyncRunWithDirection(t, ctx, repository, tenantID, conn.ID, mapping.ID, externalsyncrepo.DirectionPush)
+	claimed := claimExternalSyncRuns(t, ctx, repository, 1, "worker-push")
+	requireClaimedExternalSyncRun(t, claimed, run.ID, 1, "worker-push")
+
+	records := prepareExternalSyncPushRecords(t, ctx, repository, claimed[0].ID, tenantID, mapping.ID, conn.Provider)
+	requirePreparedCreatePushRecord(t, records, requestID)
+	stats, err := repository.ApplyPushResult(ctx, externalsyncrepo.ApplyPushInput{
+		TenantID:     tenantID,
+		RunID:        claimed[0].ID,
+		ConnectionID: conn.ID,
+		MappingID:    mapping.ID,
+		Provider:     conn.Provider,
+		Records:      records,
+		Results: []externalsyncrepo.PushResult{{
+			LocalObjectID:   requestID.String(),
+			ExternalKey:     "42",
+			ExternalURL:     "https://github.com/acme/app/issues/42",
+			ExternalVersion: "2026-07-08T12:00:00Z",
+			ErrorKind:       "provider_error",
+			ErrorMessage:    "managed comment write failed",
+			Retryable:       true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPushResult returned error: %v", err)
+	}
+	if stats.RecordsSeen != 1 || stats.RecordsChanged != 1 || stats.RecordsFailed != 1 {
+		t.Fatalf("partial push stats = %#v; want changed link plus recorded failure", stats)
+	}
+	if got := countExternalObjectLinks(t, ctx, pool, tenantID, mapping.ID); got != 1 {
+		t.Fatalf("external object links = %d; want linked issue metadata", got)
+	}
+	assertIssueLinkSynced(t, ctx, pool, tenantID, requestID, "42", "https://github.com/acme/app/issues/42")
+	if got := countExternalSyncPushFailures(t, ctx, pool, tenantID, claimed[0].ID, "42"); got != 1 {
+		t.Fatalf("push failures = %d; want provider error failure row", got)
+	}
+}
+
+func TestRepoCreateCustomerRequestIssueRunQueuesSinglePushRun(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, "external-sync-create-issue")
+	insertExternalSyncKey(t, ctx, pool, "kid-external-sync-create-issue")
+	conn := createExternalSyncConnection(t, ctx, repository, tenantID, "kid-external-sync-create-issue")
+	mapping := updateExternalSyncMappingDirection(t, ctx, repository, tenantID, conn.ID, externalsyncrepo.DirectionBidirectional)
+	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "Create GitHub issue")
+
+	result, err := repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		ActorID:   "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("CreateCustomerRequestIssueRun returned error: %v", err)
+	}
+	if result.Mapping.ID != mapping.ID ||
+		result.Run.Direction != externalsyncrepo.DirectionPush ||
+		result.Run.Trigger != externalsyncrepo.TriggerManual ||
+		result.Run.Status != externalsyncrepo.RunStatusQueued {
+		t.Fatalf("create issue result = %#v; want queued manual push run for selected mapping", result)
+	}
+	requireCreateIssueRunMetadata(t, result.Run, requestID)
+
+	repeated, err := repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		ActorID:   "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("repeated CreateCustomerRequestIssueRun returned error: %v", err)
+	}
+	if repeated.Run.ID != result.Run.ID {
+		t.Fatalf("repeated run id = %s, want existing queued run %s", repeated.Run.ID, result.Run.ID)
+	}
+
+	linkedRequestID := insertExternalSyncCustomerRequestWithNumber(t, ctx, pool, tenantID, 2, "Already linked")
+	insertExternalSyncGitHubIssueLink(t, ctx, pool, tenantID, linkedRequestID)
+	_, err = repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: linkedRequestID,
+		ActorID:   "admin-1",
+	})
+	if !errors.Is(err, externalsyncrepo.ErrConflict) {
+		t.Fatalf("linked CreateCustomerRequestIssueRun error = %v; want ErrConflict", err)
+	}
+}
+
+func TestRepoCreateCustomerRequestIssueRunRequiresUniquePushMapping(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, "external-sync-create-issue-mapping")
+	insertExternalSyncKey(t, ctx, pool, "kid-external-sync-create-issue-mapping")
+	conn := createExternalSyncConnection(t, ctx, repository, tenantID, "kid-external-sync-create-issue-mapping")
+	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "Missing push mapping")
+
+	_, err := repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		ActorID:   "admin-1",
+	})
+	if !errors.Is(err, externalsyncrepo.ErrMappingNotFound) {
+		t.Fatalf("pull-only CreateCustomerRequestIssueRun error = %v; want ErrMappingNotFound", err)
+	}
+
+	mapping := updateExternalSyncMappingDirection(t, ctx, repository, tenantID, conn.ID, externalsyncrepo.DirectionPush)
+	other := createExternalSyncConnectionNamed(t, ctx, repository, tenantID, "kid-external-sync-create-issue-mapping", "GitHub Secondary")
+	otherMapping := updateExternalSyncMappingDirection(t, ctx, repository, tenantID, other.ID, externalsyncrepo.DirectionPush)
+	_, err = repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		ActorID:   "admin-1",
+	})
+	if !errors.Is(err, externalsyncrepo.ErrConflict) {
+		t.Fatalf("ambiguous CreateCustomerRequestIssueRun error = %v; want ErrConflict", err)
+	}
+	selected, err := repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		MappingID: ptrext.Of(mapping.ID),
+		ActorID:   "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("selected CreateCustomerRequestIssueRun returned error: %v", err)
+	}
+	if selected.Mapping.ID != mapping.ID {
+		t.Fatalf("selected mapping = %s, want %s", selected.Mapping.ID, mapping.ID)
+	}
+	_, err = repository.CreateCustomerRequestIssueRun(ctx, externalsyncrepo.CustomerRequestIssueCreateRunInput{
+		TenantID:  tenantID,
+		RequestID: requestID,
+		MappingID: ptrext.Of(otherMapping.ID),
+		ActorID:   "admin-1",
+	})
+	if !errors.Is(err, externalsyncrepo.ErrConflict) {
+		t.Fatalf("concurrent other mapping CreateCustomerRequestIssueRun error = %v; want ErrConflict", err)
 	}
 }
 
@@ -2119,13 +2437,47 @@ func requirePreparedUpdatePushRecord(t *testing.T, records []externalsyncrepo.Pu
 
 func insertExternalSyncCustomerRequest(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID, title string) uuid.UUID {
 	t.Helper()
+	return insertExternalSyncCustomerRequestWithNumber(t, ctx, pool, tenantID, 1, title)
+}
+
+func insertExternalSyncCustomerRequestWithNumber(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	displayNumber int64,
+	title string,
+) uuid.UUID {
+	t.Helper()
 	id := ptrext.Of(uuid.New())
 	mustExec(t, ctx, pool, `
 		INSERT INTO customer_requests
 		 (id, tenant_id, display_number, display_id, title, created_by, updated_by)
-		VALUES ($1, $2, 1, 'CR-1', $3, 'admin-1', 'admin-1')`,
-		ptrext.Indirect(id), tenantID, title)
+		VALUES ($1, $2, $3, $4, $5, 'admin-1', 'admin-1')`,
+		ptrext.Indirect(id), tenantID, displayNumber, fmt.Sprintf("CR-%d", displayNumber), title)
 	return ptrext.Indirect(id)
+}
+
+func insertExternalSyncGitHubIssueLink(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, requestID uuid.UUID) {
+	t.Helper()
+	mustExec(t, ctx, pool, `
+		INSERT INTO customer_request_issue_links
+		 (tenant_id, request_id, provider, external_key, external_url, title, status, created_by)
+		VALUES ($1, $2, 'github', '42', 'https://github.com/acme/app/issues/42',
+		        'Existing issue', 'open', 'admin-1')`,
+		tenantID, requestID)
+}
+
+func requireCreateIssueRunMetadata(t *testing.T, run externalsyncrepo.SyncRun, requestID uuid.UUID) {
+	t.Helper()
+	var metadata map[string]string
+	if err := json.Unmarshal(run.InputMetadata, &metadata); err != nil {
+		t.Fatalf("unmarshal create issue run metadata: %v", err)
+	}
+	if metadata["local_object_id"] != requestID.String() ||
+		metadata["source"] != "customer_request_issue_create" {
+		t.Fatalf("create issue run metadata = %#v; want request selector", metadata)
+	}
 }
 
 func countExternalObjectLinks(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, mappingID uuid.UUID) int {
@@ -2194,6 +2546,22 @@ func countExternalSyncRetryRuns(t *testing.T, ctx context.Context, pool *pgxpool
 	return ptrext.Indirect(count)
 }
 
+func countExternalSyncPushFailures(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, runID uuid.UUID, externalKey string) int {
+	t.Helper()
+	count := ptrext.Of(0)
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)::int
+		  FROM external_sync_record_failures
+		 WHERE tenant_id = $1
+		   AND run_id = $2
+		   AND operation = 'push'
+		   AND external_key = $3`,
+		tenantID, runID, externalKey).Scan(count); err != nil {
+		t.Fatalf("count external sync push failures: %v", err)
+	}
+	return ptrext.Indirect(count)
+}
+
 func countExternalSyncManualPullRuns(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, mappingID uuid.UUID) int {
 	t.Helper()
 	count := ptrext.Of(0)
@@ -2228,6 +2596,91 @@ func countExternalSyncBackfillRuns(t *testing.T, ctx context.Context, pool *pgxp
 	return ptrext.Indirect(count)
 }
 
+type githubIssuePullResultInput struct {
+	tenantID          string
+	runID             uuid.UUID
+	connectionID      uuid.UUID
+	mappingID         uuid.UUID
+	requestID         uuid.UUID
+	cursorBefore      []byte
+	cursorAfter       []byte
+	externalVersion   string
+	externalUpdatedAt *time.Time
+}
+
+func applyGitHubIssuePullResult(
+	t *testing.T,
+	ctx context.Context,
+	repository *externalsyncrepo.Repo,
+	in githubIssuePullResultInput,
+) externalsyncrepo.ApplyStats {
+	t.Helper()
+	stats, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
+		TenantID:     in.tenantID,
+		RunID:        in.runID,
+		ConnectionID: in.connectionID,
+		MappingID:    in.mappingID,
+		Provider:     "github",
+		StreamKey:    externalsyncrepo.StreamDefault,
+		CursorBefore: in.cursorBefore,
+		CursorAfter:  in.cursorAfter,
+		Records: []externalsyncrepo.PullRecord{{
+			LocalObjectID:     in.requestID.String(),
+			ExternalKey:       "ISSUE-1",
+			ExternalURL:       "https://github.example.test/org/repo/issues/1",
+			ExternalVersion:   in.externalVersion,
+			ExternalUpdatedAt: in.externalUpdatedAt,
+			Payload:           []byte(`{"title":"Issue one","state":"open","assignee":"octo","assignees":["octo","hubot"],"labels":["bug","customer"],"comments":2}`),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPullResult returned error: %v", err)
+	}
+	return stats
+}
+
+func assertApplyStats(t *testing.T, got externalsyncrepo.ApplyStats, want externalsyncrepo.ApplyStats) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("apply stats = %#v; want %#v", got, want)
+	}
+}
+
+func recordGitHubIssueTimeline(
+	t *testing.T,
+	ctx context.Context,
+	repository *externalsyncrepo.Repo,
+	tenantID string,
+	mappingID uuid.UUID,
+	requestID uuid.UUID,
+) []externalsyncrepo.RecordTimelineEntry {
+	t.Helper()
+	entries, err := repository.RecordTimeline(ctx, externalsyncrepo.RecordTimelineFilter{
+		TenantID:      tenantID,
+		MappingID:     mappingID,
+		LocalObjectID: requestID.String(),
+		ExternalKey:   "ISSUE-1",
+		Limit:         10,
+	})
+	if err != nil {
+		t.Fatalf("RecordTimeline after pull returned error: %v", err)
+	}
+	return entries
+}
+
+func assertApplyPullResultError(
+	t *testing.T,
+	ctx context.Context,
+	repository *externalsyncrepo.Repo,
+	in externalsyncrepo.ApplyPullInput,
+	want error,
+) {
+	t.Helper()
+	if _, err := repository.ApplyPullResult(ctx, in); !errors.Is(err, want) {
+		t.Fatalf("ApplyPullResult error = %v; want %v", err, want)
+	}
+}
+
 func assertIssueLinkSynced(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, requestID uuid.UUID, externalKey, externalURL string) {
 	t.Helper()
 	gotKey := ptrext.Of("")
@@ -2243,6 +2696,67 @@ func assertIssueLinkSynced(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 		t.Fatalf("issue link = key:%q url:%q state:%q; want %q/%q/synced",
 			ptrext.Indirect(gotKey), ptrext.Indirect(gotURL), ptrext.Indirect(gotState), externalKey, externalURL)
 	}
+}
+
+func assertIssueLinkSyncContext(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, requestID uuid.UUID, externalKey, category, assignee string) {
+	t.Helper()
+	gotCategory := ptrext.Of("")
+	gotAssignee := ptrext.Of("")
+	if err := pool.QueryRow(ctx, `
+		SELECT external_status_category, external_assignee
+		  FROM customer_request_issue_links
+		 WHERE tenant_id = $1 AND request_id = $2 AND external_key = $3`,
+		tenantID, requestID, externalKey).Scan(gotCategory, gotAssignee); err != nil {
+		t.Fatalf("read issue link sync context: %v", err)
+	}
+	if ptrext.Indirect(gotCategory) != category || ptrext.Indirect(gotAssignee) != assignee {
+		t.Fatalf("issue link context = category:%q assignee:%q; want %q/%q",
+			ptrext.Indirect(gotCategory), ptrext.Indirect(gotAssignee), category, assignee)
+	}
+}
+
+func assertTimelineProviderPayload(
+	t *testing.T,
+	entries []externalsyncrepo.RecordTimelineEntry,
+	labels []string,
+	assignees []string,
+	comments float64,
+) {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.Kind != "link" {
+			continue
+		}
+		var detail map[string]any
+		if err := json.Unmarshal(entry.Detail, &detail); err != nil {
+			t.Fatalf("unmarshal timeline detail: %v", err)
+		}
+		payload, ok := detail["provider_payload"].(map[string]any)
+		if !ok {
+			t.Fatalf("timeline detail = %#v; missing provider_payload", detail)
+		}
+		if !stringArrayMatches(payload["labels"], labels) ||
+			!stringArrayMatches(payload["assignees"], assignees) ||
+			payload["comments"] != comments {
+			t.Fatalf("timeline provider payload = %#v; want labels %v assignees %v comments %.0f",
+				payload, labels, assignees, comments)
+		}
+		return
+	}
+	t.Fatalf("timeline entries = %#v; missing link provider payload", entries)
+}
+
+func stringArrayMatches(value any, want []string) bool {
+	items, ok := value.([]any)
+	if !ok || len(items) != len(want) {
+		return false
+	}
+	for i, item := range items {
+		if item != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func issueLinkState(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, requestID uuid.UUID, externalKey string) string {
