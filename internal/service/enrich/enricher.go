@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -38,13 +40,24 @@ const (
 	enrichmentSystemUser = "system-feedback-enricher"
 )
 
+type feedbackEnrichRepo interface {
+	TryClaim(context.Context, int64) (bool, error)
+	LoadForEnrich(context.Context, int64) (*feedback.EnrichInput, error)
+	MarkFailed(context.Context, int64, string, ...feedback.EnrichmentFailureSnapshot) (bool, string)
+	MarkDone(context.Context, int64, domain.Enriched, ...feedback.EnrichmentMetadata) error
+	BeginTx(context.Context) (pgx.Tx, error)
+	MarkDoneTx(context.Context, pgx.Tx, int64, domain.Enriched, ...feedback.EnrichmentMetadata) error
+	InsertSemanticExtractionRunTx(context.Context, pgx.Tx, feedback.SemanticExtractionRun) (int64, error)
+	ListPending(context.Context, int) ([]int64, error)
+}
+
 // Enricher classifies user_feedback rows via the LLM gateway. It owns
 // the claim-then-update loop but holds no SQL itself — repo does.
 //
 // Wiring: raw-webhook → outbox row in same tx as MarkDone (at-least-once).
 // The #34 outbound adapter framework handles delivery via OutboxWorker.
 type Enricher struct {
-	repo          *feedback.FeedbackRepo
+	repo          feedbackEnrichRepo
 	llm           llmclient.LLMClient
 	model         string                         // resolved from config; "" → enricher rejects with 400-like error
 	outbox        *outboxrepo.OutboxRepo         // optional outbox writer

@@ -163,6 +163,75 @@ func TestResolveManagedIssueLinkTargetRejectsAmbiguousLocatorInput(t *testing.T)
 	}
 }
 
+func TestResolveManagedIssueLinkTargetAllowsDirectURLInput(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	service := &Service{}
+	in := LinkIssueInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		IssueNumber: "   ",
+	}
+
+	got, err := service.resolveManagedIssueLinkTarget(context.Background(), in)
+	if err != nil {
+		t.Fatalf("resolveManagedIssueLinkTarget() error = %v", err)
+	}
+	if got.ExternalURL != in.ExternalURL || got.IssueNumber != "" {
+		t.Fatalf("resolveManagedIssueLinkTarget() = %+v, want direct URL unchanged with blank issue number", got)
+	}
+}
+
+func TestEnqueueManagedIssuePullBranches(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	connectionID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	mappingID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	input := LinkIssueInput{
+		TenantID:  "tenant-a",
+		RequestID: requestID,
+		Provider:  "github",
+		Actor:     auditlogsvc.Actor{ID: "user-1"},
+	}
+	target := &repo.ManagedIssueSyncTarget{
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+		ExternalKey:  "Phixsura/attune#228",
+	}
+
+	(&Service{}).enqueueManagedIssuePull(ctx, input, target)
+
+	store := &recordingIssueCreateRunStore{}
+	service := &Service{issueCreates: store}
+	service.enqueueManagedIssuePull(ctx, input, nil)
+	service.enqueueManagedIssuePull(ctx, LinkIssueInput{Provider: "jira"}, target)
+	service.enqueueManagedIssuePull(ctx, input, &repo.ManagedIssueSyncTarget{ConnectionID: connectionID, MappingID: mappingID})
+	if len(store.pullInputs) != 0 {
+		t.Fatalf("skip branches enqueued %d pull runs, want 0", len(store.pullInputs))
+	}
+
+	service.enqueueManagedIssuePull(ctx, input, target)
+	if len(store.pullInputs) != 1 {
+		t.Fatalf("pull run enqueues = %d, want 1", len(store.pullInputs))
+	}
+	enqueued := store.pullInputs[0]
+	if enqueued.TenantID != input.TenantID ||
+		enqueued.RequestID != requestID ||
+		enqueued.ConnectionID != connectionID ||
+		enqueued.MappingID != mappingID ||
+		enqueued.ExternalKey != "Phixsura/attune#228" ||
+		enqueued.ActorID != "user-1" {
+		t.Fatalf("pull input = %+v", enqueued)
+	}
+
+	failingStore := &recordingIssueCreateRunStore{pullErr: errors.New("queue failed")}
+	(&Service{issueCreates: failingStore}).enqueueManagedIssuePull(ctx, input, target)
+	if len(failingStore.pullInputs) != 1 {
+		t.Fatalf("failing store pull inputs = %d, want 1", len(failingStore.pullInputs))
+	}
+}
+
 func TestNormalizeCustomerLinkTrimsIdentityFields(t *testing.T) {
 	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	got, err := normalizeCustomerLink(LinkCustomerInput{
@@ -827,6 +896,31 @@ func mustParseCustomerRequestIssueURL(t *testing.T, raw string) *url.URL {
 
 func repoActor() auditlogsvc.Actor {
 	return auditlogsvc.Actor{ID: "actor-1"}
+}
+
+type recordingIssueCreateRunStore struct {
+	createInputs []externalsyncrepo.CustomerRequestIssueCreateRunInput
+	createResult *externalsyncrepo.CustomerRequestIssueCreateRunResult
+	createErr    error
+	pullInputs   []externalsyncrepo.CustomerRequestIssuePullRunInput
+	pullResult   *externalsyncrepo.CustomerRequestIssuePullRunResult
+	pullErr      error
+}
+
+func (s *recordingIssueCreateRunStore) CreateCustomerRequestIssueRun(
+	_ context.Context,
+	in externalsyncrepo.CustomerRequestIssueCreateRunInput,
+) (*externalsyncrepo.CustomerRequestIssueCreateRunResult, error) {
+	s.createInputs = append(s.createInputs, in)
+	return s.createResult, s.createErr
+}
+
+func (s *recordingIssueCreateRunStore) CreateCustomerRequestIssuePullRun(
+	_ context.Context,
+	in externalsyncrepo.CustomerRequestIssuePullRunInput,
+) (*externalsyncrepo.CustomerRequestIssuePullRunResult, error) {
+	s.pullInputs = append(s.pullInputs, in)
+	return s.pullResult, s.pullErr
 }
 
 type fakeIdempotencyStore struct {

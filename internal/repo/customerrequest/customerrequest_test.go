@@ -808,6 +808,66 @@ func TestGitHubConnectionMatchesIssueRefEnterpriseHosts(t *testing.T) {
 	}
 }
 
+func TestGitHubIssueReferenceParsers(t *testing.T) {
+	t.Parallel()
+
+	ref, ok := parseGitHubIssueKey(" Phixsura/attune.git#00228 ")
+	require.True(t, ok)
+	require.Equal(t, githubIssueRef{owner: "Phixsura", repo: "attune", issueNumber: "228"}, ref)
+
+	ref, ok = parseGitHubIssueRef(" github ", "", "Phixsura/attune#228")
+	require.True(t, ok)
+	require.Equal(t, "228", ref.issueNumber)
+
+	for _, raw := range []string{"", "Phixsura/attune", "Phixsura/attune#", "Phixsura/attune#0", "too/many/parts#1"} {
+		if ref, ok := parseGitHubIssueKey(raw); ok {
+			t.Fatalf("parseGitHubIssueKey(%q) = %+v, true; want false", raw, ref)
+		}
+	}
+
+	got, ok := normalizeGitHubIssueNumber(" 00228 ")
+	require.True(t, ok)
+	require.Equal(t, "228", got)
+	for _, raw := range []string{"", "0", "-1", "not-a-number"} {
+		if got, ok := normalizeGitHubIssueNumber(raw); ok {
+			t.Fatalf("normalizeGitHubIssueNumber(%q) = %q, true; want false", raw, got)
+		}
+	}
+}
+
+func TestManagedIssueSyncTargetTxBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	issueLinkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	connectionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	repository := &Repo{}
+
+	target, err := repository.ManagedIssueSyncTargetTx(ctx, &fakeRepoTx{rows: []fakeRepoRow{{
+		values: []any{connectionID, mappingID, "Phixsura/attune#228"},
+	}}}, "tenant-a", requestID, issueLinkID)
+	require.NoError(t, err)
+	require.NotNil(t, target)
+	require.Equal(t, connectionID, target.ConnectionID)
+	require.Equal(t, mappingID, target.MappingID)
+	require.Equal(t, "Phixsura/attune#228", target.ExternalKey)
+
+	target, err = repository.ManagedIssueSyncTargetTx(ctx, &fakeRepoTx{rows: []fakeRepoRow{{
+		err: pgx.ErrNoRows,
+	}}}, "tenant-a", requestID, issueLinkID)
+	require.NoError(t, err)
+	require.Nil(t, target)
+
+	errBoom := errors.New("boom")
+	target, err = repository.ManagedIssueSyncTargetTx(ctx, &fakeRepoTx{rows: []fakeRepoRow{{
+		err: errBoom,
+	}}}, "tenant-a", requestID, issueLinkID)
+	require.Nil(t, target)
+	require.ErrorContains(t, err, "load managed issue sync target")
+}
+
 func TestMergeTransactionMovesBacklinks(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

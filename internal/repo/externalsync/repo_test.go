@@ -126,6 +126,146 @@ func TestRepoNormalizeHelpers(t *testing.T) {
 	}
 }
 
+func TestCustomerRequestIssueRunMetadataHelpers(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+
+	createMetadata := customerRequestIssueCreateRunMetadata(requestID)
+	if got := pushRunHintFromMetadata(createMetadata); got.LocalObjectID != requestID.String() ||
+		got.ExternalKey != "" ||
+		got.Source != "customer_request_issue_create" {
+		t.Fatalf("create metadata hint = %+v", got)
+	}
+
+	pullMetadata := customerRequestIssuePullRunMetadata(requestID, "  ISSUE-228  ")
+	if got := pushRunHintFromMetadata(pullMetadata); got.LocalObjectID != requestID.String() ||
+		got.ExternalKey != "ISSUE-228" ||
+		got.Source != "customer_request_issue_link" {
+		t.Fatalf("pull metadata hint = %+v", got)
+	}
+}
+
+func TestCustomerRequestIssueRunLinkChecks(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tenantID := "tenant-1"
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	errBoom := errors.New("boom")
+
+	t.Run("require external link", func(t *testing.T) {
+		t.Parallel()
+
+		err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{true}}},
+		}), tenantID, requestID, mappingID, " ISSUE-228 ")
+		if err != nil {
+			t.Fatalf("linked request returned error: %v", err)
+		}
+		if err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false}}},
+		}), tenantID, requestID, mappingID, "ISSUE-404"); !errors.Is(err, ErrLocalObjectNotFound) {
+			t.Fatalf("missing link error = %v; want ErrLocalObjectNotFound", err)
+		}
+		if err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{err: errBoom}},
+		}), tenantID, requestID, mappingID, "ISSUE-500"); err == nil {
+			t.Fatal("link check query error returned nil")
+		}
+	})
+
+	t.Run("reject existing links", func(t *testing.T) {
+		t.Parallel()
+
+		err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false, false}}},
+		}), tenantID, requestID, mappingID)
+		if err != nil {
+			t.Fatalf("unlinked request returned error: %v", err)
+		}
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{true, false}}},
+		}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("issue link error = %v; want ErrConflict", err)
+		}
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false, true}}},
+		}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("object link error = %v; want ErrConflict", err)
+		}
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{err: errBoom}},
+		}), tenantID, requestID, mappingID); err == nil {
+			t.Fatal("existing link query error returned nil")
+		}
+	})
+
+	t.Run("reject concurrent create runs", func(t *testing.T) {
+		t.Parallel()
+
+		err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false}}},
+		}), tenantID, requestID, mappingID)
+		if err != nil {
+			t.Fatalf("request without concurrent run returned error: %v", err)
+		}
+		if err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{true}}},
+		}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("concurrent run error = %v; want ErrConflict", err)
+		}
+		if err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{err: errBoom}},
+		}), tenantID, requestID, mappingID); err == nil {
+			t.Fatal("concurrent run query error returned nil")
+		}
+	})
+}
+
+func TestCustomerRequestIssueRunExistingRunHelpers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 8, 2, 3, 4, 0, time.UTC)
+	tenantID := "tenant-1"
+	connectionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+
+	row := issueRunFakeRow(runID, tenantID, connectionID, mappingID, now, DirectionPush)
+	run, err := existingCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{row}}), tenantID, requestID, mappingID)
+	if err != nil {
+		t.Fatalf("existing create run returned error: %v", err)
+	}
+	if run.ID != runID || run.Direction != DirectionPush || run.Trigger != TriggerManual {
+		t.Fatalf("existing create run = %+v", run)
+	}
+
+	row = issueRunFakeRow(runID, tenantID, connectionID, mappingID, now, DirectionPull)
+	run, err = existingCustomerRequestIssuePullRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{row}}), tenantID, requestID, mappingID, " ISSUE-228 ")
+	if err != nil {
+		t.Fatalf("existing pull run returned error: %v", err)
+	}
+	if run.ID != runID || run.Direction != DirectionPull || run.Trigger != TriggerManual {
+		t.Fatalf("existing pull run = %+v", run)
+	}
+
+	errBoom := errors.New("boom")
+	if _, err := existingCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+		rows: []fakeRow{{err: errBoom}},
+	}), tenantID, requestID, mappingID); !errors.Is(err, errBoom) {
+		t.Fatalf("existing create run error = %v; want boom", err)
+	}
+	if _, err := existingCustomerRequestIssuePullRun(ctx, ptrext.Of(fakeTx{
+		rows: []fakeRow{{err: errBoom}},
+	}), tenantID, requestID, mappingID, "ISSUE-228"); !errors.Is(err, errBoom) {
+		t.Fatalf("existing pull run error = %v; want boom", err)
+	}
+}
+
 func TestRunInputMetadataFromEventIncludesWebhookHints(t *testing.T) {
 	t.Parallel()
 
@@ -1543,6 +1683,7 @@ func (tx *fakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFr
 
 func (tx *fakeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
 func (tx *fakeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+
 func (tx *fakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }
@@ -1631,6 +1772,21 @@ func timePtr(value time.Time) *time.Time {
 
 func pgxconnTag(value string) pgconn.CommandTag {
 	return pgconn.NewCommandTag(value)
+}
+
+func issueRunFakeRow(
+	runID uuid.UUID,
+	tenantID string,
+	connectionID uuid.UUID,
+	mappingID uuid.UUID,
+	now time.Time,
+	direction string,
+) fakeRow {
+	return fakeRow{values: []any{
+		runID, tenantID, connectionID, ptrext.Of(mappingID), direction, TriggerManual, RunStatusQueued,
+		nil, nil, 0, nil, nil, nil, []byte(`{}`), []byte(`{}`),
+		[]byte(`{"local_object_id":"99999999-9999-9999-9999-999999999999"}`), 0, 0, 0, 0, "", "", "admin", now, now,
+	}}
 }
 
 func newCanceledPoolRepo(t *testing.T) *Repo {
