@@ -4,11 +4,15 @@
 package auditlog
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -36,6 +40,42 @@ func Test_nullableJSON(t *testing.T) {
 		got := nullableJSON(input)
 		require.Equal(t, []byte(`{"a":1}`), got)
 	})
+}
+
+func Test_New(t *testing.T) {
+	t.Parallel()
+
+	require.NotNil(t, New(nil))
+}
+
+func Test_insertEntry(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := ptrext.Of(fakeAuditExecer{})
+	entry := Entry{
+		TenantID:       "tenant-1",
+		ActorType:      "user",
+		ActorID:        "user-1",
+		ActorEmail:     "ops@example.test",
+		ActorIP:        "127.0.0.1",
+		ActorUserAgent: "test",
+		Action:         "customer_request.create",
+		TargetType:     "customer_request",
+		TargetID:       "cr-1",
+		Summary:        "Created",
+		BeforeJSON:     nil,
+		AfterJSON:      json.RawMessage(`{"ok":true}`),
+	}
+
+	require.NoError(t, insertEntry(ctx, db, entry))
+	require.Len(t, db.args, 12)
+	require.Equal(t, "tenant-1", db.args[0])
+	require.Nil(t, db.args[10])
+	require.Equal(t, []byte(`{"ok":true}`), db.args[11])
+
+	errBoom := errors.New("boom")
+	require.ErrorIs(t, insertEntry(ctx, ptrext.Of(fakeAuditExecer{err: errBoom}), entry), errBoom)
 }
 
 func Test_boundedLimit(t *testing.T) {
@@ -237,6 +277,41 @@ func Test_buildListQuery(t *testing.T) {
 	})
 }
 
+func Test_appendListOrderAndLimitBranches(t *testing.T) {
+	t.Parallel()
+
+	ts := time.Date(2025, 6, 27, 12, 0, 0, 0, time.UTC)
+	cursor := formatCursor(Entry{ID: 42, CreatedAt: ts})
+
+	t.Run("bounded cursor adds seek clause and limit", func(t *testing.T) {
+		t.Parallel()
+		q, args, err := appendListOrderAndLimit("SELECT 1 WHERE tenant_id = $1", []any{"tenant-1"}, ListFilter{Cursor: cursor}, 10)
+		require.NoError(t, err)
+		require.Contains(t, q, "AND (created_at, id) < ($2, $3)")
+		require.Contains(t, q, "ORDER BY created_at DESC, id DESC")
+		require.Contains(t, q, "LIMIT $4")
+		require.Equal(t, ts, args[1])
+		require.Equal(t, int64(42), args[2])
+		require.Equal(t, 11, args[3])
+	})
+
+	t.Run("unbounded skips cursor and limit", func(t *testing.T) {
+		t.Parallel()
+		q, args, err := appendListOrderAndLimit("SELECT 1 WHERE tenant_id = $1", []any{"tenant-1"}, ListFilter{Cursor: cursor, Unbounded: true}, 0)
+		require.NoError(t, err)
+		require.Contains(t, q, "ORDER BY created_at DESC, id DESC")
+		require.NotContains(t, q, "(created_at, id) <")
+		require.NotContains(t, q, "LIMIT")
+		require.Equal(t, []any{"tenant-1"}, args)
+	})
+
+	t.Run("invalid cursor returns parse error", func(t *testing.T) {
+		t.Parallel()
+		_, _, err := appendListOrderAndLimit("SELECT 1 WHERE tenant_id = $1", []any{"tenant-1"}, ListFilter{Cursor: "bad"}, 10)
+		require.Error(t, err)
+	})
+}
+
 func Test_ParseCursor(t *testing.T) {
 	t.Parallel()
 
@@ -344,4 +419,87 @@ func Test_paginateListResult(t *testing.T) {
 		expected := formatCursor(items[2])
 		require.Equal(t, expected, result.NextCursor)
 	})
+}
+
+func Test_scanEntries(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2025, 6, 27, 12, 0, 0, 0, time.UTC)
+	rows := ptrext.Of(fakeAuditRows{rows: [][]any{
+		{
+			int64(1), "tenant-1", "user", "user-1", "ops@example.test", "127.0.0.1", "test-agent",
+			"customer_request.create", "customer_request", "cr-1", "Created",
+			json.RawMessage(`{"before":true}`), json.RawMessage(`{"after":true}`), now,
+		},
+		{
+			int64(2), "tenant-1", "admin", "admin-1", "", "", "",
+			"customer_request.update", "customer_request", "cr-1", "Updated",
+			json.RawMessage(nil), json.RawMessage(`{"status":"planned"}`), now.Add(time.Minute),
+		},
+	}})
+	items, err := scanEntries(rows)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	require.Equal(t, "customer_request.create", items[0].Action)
+	require.JSONEq(t, `{"status":"planned"}`, string(items[1].AfterJSON))
+
+	errBoom := errors.New("boom")
+	_, err = scanEntries(ptrext.Of(fakeAuditRows{rows: [][]any{{int64(1)}}, scanErr: errBoom}))
+	require.ErrorIs(t, err, errBoom)
+
+	_, err = scanEntries(ptrext.Of(fakeAuditRows{err: errBoom}))
+	require.ErrorIs(t, err, errBoom)
+}
+
+type fakeAuditExecer struct {
+	args []any
+	err  error
+}
+
+func (e *fakeAuditExecer) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	if e.err != nil {
+		return pgconn.CommandTag{}, e.err
+	}
+	e.args = append(e.args, args...)
+	return pgconn.NewCommandTag("INSERT 0 1"), nil
+}
+
+type fakeAuditRows struct {
+	rows    [][]any
+	err     error
+	scanErr error
+	idx     int
+}
+
+func (r *fakeAuditRows) Next() bool {
+	if r.idx >= len(r.rows) {
+		return false
+	}
+	r.idx++
+	return true
+}
+
+func (r *fakeAuditRows) Scan(dest ...any) error {
+	if r.scanErr != nil {
+		return r.scanErr
+	}
+	if r.idx == 0 || r.idx > len(r.rows) {
+		return errors.New("fake rows scan without current row")
+	}
+	row := r.rows[r.idx-1]
+	if len(dest) != len(row) {
+		return errors.New("fake row value count does not match scan destination count")
+	}
+	for i := range dest {
+		target := reflect.ValueOf(dest[i])
+		if target.Kind() != reflect.Pointer || target.IsNil() {
+			return errors.New("scan destination must be a non-nil pointer")
+		}
+		target.Elem().Set(reflect.ValueOf(row[i]))
+	}
+	return nil
+}
+
+func (r *fakeAuditRows) Err() error {
+	return r.err
 }

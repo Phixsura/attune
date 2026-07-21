@@ -731,6 +731,52 @@ func TestGitHubRepoTargetFromConfigDerivesBrowserURL(t *testing.T) {
 	}
 }
 
+func TestGitHubRepoTargetRejectsInvalidConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		cfg               githubExternalConnectionConfig
+		connectionBaseURL string
+	}{
+		{
+			name: "repo url with no path",
+			cfg:  githubExternalConnectionConfig{RepoURL: "https://github.com"},
+		},
+		{
+			name: "bad repo url",
+			cfg:  githubExternalConnectionConfig{RepoURL: "https://%zz"},
+		},
+		{
+			name: "missing owner",
+			cfg:  githubExternalConnectionConfig{Repo: "app", APIBaseURL: "https://api.github.com"},
+		},
+		{
+			name: "missing repo",
+			cfg:  githubExternalConnectionConfig{Owner: "acme", APIBaseURL: "https://api.github.com"},
+		},
+		{
+			name:              "bad connection base",
+			cfg:               githubExternalConnectionConfig{Owner: "acme", Repo: "app"},
+			connectionBaseURL: "://not-a-url",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, ok := githubRepoTargetFromConfig(tt.cfg, tt.connectionBaseURL)
+			require.False(t, ok)
+		})
+	}
+
+	if _, ok := githubRepoTargetFromRaw([]byte(`not-json`), ""); ok {
+		t.Fatal("githubRepoTargetFromRaw(invalid JSON) ok = true, want false")
+	}
+	if _, _, ok := githubBrowserBaseFromAPIBase("", "://bad"); ok {
+		t.Fatal("githubBrowserBaseFromAPIBase(invalid URL) ok = true, want false")
+	}
+}
+
 func TestGitHubConnectionMatchesIssueRefEnterpriseHosts(t *testing.T) {
 	t.Parallel()
 
@@ -819,6 +865,23 @@ func TestGitHubIssueReferenceParsers(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, "228", ref.issueNumber)
 
+	ref, ok = parseGitHubIssueRef("github", "https://github.com/Phixsura/attune/issues/00229", "Phixsura/attune#228")
+	require.True(t, ok)
+	require.Equal(t, githubIssueRef{host: "github.com", owner: "Phixsura", repo: "attune", issueNumber: "229"}, ref)
+
+	if ref, ok := parseGitHubIssueRef("jira", "https://github.com/Phixsura/attune/issues/228", "Phixsura/attune#228"); ok {
+		t.Fatalf("parseGitHubIssueRef(non-github) = %+v, true; want false", ref)
+	}
+	for _, raw := range []string{
+		"",
+		"https://github.com/Phixsura/attune/pull/228",
+		"https://github.com/Phixsura/attune/issues/not-a-number",
+		"https://github.com/Phixsura/issues/228",
+	} {
+		if ref, ok := parseGitHubIssueURL(raw); ok {
+			t.Fatalf("parseGitHubIssueURL(%q) = %+v, true; want false", raw, ref)
+		}
+	}
 	for _, raw := range []string{"", "Phixsura/attune", "Phixsura/attune#", "Phixsura/attune#0", "too/many/parts#1"} {
 		if ref, ok := parseGitHubIssueKey(raw); ok {
 			t.Fatalf("parseGitHubIssueKey(%q) = %+v, true; want false", raw, ref)
@@ -833,6 +896,162 @@ func TestGitHubIssueReferenceParsers(t *testing.T) {
 			t.Fatalf("normalizeGitHubIssueNumber(%q) = %q, true; want false", raw, got)
 		}
 	}
+}
+
+func TestResolveGitHubIssueLinkTargetValidationAndQueryError(t *testing.T) {
+	t.Parallel()
+
+	repository := newUnreachableCustomerRequestRepo(t)
+	connectionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	if target, err := repository.ResolveGitHubIssueLinkTarget(context.Background(), GitHubIssueLinkTargetInput{
+		TenantID:     "tenant-a",
+		ConnectionID: connectionID,
+		IssueNumber:  "0",
+	}); !errors.Is(err, ErrInvalidInput) || target != nil {
+		t.Fatalf("target=%+v err=%v, want invalid input", target, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	target, err := repository.ResolveGitHubIssueLinkTarget(ctx, GitHubIssueLinkTargetInput{
+		TenantID:     "tenant-a",
+		ConnectionID: connectionID,
+		IssueNumber:  "228",
+	})
+	if err == nil || target != nil {
+		t.Fatalf("target=%+v err=%v, want query error", target, err)
+	}
+}
+
+func TestEnsureGitHubExternalIssueLinkBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	otherRequestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	mappingID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	linkID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	input := IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+	}
+	ref := githubIssueRef{owner: "Phixsura", repo: "attune", issueNumber: "228"}
+
+	t.Run("refreshes an existing active link for the same request", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{{values: []any{linkID, requestID.String(), false}}}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 1, tx.rowIdx)
+		require.Equal(t, 1, tx.execIdx)
+	})
+
+	t.Run("rejects an active link owned by another request", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{{values: []any{linkID, otherRequestID.String(), false}}}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.ErrorIs(t, err, ErrConflict)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+		require.Equal(t, 0, tx.execIdx)
+	})
+
+	t.Run("refreshes a local tombstone when no active link conflicts", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{values: []any{linkID, requestID.String(), true}},
+			{err: pgx.ErrNoRows},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 2, tx.rowIdx)
+		require.Equal(t, 1, tx.execIdx)
+	})
+
+	t.Run("rejects a local tombstone when another active external key exists", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{values: []any{linkID, requestID.String(), true}},
+			{values: []any{"229"}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.ErrorIs(t, err, ErrConflict)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+	})
+
+	t.Run("refreshes an existing local link with the same issue key", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{err: pgx.ErrNoRows},
+			{values: []any{linkID, "228"}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 2, tx.rowIdx)
+		require.Equal(t, 1, tx.execIdx)
+	})
+
+	t.Run("rejects an existing local link with a different issue key", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{err: pgx.ErrNoRows},
+			{values: []any{linkID, "229"}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.ErrorIs(t, err, ErrConflict)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+	})
+
+	t.Run("inserts a new external issue link when no existing link matches", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{err: pgx.ErrNoRows},
+			{err: pgx.ErrNoRows},
+			{values: []any{linkID}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 3, tx.rowIdx)
+	})
+
+	t.Run("wraps lookup errors", func(t *testing.T) {
+		t.Parallel()
+
+		errBoom := errors.New("boom")
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, &fakeRepoTx{
+			rows: []fakeRepoRow{{err: errBoom}},
+		}, input, mappingID, ref)
+		require.ErrorContains(t, err, "find existing github external issue link")
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+	})
+}
+
+func TestTruncateText(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "", truncateText("value", 0))
+	require.Equal(t, "short", truncateText("short", 10))
+	require.Equal(t, "abc", truncateText("abcdef", 3))
+	require.Equal(t, "世界", truncateText("世界hello", 2))
 }
 
 func TestManagedIssueSyncTargetTxBranches(t *testing.T) {

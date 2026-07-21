@@ -309,6 +309,143 @@ func TestNormalizeSupporterRejectsOversizedFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeSupporterProfileAndValidationBranches(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	revenue := int64(125000)
+
+	gotLink, err := normalizeCustomerLink(LinkCustomerInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		AccountKey: " account:acme ",
+		AccountProfile: AccountProfileInput{
+			RevenueCents:    ptrext.Of(revenue),
+			RevenueCurrency: " ",
+			Tier:            " enterprise ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeCustomerLink(profile) error = %v", err)
+	}
+	if gotLink.AccountProfile.RevenueCurrency != "USD" ||
+		gotLink.AccountProfile.Tier != "enterprise" ||
+		accountRevenueCents(gotLink.AccountProfile) != revenue {
+		t.Fatalf("normalizeCustomerLink(profile) = %+v, want normalized account profile", gotLink.AccountProfile)
+	}
+
+	gotVote, err := normalizeVote(VoteInput{
+		TenantID:       "tenant-a",
+		RequestID:      requestID,
+		AccountKey:     " account:acme ",
+		AccountProfile: AccountProfileInput{LifecycleStatus: " active "},
+	})
+	if err != nil {
+		t.Fatalf("normalizeVote(profile) error = %v", err)
+	}
+	if gotVote.Weight != 1 ||
+		gotVote.AccountProfile.RevenueCurrency != "USD" ||
+		gotVote.AccountProfile.LifecycleStatus != "active" {
+		t.Fatalf("normalizeVote(profile) = %+v, want default weight and normalized profile", gotVote)
+	}
+
+	cases := []struct {
+		name string
+		link LinkCustomerInput
+	}{
+		{
+			name: "missing tenant",
+			link: LinkCustomerInput{
+				RequestID:  requestID,
+				AccountKey: "account:acme",
+			},
+		},
+		{
+			name: "missing request id",
+			link: LinkCustomerInput{
+				TenantID:   "tenant-a",
+				AccountKey: "account:acme",
+			},
+		},
+		{
+			name: "profile without account key",
+			link: LinkCustomerInput{
+				TenantID:       "tenant-a",
+				RequestID:      requestID,
+				SubjectKey:     "user:42",
+				AccountProfile: AccountProfileInput{Tier: "enterprise"},
+			},
+		},
+		{
+			name: "invalid profile currency",
+			link: LinkCustomerInput{
+				TenantID:       "tenant-a",
+				RequestID:      requestID,
+				AccountKey:     "account:acme",
+				AccountProfile: AccountProfileInput{RevenueCurrency: "US"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeCustomerLink(tc.link); !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizeCustomerLink() error = %v, want ErrValidation", err)
+			}
+		})
+	}
+
+	if _, err := normalizeVote(VoteInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		AccountKey: "account:acme",
+		Weight:     -1,
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeVote(weight=-1) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeVote(VoteInput{
+		TenantID:       "tenant-a",
+		RequestID:      requestID,
+		SubjectKey:     "user:42",
+		AccountProfile: AccountProfileInput{CRMProvider: "salesforce"},
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeVote(profile without account) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeVote(VoteInput{
+		TenantID:       "tenant-a",
+		RequestID:      requestID,
+		AccountKey:     "account:acme",
+		AccountProfile: AccountProfileInput{RevenueCents: ptrext.Of(int64(-1))},
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeVote(negative revenue) error = %v, want ErrValidation", err)
+	}
+}
+
+func TestValidSupporterFieldsEachLimit(t *testing.T) {
+	valid := []string{"subject-key", "subject-hash", "Subject Display", "account-key", "Account Display", "note"}
+	tests := []struct {
+		name  string
+		field int
+		value string
+	}{
+		{name: "subject key", field: 0, value: strings.Repeat("x", 513)},
+		{name: "subject hash", field: 1, value: strings.Repeat("x", 129)},
+		{name: "subject display", field: 2, value: strings.Repeat("x", 501)},
+		{name: "account key", field: 3, value: strings.Repeat("x", 513)},
+		{name: "account display", field: 4, value: strings.Repeat("x", 501)},
+		{name: "note", field: 5, value: strings.Repeat("x", 5001)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := append([]string(nil), valid...)
+			fields[tt.field] = tt.value
+			if validSupporterFields(fields[0], fields[1], fields[2], fields[3], fields[4], fields[5]) {
+				t.Fatal("validSupporterFields() = true, want false")
+			}
+		})
+	}
+	if !validSupporterFields(valid[0], valid[1], valid[2], valid[3], valid[4], valid[5]) {
+		t.Fatal("validSupporterFields(valid) = false, want true")
+	}
+}
+
 func TestNormalizeIssueInputRejectsUnsupportedProvider(t *testing.T) {
 	_, err := normalizeIssueInput(LinkIssueInput{
 		TenantID:    "tenant-a",
@@ -318,6 +455,107 @@ func TestNormalizeIssueInputRejectsUnsupportedProvider(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnsupportedProvider) {
 		t.Fatalf("normalizeIssueInput() error = %v, want ErrUnsupportedProvider", err)
+	}
+}
+
+func TestNormalizeIssueInputValidationBranches(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	got, err := normalizeIssueInput(LinkIssueInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    " GitHub ",
+		ExternalURL: " http://github.com/Phixsura/attune/issues/228 ",
+		ExternalKey: " Phixsura/attune#228 ",
+		Title:       " Bidirectional sync ",
+		Status:      " open ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeIssueInput(http) error = %v", err)
+	}
+	if got.Provider != "github" ||
+		got.ExternalURL != "http://github.com/Phixsura/attune/issues/228" ||
+		got.ExternalKey != "Phixsura/attune#228" ||
+		got.Title != "Bidirectional sync" ||
+		got.Status != "open" {
+		t.Fatalf("normalizeIssueInput(http) = %+v, want trimmed issue fields", got)
+	}
+
+	cases := []struct {
+		name string
+		in   LinkIssueInput
+		want error
+	}{
+		{
+			name: "missing tenant",
+			in: LinkIssueInput{
+				RequestID:   requestID,
+				Provider:    "github",
+				ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "missing request id",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				Provider:    "github",
+				ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "missing url host",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "github",
+				ExternalURL: "https:///issues/228",
+			},
+			want: ErrInvalidIssueURL,
+		},
+		{
+			name: "long url",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "other",
+				ExternalURL: "https://tracker.example.com/" + strings.Repeat("x", 2049),
+				ExternalKey: "tracker-1",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "long title",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "other",
+				ExternalURL: "https://tracker.example.com/items/1",
+				ExternalKey: "tracker-1",
+				Title:       strings.Repeat("x", 501),
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "long status",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "other",
+				ExternalURL: "https://tracker.example.com/items/1",
+				ExternalKey: "tracker-1",
+				Status:      strings.Repeat("x", 121),
+			},
+			want: ErrValidation,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeIssueInput(tc.in); !errors.Is(err, tc.want) {
+				t.Fatalf("normalizeIssueInput() error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -445,6 +683,12 @@ func TestNormalizeNoteAndListDefaults(t *testing.T) {
 	}
 	if _, err := normalizeNote(NoteInput{TenantID: "tenant-a", RequestID: requestID}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizeNote(empty) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeNote(NoteInput{RequestID: requestID, Body: "note"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeNote(missing tenant) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeNote(NoteInput{TenantID: "tenant-a", Body: "note"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeNote(missing request) error = %v, want ErrValidation", err)
 	}
 	if _, err := normalizeNote(NoteInput{
 		TenantID:  "tenant-a",
@@ -574,6 +818,66 @@ func TestNormalizeIssueSync(t *testing.T) {
 	if _, err := normalizeIssueSync(IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, SyncError: strings.Repeat("x", 2001)}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizeIssueSync(long sync error) error = %v, want ErrValidation", err)
 	}
+
+	for _, tc := range []struct {
+		name string
+		in   IssueSyncInput
+	}{
+		{
+			name: "missing tenant",
+			in: IssueSyncInput{
+				RequestID:   requestID,
+				IssueLinkID: linkID,
+			},
+		},
+		{
+			name: "missing request",
+			in: IssueSyncInput{
+				TenantID:    "tenant-a",
+				IssueLinkID: linkID,
+			},
+		},
+		{
+			name: "missing issue link",
+			in: IssueSyncInput{
+				TenantID:  "tenant-a",
+				RequestID: requestID,
+			},
+		},
+		{
+			name: "long status",
+			in: IssueSyncInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				IssueLinkID: linkID,
+				Status:      strings.Repeat("x", 121),
+			},
+		},
+		{
+			name: "long status category",
+			in: IssueSyncInput{
+				TenantID:               "tenant-a",
+				RequestID:              requestID,
+				IssueLinkID:            linkID,
+				ExternalStatusCategory: strings.Repeat("x", 121),
+			},
+		},
+		{
+			name: "long assignee",
+			in: IssueSyncInput{
+				TenantID:         "tenant-a",
+				RequestID:        requestID,
+				IssueLinkID:      linkID,
+				ExternalAssignee: strings.Repeat("x", 501),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeIssueSync(tc.in); !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizeIssueSync() error = %v, want ErrValidation", err)
+			}
+		})
+	}
 }
 
 func TestIssueKeyDerivation(t *testing.T) {
@@ -653,6 +957,9 @@ func TestAuditMetadataHelpers(t *testing.T) {
 	}
 	if got := createAuditSummary("customer_request.promote_feedback", repo.Summary{}); got != "Promoted feedback to customer request" {
 		t.Fatalf("createAuditSummary(promote) = %q", got)
+	}
+	if got := createAuditSummary("customer_request.create", repo.Summary{}); got != "Created customer request" {
+		t.Fatalf("createAuditSummary(create without display id) = %q", got)
 	}
 	if createAuditMetadata(summary, "idempotency-key")["owner_member_id"] != ownerID.String() {
 		t.Fatalf("createAuditMetadata() = %+v, want owner member id", createAuditMetadata(summary, "idempotency-key"))
