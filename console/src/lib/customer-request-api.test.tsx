@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   customerRequestDetailQuery,
   customerRequestGitHubIssueConnectionsQuery,
@@ -43,10 +43,15 @@ import {
   SortDirection,
 } from '@/proto/attune/v1/customer_request'
 import { server } from '@/testing/mocks/server'
-import { renderHook, waitFor } from '@/testing/test-utils'
+import { act, renderHook, waitFor } from '@/testing/test-utils'
 
 const baseURL = '/fb/v1/console/customer-requests'
 const requestID = '11111111-1111-1111-1111-111111111111'
+const githubIssueRefreshDelaysMs = [750, 1_500, 3_000, 5_000]
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 function makeQueryClient() {
   return new QueryClient({
@@ -61,6 +66,18 @@ function wrapperFor(queryClient: QueryClient) {
   return ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   )
+}
+
+async function advanceGitHubIssueRefreshTimers(count = githubIssueRefreshDelaysMs.length) {
+  for (const delayMs of githubIssueRefreshDelaysMs.slice(0, count)) {
+    await advanceTimersBy(delayMs)
+  }
+}
+
+async function advanceTimersBy(delayMs: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(delayMs)
+  })
 }
 
 describe('customer request API', () => {
@@ -197,6 +214,23 @@ describe('customer request API', () => {
     expect(params.get('limit')).toBe('50')
     expect(params.has('q')).toBe(false)
     expect(params.has('status')).toBe(false)
+  })
+
+  it('treats a null list cursor as the end of pagination', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ requests: [], nextCursor: null })
+      }),
+    )
+
+    await makeQueryClient().fetchInfiniteQuery({
+      ...customerRequestsInfiniteQuery(),
+      pages: 2,
+    })
+
+    expect(urls).toHaveLength(1)
   })
 
   it('fetches details only when an id is present', async () => {
@@ -520,6 +554,7 @@ describe('customer request API', () => {
   })
 
   it('refreshes the detail cache after queued GitHub issue creation surfaces a link', async () => {
+    vi.useFakeTimers()
     const queued = sampleDetail(requestID)
     const linked = sampleDetailWithGitHubIssue(requestID)
     let detailLoads = 0
@@ -545,13 +580,144 @@ describe('customer request API', () => {
     await result.current.mutateAsync({})
 
     expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(queued)
-    await waitFor(
-      () => expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked),
-      {
-        timeout: 3_000,
-      },
-    )
+    expect(detailLoads).toBe(0)
+    await advanceGitHubIssueRefreshTimers(1)
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked)
     expect(detailLoads).toBe(1)
+  })
+
+  it('keeps polling until a queued GitHub issue has a rendered external URL', async () => {
+    vi.useFakeTimers()
+    const queued = sampleDetail(requestID)
+    const pending = sampleDetailWithIssueLinks(requestID, [
+      { provider: 'jira', externalUrl: 'https://jira.example/browse/ATT-7' },
+      { provider: 'github', externalUrl: '   ' },
+    ])
+    const linked = sampleDetailWithGitHubIssue(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(detailLoads === 1 ? pending : linked)
+      }),
+    )
+    const qc = makeQueryClient()
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+
+    await advanceGitHubIssueRefreshTimers(1)
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(pending)
+    await advanceTimersBy(githubIssueRefreshDelaysMs[1])
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked)
+    expect(detailLoads).toBe(2)
+  })
+
+  it('invalidates request caches when queued GitHub issue refresh fails', async () => {
+    vi.useFakeTimers()
+    const queued = sampleDetail(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json({ code: 'internal', message: 'failed' }, { status: 500 })
+      }),
+    )
+    const qc = makeQueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+    invalidate.mockClear()
+
+    await advanceGitHubIssueRefreshTimers(1)
+    expect(detailLoads).toBe(1)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.detail(requestID) })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
+  })
+
+  it('invalidates request caches when queued GitHub issue polling is exhausted', async () => {
+    vi.useFakeTimers()
+    const queued = sampleDetail(requestID)
+    const pending = sampleDetailWithIssueLinks(requestID, [{ provider: 'github', externalUrl: '' }])
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(pending)
+      }),
+    )
+    const qc = makeQueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+    invalidate.mockClear()
+
+    await advanceGitHubIssueRefreshTimers()
+    expect(detailLoads).toBe(4)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.detail(requestID) })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
+  })
+
+  it('skips queued GitHub issue polling when the mutation response already has a link', async () => {
+    vi.useFakeTimers()
+    const linked = sampleDetailWithGitHubIssue(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: linked,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(linked)
+      }),
+    )
+    const qc = makeQueryClient()
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+    await advanceGitHubIssueRefreshTimers()
+
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked)
+    expect(detailLoads).toBe(0)
   })
 
   it('does not cache mutation responses without a request id', async () => {
@@ -634,7 +800,10 @@ function sampleDetail(id: string): CustomerRequestDetail {
   }
 }
 
-function sampleDetailWithGitHubIssue(id: string): CustomerRequestDetail {
+function sampleDetailWithIssueLinks(
+  id: string,
+  links: Array<{ provider: string; externalUrl: string }>,
+): CustomerRequestDetail {
   const detail = sampleDetail(id)
   return {
     ...detail,
@@ -646,26 +815,30 @@ function sampleDetailWithGitHubIssue(id: string): CustomerRequestDetail {
           deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED,
         }
       : undefined,
-    issueLinks: [
-      {
-        id: 'issue-link-1',
-        provider: 'github',
-        externalKey: '702',
-        externalUrl: 'https://github.com/acme/app/issues/702',
-        title: 'GitHub #702',
-        status: 'open',
-        createdBy: 'tester',
-        createdAt: '2026-07-07T00:00:00Z',
-        updatedAt: '2026-07-07T00:00:00Z',
-        lastSyncedAt: '2026-07-07T00:00:00Z',
-        syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
-        externalStatusCategory: 'open',
-        externalAssignee: '',
-        externalUpdatedAt: '2026-07-07T00:00:00Z',
-        syncError: '',
-      },
-    ],
+    issueLinks: links.map((link, index) => ({
+      id: `issue-link-${index + 1}`,
+      provider: link.provider,
+      externalKey: String(702 + index),
+      externalUrl: link.externalUrl,
+      title: `${link.provider} #${702 + index}`,
+      status: 'open',
+      createdBy: 'tester',
+      createdAt: '2026-07-07T00:00:00Z',
+      updatedAt: '2026-07-07T00:00:00Z',
+      lastSyncedAt: '2026-07-07T00:00:00Z',
+      syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+      externalStatusCategory: 'open',
+      externalAssignee: '',
+      externalUpdatedAt: '2026-07-07T00:00:00Z',
+      syncError: '',
+    })),
   }
+}
+
+function sampleDetailWithGitHubIssue(id: string): CustomerRequestDetail {
+  return sampleDetailWithIssueLinks(id, [
+    { provider: 'github', externalUrl: 'https://github.com/acme/app/issues/702' },
+  ])
 }
 
 function sampleScoringSettings(
