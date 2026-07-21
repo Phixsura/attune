@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   tenant enables changelog publishing, and hides the changelog publish kind
   until it can actually be used.
 
+- Go SDK end-to-end smoke now indents the generated Tink keyset before writing
+  its temporary config, so the real-stack SDK harness boots the server with a
+  valid YAML config.
+
 - Public portal submission pages now only show the acknowledgement after a
   successful submission, preventing duplicate success text when visitors submit
   feedback from the rendered page.
