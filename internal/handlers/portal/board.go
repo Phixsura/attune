@@ -31,6 +31,7 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
   <meta name="robots" content="{{if .NoIndex}}noindex,nofollow{{else}}index,follow{{end}}">
   <meta name="description" content="{{.TenantName}} public board for browsing, voting, and commenting on requests.">
   <link rel="canonical" href="{{.BoardURL}}">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   {{if .NextURL}}<link rel="next" href="{{.NextURL}}">{{end}}
   <title>{{.TenantName}} | Public board{{if .HasQuery}} | {{.Query}}{{end}}</title>
   <style>

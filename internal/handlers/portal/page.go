@@ -23,6 +23,7 @@ var portalPageTemplate = template.Must(template.New("portal-page").Parse(`<!doct
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <title>{{.TenantName}} | {{.Headline}}</title>
   <style>
     :root {

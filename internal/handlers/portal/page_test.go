@@ -70,6 +70,7 @@ func TestPageRendersPortalSubmissionForm(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"<title>Acme Co | Send feedback</title>",
+		`<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
 		`data-submit-url="/v1/portal/acme/submissions"`,
 		"Page URL enabled",
 		"Browse requests",
@@ -158,6 +159,7 @@ func TestRequestPageRendersCommentsAndComposer(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"Public board",
+		`<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
 		"Discussion",
 		"Use the API",
 		"Updated Jul 10",
@@ -276,6 +278,7 @@ func TestRoadmapPageRendersRoadmapAndPreservesReturnLink(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"<title>Acme Co | Public roadmap | billing</title>",
+		`<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
 		"Public roadmap",
 		"Browse requests",
 		"Submit new feedback",

@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Console and public portal pages now ship an explicit root favicon asset,
+  preventing browser smoke tests and real local sessions from logging missing
+  favicon resources.
+
 - Customer Request GitHub Issue creation now only enables Console actions for
   push-capable external-sync mappings and sends the selected connection id,
   preventing pull-only connections from surfacing a backend conflict.
