@@ -74,6 +74,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   labels for the column name and order controls, keeping the console
   accessibility gate green on the public visibility configuration page.
 
+- Feedback tag search popovers now expose a named dialog and listbox option
+  semantics for empty states, keeping duplicate-tag suppression accessible in
+  browser checks.
+
 - Feedback list queries now forward the `source` and `type` filters into the
   console list options, so the reserved request parameters actually affect the
   repo query instead of being dropped after binding.
