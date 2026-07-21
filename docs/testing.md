@@ -65,8 +65,7 @@ The integration tier is gated with `//go:build integration`, so the
 default unit sweep stays offline. PostgreSQL suites live under
 `test/integration/postgres/<area>` and use `internal/testdb` to open a
 real `pgxpool`, run every embedded migration before each smoke test,
-and isolate test data with one temporary database, Docker container,
-or local PostgreSQL cluster per test.
+and isolate test data with one temporary database per test.
 
 ```bash
 make test-integration
@@ -75,9 +74,9 @@ make test-integration
 Requirements:
 
 - Docker daemon running locally is the preferred path.
-- When Docker is available, local runs start `pgvector/pgvector:pg17` with
-  a short-lived Docker container, matching the CI service-container image and
-  the private deploy Compose stack.
+- When Docker is available and `ATTUNE_TEST_DATABASE_URL` is unset, the make
+  target starts one shared `pgvector/pgvector:pg17` service container, matching
+  the CI service-container image and the private deploy Compose stack.
 - When Docker is unavailable, the harness falls back to installed PostgreSQL
   binaries (`initdb` and `pg_ctl`) and still runs against a real temporary
   cluster on `127.0.0.1`.
@@ -85,6 +84,7 @@ Requirements:
   `ATTUNE_TEST_DATABASE_URL`; the harness connects to that admin
   database, creates a temporary database per test, runs migrations
   there, and drops it during cleanup.
+- To override the Go test timeout, set `ATTUNE_TEST_INTEGRATION_TIMEOUT`.
 
 CI uses the second path: `.github/workflows/ci.yml` runs an
 `integration-postgres` job with a GitHub Actions `pgvector/pgvector:pg17`
@@ -92,9 +92,9 @@ service container and exports `ATTUNE_TEST_DATABASE_URL` for
 `make test-integration`.
 
 `make test-integration` runs packages with `-p 1`. That keeps local
-fallback runs from starting many Postgres containers at once; test
-isolation still comes from a fresh container locally or a fresh
-temporary database in CI.
+fallback runs from stampeding the shared Postgres instance; test
+isolation comes from a fresh temporary database in both local Docker
+and CI service-container mode.
 
 Layout:
 
