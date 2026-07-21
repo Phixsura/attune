@@ -43,6 +43,7 @@ import {
 
 const BASE = '/fb/v1/console/customer-requests'
 const EXTERNAL_SYNC_BASE = '/fb/v1/console/external-sync'
+const githubIssueRefreshDelaysMs = [750, 1_500, 3_000, 5_000] as const
 
 export interface CustomerRequestFilters {
   q?: string
@@ -316,6 +317,12 @@ export function useCreateCustomerRequestGitHubIssue(id: string) {
       ),
     onSuccess: (response) => {
       if (response.detail) updateCustomerRequestCache(qc, response.detail)
+      if (response.runId) {
+        void refreshGitHubIssueDetailAfterRun(qc, id, response.detail).catch(() => {
+          void qc.invalidateQueries({ queryKey: customerRequestKeys.detail(id) })
+          void qc.invalidateQueries({ queryKey: customerRequestKeys.all })
+        })
+      }
     },
   })
 }
@@ -408,6 +415,34 @@ function updateCustomerRequestCache(qc: QueryClient, detail: CustomerRequestDeta
   if (detail.request?.id) {
     qc.setQueryData(customerRequestKeys.detail(detail.request.id), detail)
   }
+}
+
+async function refreshGitHubIssueDetailAfterRun(
+  qc: QueryClient,
+  id: string,
+  initial?: CustomerRequestDetail,
+) {
+  if (!id || hasRenderedGitHubIssueLink(initial)) return
+
+  for (const delayMs of githubIssueRefreshDelaysMs) {
+    await sleep(delayMs)
+    const detail = await api<CustomerRequestDetail>(`${BASE}/${encodeURIComponent(id)}`)
+    updateCustomerRequestCache(qc, detail)
+    if (hasRenderedGitHubIssueLink(detail)) return
+  }
+
+  void qc.invalidateQueries({ queryKey: customerRequestKeys.detail(id) })
+  void qc.invalidateQueries({ queryKey: customerRequestKeys.all })
+}
+
+function hasRenderedGitHubIssueLink(detail?: CustomerRequestDetail) {
+  return Boolean(
+    detail?.issueLinks.some((link) => link.provider === 'github' && link.externalUrl.trim() !== ''),
+  )
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function buildListParams(filters: CustomerRequestFilters) {

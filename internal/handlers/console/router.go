@@ -1512,7 +1512,7 @@ func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
 				return
 			}
 			if errors.Is(err, context.Canceled) {
-				logext.Warnf(req.Context(), "[%s] canceled,user_id:%s", where, authCtx.UserID)
+				logext.Infof(req.Context(), "[%s] canceled,user_id:%s", where, authCtx.UserID)
 				dispatcher.Reject(req.Context(), w, dispatcher.StatusClientClosedRequest, attunev1.ErrorCode_CLIENT_CANCELED, "client canceled request")
 				return
 			}

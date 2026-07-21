@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   tenant enables changelog publishing, and hides the changelog publish kind
   until it can actually be used.
 
+- Console request cancellations caused by normal browser navigation now log at
+  info level instead of warning level while preserving the 499
+  `CLIENT_CANCELED` response.
+
+- Customer Request detail drawers now refresh shortly after queued GitHub Issue
+  creation runs, so the synced external issue link appears without a manual
+  page reload.
+
 - Go SDK end-to-end smoke now indents the generated Tink keyset before writing
   its temporary config, so the real-stack SDK harness boots the server with a
   valid YAML config.

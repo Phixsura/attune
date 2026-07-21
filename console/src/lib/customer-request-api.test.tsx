@@ -519,6 +519,41 @@ describe('customer request API', () => {
     expect(qc.getQueryData(customerRequestKeys.detail('cached-request'))).toEqual(detail)
   })
 
+  it('refreshes the detail cache after queued GitHub issue creation surfaces a link', async () => {
+    const queued = sampleDetail(requestID)
+    const linked = sampleDetailWithGitHubIssue(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(linked)
+      }),
+    )
+    const qc = makeQueryClient()
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(queued)
+    await waitFor(
+      () => expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked),
+      {
+        timeout: 3_000,
+      },
+    )
+    expect(detailLoads).toBe(1)
+  })
+
   it('does not cache mutation responses without a request id', async () => {
     server.use(
       http.post(baseURL, () => HttpResponse.json({})),
@@ -596,6 +631,40 @@ function sampleDetail(id: string): CustomerRequestDetail {
     duplicates: [],
     accountProfiles: [],
     notes: [],
+  }
+}
+
+function sampleDetailWithGitHubIssue(id: string): CustomerRequestDetail {
+  const detail = sampleDetail(id)
+  return {
+    ...detail,
+    request: detail.request
+      ? {
+          ...detail.request,
+          linkedIssueCount: 1,
+          syncedIssueCount: 1,
+          deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED,
+        }
+      : undefined,
+    issueLinks: [
+      {
+        id: 'issue-link-1',
+        provider: 'github',
+        externalKey: '702',
+        externalUrl: 'https://github.com/acme/app/issues/702',
+        title: 'GitHub #702',
+        status: 'open',
+        createdBy: 'tester',
+        createdAt: '2026-07-07T00:00:00Z',
+        updatedAt: '2026-07-07T00:00:00Z',
+        lastSyncedAt: '2026-07-07T00:00:00Z',
+        syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+        externalStatusCategory: 'open',
+        externalAssignee: '',
+        externalUpdatedAt: '2026-07-07T00:00:00Z',
+        syncError: '',
+      },
+    ],
   }
 }
 
