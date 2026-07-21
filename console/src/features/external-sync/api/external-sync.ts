@@ -13,6 +13,7 @@ import {
   ExternalSyncDirection,
   type ExternalSyncEvent,
   type ExternalSyncHealthResponse,
+  type ExternalSyncProvider as ExternalSyncProviderItem,
   type ExternalSyncRecordFailure,
   type ExternalSyncRecordTimelineEntry,
   type ExternalSyncRecordTimelineResponse,
@@ -22,6 +23,7 @@ import {
   type ListExternalConnectionsResponse,
   type ListExternalObjectMappingsResponse,
   type ListExternalSyncEventsResponse,
+  type ListExternalSyncProvidersResponse,
   type ListExternalSyncRunsResponse,
   type PreviewExternalObjectMappingRequest,
   type PreviewExternalObjectMappingResponse,
@@ -51,6 +53,7 @@ export type {
   ExternalSyncConflict,
   ExternalSyncEvent,
   ExternalSyncHealthResponse,
+  ExternalSyncProviderItem as ExternalSyncProvider,
   ExternalSyncRecordFailure,
   ExternalSyncRecordTimelineEntry,
   ExternalSyncRecordTimelineResponse,
@@ -89,6 +92,7 @@ export const externalSyncQueryKeys = {
   root: ['console', 'external-sync'] as const,
   health: () => [...externalSyncQueryKeys.root, 'health'] as const,
   connections: () => [...externalSyncQueryKeys.root, 'connections'] as const,
+  providers: () => [...externalSyncQueryKeys.root, 'providers'] as const,
   connectionSchema: (connectionId?: string) =>
     [...externalSyncQueryKeys.root, 'connections', connectionId ?? 'none', 'schema'] as const,
   mappings: (connectionId?: string) =>
@@ -116,6 +120,16 @@ export const externalSyncConnectionsQuery = () =>
       return resp.connections
     },
     staleTime: 20_000,
+  })
+
+export const externalSyncProvidersQuery = () =>
+  queryOptions({
+    queryKey: externalSyncQueryKeys.providers(),
+    queryFn: async ({ signal }) => {
+      const resp = await api<ListExternalSyncProvidersResponse>(`${base}/providers`, { signal })
+      return resp.providers
+    },
+    staleTime: 60_000,
   })
 
 export const externalSyncMappingsQuery = (connectionId?: string) =>

@@ -13,6 +13,7 @@ import type {
   PreviewEnrichPromptResponse,
   UpdateEnrichConfigResponse,
 } from '@/proto/attune/v1/enrich_config'
+import type { ListExternalSyncProvidersResponse } from '@/proto/attune/v1/external_sync'
 import type {
   FeedbackDetail,
   GetFeedbackStatsResponse,
@@ -118,6 +119,12 @@ const defaultTestNotifyTargetResponse: TestNotifyTargetResponse = { ok: true, st
 export const defaultDeliveriesList: ListDeliveriesResponse = {
   deliveries: [],
   nextBeforeId: '0',
+}
+const defaultExternalSyncProviders: ListExternalSyncProvidersResponse = {
+  providers: [
+    { provider: 'github', display: 'GitHub' },
+    { provider: 'jira', display: 'Jira' },
+  ],
 }
 const sampleDelivery = {
   id: '101',
@@ -548,6 +555,10 @@ export const handlers = [
   http.get(`${BASE}/outbox/deliveries`, () => HttpResponse.json(defaultDeliveriesList)),
   http.post(`${BASE}/outbox/:id/retry`, () =>
     HttpResponse.json(defaultRetryDeliveryResponse, { status: 202 }),
+  ),
+
+  http.get(`${BASE}/external-sync/providers`, () =>
+    HttpResponse.json(defaultExternalSyncProviders),
   ),
 
   http.get(`${BASE}/reply-send-hook`, () => HttpResponse.json(defaultReplySendHook)),

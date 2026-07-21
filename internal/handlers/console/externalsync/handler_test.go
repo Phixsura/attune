@@ -15,6 +15,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	externalsynccore "github.com/Phixsura/attune/internal/externalsync"
+	_ "github.com/Phixsura/attune/internal/externalsync/adapter/githubissue"
+	_ "github.com/Phixsura/attune/internal/externalsync/adapter/jiraissue"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -64,6 +66,26 @@ func TestRunDirectionFromProtoLeavesUnspecifiedForMappingDefault(t *testing.T) {
 	}
 	if got := runDirectionFromProto(attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH); got != repo.DirectionPush {
 		t.Fatalf("push run direction = %q; want push", got)
+	}
+}
+
+func TestListProvidersReturnsRegisteredEntries(t *testing.T) {
+	handler := ptrext.Of(Handler{})
+
+	result, err := handler.ListProviders(handlerTestContext(), ptrext.Of(attunev1.ListExternalSyncProvidersRequest{}))
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+
+	got := result.Body.GetProviders()
+	if len(got) != 2 {
+		t.Fatalf("providers len = %d; want 2", len(got))
+	}
+	if got[0].GetProvider() != "github" || got[0].GetDisplay() != "GitHub" {
+		t.Fatalf("providers[0] = %#v; want github/GitHub", got[0])
+	}
+	if got[1].GetProvider() != "jira" || got[1].GetDisplay() != "Jira" {
+		t.Fatalf("providers[1] = %#v; want jira/Jira", got[1])
 	}
 }
 

@@ -94,6 +94,18 @@ export interface ExternalConnection {
   webhookSecretConfigured: boolean;
 }
 
+export interface ExternalSyncProvider {
+  provider: string;
+  display: string;
+}
+
+export interface ListExternalSyncProvidersRequest {
+}
+
+export interface ListExternalSyncProvidersResponse {
+  providers: ExternalSyncProvider[];
+}
+
 export interface ExternalObjectMapping {
   id: string;
   tenantId: string;
@@ -470,6 +482,7 @@ export interface GetExternalSyncHealthRequest {
  */
 export interface ExternalSyncService {
   ListExternalConnections(request: ListExternalConnectionsRequest): Promise<ListExternalConnectionsResponse>;
+  ListExternalSyncProviders(request: ListExternalSyncProvidersRequest): Promise<ListExternalSyncProvidersResponse>;
   CreateExternalConnection(request: CreateExternalConnectionRequest): Promise<ExternalConnection>;
   UpdateExternalConnection(request: UpdateExternalConnectionRequest): Promise<ExternalConnection>;
   DeleteExternalConnection(request: DeleteExternalConnectionRequest): Promise<DeleteExternalConnectionResponse>;

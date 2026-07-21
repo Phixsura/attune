@@ -1246,9 +1246,8 @@ describe('ExternalSyncPage', () => {
 
     await user.click(screen.getByRole('button', { name: '新建连接' }))
     const dialog = screen.getByRole('dialog', { name: '新建外部连接' })
-    fireEvent.change(within(dialog).getByLabelText('Provider'), {
-      target: { value: ' GitHub ' },
-    })
+    await user.click(within(dialog).getByRole('combobox', { name: 'Provider' }))
+    await user.click(screen.getByRole('option', { name: 'GitHub' }))
     fireEvent.change(within(dialog).getByLabelText('名称'), {
       target: { value: ' GitHub OSS ' },
     })
@@ -2065,6 +2064,10 @@ describe('ExternalSyncPage', () => {
       <CreateConnectionDialog
         open={true}
         pending={false}
+        providers={[
+          { provider: 'github', display: 'GitHub' },
+          { provider: 'jira', display: 'Jira' },
+        ]}
         onOpenChange={onCreateOpenChange}
         onSubmit={onCreate}
       />,
@@ -2075,9 +2078,8 @@ describe('ExternalSyncPage', () => {
     fireEvent.submit(createForm as HTMLFormElement)
     expect(onCreate).not.toHaveBeenCalled()
 
-    fireEvent.change(within(createDialog).getByLabelText('Provider'), {
-      target: { value: ' GitHub ' },
-    })
+    await createRender.user.click(within(createDialog).getByRole('combobox', { name: 'Provider' }))
+    await createRender.user.click(screen.getByRole('option', { name: 'Jira' }))
     fireEvent.change(within(createDialog).getByLabelText('名称'), {
       target: { value: ' GitHub App ' },
     })
@@ -2102,7 +2104,7 @@ describe('ExternalSyncPage', () => {
     await createRender.user.click(within(createDialog).getByRole('button', { name: '新建' }))
 
     expect(onCreate).toHaveBeenCalledWith({
-      provider: 'github',
+      provider: 'jira',
       name: 'GitHub App',
       authType: 'api_key',
       credential: 'token-1',

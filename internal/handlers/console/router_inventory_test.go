@@ -14,6 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
 	"github.com/Phixsura/attune/internal/handlers/console/digestsubscription"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
+	consoleexternalsync "github.com/Phixsura/attune/internal/handlers/console/externalsync"
 	"github.com/Phixsura/attune/internal/handlers/console/feedback"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	consoleguardpolicy "github.com/Phixsura/attune/internal/handlers/console/guardpolicy"
@@ -132,6 +133,32 @@ var expectedOtherRoutes = []string{
 	"GET /llm-usage",
 	"GET /classification-quality",
 	"GET /classification-quality/samples",
+	"GET /external-sync/providers",
+	"GET /external-sync/connections",
+	"POST /external-sync/connections",
+	"PATCH /external-sync/connections/{id}",
+	"DELETE /external-sync/connections/{id}",
+	"POST /external-sync/connections/{id}:test",
+	"POST /external-sync/connections/{id}:resume",
+	"POST /external-sync/connections/{id}:qualify",
+	"GET /external-sync/connections/{id}/schema",
+	"GET /external-sync/mappings",
+	"PUT /external-sync/mappings/{id}",
+	"POST /external-sync/mappings/{id}:preview",
+	"POST /external-sync/mappings/{id}:reset-cursor",
+	"POST /external-sync/mappings/{id}:backfill",
+	"POST /external-sync/runs",
+	"GET /external-sync/runs",
+	"GET /external-sync/runs/{id}",
+	"POST /external-sync/records:timeline",
+	"POST /external-sync/runs/{id}:retry",
+	"POST /external-sync/failures/{id}:retry",
+	"POST /external-sync/conflicts/{id}:resolve",
+	"POST /external-sync/conflicts:batch-resolve",
+	"GET /external-sync/events",
+	"GET /external-sync/events/{id}",
+	"POST /external-sync/events/{id}:replay",
+	"GET /external-sync/health",
 	"GET /enrich-config/",
 	"PUT /enrich-config/",
 	"GET /enrich-config/versions",
@@ -187,6 +214,7 @@ func TestRouterInventory(t *testing.T) {
 		gdpr:               &consolegdpr.Handler{},
 		apiKeys:            &apikey.APIKeysHandler{},
 		notifyTargets:      &notifytarget.NotifyTargetsHandler{},
+		externalSync:       &consoleexternalsync.Handler{},
 		digestSubscription: &digestsubscription.Handler{},
 		feedback:           &feedback.FeedbackHandler{},
 		feedbackSearch:     &feedback.SearchHandler{},

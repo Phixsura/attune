@@ -841,6 +841,17 @@ func TestRouterHTTPDispatch_Members(t *testing.T) {
 	}
 }
 
+// ---------- mountExternalSync provider routes ----------
+
+func TestRouterHTTPDispatch_ExternalSyncProviders(t *testing.T) {
+	t.Parallel()
+	r := dispatchRouter()
+	mux := newRecovererMux()
+	r.mountExternalSync(mux)
+
+	serveAndAssertDispatched(t, mux, http.MethodGet, "/external-sync/providers", "")
+}
+
 // ---------- authProviders handler ----------
 
 func TestRouterHTTPDispatch_AuthProviders(t *testing.T) {

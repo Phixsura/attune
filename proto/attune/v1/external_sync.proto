@@ -11,6 +11,9 @@ service ExternalSyncService {
   rpc ListExternalConnections(ListExternalConnectionsRequest) returns (ListExternalConnectionsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/external-sync/connections"};
   }
+  rpc ListExternalSyncProviders(ListExternalSyncProvidersRequest) returns (ListExternalSyncProvidersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/providers"};
+  }
   rpc CreateExternalConnection(CreateExternalConnectionRequest) returns (ExternalConnection) {
     option (google.api.http) = {
       post: "/fb/v1/console/external-sync/connections"
@@ -210,6 +213,17 @@ message ExternalConnection {
   string created_at = 16;
   string updated_at = 17;
   bool webhook_secret_configured = 18;
+}
+
+message ExternalSyncProvider {
+  string provider = 1;
+  string display = 2;
+}
+
+message ListExternalSyncProvidersRequest {}
+
+message ListExternalSyncProvidersResponse {
+  repeated ExternalSyncProvider providers = 1;
 }
 
 message ExternalObjectMapping {

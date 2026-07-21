@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	core "github.com/Phixsura/attune/internal/externalsync"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -59,6 +60,17 @@ func TestSlackAdapterWiring_E2E(t *testing.T) {
 		}
 		if ch.ID() != "slack" {
 			t.Errorf("ID() = %q, want \"slack\"", ch.ID())
+		}
+	})
+
+	// Verify the external sync registry was populated by main.go's blank imports.
+	t.Run("lookup_jira_external_sync_provider", func(t *testing.T) {
+		provider, ok := core.Lookup("jira")
+		if !ok {
+			t.Fatal("external sync Lookup(\"jira\") returned ok=false; blank-import missing in main.go?")
+		}
+		if provider.Provider() != "jira" {
+			t.Errorf("Provider() = %q, want \"jira\"", provider.Provider())
 		}
 	})
 

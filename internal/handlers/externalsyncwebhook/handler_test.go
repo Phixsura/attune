@@ -157,13 +157,81 @@ func TestGitHubServiceErrorsMapToResponses(t *testing.T) {
 	}
 }
 
+func TestJiraAcceptsSignedDelivery(t *testing.T) {
+	service := ptrext.Of(fakeService{})
+	handler := NewHandler(service)
+	connectionID := uuid.New()
+	body := []byte(`{"webhookEvent":"jira:issue_updated","timestamp":1710000000000,"issue":{"id":"10001","key":"ABC-1","fields":{"summary":"Sync me","status":{"name":"In Progress"}}},"changelog":{"id":"200","items":[{"field":"status","fromString":"To Do","toString":"In Progress"}]},"user":{"accountId":"acc-1","displayName":"Alice"}}`)
+	req := routeRequest(httptest.NewRequest(http.MethodPost, "/jira/tenant-1/"+connectionID.String(), bytes.NewReader(body)), map[string]string{
+		"tenant_id":     "tenant-1",
+		"connection_id": connectionID.String(),
+	})
+	req.Header.Set("X-Hub-Signature", testGitHubSignature([]byte("secret"), body))
+	rec := httptest.NewRecorder()
+
+	handler.Jira(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body = %s; want 202", rec.Code, rec.Body.String())
+	}
+	if service.jiraInput.TenantID != "tenant-1" || service.jiraInput.ConnectionID != connectionID ||
+		service.jiraInput.Signature == "" || string(service.jiraInput.Body) != string(body) {
+		t.Fatalf("service input = %#v; want routed Jira delivery", service.jiraInput)
+	}
+}
+
+func TestRoutesDispatchesJiraWebhook(t *testing.T) {
+	service := ptrext.Of(fakeService{})
+	handler := NewHandler(service)
+	connectionID := uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/jira/tenant-1/"+connectionID.String(), strings.NewReader(`{}`))
+	req.Header.Set("X-Hub-Signature", testGitHubSignature([]byte("secret"), []byte(`{}`)))
+	rec := httptest.NewRecorder()
+
+	handler.Routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body = %s; want 202", rec.Code, rec.Body.String())
+	}
+	if service.jiraInput.TenantID != "tenant-1" || service.jiraInput.ConnectionID != connectionID {
+		t.Fatalf("service input = %#v; want routed Jira request", service.jiraInput)
+	}
+}
+
+func TestJiraSignatureFailureMapsUnauthorized(t *testing.T) {
+	service := ptrext.Of(fakeService{err: svc.ErrWebhookSignature})
+	handler := NewHandler(service)
+	connectionID := uuid.New()
+	req := routeRequest(httptest.NewRequest(http.MethodPost, "/jira/tenant-1/"+connectionID.String(), bytes.NewReader([]byte(`{}`))), map[string]string{
+		"tenant_id":     "tenant-1",
+		"connection_id": connectionID.String(),
+	})
+	req.Header.Set("X-Hub-Signature", testGitHubSignature([]byte("secret"), []byte(`{}`)))
+	rec := httptest.NewRecorder()
+
+	handler.Jira(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d body = %s; want 401", rec.Code, rec.Body.String())
+	}
+}
+
 type fakeService struct {
-	input svc.GitHubWebhookInput
-	err   error
+	input     svc.GitHubWebhookInput
+	jiraInput svc.JiraWebhookInput
+	err       error
 }
 
 func (s *fakeService) RecordGitHubWebhook(_ context.Context, in svc.GitHubWebhookInput) (*repo.SyncEvent, error) {
 	s.input = in
+	if s.err != nil {
+		return nil, s.err
+	}
+	return ptrext.Of(repo.SyncEvent{}), nil
+}
+
+func (s *fakeService) RecordJiraWebhook(_ context.Context, in svc.JiraWebhookInput) (*repo.SyncEvent, error) {
+	s.jiraInput = in
 	if s.err != nil {
 		return nil, s.err
 	}

@@ -10,6 +10,7 @@ import {
   ExternalSyncEventSignatureStatus,
   ExternalSyncEventStatus,
   type ExternalSyncHealthResponse,
+  type ExternalSyncProvider,
   type ExternalSyncRun,
   ExternalSyncRunStatus,
   ExternalSyncRunTrigger,
@@ -724,6 +725,10 @@ async function handleRoute(
     await fulfillJson(route, clone(state.externalSync.health))
     return true
   }
+  if (method === 'GET' && path === '/external-sync/providers') {
+    await fulfillJson(route, consoleA11yExternalSyncProviders)
+    return true
+  }
   if (method === 'GET' && path === '/external-sync/connections') {
     await fulfillJson(route, { connections: clone(state.externalSync.connections) })
     return true
@@ -787,6 +792,17 @@ type ApiMockState = {
   serviceAccounts: ServiceAccount[]
   tags: Tag[]
 }
+
+const consoleA11yExternalSyncProviders: ExternalSyncProvider[] = [
+  {
+    provider: 'github',
+    display: 'GitHub',
+  },
+  {
+    provider: 'jira',
+    display: 'Jira',
+  },
+]
 
 type ExternalSyncMockState = {
   connections: ExternalConnection[]
