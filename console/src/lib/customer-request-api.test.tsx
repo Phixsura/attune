@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   customerRequestDetailQuery,
+  customerRequestGitHubIssueConnectionOptionsQuery,
   customerRequestGitHubIssueConnectionsQuery,
   customerRequestKeys,
   customerRequestSavedViewsQuery,
@@ -81,7 +82,7 @@ async function advanceTimersBy(delayMs: number) {
 }
 
 describe('customer request API', () => {
-  it('filters GitHub issue connections to pull-capable request mappings', async () => {
+  it('classifies GitHub issue connections by link and create capability', async () => {
     const connection = (id: string, provider = 'github', enabled = true, status = 'active') => ({
       id,
       tenantId: 't-1',
@@ -147,9 +148,22 @@ describe('customer request API', () => {
       }),
     )
 
-    const got = await makeQueryClient().fetchQuery(customerRequestGitHubIssueConnectionsQuery())
+    const queryClient = makeQueryClient()
+    const got = await queryClient.fetchQuery(customerRequestGitHubIssueConnectionsQuery())
+    const options = await queryClient.fetchQuery(customerRequestGitHubIssueConnectionOptionsQuery())
 
     expect(got.map((item) => item.id)).toEqual(['github-pull', 'github-bidirectional'])
+    expect(
+      options.map((option) => ({
+        id: option.connection.id,
+        canLink: option.canLink,
+        canCreate: option.canCreate,
+      })),
+    ).toEqual([
+      { id: 'github-pull', canLink: true, canCreate: false },
+      { id: 'github-bidirectional', canLink: true, canCreate: true },
+      { id: 'github-push', canLink: false, canCreate: true },
+    ])
   })
 
   it('builds list query params for filters and pagination', async () => {

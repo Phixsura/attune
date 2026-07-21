@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Customer Request GitHub Issue creation now only enables Console actions for
+  push-capable external-sync mappings and sends the selected connection id,
+  preventing pull-only connections from surfacing a backend conflict.
+
 - Jira issue label construction now avoids an overflow-prone preallocation,
   and Console external-sync internal errors no longer log raw error strings in
   the shared error path, which keeps the CodeQL scan clean.

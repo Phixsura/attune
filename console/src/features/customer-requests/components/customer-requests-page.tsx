@@ -48,7 +48,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   type CustomerRequestFilters,
   customerRequestDetailQuery,
-  customerRequestGitHubIssueConnectionsQuery,
+  customerRequestGitHubIssueConnectionOptionsQuery,
   customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
@@ -2173,15 +2173,29 @@ function IssueLinkForm({
   const [issueNumber, setIssueNumber] = useState('')
   const link = useLinkCustomerRequestIssue(requestID)
   const createGitHubIssue = useCreateCustomerRequestGitHubIssue(requestID)
-  const githubConnectionsQuery = useQuery(customerRequestGitHubIssueConnectionsQuery())
-  const githubConnections = githubConnectionsQuery.data ?? []
+  const githubConnectionOptionsQuery = useQuery(customerRequestGitHubIssueConnectionOptionsQuery())
+  const githubConnectionOptions = githubConnectionOptionsQuery.data ?? []
+  const githubConnections = githubConnectionOptions.map((option) => option.connection)
+  const selectedGitHubConnectionOption = githubConnectionOptions.find(
+    (option) => option.connection.id === connectionID,
+  )
   const canUseManagedGitHubLink =
-    provider === 'github' && url.trim() === '' && connectionID !== '' && issueNumber.trim() !== ''
+    provider === 'github' &&
+    url.trim() === '' &&
+    selectedGitHubConnectionOption?.canLink === true &&
+    issueNumber.trim() !== ''
   const canLinkIssue = url.trim() !== '' || canUseManagedGitHubLink
+  const canCreateGitHubIssue = selectedGitHubConnectionOption?.canCreate === true
   useEffect(() => {
-    if (provider !== 'github' || connectionID !== '' || githubConnections.length === 0) return
-    setConnectionID(githubConnections[0]?.id ?? '')
-  }, [connectionID, githubConnections, provider])
+    if (provider !== 'github' || connectionID !== '' || githubConnectionOptions.length === 0) {
+      return
+    }
+    const preferred =
+      githubConnectionOptions.find((option) => option.canLink && option.canCreate) ??
+      githubConnectionOptions.find((option) => option.canLink) ??
+      githubConnectionOptions.find((option) => option.canCreate)
+    setConnectionID(preferred?.connection.id ?? '')
+  }, [connectionID, githubConnectionOptions, provider])
   /* v8 ignore next -- @preserve: the issue-link form is hidden unless edit permission and request id exist. */
   if (!permissions.can('customer_request:edit') || !requestID) return null
   const handleLinkIssue = () => {
@@ -2243,10 +2257,10 @@ function IssueLinkForm({
         {hasGitHubIssueLink ? null : (
           <Button
             variant="secondary"
-            disabled={link.isPending || createGitHubIssue.isPending}
+            disabled={link.isPending || createGitHubIssue.isPending || !canCreateGitHubIssue}
             onClick={() =>
               createGitHubIssue.mutate(
-                {},
+                { connectionId: connectionID },
                 {
                   onSuccess: () => toast.success(t('customer_requests.create_github_issue_queued')),
                   onError: (err) =>
@@ -2271,12 +2285,12 @@ function IssueLinkForm({
               <SelectValue placeholder={t('customer_requests.github_connection')} />
             </SelectTrigger>
             <SelectContent>
-              {githubConnectionsQuery.isLoading ? (
+              {githubConnectionOptionsQuery.isLoading ? (
                 <SelectItem disabled value="__loading">
                   {t('customer_requests.github_connection_loading')}
                 </SelectItem>
               ) : null}
-              {!githubConnectionsQuery.isLoading && githubConnections.length === 0 ? (
+              {!githubConnectionOptionsQuery.isLoading && githubConnections.length === 0 ? (
                 <SelectItem disabled value="__empty">
                   {t('customer_requests.no_github_connections')}
                 </SelectItem>

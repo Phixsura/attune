@@ -35,6 +35,7 @@ import type {
   UpdateCustomerRequestScoringSettingsRequest,
 } from '@/proto/attune/v1/customer_request'
 import {
+  type ExternalConnection,
   type ExternalObjectMapping,
   ExternalSyncDirection,
   type ListExternalConnectionsResponse,
@@ -61,6 +62,8 @@ export const customerRequestKeys = {
   list: (filters: CustomerRequestFilters) =>
     ['console', 'customer-requests', 'list', filters] as const,
   detail: (id: string) => ['console', 'customer-requests', 'detail', id] as const,
+  githubIssueConnectionOptions: () =>
+    ['console', 'customer-requests', 'github-issue-connection-options'] as const,
   githubIssueConnections: () =>
     ['console', 'customer-requests', 'github-issue-connections'] as const,
   scoring: () => ['console', 'customer-requests', 'scoring-settings'] as const,
@@ -96,27 +99,49 @@ export const customerRequestDetailQuery = (id: string | null) =>
 export const customerRequestGitHubIssueConnectionsQuery = () =>
   queryOptions({
     queryKey: customerRequestKeys.githubIssueConnections(),
-    queryFn: async ({ signal }) => {
-      const resp = await api<ListExternalConnectionsResponse>(`${EXTERNAL_SYNC_BASE}/connections`, {
-        signal,
-      })
-      const githubConnections = resp.connections.filter(
-        (connection) =>
-          connection.provider === 'github' && connection.enabled && connection.status === 'active',
-      )
-      const checked = await Promise.all(
-        githubConnections.map(async (connection) => {
-          const mappings = await api<ListExternalObjectMappingsResponse>(
-            `${EXTERNAL_SYNC_BASE}/mappings?connection_id=${encodeURIComponent(connection.id)}`,
-            { signal },
-          )
-          return mappings.mappings.some(isPullCapableGitHubIssueMapping) ? connection : null
-        }),
-      )
-      return checked.filter((connection) => connection !== null)
-    },
+    queryFn: async ({ signal }) =>
+      (await loadGitHubIssueConnectionOptions(signal))
+        .filter((option) => option.canLink)
+        .map((option) => option.connection),
     staleTime: 20_000,
   })
+
+export interface CustomerRequestGitHubIssueConnectionOption {
+  connection: ExternalConnection
+  canLink: boolean
+  canCreate: boolean
+}
+
+export const customerRequestGitHubIssueConnectionOptionsQuery = () =>
+  queryOptions({
+    queryKey: customerRequestKeys.githubIssueConnectionOptions(),
+    queryFn: ({ signal }) => loadGitHubIssueConnectionOptions(signal),
+    staleTime: 20_000,
+  })
+
+async function loadGitHubIssueConnectionOptions(
+  signal?: AbortSignal,
+): Promise<CustomerRequestGitHubIssueConnectionOption[]> {
+  const resp = await api<ListExternalConnectionsResponse>(`${EXTERNAL_SYNC_BASE}/connections`, {
+    signal,
+  })
+  const githubConnections = resp.connections.filter(
+    (connection) =>
+      connection.provider === 'github' && connection.enabled && connection.status === 'active',
+  )
+  const checked = await Promise.all(
+    githubConnections.map(async (connection) => {
+      const mappings = await api<ListExternalObjectMappingsResponse>(
+        `${EXTERNAL_SYNC_BASE}/mappings?connection_id=${encodeURIComponent(connection.id)}`,
+        { signal },
+      )
+      const canLink = mappings.mappings.some(isPullCapableGitHubIssueMapping)
+      const canCreate = mappings.mappings.some(isPushCapableGitHubIssueMapping)
+      return { connection, canLink, canCreate }
+    }),
+  )
+  return checked.filter((option) => option.canLink || option.canCreate)
+}
 
 function isPullCapableGitHubIssueMapping(mapping: ExternalObjectMapping) {
   return (
@@ -124,6 +149,16 @@ function isPullCapableGitHubIssueMapping(mapping: ExternalObjectMapping) {
     mapping.localObjectType === 'customer_request' &&
     mapping.externalObjectType === 'issue' &&
     (mapping.direction === ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_PULL ||
+      mapping.direction === ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL)
+  )
+}
+
+function isPushCapableGitHubIssueMapping(mapping: ExternalObjectMapping) {
+  return (
+    mapping.enabled &&
+    mapping.localObjectType === 'customer_request' &&
+    mapping.externalObjectType === 'issue' &&
+    (mapping.direction === ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_PUSH ||
       mapping.direction === ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL)
   )
 }

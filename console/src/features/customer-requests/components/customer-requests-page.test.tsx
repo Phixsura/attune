@@ -1067,9 +1067,36 @@ describe('CustomerRequestsPage', () => {
 
     await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
     const dialog = await screen.findByRole('dialog')
-    await user.click(within(dialog).getByRole('button', { name: '创建 GitHub Issue' }))
+    const createButton = within(dialog).getByRole('button', { name: '创建 GitHub Issue' })
+    await waitFor(() => expect(createButton).toBeEnabled())
+    await user.click(createButton)
 
-    await waitFor(() => expect(payload).toEqual({ id: requestID }))
+    await waitFor(() =>
+      expect(payload).toEqual({ id: requestID, connectionId: 'connection-github' }),
+    )
+  })
+
+  it('disables GitHub issue creation for pull-only managed mappings', async () => {
+    let called = false
+    mockList({ requests: [sampleSummary()] })
+    mockDetail(sampleDetail(), { mappingDirection: 'EXTERNAL_SYNC_DIRECTION_PULL' })
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () => {
+        called = true
+        return HttpResponse.json({ message: 'unexpected create' }, { status: 500 })
+      }),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    const createButton = await within(dialog).findByRole('button', {
+      name: '创建 GitHub Issue',
+    })
+
+    await waitFor(() => expect(createButton).toBeDisabled())
+    expect(called).toBe(false)
   })
 
   it('hides GitHub issue creation when a GitHub issue is already linked', async () => {
@@ -1472,7 +1499,7 @@ function mockList(response: ListCustomerRequestsResponse) {
   )
 }
 
-function mockDetail(detail: CustomerRequestDetail) {
+function mockDetail(detail: CustomerRequestDetail, options: { mappingDirection?: string } = {}) {
   server.use(
     http.get(`${baseURL}/${requestID}`, () => HttpResponse.json(detail)),
     http.get('/fb/v1/console/external-sync/connections', () =>
@@ -1510,7 +1537,7 @@ function mockDetail(detail: CustomerRequestDetail) {
             connectionId: 'connection-github',
             localObjectType: 'customer_request',
             externalObjectType: 'issue',
-            direction: 'EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL',
+            direction: options.mappingDirection ?? 'EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL',
             fieldMappingJson: '{}',
             statusMappingJson: '{}',
             conflictPolicy: 'manual',
