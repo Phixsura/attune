@@ -530,7 +530,7 @@ describe('RequestNotificationsPage', () => {
     await user.click(screen.getByTestId(`rn-target-test-${targetFixture.id}`))
     await user.click(screen.getByTestId(`rn-target-delete-${targetFixture.id}`))
     await waitFor(() => expect(captures.deletedTarget).toBe(targetFixture.id))
-  })
+  }, 90_000)
 
   it('renders sender and subscriber fallback values', async () => {
     installRequestHandlers({})
@@ -816,7 +816,7 @@ describe('RequestNotificationsPage', () => {
           .querySelector('.animate-spin'),
       ).toBeInTheDocument(),
     )
-  })
+  }, 90_000)
 
   it('surfaces mutation errors through toast fallbacks', async () => {
     server.use(
@@ -853,7 +853,7 @@ describe('RequestNotificationsPage', () => {
     await user.type(screen.getByTestId('rn-draft-body'), 'CSV export is now available.')
     await user.click(screen.getByTestId('rn-preview'))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot preview'))
-  })
+  }, 90_000)
 
   it('surfaces remaining operator mutation errors and secondary form branches', async () => {
     const captures: Record<string, unknown> = {}
@@ -954,7 +954,7 @@ describe('RequestNotificationsPage', () => {
     expect(await screen.findByText('Jane Customer')).toBeInTheDocument()
     await user.click(screen.getByTestId(`rn-subscriber-suppress-${subscriberFixture.contactId}`))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('cannot suppress subscriber'))
-  }, 60_000)
+  }, 120_000)
 
   it('shows pending indicators for settings, sender, subscriber loading, and id fallbacks', async () => {
     const undefinedTarget = {

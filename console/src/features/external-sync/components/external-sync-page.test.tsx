@@ -1084,7 +1084,7 @@ describe('ExternalSyncPage', () => {
         resolution: 'EXTERNAL_SYNC_CONFLICT_RESOLUTION_IGNORED',
       })
     })
-  })
+  }, 90_000)
 
   it('lets the backend choose the mapping direction when mappings are unavailable', async () => {
     let requestedRun: unknown

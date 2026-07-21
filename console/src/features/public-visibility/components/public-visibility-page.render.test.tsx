@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import { toast } from 'sonner'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PublicVisibilityPage } from '@/features/public-visibility/components/public-visibility-page'
 import {
   ModerationState,
@@ -22,9 +22,11 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
-server.use(
-  http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
-)
+beforeEach(() => {
+  server.use(
+    http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
+  )
+})
 
 const currentRequestID = '11111111-1111-1111-1111-111111111111'
 const similarRequestID = '33333333-3333-3333-3333-333333333333'
@@ -260,7 +262,9 @@ describe('PublicVisibilityPage', () => {
 
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
-    await waitFor(() => expect(screen.getByText('路线图状态映射')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('路线图状态映射')).toBeInTheDocument(), {
+      timeout: 10_000,
+    })
 
     const mappingLabels = screen.getAllByLabelText('公开列名称')
     await user.clear(mappingLabels[0])

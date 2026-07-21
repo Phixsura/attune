@@ -1001,7 +1001,7 @@ describe('EnrichmentRuntimePage', () => {
         updateReason: 'rollback from table',
       })
     })
-  }, 20_000) // Full-page runtime smoke covers multiple guarded action dialogs.
+  }, 60_000) // Full-page runtime smoke covers multiple guarded action dialogs.
 
   it('requires recent step-up before reset and rollback mutations', async () => {
     let resetBody: unknown

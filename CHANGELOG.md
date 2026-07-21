@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   tenant enables changelog publishing, and hides the changelog publish kind
   until it can actually be used.
 
+- Public portal submission pages now only show the acknowledgement after a
+  successful submission, preventing duplicate success text when visitors submit
+  feedback from the rendered page.
+
 - Request notification previews now wrap long JSON fields inside the card,
   preventing horizontal overflow in deployed Console pages on narrow viewports.
 

@@ -394,7 +394,6 @@ var portalPageTemplate = template.Must(template.New("portal-page").Parse(`<!doct
               {{end}}
             </div>
 
-            <div class="hint">{{.Acknowledgement}}</div>
             <div class="footer">
               <div class="status" id="portal-status" aria-live="polite"></div>
               <button class="button" id="portal-submit" type="submit" {{if not .CanSubmit}}disabled{{end}}>{{.SubmitButtonLabel}}</button>
@@ -508,7 +507,6 @@ type portalPageData struct {
 	Headline                 string
 	Description              string
 	SubmitButtonLabel        string
-	Acknowledgement          string
 	ShowPageURL              bool
 	CanSubmit                bool
 	IdentityLabel            string
@@ -598,7 +596,6 @@ func portalPageDataFromConfig(cfg portalsvc.SubmissionConfig) portalPageData {
 		Headline:                 form.Headline,
 		Description:              form.Description,
 		SubmitButtonLabel:        form.SubmitButtonLabel,
-		Acknowledgement:          form.Acknowledgement,
 		ShowPageURL:              form.ShowPageURL,
 		CanSubmit:                cfg.CanSubmit,
 		IdentityLabel:            identityLabel,

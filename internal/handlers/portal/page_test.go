@@ -34,7 +34,7 @@ func TestPageRendersPortalSubmissionForm(t *testing.T) {
 			Form: pvrepo.PortalSubmissionForm{
 				Headline:          "Send feedback",
 				Description:       "Share what is broken or worth improving.",
-				Acknowledgement:   "Thanks. We will review your submission.",
+				Acknowledgement:   "Custom acknowledgement shown only after submit.",
 				SubmitButtonLabel: "Submit feedback",
 				ShowPageURL:       true,
 				Fields: []pvrepo.PortalSubmissionField{
@@ -86,6 +86,9 @@ func TestPageRendersPortalSubmissionForm(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, "Custom acknowledgement shown only after submit.") {
+		t.Fatalf("body pre-rendered success acknowledgement: %s", body)
 	}
 }
 
