@@ -264,6 +264,104 @@ func TestPGCustomerRequestLinkGitHubIssueByConnectionAndNumber(t *testing.T) {
 	assertManagedGitHubIssuePullRun(t, e, request.ID, connectionID, mappingID, "212")
 }
 
+func TestPGCustomerRequestDeliveryGraphUsesExternalObjectPayload(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Delivery graph payload request")
+	_, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	linked, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue managed URL: %v", err)
+	}
+	if len(linked.Request.IssueLinks) != 1 {
+		t.Fatalf("issue links len = %d, want one", len(linked.Request.IssueLinks))
+	}
+
+	payloadUpdatedAt := time.Date(2026, 7, 7, 1, 30, 0, 0, time.UTC)
+	updateExternalObjectPayload(t, e, request.ID, mappingID, "228", payloadUpdatedAt)
+
+	detail, err := e.repo.GetDetail(e.ctx, e.tenantID, request.ID, 50)
+	if err != nil {
+		t.Fatalf("GetDetail with external object payload: %v", err)
+	}
+	if detail.DeliveryGraph.Health != crrepo.DeliveryHealthFailed {
+		t.Fatalf("delivery graph health = %q, want failed", detail.DeliveryGraph.Health)
+	}
+	if len(detail.DeliveryGraph.Artifacts) != 2 {
+		t.Fatalf("delivery graph artifacts len = %d, want 2", len(detail.DeliveryGraph.Artifacts))
+	}
+	artifact := detail.DeliveryGraph.Artifacts[1]
+	if artifact.Source != "external_object_link" || artifact.Title != "Provider payload title" {
+		t.Fatalf("delivery artifact = %+v, want external payload source/title", artifact)
+	}
+	if artifact.Status != "closed" || artifact.StatusCategory != "completed" {
+		t.Fatalf("delivery artifact status = %q/%q, want closed/completed", artifact.Status, artifact.StatusCategory)
+	}
+	if artifact.Assignee != "octo, hubot" || artifact.SyncError != "secondary rate limit" {
+		t.Fatalf("delivery artifact assignee/error = %q/%q", artifact.Assignee, artifact.SyncError)
+	}
+	if artifact.LastSeenAt == nil || !artifact.LastSeenAt.Equal(payloadUpdatedAt) {
+		t.Fatalf("delivery artifact last seen = %+v, want %s", artifact.LastSeenAt, payloadUpdatedAt)
+	}
+}
+
+func TestPGCustomerRequestDeliveryGraphUsesProjectedArtifacts(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Delivery graph projected artifact request")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	if _, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/229",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	}); err != nil {
+		t.Fatalf("LinkIssue managed URL: %v", err)
+	}
+	prSeenAt := time.Date(2026, 7, 7, 2, 0, 0, 0, time.UTC)
+	insertProjectedDeliveryArtifact(t, e, request.ID, connectionID, mappingID, prSeenAt)
+
+	detail, err := e.repo.GetDetail(e.ctx, e.tenantID, request.ID, 50)
+	if err != nil {
+		t.Fatalf("GetDetail with projected delivery artifact: %v", err)
+	}
+	if detail.DeliveryGraph.Health != crrepo.DeliveryHealthFailed {
+		t.Fatalf("delivery graph health = %q, want failed", detail.DeliveryGraph.Health)
+	}
+	if detail.DeliveryGraph.HealthExplanation != "2 linked artifacts: 1 failed, 1 pending." {
+		t.Fatalf("delivery graph explanation = %q", detail.DeliveryGraph.HealthExplanation)
+	}
+	if len(detail.DeliveryGraph.Artifacts) != 3 || len(detail.DeliveryGraph.Relationships) != 2 {
+		t.Fatalf("delivery graph = %+v, want root plus issue plus PR with two relationships", detail.DeliveryGraph)
+	}
+	artifact := detail.DeliveryGraph.Artifacts[2]
+	if artifact.ArtifactType != "pull_request" || artifact.Title != "Implement delivery graph projection" {
+		t.Fatalf("projected artifact = %+v, want PR projection", artifact)
+	}
+	if artifact.Health != crrepo.DeliveryHealthFailed || artifact.SyncError != "merge conflict" {
+		t.Fatalf("projected artifact health/error = %q/%q", artifact.Health, artifact.SyncError)
+	}
+	if artifact.LastSeenAt == nil || !artifact.LastSeenAt.Equal(prSeenAt) {
+		t.Fatalf("projected artifact last seen = %+v, want %s", artifact.LastSeenAt, prSeenAt)
+	}
+	if detail.DeliveryGraph.Relationships[1].RelationshipType != "implements" {
+		t.Fatalf("projected relationship = %+v, want implements", detail.DeliveryGraph.Relationships[1])
+	}
+}
+
 func TestPGCustomerRequestLinkGitHubIssueURLQueuesManagedPullRun(t *testing.T) {
 	e := setup(t)
 	request := e.createRequest(t, e.tenantID, "Managed GitHub issue by URL")
@@ -1367,6 +1465,82 @@ func assertManagedGitHubExternalObjectLink(
 	if gotKey != externalKey || gotURL != externalURL || gotState != "pending" {
 		t.Fatalf("external object link = key:%q url:%q state:%q; want %q/%q/pending",
 			gotKey, gotURL, gotState, externalKey, externalURL)
+	}
+}
+
+func updateExternalObjectPayload(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+	externalKey string,
+	updatedAt time.Time,
+) {
+	t.Helper()
+	payload := `{
+		"title":"Provider payload title",
+		"state":"closed",
+		"state_reason":"completed",
+		"html_url":"https://github.com/Phixsura/attune/issues/228",
+		"updated_at":"` + updatedAt.Format(time.RFC3339) + `",
+		"assignees":[{"login":"octo"},{"login":"hubot"}]
+	}`
+	tag, err := e.pool.Exec(e.ctx, `
+		UPDATE external_object_links
+		   SET external_version = $5,
+		       external_updated_at = $6,
+		       normalized_payload = $7::jsonb,
+		       sync_state = 'failed',
+		       sync_error = 'secondary rate limit',
+		       last_synced_at = NOW(),
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND local_object_id = $3
+		   AND external_key = $4
+		   AND external_deleted_at IS NULL
+		   AND local_deleted_at IS NULL`,
+		e.tenantID, mappingID, requestID.String(), externalKey, updatedAt.Format(time.RFC3339),
+		updatedAt, payload)
+	if err != nil {
+		t.Fatalf("update external object payload: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("update external object payload rows = %d, want 1", tag.RowsAffected())
+	}
+}
+
+func insertProjectedDeliveryArtifact(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	connectionID uuid.UUID,
+	mappingID uuid.UUID,
+	seenAt time.Time,
+) {
+	t.Helper()
+	tag, err := e.pool.Exec(e.ctx, `
+		INSERT INTO customer_request_delivery_artifacts (
+			tenant_id, request_id, provider, connection_id, mapping_id,
+			artifact_type, relationship, external_key, external_url, display_key,
+			title, status, status_category, state_reason, assignee, sync_state,
+			sync_error, source, payload, external_updated_at, last_seen_at
+		)
+		VALUES (
+			$1, $2, 'github', $3, $4,
+			'pull_request', 'implements', 'Phixsura/attune#313',
+			'https://github.com/Phixsura/attune/pull/313', 'PR #313',
+			'Implement delivery graph projection', 'blocked', 'blocked',
+			'merge_conflict', 'octo', 'failed',
+			'merge conflict', 'delivery_artifact', '{"checks":"failed"}'::jsonb,
+			$5, $5
+		)`,
+		e.tenantID, requestID, connectionID, mappingID, seenAt)
+	if err != nil {
+		t.Fatalf("insert projected delivery artifact: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("insert projected delivery artifact rows = %d, want 1", tag.RowsAffected())
 	}
 }
 

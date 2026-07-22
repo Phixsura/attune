@@ -213,21 +213,88 @@ type FeedbackEvidence struct {
 }
 
 type IssueLink struct {
-	ID                     uuid.UUID
-	Provider               string
-	ExternalKey            string
-	ExternalURL            string
-	Title                  string
-	Status                 string
-	CreatedBy              string
-	CreatedAt              time.Time
-	UpdatedAt              time.Time
-	LastSyncedAt           *time.Time
-	SyncState              IssueSyncState
-	ExternalStatusCategory string
-	ExternalAssignee       string
-	ExternalUpdatedAt      *time.Time
-	SyncError              string
+	ID                      uuid.UUID
+	Provider                string
+	ExternalKey             string
+	ExternalURL             string
+	Title                   string
+	Status                  string
+	CreatedBy               string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	LastSyncedAt            *time.Time
+	SyncState               IssueSyncState
+	ExternalStatusCategory  string
+	ExternalAssignee        string
+	ExternalUpdatedAt       *time.Time
+	SyncError               string
+	ExternalObjectLinkID    *uuid.UUID
+	ExternalObjectMappingID *uuid.UUID
+	ExternalObjectVersion   string
+	ExternalObjectUpdatedAt *time.Time
+	ExternalObjectSyncState string
+	ExternalObjectSyncError string
+	ExternalObjectPayload   []byte
+}
+
+type DeliveryArtifact struct {
+	ID             string
+	Provider       string
+	ArtifactType   string
+	ExternalKey    string
+	ExternalURL    string
+	Title          string
+	Status         string
+	StatusCategory string
+	Assignee       string
+	SyncState      IssueSyncState
+	Health         DeliveryHealth
+	LastSeenAt     *time.Time
+	Source         string
+	SyncError      string
+}
+
+type DeliveryRelationship struct {
+	ID               string
+	SourceArtifactID string
+	TargetArtifactID string
+	RelationshipType string
+	Provider         string
+	CreatedAt        time.Time
+}
+
+type DeliveryGraph struct {
+	Artifacts         []DeliveryArtifact
+	Relationships     []DeliveryRelationship
+	Health            DeliveryHealth
+	HealthExplanation string
+	UpdatedAt         *time.Time
+}
+
+type DeliveryArtifactProjection struct {
+	ID                   uuid.UUID
+	Provider             string
+	ConnectionID         *uuid.UUID
+	MappingID            *uuid.UUID
+	ExternalObjectLinkID *uuid.UUID
+	ArtifactType         string
+	Relationship         string
+	ExternalKey          string
+	ExternalURL          string
+	DisplayKey           string
+	Title                string
+	Status               string
+	StatusCategory       string
+	StateReason          string
+	Assignee             string
+	SyncState            string
+	SyncError            string
+	Source               string
+	ExternalUpdatedAt    *time.Time
+	FirstSeenAt          time.Time
+	LastSeenAt           *time.Time
+	UpdatedAt            time.Time
+	Payload              []byte
 }
 
 type AccountProfile struct {
@@ -289,6 +356,7 @@ type Detail struct {
 	Summary         Summary
 	Feedback        []FeedbackEvidence
 	IssueLinks      []IssueLink
+	DeliveryGraph   DeliveryGraph
 	CustomerLinks   []CustomerLink
 	Votes           []Vote
 	Notes           []Note
@@ -440,6 +508,31 @@ type IssueSyncInput struct {
 	ExternalUpdatedAt      *time.Time
 	SyncError              string
 	ActorID                string
+}
+
+type DeliveryArtifactProjectionInput struct {
+	TenantID             string
+	RequestID            uuid.UUID
+	Provider             string
+	ConnectionID         *uuid.UUID
+	MappingID            *uuid.UUID
+	ExternalObjectLinkID *uuid.UUID
+	ArtifactType         string
+	Relationship         string
+	ExternalKey          string
+	ExternalURL          string
+	DisplayKey           string
+	Title                string
+	Status               string
+	StatusCategory       string
+	StateReason          string
+	Assignee             string
+	SyncState            string
+	SyncError            string
+	Source               string
+	Payload              []byte
+	ExternalUpdatedAt    *time.Time
+	LastSeenAt           *time.Time
 }
 
 type MergeResult struct {
@@ -752,6 +845,10 @@ func loadDetail(ctx context.Context, db queryer, tenantID string, id uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
+	deliveryArtifacts, err := listDeliveryArtifacts(ctx, db, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
 	customers, err := listCustomerLinks(ctx, db, tenantID, id)
 	if err != nil {
 		return nil, err
@@ -769,10 +866,12 @@ func loadDetail(ctx context.Context, db queryer, tenantID string, id uuid.UUID, 
 		return nil, err
 	}
 	accountProfiles := collectAccountProfiles(customers, votes)
+	summaryValue := ptrext.Indirect(summary)
 	return ptrext.Of(Detail{
-		Summary:         ptrext.Indirect(summary),
+		Summary:         summaryValue,
 		Feedback:        feedback,
 		IssueLinks:      issues,
+		DeliveryGraph:   buildDeliveryGraph(summaryValue, issues, deliveryArtifacts...),
 		CustomerLinks:   customers,
 		Votes:           votes,
 		Notes:           notes,
@@ -1722,6 +1821,78 @@ func (r *Repo) RecordIssueSyncTx(ctx context.Context, tx pgx.Tx, in IssueSyncInp
 		return nil, err
 	}
 	return getIssueLink(ctx, tx, in.TenantID, in.RequestID, in.IssueLinkID)
+}
+
+func (r *Repo) UpsertDeliveryArtifactTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	in DeliveryArtifactProjectionInput,
+) (*DeliveryArtifactProjection, error) {
+	relationship := firstNonEmpty(in.Relationship, deliveryRelationshipReferences)
+	syncState := firstNonEmpty(in.SyncState, deliveryExternalSyncStatePending)
+	source := firstNonEmpty(in.Source, deliverySourceDeliveryArtifact)
+	payload := deliveryArtifactPayloadJSON(in.Payload)
+	var out DeliveryArtifactProjection
+	err := scanDeliveryArtifactProjection(tx.QueryRow(ctx, `
+		INSERT INTO customer_request_delivery_artifacts (
+			id, tenant_id, request_id, provider, connection_id, mapping_id,
+			external_object_link_id, artifact_type, relationship, external_key,
+			external_url, display_key, title, status, status_category, state_reason,
+			assignee, sync_state, sync_error, source, payload, external_updated_at,
+			last_seen_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10,
+			$11, $12, $13, $14, $15, $16,
+			$17, $18, $19, $20, $21::jsonb, $22,
+			$23
+		)
+		ON CONFLICT (tenant_id, request_id, provider, artifact_type, external_key)
+		WHERE deleted_at IS NULL
+		DO UPDATE SET
+			connection_id = EXCLUDED.connection_id,
+			mapping_id = EXCLUDED.mapping_id,
+			external_object_link_id = EXCLUDED.external_object_link_id,
+			relationship = EXCLUDED.relationship,
+			external_url = EXCLUDED.external_url,
+			display_key = EXCLUDED.display_key,
+			title = EXCLUDED.title,
+			status = EXCLUDED.status,
+			status_category = EXCLUDED.status_category,
+			state_reason = EXCLUDED.state_reason,
+			assignee = EXCLUDED.assignee,
+			sync_state = EXCLUDED.sync_state,
+			sync_error = EXCLUDED.sync_error,
+			source = EXCLUDED.source,
+			payload = EXCLUDED.payload,
+			external_updated_at = EXCLUDED.external_updated_at,
+			last_seen_at = EXCLUDED.last_seen_at,
+			deleted_at = NULL,
+			updated_at = NOW()
+		RETURNING id, provider, connection_id::text, mapping_id::text,
+		          external_object_link_id::text, artifact_type, relationship,
+		          external_key, external_url, display_key, title, status,
+		          status_category, state_reason, assignee, sync_state, sync_error,
+		          source, external_updated_at, first_seen_at, last_seen_at,
+		          updated_at, COALESCE(payload, '{}'::jsonb)::text`,
+		uuid.New(), in.TenantID, in.RequestID, in.Provider, in.ConnectionID, in.MappingID,
+		in.ExternalObjectLinkID, in.ArtifactType, relationship, in.ExternalKey,
+		in.ExternalURL, in.DisplayKey, in.Title, in.Status, in.StatusCategory, in.StateReason,
+		in.Assignee, syncState, in.SyncError, source, payload, in.ExternalUpdatedAt,
+		in.LastSeenAt,
+	), &out) // ptrext:allow scan-target
+	if err != nil {
+		return nil, mapWriteError(err, "upsert customer request delivery artifact")
+	}
+	return ptrext.Of(out), nil
+}
+
+func deliveryArtifactPayloadJSON(payload []byte) string {
+	if strings.TrimSpace(string(payload)) == "" {
+		return "{}"
+	}
+	return string(payload)
 }
 
 func (r *Repo) MergeTx(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (MergeResult, error) {
@@ -2800,27 +2971,43 @@ func listDuplicates(ctx context.Context, db queryer, tenantID string, requestID 
 	return out, rows.Err()
 }
 
-func listIssueLinks(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]IssueLink, error) {
-	rows, err := db.Query(ctx, `
+const issueLinkSelectSQL = `
 		SELECT
-			id,
-			provider,
-			external_key,
-			external_url,
-			title,
-			status,
-			created_by,
-			created_at,
-			updated_at,
-			last_synced_at,
-			sync_state,
-			external_status_category,
-			external_assignee,
-			external_updated_at,
-			sync_error
-		FROM customer_request_issue_links
-		WHERE tenant_id = $1 AND request_id = $2
-		ORDER BY created_at DESC, id DESC`, tenantID, requestID)
+			il.id,
+			il.provider,
+			il.external_key,
+			il.external_url,
+			il.title,
+			il.status,
+			il.created_by,
+			il.created_at,
+			il.updated_at,
+			il.last_synced_at,
+			il.sync_state,
+			il.external_status_category,
+			il.external_assignee,
+			il.external_updated_at,
+			il.sync_error,
+			il.external_object_link_id::text,
+			eol.mapping_id::text,
+			COALESCE(eol.external_version, ''),
+			eol.external_updated_at,
+			COALESCE(eol.sync_state, ''),
+			COALESCE(eol.sync_error, ''),
+			COALESCE(eol.normalized_payload, '{}'::jsonb)::text
+		FROM customer_request_issue_links il
+		LEFT JOIN external_object_links eol
+		  ON eol.tenant_id = il.tenant_id
+		 AND eol.id = il.external_object_link_id
+		 AND eol.local_object_type = 'customer_request'
+		 AND eol.local_object_id = il.request_id::text
+		 AND eol.external_object_type = 'issue'
+`
+
+func listIssueLinks(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]IssueLink, error) {
+	rows, err := db.Query(ctx, issueLinkSelectSQL+`
+		WHERE il.tenant_id = $1 AND il.request_id = $2
+		ORDER BY il.created_at DESC, il.id DESC`, tenantID, requestID)
 	if err != nil {
 		return nil, fmt.Errorf("list customer request issue links: %w", err)
 	}
@@ -2839,25 +3026,8 @@ func listIssueLinks(ctx context.Context, db queryer, tenantID string, requestID 
 func getIssueLink(ctx context.Context, db queryer, tenantID string, requestID, issueLinkID uuid.UUID) (*IssueLink, error) {
 	var out IssueLink
 	err := scanIssueLink(db.QueryRow(
-		ctx, `
-		SELECT
-			id,
-			provider,
-			external_key,
-			external_url,
-			title,
-			status,
-			created_by,
-			created_at,
-			updated_at,
-			last_synced_at,
-			sync_state,
-			external_status_category,
-			external_assignee,
-			external_updated_at,
-			sync_error
-		FROM customer_request_issue_links
-		WHERE tenant_id = $1 AND request_id = $2 AND id = $3`,
+		ctx, issueLinkSelectSQL+`
+		WHERE il.tenant_id = $1 AND il.request_id = $2 AND il.id = $3`,
 		tenantID, requestID, issueLinkID,
 	), &out) // ptrext:allow scan-target
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -2871,6 +3041,8 @@ func getIssueLink(ctx context.Context, db queryer, tenantID string, requestID, i
 
 func scanIssueLink(row scanner, out *IssueLink) error { // ptrext:allow scan-target
 	var syncState string
+	var objectLinkID, mappingID sql.NullString
+	var payloadText string
 	err := row.Scan(
 		&out.ID,
 		&out.Provider,
@@ -2887,12 +3059,137 @@ func scanIssueLink(row scanner, out *IssueLink) error { // ptrext:allow scan-tar
 		&out.ExternalAssignee,
 		&out.ExternalUpdatedAt,
 		&out.SyncError,
+		&objectLinkID,
+		&mappingID,
+		&out.ExternalObjectVersion,
+		&out.ExternalObjectUpdatedAt,
+		&out.ExternalObjectSyncState,
+		&out.ExternalObjectSyncError,
+		&payloadText,
 	)
 	if err != nil {
 		return err
 	}
 	out.SyncState = IssueSyncState(syncState)
+	parsedObjectLinkID, err := parseOptionalUUID(objectLinkID)
+	if err != nil {
+		return err
+	}
+	out.ExternalObjectLinkID = parsedObjectLinkID
+	parsedMappingID, err := parseOptionalUUID(mappingID)
+	if err != nil {
+		return err
+	}
+	out.ExternalObjectMappingID = parsedMappingID
+	out.ExternalObjectPayload = []byte(payloadText)
 	return nil
+}
+
+func listDeliveryArtifacts(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID) ([]DeliveryArtifactProjection, error) {
+	rows, err := db.Query(ctx, `
+		SELECT
+			id,
+			provider,
+			connection_id::text,
+			mapping_id::text,
+			external_object_link_id::text,
+			artifact_type,
+			relationship,
+			external_key,
+			external_url,
+			display_key,
+			title,
+			status,
+			status_category,
+			state_reason,
+			assignee,
+			sync_state,
+			sync_error,
+			source,
+			external_updated_at,
+			first_seen_at,
+			last_seen_at,
+			updated_at,
+			COALESCE(payload, '{}'::jsonb)::text
+		FROM customer_request_delivery_artifacts
+		WHERE tenant_id = $1
+		  AND request_id = $2
+		  AND deleted_at IS NULL
+		ORDER BY last_seen_at DESC NULLS LAST, updated_at DESC, id DESC`, tenantID, requestID)
+	if err != nil {
+		return nil, fmt.Errorf("list customer request delivery artifacts: %w", err)
+	}
+	defer rows.Close()
+	var out []DeliveryArtifactProjection
+	for rows.Next() {
+		var item DeliveryArtifactProjection
+		if err := scanDeliveryArtifactProjection(rows, &item); err != nil { // ptrext:allow scan-target
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func scanDeliveryArtifactProjection(row scanner, out *DeliveryArtifactProjection) error { // ptrext:allow scan-target
+	var connectionID, mappingID, externalObjectLinkID sql.NullString
+	var payloadText string
+	err := row.Scan(
+		&out.ID,
+		&out.Provider,
+		&connectionID,
+		&mappingID,
+		&externalObjectLinkID,
+		&out.ArtifactType,
+		&out.Relationship,
+		&out.ExternalKey,
+		&out.ExternalURL,
+		&out.DisplayKey,
+		&out.Title,
+		&out.Status,
+		&out.StatusCategory,
+		&out.StateReason,
+		&out.Assignee,
+		&out.SyncState,
+		&out.SyncError,
+		&out.Source,
+		&out.ExternalUpdatedAt,
+		&out.FirstSeenAt,
+		&out.LastSeenAt,
+		&out.UpdatedAt,
+		&payloadText,
+	)
+	if err != nil {
+		return err
+	}
+	parsedConnectionID, err := parseOptionalUUID(connectionID)
+	if err != nil {
+		return err
+	}
+	out.ConnectionID = parsedConnectionID
+	parsedMappingID, err := parseOptionalUUID(mappingID)
+	if err != nil {
+		return err
+	}
+	out.MappingID = parsedMappingID
+	parsedExternalObjectLinkID, err := parseOptionalUUID(externalObjectLinkID)
+	if err != nil {
+		return err
+	}
+	out.ExternalObjectLinkID = parsedExternalObjectLinkID
+	out.Payload = []byte(payloadText)
+	return nil
+}
+
+func parseOptionalUUID(value sql.NullString) (*uuid.UUID, error) {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return nil, nil
+	}
+	parsed, err := uuid.Parse(value.String)
+	if err != nil {
+		return nil, err
+	}
+	return ptrext.Of(parsed), nil
 }
 
 type accountProfileScan struct {
@@ -2954,6 +3251,453 @@ func collectAccountProfiles(customers []CustomerLink, votes []Vote) []AccountPro
 		out = append(out, profile)
 	}
 	return out
+}
+
+const (
+	deliveryArtifactTypeCustomerRequest = "customer_request"
+	deliveryArtifactTypeIssue           = "issue"
+	deliveryProviderAttune              = "attune"
+	deliveryRelationshipTrackedBy       = "tracked_by"
+	deliveryRelationshipReferences      = "references"
+	deliverySourceCustomerRequest       = "customer_request"
+	deliverySourceIssueLink             = "customer_request_issue_link"
+	deliverySourceExternalObjectLink    = "external_object_link"
+	deliverySourceDeliveryArtifact      = "delivery_artifact"
+	deliveryExternalSyncStateManual     = "manual"
+	deliveryExternalSyncStatePending    = "pending"
+	deliveryExternalSyncStateSynced     = "synced"
+	deliveryExternalSyncStateStale      = "stale"
+	deliveryExternalSyncStateFailed     = "failed"
+	deliveryExternalSyncStateConflict   = "conflict"
+	deliveryExternalSyncStateDeleted    = "deleted"
+)
+
+func buildDeliveryGraph(summary Summary, issueLinks []IssueLink, projections ...DeliveryArtifactProjection) DeliveryGraph {
+	root := rootDeliveryArtifact(summary)
+	artifacts := make([]DeliveryArtifact, 0, len(issueLinks)+len(projections)+1)
+	artifacts = append(artifacts, root)
+	linkedArtifacts := make([]DeliveryArtifact, 0, len(issueLinks)+len(projections))
+	relationships := make([]DeliveryRelationship, 0, len(issueLinks)+len(projections))
+	seen := make(map[string]struct{}, len(issueLinks)+len(projections))
+	updatedAt := root.LastSeenAt
+	for _, link := range issueLinks {
+		artifact := issueDeliveryArtifact(link)
+		markDeliveryArtifactSeen(seen, artifact)
+		artifacts = append(artifacts, artifact)
+		linkedArtifacts = append(linkedArtifacts, artifact)
+		relationships = append(relationships, issueDeliveryRelationship(root.ID, artifact.ID, link))
+		updatedAt = latestDeliveryGraphTime(updatedAt, artifact.LastSeenAt)
+	}
+	for _, projection := range projections {
+		artifact := projectedDeliveryArtifact(projection)
+		if markDeliveryArtifactSeen(seen, artifact) {
+			continue
+		}
+		artifacts = append(artifacts, artifact)
+		linkedArtifacts = append(linkedArtifacts, artifact)
+		relationships = append(relationships, projectedDeliveryRelationship(root.ID, artifact.ID, projection))
+		updatedAt = latestDeliveryGraphTime(updatedAt, artifact.LastSeenAt)
+	}
+	return DeliveryGraph{
+		Artifacts:         artifacts,
+		Relationships:     relationships,
+		Health:            deliveryGraphHealth(summary.DeliveryHealth, linkedArtifacts),
+		HealthExplanation: deliveryGraphHealthExplanation(linkedArtifacts),
+		UpdatedAt:         updatedAt,
+	}
+}
+
+func rootDeliveryArtifact(summary Summary) DeliveryArtifact {
+	return DeliveryArtifact{
+		ID:           "request:" + summary.ID.String(),
+		Provider:     deliveryProviderAttune,
+		ArtifactType: deliveryArtifactTypeCustomerRequest,
+		ExternalKey:  summary.DisplayID,
+		Title:        summary.Title,
+		Status:       string(summary.Status),
+		Health:       summary.DeliveryHealth,
+		LastSeenAt:   ptrext.Of(summary.UpdatedAt),
+		Source:       deliverySourceCustomerRequest,
+	}
+}
+
+func issueDeliveryArtifact(link IssueLink) DeliveryArtifact {
+	metadata := deliveryMetadataFromIssuePayload(link.ExternalObjectPayload)
+	title := firstNonEmpty(metadata.Title, link.Title)
+	if title == "" {
+		title = link.ExternalKey
+	}
+	return DeliveryArtifact{
+		ID:             "issue_link:" + link.ID.String(),
+		Provider:       link.Provider,
+		ArtifactType:   deliveryArtifactTypeIssue,
+		ExternalKey:    link.ExternalKey,
+		ExternalURL:    firstNonEmpty(metadata.ExternalURL, link.ExternalURL),
+		Title:          title,
+		Status:         firstNonEmpty(metadata.Status, link.Status),
+		StatusCategory: firstNonEmpty(link.ExternalStatusCategory, metadata.StatusCategory),
+		Assignee:       firstNonEmpty(link.ExternalAssignee, metadata.Assignee),
+		SyncState:      link.SyncState,
+		Health:         issueDeliveryHealth(link),
+		LastSeenAt:     issueLastSeenAt(link, metadata),
+		Source:         issueDeliverySource(link),
+		SyncError:      firstNonEmpty(link.SyncError, link.ExternalObjectSyncError),
+	}
+}
+
+func issueDeliveryRelationship(rootID string, issueID string, link IssueLink) DeliveryRelationship {
+	return DeliveryRelationship{
+		ID:               "rel:" + rootID + ":" + issueID,
+		SourceArtifactID: rootID,
+		TargetArtifactID: issueID,
+		RelationshipType: deliveryRelationshipTrackedBy,
+		Provider:         link.Provider,
+		CreatedAt:        link.CreatedAt,
+	}
+}
+
+func projectedDeliveryArtifact(row DeliveryArtifactProjection) DeliveryArtifact {
+	title := firstNonEmpty(row.Title, row.DisplayKey)
+	if title == "" {
+		title = row.ExternalKey
+	}
+	return DeliveryArtifact{
+		ID:             "delivery_artifact:" + row.ID.String(),
+		Provider:       row.Provider,
+		ArtifactType:   row.ArtifactType,
+		ExternalKey:    row.ExternalKey,
+		ExternalURL:    row.ExternalURL,
+		Title:          title,
+		Status:         row.Status,
+		StatusCategory: firstNonEmpty(row.StatusCategory, row.StateReason),
+		Assignee:       row.Assignee,
+		SyncState:      deliveryArtifactIssueSyncState(row.SyncState),
+		Health:         projectedDeliveryHealth(row),
+		LastSeenAt:     projectedLastSeenAt(row),
+		Source:         firstNonEmpty(row.Source, deliverySourceDeliveryArtifact),
+		SyncError:      row.SyncError,
+	}
+}
+
+func projectedDeliveryRelationship(rootID string, artifactID string, row DeliveryArtifactProjection) DeliveryRelationship {
+	relationship := firstNonEmpty(row.Relationship, deliveryRelationshipReferences)
+	return DeliveryRelationship{
+		ID:               "rel:" + rootID + ":" + artifactID,
+		SourceArtifactID: rootID,
+		TargetArtifactID: artifactID,
+		RelationshipType: relationship,
+		Provider:         row.Provider,
+		CreatedAt:        row.FirstSeenAt,
+	}
+}
+
+func deliveryHealthForIssueSyncState(state IssueSyncState) DeliveryHealth {
+	switch state {
+	case IssueSyncStateManual:
+		return DeliveryHealthManual
+	case IssueSyncStateSynced:
+		return DeliveryHealthSynced
+	case IssueSyncStateStale:
+		return DeliveryHealthStale
+	case IssueSyncStateFailed:
+		return DeliveryHealthFailed
+	default:
+		return DeliveryHealthPending
+	}
+}
+
+func deliveryArtifactIssueSyncState(state string) IssueSyncState {
+	switch strings.TrimSpace(state) {
+	case deliveryExternalSyncStateManual:
+		return IssueSyncStateManual
+	case deliveryExternalSyncStateSynced:
+		return IssueSyncStateSynced
+	case deliveryExternalSyncStateStale, deliveryExternalSyncStateDeleted:
+		return IssueSyncStateStale
+	case deliveryExternalSyncStateFailed, deliveryExternalSyncStateConflict:
+		return IssueSyncStateFailed
+	default:
+		return IssueSyncStatePending
+	}
+}
+
+func issueDeliveryHealth(link IssueLink) DeliveryHealth {
+	switch strings.TrimSpace(link.ExternalObjectSyncState) {
+	case deliveryExternalSyncStateFailed, deliveryExternalSyncStateConflict:
+		return DeliveryHealthFailed
+	case deliveryExternalSyncStateDeleted:
+		return DeliveryHealthStale
+	case deliveryExternalSyncStatePending:
+		return DeliveryHealthPending
+	case deliveryExternalSyncStateSynced:
+		return DeliveryHealthSynced
+	default:
+		return deliveryHealthForIssueSyncState(link.SyncState)
+	}
+}
+
+func projectedDeliveryHealth(row DeliveryArtifactProjection) DeliveryHealth {
+	switch strings.TrimSpace(row.SyncState) {
+	case deliveryExternalSyncStateFailed, deliveryExternalSyncStateConflict:
+		return DeliveryHealthFailed
+	case deliveryExternalSyncStateStale, deliveryExternalSyncStateDeleted:
+		return DeliveryHealthStale
+	case deliveryExternalSyncStateSynced:
+		return DeliveryHealthSynced
+	case deliveryExternalSyncStateManual:
+		return DeliveryHealthManual
+	default:
+		return DeliveryHealthPending
+	}
+}
+
+func deliveryGraphHealth(summaryHealth DeliveryHealth, artifacts []DeliveryArtifact) DeliveryHealth {
+	health := summaryHealth
+	for _, artifact := range artifacts {
+		health = worseDeliveryHealth(health, artifact.Health)
+	}
+	return health
+}
+
+func worseDeliveryHealth(left DeliveryHealth, right DeliveryHealth) DeliveryHealth {
+	if deliveryHealthSeverity(right) > deliveryHealthSeverity(left) {
+		return right
+	}
+	return left
+}
+
+func deliveryHealthSeverity(health DeliveryHealth) int {
+	switch health {
+	case DeliveryHealthFailed:
+		return 6
+	case DeliveryHealthStale:
+		return 5
+	case DeliveryHealthPending:
+		return 4
+	case DeliveryHealthManual:
+		return 3
+	case DeliveryHealthSynced:
+		return 2
+	case DeliveryHealthNoLinks:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func issueDeliverySource(link IssueLink) string {
+	if link.ExternalObjectLinkID != nil {
+		return deliverySourceExternalObjectLink
+	}
+	return deliverySourceIssueLink
+}
+
+func markDeliveryArtifactSeen(seen map[string]struct{}, artifact DeliveryArtifact) bool {
+	key := deliveryArtifactDedupeKey(artifact)
+	if key == "" {
+		return false
+	}
+	if _, ok := seen[key]; ok {
+		return true
+	}
+	seen[key] = struct{}{}
+	return false
+}
+
+func deliveryArtifactDedupeKey(artifact DeliveryArtifact) string {
+	provider := strings.ToLower(strings.TrimSpace(artifact.Provider))
+	artifactType := strings.ToLower(strings.TrimSpace(artifact.ArtifactType))
+	externalKey := strings.ToLower(strings.TrimSpace(artifact.ExternalKey))
+	if provider == "" || artifactType == "" || externalKey == "" {
+		return ""
+	}
+	return provider + "\x00" + artifactType + "\x00" + externalKey
+}
+
+func issueLastSeenAt(link IssueLink, metadata deliveryArtifactMetadata) *time.Time {
+	latest := latestDeliveryGraphTime(link.ExternalUpdatedAt, link.ExternalObjectUpdatedAt)
+	latest = latestDeliveryGraphTime(latest, metadata.UpdatedAt)
+	latest = latestDeliveryGraphTime(latest, link.LastSyncedAt)
+	if latest != nil {
+		return latest
+	}
+	return ptrext.Of(link.UpdatedAt)
+}
+
+func projectedLastSeenAt(row DeliveryArtifactProjection) *time.Time {
+	latest := latestDeliveryGraphTime(row.LastSeenAt, row.ExternalUpdatedAt)
+	if latest != nil {
+		return latest
+	}
+	if !row.UpdatedAt.IsZero() {
+		return ptrext.Of(row.UpdatedAt)
+	}
+	return ptrext.Of(row.FirstSeenAt)
+}
+
+type deliveryArtifactMetadata struct {
+	Title          string
+	Status         string
+	StatusCategory string
+	Assignee       string
+	ExternalURL    string
+	UpdatedAt      *time.Time
+}
+
+func deliveryMetadataFromIssuePayload(payload []byte) deliveryArtifactMetadata {
+	rawText := strings.TrimSpace(string(payload))
+	if rawText == "" || rawText == "{}" {
+		return deliveryArtifactMetadata{}
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(rawText), &raw); err != nil {
+		return deliveryArtifactMetadata{}
+	}
+	return deliveryArtifactMetadata{
+		Title:          metadataString(raw, "title", "summary", "name"),
+		Status:         metadataString(raw, "status", "state"),
+		StatusCategory: metadataString(raw, "status_category", "state_reason"),
+		Assignee:       metadataAssignee(raw),
+		ExternalURL:    metadataString(raw, "html_url", "external_url", "url"),
+		UpdatedAt:      metadataTime(raw, "updated_at", "external_updated_at"),
+	}
+}
+
+func metadataString(raw map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := metadataValueString(raw[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func metadataValueString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		return metadataObjectDisplay(typed)
+	default:
+		return ""
+	}
+}
+
+func metadataObjectDisplay(raw map[string]any) string {
+	for _, key := range []string{"login", "name", "display_name", "email"} {
+		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func metadataAssignee(raw map[string]any) string {
+	if value := metadataString(raw, "assignee"); value != "" {
+		return value
+	}
+	return metadataArrayDisplay(raw["assignees"])
+}
+
+func metadataArrayDisplay(value any) string {
+	items, ok := value.([]any)
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, min(len(items), 3))
+	for _, item := range items {
+		if display := metadataValueString(item); display != "" {
+			parts = append(parts, display)
+		}
+		if len(parts) == 3 {
+			break
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func metadataTime(raw map[string]any, keys ...string) *time.Time {
+	for _, key := range keys {
+		value, ok := raw[key].(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+		if err == nil {
+			return ptrext.Of(parsed)
+		}
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func latestDeliveryGraphTime(current *time.Time, candidate *time.Time) *time.Time {
+	if candidate == nil || ptrext.Indirect(candidate).IsZero() {
+		return current
+	}
+	if current == nil || ptrext.Indirect(candidate).After(ptrext.Indirect(current)) {
+		return candidate
+	}
+	return current
+}
+
+type deliverySyncStateCounts struct {
+	manual  int
+	pending int
+	synced  int
+	stale   int
+	failed  int
+}
+
+func deliveryGraphHealthExplanation(artifacts []DeliveryArtifact) string {
+	if len(artifacts) == 0 {
+		return "No delivery artifacts are linked."
+	}
+	counts := countDeliveryArtifactHealth(artifacts)
+	parts := make([]string, 0, 5)
+	parts = appendSyncStateCount(parts, counts.synced, "synced")
+	parts = appendSyncStateCount(parts, counts.stale, "stale")
+	parts = appendSyncStateCount(parts, counts.failed, "failed")
+	parts = appendSyncStateCount(parts, counts.pending, "pending")
+	parts = appendSyncStateCount(parts, counts.manual, "manual")
+	if len(parts) == 0 {
+		return fmt.Sprintf("%d linked artifacts.", len(artifacts))
+	}
+	return fmt.Sprintf("%d linked artifacts: %s.", len(artifacts), strings.Join(parts, ", "))
+}
+
+func countDeliveryArtifactHealth(artifacts []DeliveryArtifact) deliverySyncStateCounts {
+	var counts deliverySyncStateCounts
+	for _, artifact := range artifacts {
+		switch artifact.Health {
+		case DeliveryHealthManual:
+			counts.manual++
+		case DeliveryHealthSynced:
+			counts.synced++
+		case DeliveryHealthStale:
+			counts.stale++
+		case DeliveryHealthFailed:
+			counts.failed++
+		default:
+			counts.pending++
+		}
+	}
+	return counts
+}
+
+func appendSyncStateCount(parts []string, count int, label string) []string {
+	if count == 0 {
+		return parts
+	}
+	return append(parts, fmt.Sprintf("%d %s", count, label))
 }
 
 func decisionScoreExplanation(summary *Summary) string {

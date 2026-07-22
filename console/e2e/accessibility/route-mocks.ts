@@ -2,9 +2,14 @@ import type { Page, Route } from '@playwright/test'
 import type { ServiceAccount } from '../../src/proto/attune/v1/api_key'
 import type { AuditLogViewState, SavedAuditLogView } from '../../src/proto/attune/v1/audit'
 import {
+  type CreateExternalConnectionRequest,
+  type CreateExternalProviderInstallationRequest,
   type ExternalConnection,
   type ExternalObjectMapping,
   type ExternalObjectSchema,
+  type ExternalProviderInstallation,
+  type ExternalProviderInstallationResource,
+  type ExternalProviderInstallationResourceInput,
   ExternalSyncDirection,
   type ExternalSyncEvent,
   ExternalSyncEventSignatureStatus,
@@ -92,6 +97,16 @@ export type ApiMockDiagnostics = {
     method: string
     path: string
   }>
+  providerInstallationRequests: Array<{
+    body: unknown
+    method: string
+    path: string
+  }>
+  externalConnectionRequests: Array<{
+    body: unknown
+    method: string
+    path: string
+  }>
   unhandledRequests: string[]
   semanticSearchRequests: unknown[]
 }
@@ -114,7 +129,9 @@ export async function installConsoleApiMocks(
   options: ApiMockOptions = {},
 ): Promise<ApiMockDiagnostics> {
   const diagnostics: ApiMockDiagnostics = {
+    externalConnectionRequests: [],
     inboundSourceRequests: [],
+    providerInstallationRequests: [],
     replyDraftRequests: [],
     replySendHookRequests: [],
     unhandledRequests: [],
@@ -729,8 +746,76 @@ async function handleRoute(
     await fulfillJson(route, consoleA11yExternalSyncProviders)
     return true
   }
+  if (method === 'GET' && path === '/external-sync/provider-installations') {
+    await fulfillJson(route, { installations: clone(state.externalSync.installations) })
+    return true
+  }
+  if (method === 'POST' && path === '/external-sync/provider-installations') {
+    const body = readJsonBody(route) as CreateExternalProviderInstallationRequest
+    diagnostics.providerInstallationRequests.push({ method, path, body })
+    const installation = createExternalProviderInstallation(state.externalSync, body)
+    await fulfillJson(route, clone(installation), 201)
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/external-sync\/provider-installations\/[^/]+:qualify$/)) {
+    diagnostics.providerInstallationRequests.push({ method, path, body: null })
+    const installationID = providerInstallationIDFromPath(path)
+    const result = qualifyExternalProviderInstallation(state.externalSync, installationID)
+    if (!result) {
+      await fulfillError(route, `Missing provider installation ${installationID}`, 404)
+      return true
+    }
+    await fulfillJson(route, clone(result))
+    return true
+  }
+  if (method === 'DELETE' && path.match(/^\/external-sync\/provider-installations\/[^/]+$/)) {
+    diagnostics.providerInstallationRequests.push({ method, path, body: null })
+    const installationID = providerInstallationIDFromPath(path)
+    state.externalSync.installations = state.externalSync.installations.filter(
+      (installation) => installation.id !== installationID,
+    )
+    delete state.externalSync.resourcesByInstallation[installationID]
+    await route.fulfill({ status: 204 })
+    return true
+  }
+  if (
+    method === 'GET' &&
+    path.match(/^\/external-sync\/provider-installations\/[^/]+\/resources$/)
+  ) {
+    const installationID = providerInstallationIDFromPath(path)
+    await fulfillJson(route, {
+      resources: clone(state.externalSync.resourcesByInstallation[installationID] ?? []),
+    })
+    return true
+  }
+  if (
+    method === 'POST' &&
+    path.match(/^\/external-sync\/provider-installations\/[^/]+\/resources:select$/)
+  ) {
+    const body = readJsonBody(route) as { resourceIds?: string[] }
+    diagnostics.providerInstallationRequests.push({ method, path, body })
+    const installationID = providerInstallationIDFromPath(path)
+    const resources = selectExternalProviderInstallationResources(
+      state.externalSync,
+      installationID,
+      body?.resourceIds ?? [],
+    )
+    if (!resources) {
+      await fulfillError(route, `Missing provider installation ${installationID}`, 404)
+      return true
+    }
+    await fulfillJson(route, { resources: clone(resources) })
+    return true
+  }
   if (method === 'GET' && path === '/external-sync/connections') {
     await fulfillJson(route, { connections: clone(state.externalSync.connections) })
+    return true
+  }
+  if (method === 'POST' && path === '/external-sync/connections') {
+    const body = readJsonBody(route) as CreateExternalConnectionRequest
+    diagnostics.externalConnectionRequests.push({ method, path, body })
+    const connection = createExternalConnection(state.externalSync, body)
+    await fulfillJson(route, clone(connection), 201)
     return true
   }
   if (method === 'GET' && path.match(/^\/external-sync\/connections\/[^/]+\/schema$/)) {
@@ -808,7 +893,9 @@ type ExternalSyncMockState = {
   connections: ExternalConnection[]
   events: ExternalSyncEvent[]
   health: ExternalSyncHealthResponse
+  installations: ExternalProviderInstallation[]
   mappings: ExternalObjectMapping[]
+  resourcesByInstallation: Record<string, ExternalProviderInstallationResource[]>
   runs: ExternalSyncRun[]
   schemasByConnection: Record<string, ExternalObjectSchema[]>
 }
@@ -1268,6 +1355,7 @@ function createExternalSyncState(): ExternalSyncMockState {
     status: 'active',
     authType: 'token',
     baseUrl: '',
+    providerInstallationId: '',
     providerConfigJson: '{"owner":"acme","repo":"console"}',
     scopes: ['issues'],
     lastTestedAt: '2026-07-08T02:00:00Z',
@@ -1288,6 +1376,7 @@ function createExternalSyncState(): ExternalSyncMockState {
     status: 'quarantined',
     authType: 'token',
     baseUrl: '',
+    providerInstallationId: '',
     providerConfigJson: '{"owner":"acme","repo":"legacy"}',
     scopes: ['issues'],
     lastTestedAt: '2026-07-08T03:00:00Z',
@@ -1383,7 +1472,9 @@ function createExternalSyncState(): ExternalSyncMockState {
       throttledRuns: 1,
       unauthorizedRuns: 0,
     },
+    installations: [],
     mappings: [mapping],
+    resourcesByInstallation: {},
     runs: [run],
     schemasByConnection: {
       [activeConnection.id]: [
@@ -1404,6 +1495,198 @@ function createExternalSyncState(): ExternalSyncMockState {
       ],
     },
   }
+}
+
+function createExternalProviderInstallation(
+  state: ExternalSyncMockState,
+  body: CreateExternalProviderInstallationRequest,
+): ExternalProviderInstallation {
+  const createdAt = '2026-07-22T08:00:00Z'
+  const installation: ExternalProviderInstallation = {
+    id: `external-sync-provider-installation-${state.installations.length + 1}`,
+    tenantId: consoleA11yMe.tenant.id,
+    provider: body.provider,
+    displayName: body.displayName,
+    installationKind: body.installationKind,
+    status: 'active',
+    externalInstallationId: body.externalInstallationId,
+    accountLogin: body.accountLogin,
+    accountId: body.accountId,
+    accountUrl: body.accountUrl,
+    baseUrl: body.baseUrl,
+    permissionsJson: body.permissionsJson,
+    capabilityProfileJson: body.capabilityProfileJson || '{}',
+    resourceSelection: body.resourceSelection,
+    qualificationStatus: 'untested',
+    lastQualifiedAt: '',
+    lastError: '',
+    createdBy: 'user-a11y',
+    updatedBy: 'user-a11y',
+    createdAt,
+    updatedAt: createdAt,
+  }
+  state.installations = [...state.installations, installation]
+  state.resourcesByInstallation[installation.id] = body.resources.map((resource, index) =>
+    createExternalProviderInstallationResource(installation, resource, index),
+  )
+  return installation
+}
+
+function createExternalProviderInstallationResource(
+  installation: ExternalProviderInstallation,
+  input: ExternalProviderInstallationResourceInput,
+  index: number,
+): ExternalProviderInstallationResource {
+  return {
+    id: `${installation.id}-resource-${index + 1}`,
+    tenantId: installation.tenantId,
+    installationId: installation.id,
+    provider: installation.provider,
+    resourceType: input.resourceType,
+    externalResourceId: input.externalResourceId,
+    resourceKey: input.resourceKey,
+    displayName: input.displayName,
+    htmlUrl: input.htmlUrl,
+    selected: input.selected,
+    status: input.status,
+    permissionsJson: input.permissionsJson,
+    lastSeenAt: '2026-07-22T08:00:00Z',
+    createdAt: '2026-07-22T08:00:00Z',
+    updatedAt: '2026-07-22T08:00:00Z',
+  }
+}
+
+function createExternalConnection(
+  state: ExternalSyncMockState,
+  body: CreateExternalConnectionRequest,
+): ExternalConnection {
+  const createdAt = '2026-07-22T08:02:00Z'
+  const enabled = body.enabled ?? true
+  const connection: ExternalConnection = {
+    id: `external-sync-conn-a11y-created-${state.connections.length + 1}`,
+    tenantId: consoleA11yMe.tenant.id,
+    provider: body.provider,
+    name: body.name,
+    enabled,
+    status: enabled ? 'active' : 'disabled',
+    authType: body.authType,
+    baseUrl: body.baseUrl,
+    providerInstallationId: body.providerInstallationId,
+    providerConfigJson: body.providerConfigJson,
+    scopes: body.scopes,
+    lastTestedAt: '',
+    lastTestStatus: 'untested',
+    lastError: '',
+    createdBy: 'user-a11y',
+    updatedBy: 'user-a11y',
+    createdAt,
+    updatedAt: createdAt,
+    webhookSecretConfigured: body.webhookSecret.length > 0,
+  }
+  state.connections = [...state.connections, connection]
+  return connection
+}
+
+function qualifyExternalProviderInstallation(state: ExternalSyncMockState, installationID: string) {
+  const installation = state.installations.find((item) => item.id === installationID)
+  if (!installation) return null
+
+  const resources = state.resourcesByInstallation[installationID] ?? []
+  const selectedCount = resources.filter((resource) => resource.selected).length
+  const permissionProfileOK =
+    installation.permissionsJson.includes('"metadata":"read"') &&
+    installation.permissionsJson.includes('"issues":"write"')
+  const ready =
+    installation.provider === 'github' &&
+    installation.externalInstallationId !== '' &&
+    permissionProfileOK &&
+    selectedCount > 0
+  const grade = ready ? 'full_app' : 'blocked'
+  const status = ready ? 'ok' : 'failed'
+  const lastQualifiedAt = '2026-07-22T08:01:00Z'
+  const updatedInstallation: ExternalProviderInstallation = {
+    ...installation,
+    capabilityProfileJson: JSON.stringify({
+      grade,
+      ready,
+      check_counts: ready ? { ok: 3 } : { failed: 1, ok: 2 },
+      resource_count: resources.length,
+      selected_resources: selectedCount,
+    }),
+    qualificationStatus: status,
+    lastQualifiedAt,
+    lastError: ready ? '' : 'Installation is not ready for issue sync',
+    updatedAt: lastQualifiedAt,
+  }
+  state.installations = state.installations.map((item) =>
+    item.id === installationID ? updatedInstallation : item,
+  )
+  return {
+    installationId: installationID,
+    ready,
+    grade,
+    installation: updatedInstallation,
+    checks: [
+      {
+        name: 'provider_registered',
+        status: 'EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_OK',
+        summary: 'Provider adapter is registered',
+        detailJson: '{}',
+      },
+      {
+        name: 'permission_profile',
+        status: permissionProfileOK
+          ? 'EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_OK'
+          : 'EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_FAILED',
+        summary: permissionProfileOK
+          ? 'GitHub installation exposes required issue-sync permissions'
+          : 'GitHub installation is missing required issue-sync permissions',
+        detailJson: '{}',
+      },
+      {
+        name: 'resource_selection',
+        status:
+          selectedCount > 0
+            ? 'EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_OK'
+            : 'EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_FAILED',
+        summary:
+          selectedCount > 0
+            ? 'Installation has selected provider resources'
+            : 'No provider resources are selected for sync',
+        detailJson: JSON.stringify({ selected_resources: selectedCount }),
+      },
+    ],
+  }
+}
+
+function selectExternalProviderInstallationResources(
+  state: ExternalSyncMockState,
+  installationID: string,
+  resourceIDs: string[],
+) {
+  const resources = state.resourcesByInstallation[installationID]
+  if (!resources) return null
+  const selected = new Set(resourceIDs)
+  const updatedResources = resources.map((resource) => ({
+    ...resource,
+    selected: selected.has(resource.id),
+    updatedAt: '2026-07-22T08:02:00Z',
+  }))
+  state.resourcesByInstallation[installationID] = updatedResources
+  state.installations = state.installations.map((installation) =>
+    installation.id === installationID
+      ? {
+          ...installation,
+          resourceSelection: selected.size > 0 ? 'selected' : 'none',
+          updatedAt: '2026-07-22T08:02:00Z',
+        }
+      : installation,
+  )
+  return updatedResources
+}
+
+function providerInstallationIDFromPath(path: string) {
+  return path.split('/')[3].split(':')[0]
 }
 
 function clone<T>(value: T): T {

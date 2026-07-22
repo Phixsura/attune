@@ -31,6 +31,7 @@ type providerConfig struct {
 	ManagedLabelPrefix        string   `json:"managed_label_prefix,omitempty"`
 	DefaultLabels             []string `json:"default_labels,omitempty"`
 	SyncComments              *bool    `json:"sync_comments,omitempty"`
+	SyncDeliveryArtifacts     *bool    `json:"sync_delivery_artifacts,omitempty"`
 	AllowReopen               bool     `json:"allow_reopen,omitempty"`
 	LinkedExistingWritePolicy string   `json:"linked_existing_write_policy,omitempty"`
 	BodySectionMode           string   `json:"body_section_mode,omitempty"`
@@ -40,10 +41,12 @@ type settings struct {
 	owner                     string
 	repo                      string
 	apiBase                   string
+	repoHTMLURL               string
 	token                     string
 	managedLabelPrefix        string
 	defaultLabels             []string
 	syncComments              bool
+	syncDeliveryArtifacts     bool
 	allowReopen               bool
 	linkedExistingWritePolicy string
 	bodySectionMode           string
@@ -76,14 +79,17 @@ func settingsFromConnection(conn core.Connection) (settings, error) {
 		return settings{}, err
 	}
 	syncComments := ptrext.IndirectOr(cfg.SyncComments, true)
+	syncDeliveryArtifacts := ptrext.IndirectOr(cfg.SyncDeliveryArtifacts, true)
 	return settings{
 		owner:                     owner,
 		repo:                      repo,
 		apiBase:                   apiBase,
+		repoHTMLURL:               repoHTMLURL(cfg, owner, repo),
 		token:                     token,
 		managedLabelPrefix:        cfg.ManagedLabelPrefix,
 		defaultLabels:             cfg.DefaultLabels,
 		syncComments:              syncComments,
+		syncDeliveryArtifacts:     syncDeliveryArtifacts,
 		allowReopen:               cfg.AllowReopen,
 		linkedExistingWritePolicy: cfg.LinkedExistingWritePolicy,
 		bodySectionMode:           cfg.BodySectionMode,
@@ -144,6 +150,13 @@ func resolveRepo(cfg providerConfig) (string, string, error) {
 		return "", "", fmt.Errorf("github owner and repo must not contain slashes")
 	}
 	return cfg.Owner, strings.TrimSuffix(cfg.Repo, ".git"), nil
+}
+
+func repoHTMLURL(cfg providerConfig, owner, repo string) string {
+	if cfg.RepoURL != "" {
+		return strings.TrimSuffix(strings.TrimRight(cfg.RepoURL, "/"), ".git")
+	}
+	return "https://github.com/" + owner + "/" + repo
 }
 
 func parseRepoURL(raw string) (string, string, error) {

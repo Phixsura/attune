@@ -5,6 +5,7 @@ import {
   ClipboardList,
   DollarSign,
   ExternalLink,
+  GitBranch,
   Github,
   GitMerge,
   Loader2,
@@ -79,6 +80,8 @@ import { cn } from '@/lib/utils'
 import {
   type CustomerRequestAccountProfile,
   type CustomerRequestCustomerLink,
+  type CustomerRequestDeliveryArtifact,
+  type CustomerRequestDeliveryGraph,
   CustomerRequestDeliveryHealth,
   type CustomerRequestDuplicate,
   type CustomerRequestFeedbackEvidence,
@@ -1196,6 +1199,9 @@ function CustomerRequestDetailSheet({
                 </div>
               )}
             </DetailSection>
+            <DetailSection title={t('customer_requests.delivery_graph')}>
+              <DeliveryGraphPanel graph={detail.data.deliveryGraph} />
+            </DetailSection>
             <DetailSection title={t('customer_requests.delivery_links')}>
               {detail.data.issueLinks.length === 0 ? (
                 <EmptyLine text={t('customer_requests.no_issues')} />
@@ -2140,6 +2146,97 @@ function AccountProfileRow({ item }: { item: CustomerRequestAccountProfile }) {
   )
 }
 
+function DeliveryGraphPanel({ graph }: { graph?: CustomerRequestDeliveryGraph }) {
+  const { t } = useTranslation()
+  const artifacts = graph?.artifacts ?? []
+  const relationships = graph?.relationships ?? []
+  const externalArtifacts = artifacts.filter((item) => item.artifactType !== 'customer_request')
+  if (!graph || externalArtifacts.length === 0) {
+    return <EmptyLine text={t('customer_requests.delivery_graph_empty')} />
+  }
+  return (
+    <div className="rounded-md border text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 p-3">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2 font-medium">
+            <GitBranch className="size-4 text-muted-foreground" />
+            <span>{deliveryHealthLabel(graph.health, t)}</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {graph.healthExplanation ||
+              t('customer_requests.delivery_graph_summary', {
+                count: artifacts.length,
+                relationshipCount: relationships.length,
+              })}
+          </p>
+        </div>
+        <div className="rounded bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+          {t('customer_requests.delivery_graph_summary', {
+            count: artifacts.length,
+            relationshipCount: relationships.length,
+          })}
+        </div>
+      </div>
+      <div className="border-t">
+        {externalArtifacts.map((artifact) => (
+          <DeliveryArtifactRow key={artifact.id} artifact={artifact} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DeliveryArtifactRow({ artifact }: { artifact: CustomerRequestDeliveryArtifact }) {
+  const { t } = useTranslation()
+  const label = artifact.title || artifact.externalKey || artifact.externalUrl || artifact.id
+  return (
+    <div className="grid gap-2 border-t p-3 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="min-w-0 space-y-1">
+        {artifact.externalUrl ? (
+          <a
+            className="flex min-w-0 items-center gap-2 font-medium hover:underline"
+            href={artifact.externalUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span className="min-w-0 truncate">{label}</span>
+            <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
+          </a>
+        ) : (
+          <div className="truncate font-medium">{label}</div>
+        )}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{artifact.provider}</span>
+          <span>{artifact.artifactType}</span>
+          {artifact.externalKey ? <span>{artifact.externalKey}</span> : null}
+          {artifact.status ? <span>{artifact.status}</span> : null}
+          {artifact.statusCategory ? <span>{artifact.statusCategory}</span> : null}
+          {artifact.assignee ? <span>{artifact.assignee}</span> : null}
+          <span>{syncStateLabel(artifact.syncState, t)}</span>
+          {artifact.lastSeenAt ? (
+            <span>
+              {t('customer_requests.delivery_artifact_last_seen', {
+                value: formatDate(artifact.lastSeenAt),
+              })}
+            </span>
+          ) : null}
+        </div>
+        {artifact.syncError ? (
+          <p className="text-xs text-destructive">{artifact.syncError}</p>
+        ) : null}
+      </div>
+      <div
+        className={cn(
+          'h-fit rounded border px-2 py-1 text-xs font-medium',
+          deliveryHealthClassName(artifact.health),
+        )}
+      >
+        {deliveryHealthLabel(artifact.health, t)}
+      </div>
+    </div>
+  )
+}
+
 function DuplicateRow({ item }: { item: CustomerRequestDuplicate }) {
   return (
     <div className="rounded-md border p-3 text-sm">
@@ -2524,6 +2621,21 @@ export function deliveryHealthLabel(
       return t('customer_requests.delivery_health_states.manual')
     default:
       return t('customer_requests.delivery_health_states.no_links')
+  }
+}
+
+function deliveryHealthClassName(health: CustomerRequestDeliveryHealth | undefined) {
+  switch (health) {
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED:
+      return 'border-destructive/40 bg-destructive/10 text-destructive'
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE:
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-700'
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING:
+      return 'border-sky-500/40 bg-sky-500/10 text-sky-700'
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED:
+      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
+    default:
+      return 'border-border bg-muted text-muted-foreground'
   }
 }
 

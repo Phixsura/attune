@@ -92,6 +92,7 @@ export interface ExternalConnection {
   createdAt: string;
   updatedAt: string;
   webhookSecretConfigured: boolean;
+  providerInstallationId: string;
 }
 
 export interface ExternalSyncProvider {
@@ -99,11 +100,122 @@ export interface ExternalSyncProvider {
   display: string;
 }
 
+export interface ExternalProviderInstallation {
+  id: string;
+  tenantId: string;
+  provider: string;
+  displayName: string;
+  installationKind: string;
+  status: string;
+  externalInstallationId: string;
+  accountLogin: string;
+  accountId: string;
+  accountUrl: string;
+  baseUrl: string;
+  permissionsJson: string;
+  capabilityProfileJson: string;
+  resourceSelection: string;
+  qualificationStatus: string;
+  lastQualifiedAt: string;
+  lastError: string;
+  createdBy: string;
+  updatedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalProviderInstallationResource {
+  id: string;
+  tenantId: string;
+  installationId: string;
+  provider: string;
+  resourceType: string;
+  externalResourceId: string;
+  resourceKey: string;
+  displayName: string;
+  htmlUrl: string;
+  selected: boolean;
+  status: string;
+  permissionsJson: string;
+  lastSeenAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalProviderInstallationResourceInput {
+  resourceType: string;
+  externalResourceId: string;
+  resourceKey: string;
+  displayName: string;
+  htmlUrl: string;
+  selected: boolean;
+  status: string;
+  permissionsJson: string;
+}
+
 export interface ListExternalSyncProvidersRequest {
 }
 
 export interface ListExternalSyncProvidersResponse {
   providers: ExternalSyncProvider[];
+}
+
+export interface ListExternalProviderInstallationsRequest {
+}
+
+export interface ListExternalProviderInstallationsResponse {
+  installations: ExternalProviderInstallation[];
+}
+
+export interface CreateExternalProviderInstallationRequest {
+  provider: string;
+  displayName: string;
+  installationKind: string;
+  externalInstallationId: string;
+  accountLogin: string;
+  accountId: string;
+  accountUrl: string;
+  baseUrl: string;
+  permissionsJson: string;
+  capabilityProfileJson: string;
+  resourceSelection: string;
+  resources: ExternalProviderInstallationResourceInput[];
+}
+
+export interface DeleteExternalProviderInstallationRequest {
+  id: string;
+}
+
+export interface DeleteExternalProviderInstallationResponse {
+}
+
+export interface QualifyExternalProviderInstallationRequest {
+  id: string;
+}
+
+export interface QualifyExternalProviderInstallationResponse {
+  installationId: string;
+  ready: boolean;
+  grade: string;
+  checks: ExternalSyncQualificationCheck[];
+  installation?: ExternalProviderInstallation | undefined;
+}
+
+export interface ListExternalProviderInstallationResourcesRequest {
+  id: string;
+}
+
+export interface ListExternalProviderInstallationResourcesResponse {
+  resources: ExternalProviderInstallationResource[];
+}
+
+export interface SelectExternalProviderInstallationResourcesRequest {
+  id: string;
+  resourceIds: string[];
+}
+
+export interface SelectExternalProviderInstallationResourcesResponse {
+  resources: ExternalProviderInstallationResource[];
 }
 
 export interface ExternalObjectMapping {
@@ -291,6 +403,7 @@ export interface CreateExternalConnectionRequest {
   scopes: string[];
   enabled?: boolean | undefined;
   webhookSecret: string;
+  providerInstallationId: string;
 }
 
 export interface UpdateExternalConnectionRequest {
@@ -486,6 +599,24 @@ export interface GetExternalSyncHealthRequest {
 export interface ExternalSyncService {
   ListExternalConnections(request: ListExternalConnectionsRequest): Promise<ListExternalConnectionsResponse>;
   ListExternalSyncProviders(request: ListExternalSyncProvidersRequest): Promise<ListExternalSyncProvidersResponse>;
+  ListExternalProviderInstallations(
+    request: ListExternalProviderInstallationsRequest,
+  ): Promise<ListExternalProviderInstallationsResponse>;
+  CreateExternalProviderInstallation(
+    request: CreateExternalProviderInstallationRequest,
+  ): Promise<ExternalProviderInstallation>;
+  DeleteExternalProviderInstallation(
+    request: DeleteExternalProviderInstallationRequest,
+  ): Promise<DeleteExternalProviderInstallationResponse>;
+  QualifyExternalProviderInstallation(
+    request: QualifyExternalProviderInstallationRequest,
+  ): Promise<QualifyExternalProviderInstallationResponse>;
+  ListExternalProviderInstallationResources(
+    request: ListExternalProviderInstallationResourcesRequest,
+  ): Promise<ListExternalProviderInstallationResourcesResponse>;
+  SelectExternalProviderInstallationResources(
+    request: SelectExternalProviderInstallationResourcesRequest,
+  ): Promise<SelectExternalProviderInstallationResourcesResponse>;
   CreateExternalConnection(request: CreateExternalConnectionRequest): Promise<ExternalConnection>;
   UpdateExternalConnection(request: UpdateExternalConnectionRequest): Promise<ExternalConnection>;
   DeleteExternalConnection(request: DeleteExternalConnectionRequest): Promise<DeleteExternalConnectionResponse>;

@@ -1863,11 +1863,14 @@ func customerRequestHandlerContext() *dispatcher.RequestContext[*session.AuthCtx
 func sampleServiceDetail(requestID, ownerID, linkID uuid.UUID) *svc.Detail {
 	now := time.Date(2026, 7, 7, 1, 2, 3, 0, time.UTC)
 	profile := sampleAccountProfile(now)
+	summary := sampleSummary(requestID, ownerID, now)
+	issueLinks := sampleIssueLinks(linkID, now)
 	return ptrext.Of(svc.Detail{
 		Request: repo.Detail{
-			Summary:         sampleSummary(requestID, ownerID, now),
+			Summary:         summary,
 			Feedback:        sampleFeedback(now),
-			IssueLinks:      sampleIssueLinks(linkID, now),
+			IssueLinks:      issueLinks,
+			DeliveryGraph:   sampleDeliveryGraph(summary, issueLinks, now),
 			CustomerLinks:   sampleCustomerLinks(linkID, now, profile),
 			Votes:           sampleVotes(linkID, now, profile),
 			Notes:           []repo.Note{{ID: linkID, Body: "Coordinate rollout", CreatedBy: "tester", CreatedAt: now}},
@@ -1876,6 +1879,57 @@ func sampleServiceDetail(requestID, ownerID, linkID uuid.UUID) *svc.Detail {
 		},
 		AuditEntries: []svc.AuditEntry{{ID: 1, Action: "created", ActorType: "admin", ActorID: "tester", Summary: "Created", CreatedAt: now}},
 	})
+}
+
+func sampleDeliveryGraph(
+	summary repo.Summary,
+	issueLinks []repo.IssueLink,
+	now time.Time,
+) repo.DeliveryGraph {
+	rootID := "request:" + summary.ID.String()
+	issueID := "issue_link:" + issueLinks[0].ID.String()
+	return repo.DeliveryGraph{
+		Artifacts: []repo.DeliveryArtifact{
+			{
+				ID:           rootID,
+				Provider:     "attune",
+				ArtifactType: "customer_request",
+				ExternalKey:  summary.DisplayID,
+				Title:        summary.Title,
+				Status:       string(summary.Status),
+				Health:       summary.DeliveryHealth,
+				LastSeenAt:   ptrext.Of(now),
+				Source:       "customer_request",
+			},
+			{
+				ID:             issueID,
+				Provider:       issueLinks[0].Provider,
+				ArtifactType:   "issue",
+				ExternalKey:    issueLinks[0].ExternalKey,
+				ExternalURL:    issueLinks[0].ExternalURL,
+				Title:          issueLinks[0].Title,
+				Status:         issueLinks[0].Status,
+				StatusCategory: issueLinks[0].ExternalStatusCategory,
+				Assignee:       issueLinks[0].ExternalAssignee,
+				SyncState:      issueLinks[0].SyncState,
+				Health:         repo.DeliveryHealthFailed,
+				LastSeenAt:     ptrext.Of(now),
+				Source:         "customer_request_issue_link",
+				SyncError:      issueLinks[0].SyncError,
+			},
+		},
+		Relationships: []repo.DeliveryRelationship{{
+			ID:               "rel:" + rootID + ":" + issueID,
+			SourceArtifactID: rootID,
+			TargetArtifactID: issueID,
+			RelationshipType: "tracked_by",
+			Provider:         issueLinks[0].Provider,
+			CreatedAt:        now,
+		}},
+		Health:            repo.DeliveryHealthFailed,
+		HealthExplanation: "1 linked artifacts: 1 failed.",
+		UpdatedAt:         ptrext.Of(now),
+	}
 }
 
 func sampleSummary(requestID, ownerID uuid.UUID, now time.Time) repo.Summary {
@@ -1995,18 +2049,51 @@ func sampleVotes(linkID uuid.UUID, now time.Time, profile repo.AccountProfile) [
 
 func assertDetailProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
 	t.Helper()
+	assertDetailSummaryProto(t, detail)
+	assertDetailIssueProto(t, detail)
+	assertDetailDeliveryGraphProto(t, detail)
+	assertDetailSupportListsProto(t, detail)
+}
+
+func assertDetailSummaryProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
 	if detail.GetRequest().GetDisplayId() != "CR-7" {
 		t.Fatalf("DisplayId = %q, want CR-7", detail.GetRequest().GetDisplayId())
 	}
 	if detail.GetRequest().GetOwner().GetEmail() != "owner@example.com" {
 		t.Fatalf("Owner email = %q, want owner@example.com", detail.GetRequest().GetOwner().GetEmail())
 	}
+}
+
+func assertDetailIssueProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
 	if len(detail.GetFeedback()) != 1 || detail.GetFeedback()[0].GetImportance() != attunev1.CustomerRequestImportance_CUSTOMER_REQUEST_IMPORTANCE_CRITICAL {
 		t.Fatalf("Feedback = %+v, want critical feedback evidence", detail.GetFeedback())
 	}
 	if len(detail.GetIssueLinks()) != 1 || detail.GetIssueLinks()[0].GetSyncState() != attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED {
 		t.Fatalf("IssueLinks = %+v, want failed issue", detail.GetIssueLinks())
 	}
+}
+
+func assertDetailDeliveryGraphProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
+	graph := detail.GetDeliveryGraph()
+	if graph.GetHealth() != attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED {
+		t.Fatalf("DeliveryGraph health = %v, want failed", graph.GetHealth())
+	}
+	if len(graph.GetArtifacts()) != 2 || len(graph.GetRelationships()) != 1 {
+		t.Fatalf("DeliveryGraph = %+v, want two artifacts and one relationship", graph)
+	}
+	if graph.GetArtifacts()[1].GetArtifactType() != "issue" || graph.GetArtifacts()[1].GetSyncError() != "rate limited" {
+		t.Fatalf("DeliveryGraph issue artifact = %+v, want issue with sync error", graph.GetArtifacts()[1])
+	}
+	if graph.GetRelationships()[0].GetRelationshipType() != "tracked_by" {
+		t.Fatalf("DeliveryGraph relationship = %+v, want tracked_by", graph.GetRelationships()[0])
+	}
+}
+
+func assertDetailSupportListsProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
 	if len(detail.GetCustomers()) != 1 || detail.GetCustomers()[0].GetAccountProfile().GetAccountKey() != "acme" {
 		t.Fatalf("Customers = %+v, want account profile", detail.GetCustomers())
 	}

@@ -543,6 +543,7 @@ func TestRepoConnectionMappingRunEventScanners(t *testing.T) {
 	now := time.Date(2026, 7, 8, 2, 3, 4, 0, time.UTC)
 	tenantID := "tenant-1"
 	connectionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	providerInstallationID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
 	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 
@@ -551,14 +552,18 @@ func TestRepoConnectionMappingRunEventScanners(t *testing.T) {
 		"token", "https://api.github.com", []byte(`{"repo":"acme/app"}`),
 		[]string{"issues"},
 		"credential-key", []byte("credential"), stringPtr("webhook-key"), []byte("webhook"),
-		timePtr(now), timePtr(now), TestStatusOK, "", "admin", "admin", now, now,
+		timePtr(now), timePtr(now), TestStatusOK, "", "admin", "admin", ptrext.Of(providerInstallationID), now, now,
 	}})
 	if err != nil {
 		t.Fatalf("scanConnection returned error: %v", err)
 	}
-	if conn.WebhookSecretKeyID != "webhook-key" || conn.LastTestedAt == nil {
-		t.Fatalf("connection nullable fields = %+v", conn)
+	if conn.WebhookSecretKeyID != "webhook-key" {
+		t.Fatalf("connection webhook key = %q; want webhook-key", conn.WebhookSecretKeyID)
 	}
+	if conn.LastTestedAt == nil {
+		t.Fatalf("connection last tested at = nil; want timestamp")
+	}
+	requireScannedProviderInstallationID(t, conn.ProviderInstallationID, providerInstallationID)
 
 	mapping, err := scanMapping(fakeRow{values: []any{
 		mappingID, tenantID, connectionID, "customer_request", "issue", DirectionPull,
@@ -857,9 +862,11 @@ func TestApplyPullChildRecordBranches(t *testing.T) {
 	now := time.Date(2026, 7, 8, 4, 0, 0, 123, time.UTC)
 	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
 	input := ApplyPullInput{
 		TenantID:      "tenant-1",
 		RunID:         uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+		ConnectionID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 		MappingID:     mappingID,
 		Provider:      "github",
 		InputMetadata: []byte(`{"external_sync_event_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}`),
@@ -974,6 +981,43 @@ func TestApplyPullChildRecordBranches(t *testing.T) {
 		args := tx.execArgs[0]
 		if args[1] != linkID || args[2] != "comment-1" || args[5] != input.RunID {
 			t.Fatalf("delete args = %#v, want link/comment/run identifiers", args)
+		}
+	})
+
+	t.Run("delivery artifact children are projected", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{
+			rows:  []fakeRow{fakeObjectLinkRow(linkID, requestID.String(), "ISS-1", SyncStateSynced, false)},
+			execs: []pgconn.CommandTag{pgconn.NewCommandTag("INSERT 0 1")},
+		})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, PullChildRecord{
+			ParentExternalKey: "ISS-1",
+			Type:              "pull_request",
+			ExternalKey:       "acme/app#313",
+			ExternalURL:       "https://github.com/acme/app/pull/313",
+			ExternalVersion:   now.Format(time.RFC3339Nano),
+			ExternalUpdatedAt: ptrext.Of(now),
+			Payload: []byte(`{
+				"number": 313,
+				"title": "Ship delivery graph",
+				"state": "open",
+				"state_reason": "review_required",
+				"assignees": [{"login": "octo"}]
+			}`),
+		})
+		if err != nil || outcome.changed != 1 || tx.rowIdx != 1 || tx.execIdx != 1 {
+			t.Fatalf("outcome=%+v err=%v rows=%d execs=%d, want projected delivery artifact", outcome, err, tx.rowIdx, tx.execIdx)
+		}
+		args := tx.execArgs[0]
+		if args[2] != requestID || args[3] != "github" || args[5] != mappingID || args[6] != linkID {
+			t.Fatalf("projection identity args = %#v", args)
+		}
+		if args[7] != "pull_request" || args[8] != "implements" || args[9] != "acme/app#313" {
+			t.Fatalf("projection artifact args = %#v", args)
+		}
+		if args[11] != "313" || args[12] != "Ship delivery graph" || args[16] != "octo" {
+			t.Fatalf("projection payload args = %#v", args)
 		}
 	})
 
@@ -2535,6 +2579,16 @@ func stringPtr(value string) *string {
 
 func timePtr(value time.Time) *time.Time {
 	return ptrext.Of(value)
+}
+
+func requireScannedProviderInstallationID(t *testing.T, got *uuid.UUID, want uuid.UUID) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("provider installation id = nil; want %s", want)
+	}
+	if ptrext.Indirect(got) != want {
+		t.Fatalf("provider installation id = %s; want %s", ptrext.Indirect(got), want)
+	}
 }
 
 func pgxconnTag(value string) pgconn.CommandTag {

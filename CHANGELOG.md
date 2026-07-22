@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- Added external provider installation management for Console external sync,
+  including installation records, authorized resource selection, qualification
+  grading, connection binding with selected-resource provider configuration,
+  audit events, and OpenAPI/proto contract coverage.
+
+- Added a Customer Request delivery graph projection to the generated API,
+  Go detail model, and Console detail drawer, so linked external issue artifacts
+  are presented with provider-neutral nodes, relationships, health, and
+  last-seen context.
+
+- Customer Request delivery graphs now merge provider-normalized external
+  object link metadata into linked issue artifacts, including provider title,
+  status reason, assignee, URL, last-seen time, source, and external-sync
+  failure state.
+
+- Added a provider-neutral Customer Request delivery artifact projection table
+  and repository upsert/read path, so request detail graphs can include pull
+  requests, commits, branches, deployments, releases, project items, sub-issues,
+  and support tickets alongside legacy issue links.
+
+- External sync pull children for pull requests, commits, branches,
+  deployments, releases, project items, sub-issues, and support tickets now
+  project into Customer Request delivery graphs with provider relationship,
+  status, assignee, payload, and last-seen context.
+
+- GitHub issue pulls now read issue timeline events and emit referenced pull
+  requests plus closing commits as delivery artifact children, making provider
+  data reach Customer Request delivery graphs without manual projection code.
+
 ### Security
 
 - Removed `golang.org/x/crypto` from the root dependency graph and raised the
@@ -16,6 +47,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   package from the module graph.
 
 ### Fixed
+
+- Console primary buttons now keep an opaque hover background, preserving
+  WCAG text contrast for mouse-driven workflows.
 
 - Public board detail pages now return 404/400 for hidden or invalid public
   request lookups surfaced by the public-visibility service instead of a generic

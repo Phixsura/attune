@@ -93,6 +93,9 @@ func TestDiscoverReturnsIssueSchema(t *testing.T) {
 	if len(schemas) != 1 || schemas[0].Type != "issue" || len(schemas[0].WritableFields) == 0 {
 		t.Fatalf("schemas = %#v; want issue schema with writable fields", schemas)
 	}
+	if !containsString(schemas[0].Fields, "delivery_artifact.external_key") {
+		t.Fatalf("schema fields = %#v; want delivery artifact discovery fields", schemas[0].Fields)
+	}
 }
 
 func TestConfigRejectsInvalidConnectionSettings(t *testing.T) {
@@ -392,6 +395,7 @@ func TestCheckAndPullIssues(t *testing.T) {
 	}
 	assertPulledIssueRecord(t, result, customerRequestID)
 	assertPulledIssueComment(t, result)
+	assertPulledDeliveryArtifacts(t, result)
 	assertPulledIssueCursor(t, result.NextCursor)
 }
 
@@ -415,10 +419,10 @@ func assertPulledIssueRecord(t *testing.T, result core.PullResult, customerReque
 
 func assertPulledIssueComment(t *testing.T, result core.PullResult) {
 	t.Helper()
-	if len(result.Children) != 1 {
-		t.Fatalf("children len = %d, want 1", len(result.Children))
+	child, ok := findPulledChild(result, "comment", "9001")
+	if !ok {
+		t.Fatalf("children = %+v, want issue comment child", result.Children)
 	}
-	child := result.Children[0]
 	if child.ParentKey != "7" || child.Type != "comment" || child.Key != "9001" {
 		t.Fatalf("child = %+v, want issue comment child", child)
 	}
@@ -429,6 +433,58 @@ func assertPulledIssueComment(t *testing.T, result core.PullResult) {
 	if commentPayload.AuthorLogin != "octo" || commentPayload.Marker != "cr-note-1" || commentPayload.BodyDigest == "" {
 		t.Fatalf("comment payload = %+v, want normalized comment fields", commentPayload)
 	}
+}
+
+func assertPulledDeliveryArtifacts(t *testing.T, result core.PullResult) {
+	t.Helper()
+	pr, ok := findPulledChild(result, "pull_request", "acme/app#313")
+	if !ok {
+		t.Fatalf("children = %+v, want pull request child", result.Children)
+	}
+	if pr.ParentKey != "7" || pr.URL != "https://github.com/acme/app/pull/313" ||
+		pr.UpdatedAt.UTC().Format(time.RFC3339) != "2026-07-08T10:08:00Z" {
+		t.Fatalf("pull request child = %+v, want parent/url/timestamp", pr)
+	}
+	prPayload := normalizedDeliveryArtifact{}
+	if err := json.Unmarshal(pr.Payload, &prPayload); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("decode pull request payload: %v", err)
+	}
+	if prPayload.Number != 313 || prPayload.Title != "Implement delivery graph" ||
+		prPayload.Relationship != "implements" || prPayload.Assignee != "octo" {
+		t.Fatalf("pull request payload = %+v, want normalized PR fields", prPayload)
+	}
+
+	commit, ok := findPulledChild(result, "commit", "acme/app@0123456789abcdef")
+	if !ok {
+		t.Fatalf("children = %+v, want commit child", result.Children)
+	}
+	commitPayload := normalizedDeliveryArtifact{}
+	if err := json.Unmarshal(commit.Payload, &commitPayload); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("decode commit payload: %v", err)
+	}
+	if commitPayload.CommitID != "0123456789abcdef" ||
+		commitPayload.Relationship != "implements" ||
+		commitPayload.HTMLURL != "https://github.com/acme/app/commit/0123456789abcdef" {
+		t.Fatalf("commit payload = %+v, want normalized commit fields", commitPayload)
+	}
+}
+
+func findPulledChild(result core.PullResult, childType, key string) (core.ExternalChildRecord, bool) {
+	for _, child := range result.Children {
+		if child.Type == childType && child.Key == key {
+			return child, true
+		}
+	}
+	return core.ExternalChildRecord{}, false
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func assertPulledIssueCursor(t *testing.T, nextCursor []byte) {
@@ -465,6 +521,14 @@ func newCheckAndPullIssuesServer(t *testing.T, requestID, customerRequestID stri
 			t.Fatalf("comments per_page = %q, want 100", got)
 		}
 		writeJSON(t, w, pullIssueCommentsPayload())
+	})
+	mux.HandleFunc("/repos/acme/app/issues/7/timeline", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-GitHub-Request-Id", requestID)
+		assertGitHubHeaders(t, r)
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Fatalf("timeline per_page = %q, want 100", got)
+		}
+		writeJSON(t, w, pullIssueTimelinePayload())
 	})
 	return httptest.NewServer(mux)
 }
@@ -506,6 +570,37 @@ func pullIssueCommentsPayload() []map[string]any {
 		"created_at": "2026-07-08T10:05:00Z",
 		"updated_at": "2026-07-08T10:06:00Z",
 	}}
+}
+
+func pullIssueTimelinePayload() []map[string]any {
+	return []map[string]any{
+		{
+			"event":      "cross-referenced",
+			"created_at": "2026-07-08T10:08:00Z",
+			"actor":      map[string]any{"login": "hubot"},
+			"source": map[string]any{
+				"type": "pull_request",
+				"issue": map[string]any{
+					"number":       313,
+					"html_url":     "https://github.com/acme/app/pull/313",
+					"title":        "Implement delivery graph",
+					"state":        "open",
+					"state_reason": "review_required",
+					"assignee":     map[string]any{"login": "octo"},
+					"assignees":    []map[string]any{{"login": "octo"}},
+					"updated_at":   "2026-07-08T10:07:00Z",
+					"pull_request": map[string]any{"url": "https://api.github.com/repos/acme/app/pulls/313"},
+				},
+			},
+		},
+		{
+			"event":      "closed",
+			"commit_id":  "0123456789abcdef",
+			"commit_url": "https://api.github.com/repos/acme/app/commits/0123456789abcdef",
+			"created_at": "2026-07-08T10:09:00Z",
+			"actor":      map[string]any{"login": "octo"},
+		},
+	}
 }
 
 func TestPullFailureBranches(t *testing.T) {
@@ -618,8 +713,9 @@ func TestPullUsesIssueHintWithoutAdvancingCursor(t *testing.T) {
 	if cursor.UpdatedSince != "2026-07-07T00:00:00Z" {
 		t.Fatalf("cursor = %+v, want original cursor", cursor)
 	}
-	if len(requests) != 2 || strings.Contains(requests[0], "/issues?") {
-		t.Fatalf("requests = %#v, want single issue pull", requests)
+	if len(requests) != 2 || strings.Contains(requests[0], "/issues?") ||
+		!strings.Contains(requests[1], "/issues/42/comments") {
+		t.Fatalf("requests = %#v, want targeted issue plus comment pull", requests)
 	}
 }
 

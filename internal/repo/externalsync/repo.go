@@ -37,6 +37,7 @@ func (r *Repo) ListConnections(ctx context.Context, tenantID string) ([]Connecti
 		       provider_config, scopes, credential_key_id, credential_ciphertext,
 		       webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		       last_tested_at, last_test_status, last_error, created_by, updated_by,
+		       provider_installation_id,
 		       created_at, updated_at
 		  FROM external_connections
 		 WHERE tenant_id = $1
@@ -63,6 +64,7 @@ func (r *Repo) GetConnection(ctx context.Context, tenantID string, id uuid.UUID)
 		       provider_config, scopes, credential_key_id, credential_ciphertext,
 		       webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		       last_tested_at, last_test_status, last_error, created_by, updated_by,
+		       provider_installation_id,
 		       created_at, updated_at
 		  FROM external_connections
 		 WHERE tenant_id = $1
@@ -95,19 +97,20 @@ func (r *Repo) CreateConnection(ctx context.Context, in Connection) (*Connection
 			 (id, tenant_id, provider, name, enabled, status, auth_type, base_url,
 			  provider_config, scopes, credential_key_id, credential_ciphertext,
 			  webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
-			  created_by, updated_by)
+			  provider_installation_id, created_by, updated_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12,
 			        NULLIF($13, ''), $14, CASE WHEN NULLIF($13, '') IS NULL THEN NULL ELSE NOW() END,
-			        $15, $16)
+			        $15, $16, $17)
 			RETURNING id, tenant_id, provider, name, enabled, status, auth_type, base_url,
 			          provider_config, scopes, credential_key_id, credential_ciphertext,
 			          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 			          last_tested_at, last_test_status, last_error, created_by, updated_by,
+			          provider_installation_id,
 			          created_at, updated_at`,
 			in.ID, in.TenantID, in.Provider, in.Name, in.Enabled, in.Status, in.AuthType,
 			in.BaseURL, string(in.ProviderConfig), in.Scopes, in.CredentialKeyID,
 			in.CredentialCiphertext, in.WebhookSecretKeyID, in.WebhookSecretCiphertext,
-			in.CreatedBy, in.UpdatedBy,
+			in.ProviderInstallationID, in.CreatedBy, in.UpdatedBy,
 		))
 		if scanErr != nil {
 			return scanErr
@@ -169,6 +172,7 @@ func (r *Repo) UpdateConnection(ctx context.Context, in Connection, updateCreden
 			          provider_config, scopes, credential_key_id, credential_ciphertext,
 			          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 			          last_tested_at, last_test_status, last_error, created_by, updated_by,
+			          provider_installation_id,
 			          created_at, updated_at`,
 			in.TenantID, in.ID, in.Name, in.Enabled, in.BaseURL, string(in.ProviderConfig),
 			in.Scopes, in.CredentialKeyID, in.CredentialCiphertext, updateCredential,
@@ -226,6 +230,7 @@ func (r *Repo) UpdateConnectionTestResult(ctx context.Context, tenantID string, 
 		          provider_config, scopes, credential_key_id, credential_ciphertext,
 		          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		          last_tested_at, last_test_status, last_error, created_by, updated_by,
+		          provider_installation_id,
 		          created_at, updated_at`,
 		tenantID, id, status, truncate(lastError, 2000)))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -253,6 +258,7 @@ func (r *Repo) ResumeConnection(ctx context.Context, tenantID string, id uuid.UU
 		          provider_config, scopes, credential_key_id, credential_ciphertext,
 		          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		          last_tested_at, last_test_status, last_error, created_by, updated_by,
+		          provider_installation_id,
 		          created_at, updated_at`,
 		tenantID, id, actor))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -2786,9 +2792,23 @@ func applyPullChildRecord(ctx context.Context, tx pgx.Tx, in ApplyPullInput, map
 	child.ExternalURL = strings.TrimSpace(child.ExternalURL)
 	child.ExternalVersion = strings.TrimSpace(child.ExternalVersion)
 	payload := normalizePayloadObject(child.Payload)
-	if child.Type != ChildTypeComment {
+	if child.Type == ChildTypeComment {
+		return applyPullCommentChildRecord(ctx, tx, in, mapping, child, payload)
+	}
+	if !isDeliveryArtifactChildType(child.Type) {
 		return pullApplyOutcome{}, nil
 	}
+	return applyPullDeliveryArtifactChildRecord(ctx, tx, in, mapping, child, payload)
+}
+
+func applyPullCommentChildRecord(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ApplyPullInput,
+	mapping Mapping,
+	child PullChildRecord,
+	payload []byte,
+) (pullApplyOutcome, error) {
 	if mapping.ExternalObjectType != "issue" {
 		return pullApplyOutcome{}, nil
 	}
@@ -2812,6 +2832,45 @@ func applyPullChildRecord(ctx context.Context, tx pgx.Tx, in ApplyPullInput, map
 		return pullApplyOutcome{changed: changed}, err
 	}
 	changed, err := upsertExternalObjectComment(ctx, tx, in, mapping, ptrext.Indirect(link), child, payload)
+	return pullApplyOutcome{changed: changed}, err
+}
+
+func applyPullDeliveryArtifactChildRecord(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ApplyPullInput,
+	mapping Mapping,
+	child PullChildRecord,
+	payload []byte,
+) (pullApplyOutcome, error) {
+	if mapping.LocalObjectType != "customer_request" || mapping.ExternalObjectType != "issue" {
+		return pullApplyOutcome{}, nil
+	}
+	if child.ParentExternalKey == "" || child.ExternalKey == "" {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"validation", "delivery artifact parent_external_key and external_key are required", payload, false)
+	}
+	link, err := findLinkByExternal(ctx, tx, in.TenantID, mapping.ID, mapping.ExternalObjectType, child.ParentExternalKey)
+	if err != nil {
+		return pullApplyOutcome{}, err
+	}
+	if link != nil && ptrext.Indirect(link).LocalDeleted {
+		return pullApplyOutcome{}, nil
+	}
+	if link == nil {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"parent_link_not_found", "parent external object link was not found", payload, true)
+	}
+	requestID, err := uuid.Parse(ptrext.Indirect(link).LocalObjectID)
+	if err != nil {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"validation", "parent link local_object_id must be a customer request UUID", payload, false)
+	}
+	if child.Deleted {
+		changed, err := markDeliveryArtifactDeleted(ctx, tx, in, requestID, child)
+		return pullApplyOutcome{changed: changed}, err
+	}
+	changed, err := upsertDeliveryArtifactChild(ctx, tx, in, mapping, ptrext.Indirect(link), requestID, child, payload)
 	return pullApplyOutcome{changed: changed}, err
 }
 
@@ -2858,6 +2917,94 @@ func upsertExternalObjectComment(ctx context.Context, tx pgx.Tx, in ApplyPullInp
 		return 0, fmt.Errorf("upsert external object comment: %w", err)
 	}
 	return 1, nil
+}
+
+func upsertDeliveryArtifactChild(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ApplyPullInput,
+	mapping Mapping,
+	link objectLinkRow,
+	requestID uuid.UUID,
+	child PullChildRecord,
+	payload []byte,
+) (int, error) {
+	externalURL := firstNonEmpty(child.ExternalURL, payloadFlexibleString(payload, "html_url", "external_url", "url"))
+	displayKey := firstNonEmpty(payloadFlexibleString(payload, "display_key", "number", "name"), child.ExternalKey)
+	_, err := tx.Exec(ctx, `
+		INSERT INTO customer_request_delivery_artifacts (
+			id, tenant_id, request_id, provider, connection_id, mapping_id,
+			external_object_link_id, artifact_type, relationship, external_key,
+			external_url, display_key, title, status, status_category, state_reason,
+			assignee, sync_state, sync_error, source, payload, external_updated_at,
+			last_seen_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10,
+			$11, $12, $13, $14, $15, $16,
+			$17, 'synced', '', 'external_sync_child', $18::jsonb, $19,
+			$20
+		)
+		ON CONFLICT (tenant_id, request_id, provider, artifact_type, external_key)
+		WHERE deleted_at IS NULL
+		DO UPDATE SET
+			connection_id = EXCLUDED.connection_id,
+			mapping_id = EXCLUDED.mapping_id,
+			external_object_link_id = EXCLUDED.external_object_link_id,
+			relationship = EXCLUDED.relationship,
+			external_url = EXCLUDED.external_url,
+			display_key = EXCLUDED.display_key,
+			title = EXCLUDED.title,
+			status = EXCLUDED.status,
+			status_category = EXCLUDED.status_category,
+			state_reason = EXCLUDED.state_reason,
+			assignee = EXCLUDED.assignee,
+			sync_state = EXCLUDED.sync_state,
+			sync_error = '',
+			source = EXCLUDED.source,
+			payload = EXCLUDED.payload,
+			external_updated_at = EXCLUDED.external_updated_at,
+			last_seen_at = EXCLUDED.last_seen_at,
+			deleted_at = NULL,
+			updated_at = NOW()`,
+		uuid.New(), in.TenantID, requestID, issueProvider(in.Provider), nilUUID(in.ConnectionID), mapping.ID,
+		link.ID, child.Type, deliveryArtifactRelationship(child.Type, payload), child.ExternalKey,
+		truncate(externalURL, 2048), truncate(displayKey, 512),
+		truncate(payloadFlexibleString(payload, "title", "name", "summary", "subject"), 500),
+		truncate(payloadFlexibleString(payload, "status", "state", "conclusion"), 120),
+		truncate(payloadFlexibleString(payload, "status_category", "state_reason", "conclusion"), 120),
+		truncate(payloadFlexibleString(payload, "state_reason", "reason"), 240),
+		truncate(payloadAssignee(payload), 500), string(payload),
+		firstNonNilTime(child.ExternalUpdatedAt, payloadTime(payload, "updated_at")),
+		firstNonNilTime(child.ExternalUpdatedAt, payloadTime(payload, "updated_at")))
+	if err != nil {
+		return 0, fmt.Errorf("upsert customer request delivery artifact child: %w", err)
+	}
+	return 1, nil
+}
+
+func markDeliveryArtifactDeleted(ctx context.Context, tx pgx.Tx, in ApplyPullInput, requestID uuid.UUID, child PullChildRecord) (int, error) {
+	seenAt := firstNonNilTime(child.ExternalUpdatedAt, parseExternalVersionTime(child.ExternalVersion))
+	tag, err := tx.Exec(ctx, `
+		UPDATE customer_request_delivery_artifacts
+		   SET sync_state = 'deleted',
+		       deleted_at = COALESCE(deleted_at, NOW()),
+		       sync_error = '',
+		       external_updated_at = $6,
+		       last_seen_at = $6,
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND request_id = $2
+		   AND provider = $3
+		   AND artifact_type = $4
+		   AND external_key = $5
+		   AND deleted_at IS NULL`,
+		in.TenantID, requestID, issueProvider(in.Provider), child.Type, child.ExternalKey, seenAt)
+	if err != nil {
+		return 0, fmt.Errorf("mark customer request delivery artifact deleted: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 func markExternalObjectCommentDeleted(ctx context.Context, tx pgx.Tx, in ApplyPullInput, link objectLinkRow, child PullChildRecord) (int, error) {
@@ -3365,6 +3512,68 @@ func payloadString(payload []byte, keys ...string) string {
 	return ""
 }
 
+func payloadFlexibleString(payload []byte, keys ...string) string {
+	var v map[string]any
+	if err := json.Unmarshal(payload, &v); err != nil {
+		return ""
+	}
+	for _, key := range keys {
+		if value := payloadValueString(v[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func payloadValueString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		if typed == float64(int64(typed)) {
+			return fmt.Sprintf("%d", int64(typed))
+		}
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", typed), "0"), ".")
+	case map[string]any:
+		return payloadObjectDisplay(typed)
+	default:
+		return ""
+	}
+}
+
+func payloadObjectDisplay(raw map[string]any) string {
+	for _, key := range []string{"login", "name", "display_name", "email", "url"} {
+		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func payloadAssignee(payload []byte) string {
+	var v map[string]any
+	if err := json.Unmarshal(payload, &v); err != nil {
+		return ""
+	}
+	if value := payloadValueString(v["assignee"]); value != "" {
+		return value
+	}
+	items, ok := v["assignees"].([]any)
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, min(len(items), 3))
+	for _, item := range items {
+		if value := payloadValueString(item); value != "" {
+			parts = append(parts, value)
+		}
+		if len(parts) == 3 {
+			break
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 func payloadTime(payload []byte, key string) *time.Time {
 	value := payloadString(payload, key)
 	if value == "" {
@@ -3477,6 +3686,60 @@ func conflictMessage(kind string) string {
 	}
 }
 
+func isDeliveryArtifactChildType(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "pull_request", "commit", "branch", "deployment", "release", "project_item", "sub_issue", "support_ticket":
+		return true
+	default:
+		return false
+	}
+}
+
+func deliveryArtifactRelationship(artifactType string, payload []byte) string {
+	switch payloadFlexibleString(payload, "relationship", "link_type") {
+	case "tracked_by", "implements", "blocks", "duplicates", "references", "ships_in", "reported_from", "parent", "child":
+		return payloadFlexibleString(payload, "relationship", "link_type")
+	}
+	switch artifactType {
+	case "pull_request":
+		return "implements"
+	case "deployment", "release":
+		return "ships_in"
+	case "sub_issue":
+		return "child"
+	case "support_ticket":
+		return "reported_from"
+	default:
+		return "references"
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstNonNilTime(left, right *time.Time) *time.Time {
+	if left != nil && !ptrext.Indirect(left).IsZero() {
+		return left
+	}
+	if right != nil && !ptrext.Indirect(right).IsZero() {
+		return right
+	}
+	return nil
+}
+
+func nilUUID(value uuid.UUID) *uuid.UUID {
+	if value == uuid.Nil {
+		return nil
+	}
+	return ptrext.Of(value)
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -3491,12 +3754,14 @@ type failureRetrySeed struct {
 func scanConnection(row scanner) (Connection, error) {
 	var c Connection
 	var webhookSecretKeyID *string
+	var providerInstallationID *uuid.UUID
 	err := row.Scan(&c.ID, &c.TenantID, &c.Provider, &c.Name, &c.Enabled, &c.Status,
 		&c.AuthType, &c.BaseURL, &c.ProviderConfig, &c.Scopes, &c.CredentialKeyID,
 		&c.CredentialCiphertext, &webhookSecretKeyID, &c.WebhookSecretCiphertext,
 		&c.WebhookSecretSetAt, &c.LastTestedAt, &c.LastTestStatus, &c.LastError,
-		&c.CreatedBy, &c.UpdatedBy, &c.CreatedAt, &c.UpdatedAt)
+		&c.CreatedBy, &c.UpdatedBy, &providerInstallationID, &c.CreatedAt, &c.UpdatedAt)
 	c.WebhookSecretKeyID = ptrext.Indirect(webhookSecretKeyID)
+	c.ProviderInstallationID = providerInstallationID
 	return c, err
 }
 

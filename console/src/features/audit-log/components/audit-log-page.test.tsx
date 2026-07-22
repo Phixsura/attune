@@ -639,11 +639,13 @@ describe('AuditLogPage', () => {
 
     const { user } = renderWithProviders(<AuditLogPage />)
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: '删除视图 成员删除排查' })).toBeInTheDocument()
-    })
+    const deleteViewButton = await screen.findByRole(
+      'button',
+      { name: '删除视图 成员删除排查' },
+      { timeout: 5000 },
+    )
 
-    await user.click(screen.getByRole('button', { name: '删除视图 成员删除排查' }))
+    await user.click(deleteViewButton)
 
     expect(confirmSpy).toHaveBeenCalledWith('确认删除“成员删除排查”吗？')
     expect(deleteCalled).toBe(false)

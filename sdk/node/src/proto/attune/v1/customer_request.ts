@@ -160,6 +160,40 @@ export interface CustomerRequestIssueLink {
   syncError: string;
 }
 
+export interface CustomerRequestDeliveryArtifact {
+  id: string;
+  provider: string;
+  artifactType: string;
+  externalKey: string;
+  externalUrl: string;
+  title: string;
+  status: string;
+  statusCategory: string;
+  assignee: string;
+  syncState: CustomerRequestIssueSyncState;
+  health: CustomerRequestDeliveryHealth;
+  lastSeenAt: string;
+  source: string;
+  syncError: string;
+}
+
+export interface CustomerRequestDeliveryRelationship {
+  id: string;
+  sourceArtifactId: string;
+  targetArtifactId: string;
+  relationshipType: string;
+  provider: string;
+  createdAt: string;
+}
+
+export interface CustomerRequestDeliveryGraph {
+  artifacts: CustomerRequestDeliveryArtifact[];
+  relationships: CustomerRequestDeliveryRelationship[];
+  health: CustomerRequestDeliveryHealth;
+  healthExplanation: string;
+  updatedAt: string;
+}
+
 export interface CustomerRequestCustomerLink {
   id: string;
   subjectKey: string;
@@ -235,6 +269,7 @@ export interface CustomerRequestDetail {
   duplicates: CustomerRequestDuplicate[];
   accountProfiles: CustomerRequestAccountProfile[];
   notes: CustomerRequestNote[];
+  deliveryGraph?: CustomerRequestDeliveryGraph | undefined;
 }
 
 export interface CustomerRequestScoringSettings {

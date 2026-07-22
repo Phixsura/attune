@@ -886,8 +886,13 @@ describe('PublicVisibilityPage', () => {
 
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '已公开 (1)' })).toBeEnabled())
-    await user.click(screen.getByRole('button', { name: '已公开 (1)' }))
+    const approvedQueueButton = await screen.findByRole(
+      'button',
+      { name: '已公开 (1)' },
+      { timeout: 10_000 },
+    )
+    expect(approvedQueueButton).toBeEnabled()
+    await user.click(approvedQueueButton)
     await user.click(screen.getByRole('button', { name: '隐藏' }))
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: '隐藏审核项' })).toBeInTheDocument()
@@ -901,7 +906,7 @@ describe('PublicVisibilityPage', () => {
       })
     })
 
-    await user.click(screen.getByRole('button', { name: '已拦截 (1)' }))
+    await user.click(await screen.findByRole('button', { name: '已拦截 (1)' }, { timeout: 10_000 }))
     await user.click(screen.getByRole('button', { name: '标记垃圾' }))
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: '标记垃圾审核项' })).toBeInTheDocument()

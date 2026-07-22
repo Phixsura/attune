@@ -7,6 +7,7 @@ package githubissue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -94,6 +95,12 @@ func (p *Provider) Discover(_ context.Context, _ core.Connection) ([]core.Object
 				"comment.body",
 				"comment.author_login",
 				"comment.updated_at",
+				"delivery_artifact.type",
+				"delivery_artifact.relationship",
+				"delivery_artifact.external_key",
+				"delivery_artifact.title",
+				"delivery_artifact.status",
+				"delivery_artifact.updated_at",
 			},
 			RequiredFields: []string{"title"},
 			WritableFields: []string{
@@ -141,6 +148,11 @@ func (p *Provider) Pull(ctx context.Context, req core.PullRequest) (core.PullRes
 	if err != nil {
 		return core.PullResult{}, err
 	}
+	deliveryChildren, err := p.deliveryArtifactChildrenForIssues(ctx, cfg, issues)
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	children = append(children, deliveryChildren...)
 	next, err := nextCursor(cfg, cursor, maxUpdated, headers.Get("Link"))
 	if err != nil {
 		return core.PullResult{}, err
@@ -161,6 +173,11 @@ func (p *Provider) pullSingleIssue(ctx context.Context, cfg settings, cursor cur
 	if err != nil {
 		return core.PullResult{}, err
 	}
+	deliveryChildren, err := p.deliveryArtifactChildrenForIssues(ctx, cfg, []apiIssue{issue})
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	children = append(children, deliveryChildren...)
 	next, err := encodeCursor(cursor)
 	if err != nil {
 		return core.PullResult{}, err
@@ -205,6 +222,35 @@ func (p *Provider) commentChildrenForIssues(ctx context.Context, cfg settings, i
 		children = append(children, normalized...)
 	}
 	return children, nil
+}
+
+func (p *Provider) deliveryArtifactChildrenForIssues(ctx context.Context, cfg settings, issues []apiIssue) ([]core.ExternalChildRecord, error) {
+	if !cfg.syncDeliveryArtifacts {
+		return nil, nil
+	}
+	children := []core.ExternalChildRecord{}
+	for _, issue := range issues {
+		if !shouldFetchDeliveryArtifacts(issue) {
+			continue
+		}
+		timeline, err := p.fetchIssueTimeline(ctx, cfg, issue.Number)
+		if isOptionalTimelineUnavailable(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		normalized, err := normalizeTimelineDeliveryChildren(cfg, strconv.Itoa(issue.Number), timeline)
+		if err != nil {
+			return nil, validationError("%v", err)
+		}
+		children = append(children, normalized...)
+	}
+	return children, nil
+}
+
+func shouldFetchDeliveryArtifacts(issue apiIssue) bool {
+	return issue.Number > 0 && issue.PullRequest == nil && extractCustomerRequestID(issue.Body) != ""
 }
 
 func appendDeletedCommentHint(parentKey string, children []core.ExternalChildRecord, issue apiIssue, hint pullHint) ([]core.ExternalChildRecord, error) {
@@ -255,6 +301,45 @@ func (p *Provider) fetchIssueComments(ctx context.Context, cfg settings, issueNu
 		}
 	}
 	return out, nil
+}
+
+func (p *Provider) fetchIssueTimeline(ctx context.Context, cfg settings, issueNumber int) ([]apiTimelineEvent, error) {
+	rawURL, err := issueTimelineURL(cfg, issueNumber)
+	if err != nil {
+		return nil, err
+	}
+	var out []apiTimelineEvent
+	for rawURL != "" {
+		body, headers, err := p.request(ctx, cfg, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		events, err := decodeTimelineResponse(body)
+		if err != nil {
+			return nil, validationError("%v", err)
+		}
+		out = append(out, events...)
+		next := parseNextLink(headers.Get("Link"))
+		if next == "" {
+			break
+		}
+		rawURL, err = validateNextURL(cfg, next)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func isOptionalTimelineUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	providerErr := (*providerError)(nil)
+	if !errors.As(err, &providerErr) { // ptrext:allow errors.As out-param
+		return false
+	}
+	return providerErr.kind == "not_found"
 }
 
 func (p *Provider) Push(ctx context.Context, req core.PushRequest) (core.PushResult, error) {

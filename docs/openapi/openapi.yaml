@@ -2928,6 +2928,155 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalProviderInstallations
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalProviderInstallationsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_CreateExternalProviderInstallation
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateExternalProviderInstallationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalProviderInstallation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}:
+        delete:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_DeleteExternalProviderInstallation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteExternalProviderInstallationResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}/resources:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalProviderInstallationResources
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalProviderInstallationResourcesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}/resources:select:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_SelectExternalProviderInstallationResources
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SelectExternalProviderInstallationResourcesRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SelectExternalProviderInstallationResourcesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}:qualify:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_QualifyExternalProviderInstallation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/QualifyExternalProviderInstallationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QualifyExternalProviderInstallationResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/external-sync/providers:
         get:
             tags:
@@ -10932,6 +11081,41 @@ components:
                     type: boolean
                 webhookSecret:
                     type: string
+                providerInstallationId:
+                    type: string
+        CreateExternalProviderInstallationRequest:
+            required:
+                - provider
+                - displayName
+                - installationKind
+            type: object
+            properties:
+                provider:
+                    type: string
+                displayName:
+                    type: string
+                installationKind:
+                    type: string
+                externalInstallationId:
+                    type: string
+                accountLogin:
+                    type: string
+                accountId:
+                    type: string
+                accountUrl:
+                    type: string
+                baseUrl:
+                    type: string
+                permissionsJson:
+                    type: string
+                capabilityProfileJson:
+                    type: string
+                resourceSelection:
+                    type: string
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallationResourceInput'
         CreateGuardPolicyRequest:
             type: object
             properties:
@@ -11453,6 +11637,95 @@ components:
                     type: string
                 accountProfile:
                     $ref: '#/components/schemas/CustomerRequestAccountProfile'
+        CustomerRequestDeliveryArtifact:
+            type: object
+            properties:
+                id:
+                    type: string
+                provider:
+                    type: string
+                artifactType:
+                    type: string
+                externalKey:
+                    type: string
+                externalUrl:
+                    type: string
+                title:
+                    type: string
+                status:
+                    type: string
+                statusCategory:
+                    type: string
+                assignee:
+                    type: string
+                syncState:
+                    enum:
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED
+                    type: string
+                    format: enum
+                health:
+                    enum:
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_UNSPECIFIED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+                    type: string
+                    format: enum
+                lastSeenAt:
+                    type: string
+                source:
+                    type: string
+                syncError:
+                    type: string
+        CustomerRequestDeliveryGraph:
+            type: object
+            properties:
+                artifacts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestDeliveryArtifact'
+                relationships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestDeliveryRelationship'
+                health:
+                    enum:
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_UNSPECIFIED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+                    type: string
+                    format: enum
+                healthExplanation:
+                    type: string
+                updatedAt:
+                    type: string
+        CustomerRequestDeliveryRelationship:
+            type: object
+            properties:
+                id:
+                    type: string
+                sourceArtifactId:
+                    type: string
+                targetArtifactId:
+                    type: string
+                relationshipType:
+                    type: string
+                provider:
+                    type: string
+                createdAt:
+                    type: string
         CustomerRequestDetail:
             type: object
             properties:
@@ -11492,6 +11765,8 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/CustomerRequestNote'
+                deliveryGraph:
+                    $ref: '#/components/schemas/CustomerRequestDeliveryGraph'
         CustomerRequestDuplicate:
             type: object
             properties:
@@ -11871,6 +12146,9 @@ components:
             type: object
             properties: {}
         DeleteExternalConnectionResponse:
+            type: object
+            properties: {}
+        DeleteExternalProviderInstallationResponse:
             type: object
             properties: {}
         DeleteGdprSubjectRequest:
@@ -12537,6 +12815,8 @@ components:
                     type: string
                 webhookSecretConfigured:
                     type: boolean
+                providerInstallationId:
+                    type: string
         ExternalDocs:
             type: object
             properties:
@@ -12604,6 +12884,105 @@ components:
                     type: array
                     items:
                         type: string
+        ExternalProviderInstallation:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                provider:
+                    type: string
+                displayName:
+                    type: string
+                installationKind:
+                    type: string
+                status:
+                    type: string
+                externalInstallationId:
+                    type: string
+                accountLogin:
+                    type: string
+                accountId:
+                    type: string
+                accountUrl:
+                    type: string
+                baseUrl:
+                    type: string
+                permissionsJson:
+                    type: string
+                capabilityProfileJson:
+                    type: string
+                resourceSelection:
+                    type: string
+                qualificationStatus:
+                    type: string
+                lastQualifiedAt:
+                    type: string
+                lastError:
+                    type: string
+                createdBy:
+                    type: string
+                updatedBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ExternalProviderInstallationResource:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                installationId:
+                    type: string
+                provider:
+                    type: string
+                resourceType:
+                    type: string
+                externalResourceId:
+                    type: string
+                resourceKey:
+                    type: string
+                displayName:
+                    type: string
+                htmlUrl:
+                    type: string
+                selected:
+                    type: boolean
+                status:
+                    type: string
+                permissionsJson:
+                    type: string
+                lastSeenAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ExternalProviderInstallationResourceInput:
+            required:
+                - resourceKey
+            type: object
+            properties:
+                resourceType:
+                    type: string
+                externalResourceId:
+                    type: string
+                resourceKey:
+                    type: string
+                displayName:
+                    type: string
+                htmlUrl:
+                    type: string
+                selected:
+                    type: boolean
+                status:
+                    type: string
+                permissionsJson:
+                    type: string
         ExternalSyncAttempt:
             type: object
             properties:
@@ -14224,6 +14603,20 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ExternalObjectMapping'
+        ListExternalProviderInstallationResourcesResponse:
+            type: object
+            properties:
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallationResource'
+        ListExternalProviderInstallationsResponse:
+            type: object
+            properties:
+                installations:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallation'
         ListExternalSyncEventsResponse:
             type: object
             properties:
@@ -15520,6 +15913,26 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ExternalSyncQualificationCheck'
+        QualifyExternalProviderInstallationRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        QualifyExternalProviderInstallationResponse:
+            type: object
+            properties:
+                installationId:
+                    type: string
+                ready:
+                    type: boolean
+                grade:
+                    type: string
+                checks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncQualificationCheck'
+                installation:
+                    $ref: '#/components/schemas/ExternalProviderInstallation'
         QualityAction:
             type: object
             properties:
@@ -16793,6 +17206,22 @@ components:
         SeedDefaultsResponse:
             type: object
             properties: {}
+        SelectExternalProviderInstallationResourcesRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                resourceIds:
+                    type: array
+                    items:
+                        type: string
+        SelectExternalProviderInstallationResourcesResponse:
+            type: object
+            properties:
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallationResource'
         SemanticDescriptor:
             type: object
             properties:

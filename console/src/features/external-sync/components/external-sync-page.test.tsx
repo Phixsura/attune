@@ -2,6 +2,7 @@ import { HttpResponse, http } from 'msw'
 import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 import {
+  type CreateExternalConnectionRequest,
   ExternalSyncConflictResolution,
   ExternalSyncDirection,
 } from '@/features/external-sync/api/external-sync'
@@ -13,7 +14,9 @@ import {
   ConflictResolutionControls,
   ConnectionsCard,
   CreateConnectionDialog,
+  CreateProviderInstallationDialog,
   canShowRecordTimeline,
+  capabilityGrade,
   DiagnosticRows,
   directionLabel,
   EditConnectionDialog,
@@ -30,7 +33,9 @@ import {
   MappingEditor,
   mappingAllowsPull,
   normalizeJSONInput,
+  ProviderInstallationsCard,
   prettyJSON,
+  providerConfigFromInstallationResources,
   qualificationToastDescription,
   RecordTimelinePanel,
   RunDetailCard,
@@ -84,6 +89,234 @@ function runDetailResponse(id: string, overrides: Record<string, unknown> = {}) 
 }
 
 describe('ExternalSyncPage', () => {
+  it('renders provider installations and saves exact resource selection', async () => {
+    const onSelect = vi.fn()
+    const onQualify = vi.fn()
+    const onDelete = vi.fn()
+    const onSaveResources = vi.fn()
+    const { user } = renderWithProviders(
+      <ProviderInstallationsCard
+        installations={[
+          {
+            id: 'pi-1',
+            tenantId: 'tenant-1',
+            provider: 'github',
+            displayName: 'GitHub App',
+            installationKind: 'github_app',
+            status: 'active',
+            externalInstallationId: '123',
+            accountLogin: 'acme',
+            accountId: '',
+            accountUrl: '',
+            baseUrl: '',
+            permissionsJson: '{"metadata":"read","issues":"write"}',
+            capabilityProfileJson: '{"grade":"full_app"}',
+            resourceSelection: 'selected',
+            qualificationStatus: 'ok',
+            lastQualifiedAt: '',
+            lastError: '',
+            createdBy: 'admin',
+            updatedBy: 'admin',
+            createdAt: '2026-07-08T01:00:00Z',
+            updatedAt: '2026-07-08T01:00:00Z',
+          },
+        ]}
+        resources={[
+          {
+            id: 'res-1',
+            tenantId: 'tenant-1',
+            installationId: 'pi-1',
+            provider: 'github',
+            resourceType: 'repository',
+            externalResourceId: '',
+            resourceKey: 'acme/app',
+            displayName: 'acme/app',
+            htmlUrl: 'https://github.com/acme/app',
+            selected: true,
+            status: 'active',
+            permissionsJson: '{}',
+            lastSeenAt: '',
+            createdAt: '2026-07-08T01:00:00Z',
+            updatedAt: '2026-07-08T01:00:00Z',
+          },
+          {
+            id: 'res-2',
+            tenantId: 'tenant-1',
+            installationId: 'pi-1',
+            provider: 'github',
+            resourceType: 'repository',
+            externalResourceId: '',
+            resourceKey: 'acme/other',
+            displayName: 'acme/other',
+            htmlUrl: 'https://github.com/acme/other',
+            selected: false,
+            status: 'active',
+            permissionsJson: '{}',
+            lastSeenAt: '',
+            createdAt: '2026-07-08T01:00:00Z',
+            updatedAt: '2026-07-08T01:00:00Z',
+          },
+        ]}
+        loading={false}
+        resourcesLoading={false}
+        selectedID="pi-1"
+        selecting={false}
+        onSelect={onSelect}
+        onQualify={onQualify}
+        onDelete={onDelete}
+        onSaveResources={onSaveResources}
+      />,
+    )
+
+    expect(screen.getByText('GitHub App')).toBeInTheDocument()
+    expect(screen.getByText('full_app')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText(/acme\/app/)).toBeChecked())
+    await user.click(screen.getByLabelText(/acme\/app/))
+    await user.click(screen.getByLabelText(/acme\/other/))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(onSaveResources).toHaveBeenCalledWith('pi-1', ['res-2'])
+  })
+
+  it('creates provider installation requests from the dialog', async () => {
+    const onSubmit = vi.fn()
+    const { user } = renderWithProviders(
+      <CreateProviderInstallationDialog
+        open
+        pending={false}
+        providers={[{ provider: 'github', display: 'GitHub' }]}
+        onOpenChange={vi.fn()}
+        onSubmit={onSubmit}
+      />,
+    )
+
+    await user.type(screen.getByLabelText('显示名称'), 'GitHub App')
+    await user.type(screen.getByLabelText('外部安装 ID'), '12345')
+    await user.type(screen.getByLabelText('账号或组织'), 'acme')
+    await user.type(screen.getByLabelText('资源键'), 'acme/app')
+    await user.click(screen.getByRole('button', { name: '新建' }))
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      provider: 'github',
+      displayName: 'GitHub App',
+      installationKind: 'github_app',
+      externalInstallationId: '12345',
+      accountLogin: 'acme',
+      accountId: '',
+      accountUrl: '',
+      baseUrl: '',
+      permissionsJson: '{"metadata":"read","issues":"write"}',
+      capabilityProfileJson: '{}',
+      resourceSelection: 'selected',
+      resources: [
+        {
+          resourceType: 'repository',
+          externalResourceId: '',
+          resourceKey: 'acme/app',
+          displayName: 'acme/app',
+          htmlUrl: '',
+          selected: true,
+          status: 'active',
+          permissionsJson: '{}',
+        },
+      ],
+    })
+  })
+
+  it('binds create connection requests to the selected provider installation', async () => {
+    const selectedInstallation = {
+      id: 'pi-1',
+      tenantId: 'tenant-1',
+      provider: 'github',
+      displayName: 'GitHub App',
+      installationKind: 'github_app',
+      status: 'active',
+      externalInstallationId: '123',
+      accountLogin: 'acme',
+      accountId: '',
+      accountUrl: 'https://github.com/acme',
+      baseUrl: 'https://api.github.com',
+      permissionsJson: '{"metadata":"read","issues":"write"}',
+      capabilityProfileJson: '{"grade":"full_app"}',
+      resourceSelection: 'selected',
+      qualificationStatus: 'ok',
+      lastQualifiedAt: '2026-07-08T02:00:00Z',
+      lastError: '',
+      createdBy: 'admin',
+      updatedBy: 'admin',
+      createdAt: '2026-07-08T01:00:00Z',
+      updatedAt: '2026-07-08T02:00:00Z',
+    }
+    const selectedInstallationResources = [
+      {
+        id: 'res-1',
+        tenantId: 'tenant-1',
+        installationId: 'pi-1',
+        provider: 'github',
+        resourceType: 'repository',
+        externalResourceId: '100',
+        resourceKey: 'acme/app',
+        displayName: 'acme/app',
+        htmlUrl: 'https://github.com/acme/app',
+        selected: true,
+        status: 'active',
+        permissionsJson: '{}',
+        lastSeenAt: '2026-07-08T02:00:00Z',
+        createdAt: '2026-07-08T01:00:00Z',
+        updatedAt: '2026-07-08T02:00:00Z',
+      },
+    ]
+    const renderDialog = (onSubmit: (body: CreateExternalConnectionRequest) => void) =>
+      renderWithProviders(
+        <CreateConnectionDialog
+          open
+          pending={false}
+          providers={[
+            { provider: 'github', display: 'GitHub' },
+            { provider: 'jira', display: 'Jira' },
+          ]}
+          selectedInstallation={selectedInstallation}
+          selectedInstallationResources={selectedInstallationResources}
+          onOpenChange={vi.fn()}
+          onSubmit={onSubmit}
+        />,
+      )
+
+    const onSubmit = vi.fn()
+    let view = renderDialog(onSubmit)
+    await waitFor(() => expect(screen.getByLabelText('名称')).toHaveValue('GitHub App'))
+    await view.user.type(screen.getByLabelText('凭据'), 'gh-token')
+    await view.user.click(screen.getByRole('button', { name: '新建' }))
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'github',
+        name: 'GitHub App',
+        baseUrl: 'https://api.github.com',
+        providerConfigJson: '{"owner":"acme","repo":"app"}',
+        providerInstallationId: 'pi-1',
+      }),
+    )
+    view.unmount()
+
+    const onProviderChangedSubmit = vi.fn()
+    view = renderDialog(onProviderChangedSubmit)
+    await waitFor(() => expect(screen.getByLabelText('名称')).toHaveValue('GitHub App'))
+    await view.user.click(screen.getByRole('combobox', { name: 'Provider' }))
+    await view.user.click(screen.getByRole('option', { name: 'Jira' }))
+    await view.user.type(screen.getByLabelText('凭据'), 'jira-token')
+    await view.user.click(screen.getByRole('button', { name: '新建' }))
+
+    expect(onProviderChangedSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'jira',
+        baseUrl: '',
+        providerConfigJson: '{}',
+        providerInstallationId: '',
+      }),
+    )
+  })
+
   it('renders health, connection, mapping, runs, and selected run detail', async () => {
     let requestedRun: unknown
     let updatedConnection: unknown
@@ -2111,6 +2344,7 @@ describe('ExternalSyncPage', () => {
       webhookSecret: 'webhook-secret',
       baseUrl: 'https://github.example.test/api/v3',
       providerConfigJson: '{}',
+      providerInstallationId: '',
       scopes: ['issues', 'pull'],
       enabled: false,
     })
@@ -2873,9 +3107,46 @@ describe('ExternalSyncPage', () => {
     expect(formatDate('')).toBe('')
     expect(formatDate('not-a-date')).toBe('not-a-date')
     expect(formatDate('2026-07-08T02:00:00Z')).toContain('2026')
+    expect(capabilityGrade('{"grade":"full_app"}')).toBe('full_app')
+    expect(capabilityGrade('{"ready":true}')).toBe('')
+    expect(capabilityGrade('not-json')).toBe('')
     expect(shortID('123456789')).toBe('12345678')
     expect(normalizeJSONInput('   ')).toBe('{}')
     expect(normalizeJSONInput(' {"a":1} ')).toBe('{"a":1}')
+    const installationResource = {
+      id: 'resource-1',
+      tenantId: 'tenant-1',
+      installationId: 'installation-1',
+      provider: 'github',
+      resourceType: 'repository',
+      externalResourceId: '100',
+      resourceKey: 'acme/app.git',
+      displayName: 'acme/app',
+      htmlUrl: 'https://github.com/acme/app',
+      selected: true,
+      status: 'active',
+      permissionsJson: '{}',
+      lastSeenAt: '2026-07-08T02:00:00Z',
+      createdAt: '2026-07-08T01:00:00Z',
+      updatedAt: '2026-07-08T02:00:00Z',
+    }
+    expect(providerConfigFromInstallationResources([installationResource])).toBe(
+      '{"owner":"acme","repo":"app"}',
+    )
+    expect(
+      providerConfigFromInstallationResources([
+        installationResource,
+        { ...installationResource, id: 'resource-2', resourceKey: 'acme/other' },
+      ]),
+    ).toBe('')
+    expect(
+      providerConfigFromInstallationResources([{ ...installationResource, selected: false }]),
+    ).toBe('')
+    expect(
+      providerConfigFromInstallationResources([
+        { ...installationResource, resourceType: 'organization' },
+      ]),
+    ).toBe('')
     expect(mappingAllowsPull(ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_PULL)).toBe(true)
     expect(mappingAllowsPull(ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL)).toBe(
       true,

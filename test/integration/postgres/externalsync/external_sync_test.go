@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +19,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	core "github.com/Phixsura/attune/internal/externalsync"
+	githubadapter "github.com/Phixsura/attune/internal/externalsync/adapter/githubissue"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	crrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/testdb"
 )
@@ -233,6 +239,24 @@ func TestRepoConnectionCreateListAndValidation(t *testing.T) {
 	}
 }
 
+func TestRepoConnectionProviderInstallationBindingPersistence(t *testing.T) {
+	fixture := newExternalSyncManagementFixture(t, "external-sync-management-bound")
+	installation := createExternalProviderInstallation(t, fixture.ctx, fixture.repository, fixture.tenantID)
+
+	bound := createExternalSyncConnectionWithInstallation(t, fixture, installation.ID)
+	loaded, err := fixture.repository.GetConnection(fixture.ctx, fixture.tenantID, bound.ID)
+	if err != nil {
+		t.Fatalf("GetConnection bound returned error: %v", err)
+	}
+	requireProviderInstallationConnection(t, ptrext.Indirect(loaded), installation.ID)
+
+	listed, err := fixture.repository.ListConnections(fixture.ctx, fixture.tenantID)
+	if err != nil {
+		t.Fatalf("ListConnections after provider installation returned error: %v", err)
+	}
+	requireListedProviderInstallationConnection(t, listed, bound.ID, installation.ID)
+}
+
 func TestRepoConnectionUpdateProbeAndResumeLifecycle(t *testing.T) {
 	fixture := newExternalSyncManagementFixture(t, "external-sync-management-update")
 
@@ -387,6 +411,246 @@ func TestRepoConnectionDeleteLifecycle(t *testing.T) {
 	}
 	if _, err := fixture.repository.GetConnection(fixture.ctx, fixture.tenantID, fixture.other.ID); !errors.Is(err, externalsyncrepo.ErrConnectionNotFound) {
 		t.Fatalf("GetConnection deleted error = %v; want ErrConnectionNotFound", err)
+	}
+}
+
+func TestRepoProviderInstallationCreateListAndGet(t *testing.T) {
+	fixture := newProviderInstallationFixture(t, "external-sync-provider-installation-create")
+
+	if fixture.installation.ID != fixture.installationID || len(fixture.resources) != 2 {
+		t.Fatalf("created installation=%#v resources=%#v; want installation with two resources",
+			fixture.installation, fixture.resources)
+	}
+	if !json.Valid(fixture.installation.Permissions) || !json.Valid(fixture.resources[0].Permissions) {
+		t.Fatalf("created JSON fields are invalid: installation=%s resource=%s",
+			fixture.installation.Permissions, fixture.resources[0].Permissions)
+	}
+	requireDuplicateProviderInstallationConflict(t, fixture)
+
+	listed, err := fixture.repository.ListProviderInstallations(fixture.ctx, fixture.tenantID)
+	if err != nil {
+		t.Fatalf("ListProviderInstallations returned error: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != fixture.installationID {
+		t.Fatalf("listed installations = %#v; want created installation", listed)
+	}
+	loaded, err := fixture.repository.GetProviderInstallation(fixture.ctx, fixture.tenantID, fixture.installationID)
+	if err != nil {
+		t.Fatalf("GetProviderInstallation returned error: %v", err)
+	}
+	if loaded.AccountLogin != "acme" || loaded.ResourceSelection != externalsyncrepo.ResourceSelectionSelected {
+		t.Fatalf("loaded installation = %#v; want acme selected installation", loaded)
+	}
+}
+
+func TestRepoProviderInstallationQualificationLifecycle(t *testing.T) {
+	fixture := newProviderInstallationFixture(t, "external-sync-provider-installation-qualification")
+
+	qualified, err := fixture.repository.UpdateProviderInstallationQualification(
+		fixture.ctx,
+		fixture.tenantID,
+		fixture.installationID,
+		externalsyncrepo.TestStatusFailed,
+		strings.Repeat("x", 2100),
+		[]byte(`{"grade":"blocked"}`),
+		"admin-2",
+	)
+	if err != nil {
+		t.Fatalf("UpdateProviderInstallationQualification returned error: %v", err)
+	}
+	requireQualifiedProviderInstallation(t, ptrext.Indirect(qualified))
+	if _, err := fixture.repository.UpdateProviderInstallationQualification(fixture.ctx, fixture.tenantID, uuid.New(), externalsyncrepo.TestStatusOK, "", []byte(`{}`), "admin-2"); !errors.Is(err, externalsyncrepo.ErrInstallationNotFound) {
+		t.Fatalf("missing UpdateProviderInstallationQualification error = %v; want ErrInstallationNotFound", err)
+	}
+}
+
+func TestRepoProviderInstallationResourceSelectionLifecycle(t *testing.T) {
+	fixture := newProviderInstallationFixture(t, "external-sync-provider-installation-selection")
+
+	selected, err := fixture.repository.SelectProviderInstallationResources(
+		fixture.ctx,
+		fixture.tenantID,
+		fixture.installationID,
+		[]uuid.UUID{fixture.resources[1].ID, fixture.resources[1].ID},
+		"admin-3",
+	)
+	if err != nil {
+		t.Fatalf("SelectProviderInstallationResources returned error: %v", err)
+	}
+	requireProviderResourceSelection(t, selected, map[uuid.UUID]bool{
+		fixture.resources[0].ID: false,
+		fixture.resources[1].ID: true,
+	})
+	loaded, err := fixture.repository.GetProviderInstallation(fixture.ctx, fixture.tenantID, fixture.installationID)
+	if err != nil {
+		t.Fatalf("GetProviderInstallation after selection returned error: %v", err)
+	}
+	if loaded.ResourceSelection != externalsyncrepo.ResourceSelectionSelected || loaded.UpdatedBy != "admin-3" {
+		t.Fatalf("selection installation = %#v; want selected by admin-3", loaded)
+	}
+	if _, err := fixture.repository.SelectProviderInstallationResources(fixture.ctx, fixture.tenantID, fixture.installationID, []uuid.UUID{uuid.New()}, "admin-3"); !errors.Is(err, externalsyncrepo.ErrResourceNotFound) {
+		t.Fatalf("missing SelectProviderInstallationResources resource error = %v; want ErrResourceNotFound", err)
+	}
+
+	selected, err = fixture.repository.SelectProviderInstallationResources(fixture.ctx, fixture.tenantID, fixture.installationID, nil, "admin-4")
+	if err != nil {
+		t.Fatalf("SelectProviderInstallationResources none returned error: %v", err)
+	}
+	requireProviderResourceSelection(t, selected, map[uuid.UUID]bool{
+		fixture.resources[0].ID: false,
+		fixture.resources[1].ID: false,
+	})
+	loaded, err = fixture.repository.GetProviderInstallation(fixture.ctx, fixture.tenantID, fixture.installationID)
+	if err != nil {
+		t.Fatalf("GetProviderInstallation after none selection returned error: %v", err)
+	}
+	if loaded.ResourceSelection != externalsyncrepo.ResourceSelectionNone {
+		t.Fatalf("resource selection = %q; want none", loaded.ResourceSelection)
+	}
+	if _, err := fixture.repository.ListProviderInstallationResources(fixture.ctx, fixture.tenantID, uuid.New()); !errors.Is(err, externalsyncrepo.ErrInstallationNotFound) {
+		t.Fatalf("missing ListProviderInstallationResources error = %v; want ErrInstallationNotFound", err)
+	}
+}
+
+func TestRepoProviderInstallationDeleteLifecycle(t *testing.T) {
+	fixture := newProviderInstallationFixture(t, "external-sync-provider-installation-delete")
+
+	if err := fixture.repository.DeleteProviderInstallation(fixture.ctx, fixture.tenantID, fixture.installationID, "admin-5"); err != nil {
+		t.Fatalf("DeleteProviderInstallation returned error: %v", err)
+	}
+	if err := fixture.repository.DeleteProviderInstallation(fixture.ctx, fixture.tenantID, fixture.installationID, "admin-5"); !errors.Is(err, externalsyncrepo.ErrInstallationNotFound) {
+		t.Fatalf("second DeleteProviderInstallation error = %v; want ErrInstallationNotFound", err)
+	}
+	if _, err := fixture.repository.GetProviderInstallation(fixture.ctx, fixture.tenantID, fixture.installationID); !errors.Is(err, externalsyncrepo.ErrInstallationNotFound) {
+		t.Fatalf("GetProviderInstallation deleted error = %v; want ErrInstallationNotFound", err)
+	}
+	if _, err := fixture.repository.ListProviderInstallationResources(fixture.ctx, fixture.tenantID, fixture.installationID); !errors.Is(err, externalsyncrepo.ErrInstallationNotFound) {
+		t.Fatalf("ListProviderInstallationResources deleted error = %v; want ErrInstallationNotFound", err)
+	}
+}
+
+type providerInstallationFixture struct {
+	ctx            context.Context
+	repository     *externalsyncrepo.Repo
+	tenantID       string
+	installationID uuid.UUID
+	installation   externalsyncrepo.ProviderInstallation
+	resources      []externalsyncrepo.ProviderInstallationResource
+}
+
+func newProviderInstallationFixture(t *testing.T, slug string) providerInstallationFixture {
+	t.Helper()
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, slug)
+	installationID := uuid.New()
+	now := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)
+
+	installation, resources, err := repository.CreateProviderInstallation(ctx, externalsyncrepo.ProviderInstallationWithResources{
+		Installation: externalsyncrepo.ProviderInstallation{
+			ID:                     installationID,
+			TenantID:               tenantID,
+			Provider:               "github",
+			DisplayName:            "GitHub App",
+			InstallationKind:       externalsyncrepo.InstallationKindGitHubApp,
+			Status:                 externalsyncrepo.InstallationStatusActive,
+			ExternalInstallationID: "12345",
+			AccountLogin:           "acme",
+			AccountID:              "42",
+			AccountURL:             "https://github.com/acme",
+			BaseURL:                "https://api.github.com",
+			Permissions:            []byte(`{"metadata":"read","issues":"write"}`),
+			CapabilityProfile:      []byte(`{}`),
+			ResourceSelection:      externalsyncrepo.ResourceSelectionSelected,
+			QualificationStatus:    externalsyncrepo.TestStatusUntested,
+			CreatedBy:              "admin-1",
+			UpdatedBy:              "admin-1",
+		},
+		Resources: []externalsyncrepo.ProviderInstallationResource{
+			{
+				ID:                 uuid.New(),
+				TenantID:           tenantID,
+				InstallationID:     installationID,
+				Provider:           "github",
+				ResourceType:       externalsyncrepo.ResourceTypeRepository,
+				ExternalResourceID: "1001",
+				ResourceKey:        "acme/attune",
+				DisplayName:        "acme/attune",
+				HTMLURL:            "https://github.com/acme/attune",
+				Selected:           true,
+				Status:             externalsyncrepo.ResourceStatusActive,
+				Permissions:        []byte(`{"issues":"write"}`),
+				LastSeenAt:         ptrext.Of(now),
+			},
+			{
+				ID:                 uuid.New(),
+				TenantID:           tenantID,
+				InstallationID:     installationID,
+				Provider:           "github",
+				ResourceType:       externalsyncrepo.ResourceTypeRepository,
+				ExternalResourceID: "1002",
+				ResourceKey:        "acme/website",
+				DisplayName:        "acme/website",
+				HTMLURL:            "https://github.com/acme/website",
+				Selected:           true,
+				Status:             externalsyncrepo.ResourceStatusActive,
+				Permissions:        []byte(`{"issues":"write"}`),
+				LastSeenAt:         ptrext.Of(now),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProviderInstallation fixture returned error: %v", err)
+	}
+
+	return providerInstallationFixture{
+		ctx:            ctx,
+		repository:     repository,
+		tenantID:       tenantID,
+		installationID: installationID,
+		installation:   ptrext.Indirect(installation),
+		resources:      resources,
+	}
+}
+
+func requireDuplicateProviderInstallationConflict(t *testing.T, fixture providerInstallationFixture) {
+	t.Helper()
+	_, _, err := fixture.repository.CreateProviderInstallation(fixture.ctx, externalsyncrepo.ProviderInstallationWithResources{
+		Installation: externalsyncrepo.ProviderInstallation{
+			ID:                     uuid.New(),
+			TenantID:               fixture.tenantID,
+			Provider:               "github",
+			DisplayName:            "GitHub Duplicate",
+			InstallationKind:       externalsyncrepo.InstallationKindGitHubApp,
+			Status:                 externalsyncrepo.InstallationStatusActive,
+			ExternalInstallationID: "12345",
+			Permissions:            []byte(`{}`),
+			CapabilityProfile:      []byte(`{}`),
+			ResourceSelection:      externalsyncrepo.ResourceSelectionNone,
+			QualificationStatus:    externalsyncrepo.TestStatusUntested,
+			CreatedBy:              "admin-1",
+			UpdatedBy:              "admin-1",
+		},
+	})
+	if !errors.Is(err, externalsyncrepo.ErrConflict) {
+		t.Fatalf("duplicate CreateProviderInstallation error = %v; want ErrConflict", err)
+	}
+}
+
+func requireQualifiedProviderInstallation(t *testing.T, installation externalsyncrepo.ProviderInstallation) {
+	t.Helper()
+	if installation.QualificationStatus != externalsyncrepo.TestStatusFailed {
+		t.Fatalf("qualification status = %q; want failed", installation.QualificationStatus)
+	}
+	if installation.LastQualifiedAt == nil {
+		t.Fatal("last qualified at = nil; want timestamp")
+	}
+	if len(installation.LastError) != 2000 {
+		t.Fatalf("last error length = %d; want 2000", len(installation.LastError))
+	}
+	if installation.UpdatedBy != "admin-2" {
+		t.Fatalf("updated by = %q; want admin-2", installation.UpdatedBy)
 	}
 }
 
@@ -1196,6 +1460,280 @@ func TestRepoApplyPullResultIsIdempotentAndAdvancesCursor(t *testing.T) {
 	}, externalsyncrepo.ErrMappingNotFound)
 }
 
+func TestRepoApplyPullResultProjectsDeliveryArtifactChildren(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, "external-sync-delivery-artifact-child")
+	insertExternalSyncKey(t, ctx, pool, "kid-external-sync-delivery-artifact-child")
+	conn := createExternalSyncConnection(t, ctx, repository, tenantID, "kid-external-sync-delivery-artifact-child")
+	mapping := firstExternalSyncMapping(t, ctx, repository, tenantID, conn.ID)
+	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "External sync delivery artifact")
+	run := insertExternalSyncRun(t, ctx, repository, tenantID, conn.ID, mapping.ID)
+	seenAt := time.Date(2026, 7, 8, 5, 30, 0, 0, time.UTC)
+
+	stats, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
+		TenantID:     tenantID,
+		RunID:        run.ID,
+		ConnectionID: conn.ID,
+		MappingID:    mapping.ID,
+		Provider:     "github",
+		StreamKey:    externalsyncrepo.StreamDefault,
+		Records: []externalsyncrepo.PullRecord{{
+			LocalObjectID:     requestID.String(),
+			ExternalKey:       "ISSUE-1",
+			ExternalURL:       "https://github.com/acme/app/issues/1",
+			ExternalVersion:   "issue-v1",
+			ExternalUpdatedAt: ptrext.Of(seenAt.Add(-time.Hour)),
+			Payload:           []byte(`{"title":"Issue one","state":"open"}`),
+		}},
+		Children: []externalsyncrepo.PullChildRecord{{
+			ParentExternalKey: "ISSUE-1",
+			Type:              "pull_request",
+			ExternalKey:       "acme/app#313",
+			ExternalURL:       "https://github.com/acme/app/pull/313",
+			ExternalVersion:   seenAt.Format(time.RFC3339),
+			ExternalUpdatedAt: ptrext.Of(seenAt),
+			Payload: []byte(`{
+				"number": 313,
+				"title": "Ship delivery graph",
+				"state": "open",
+				"state_reason": "review_required",
+				"assignees": [{"login": "octo"}]
+			}`),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyPullResult returned error: %v", err)
+	}
+	assertApplyStats(t, stats, externalsyncrepo.ApplyStats{RecordsSeen: 2, RecordsChanged: 2})
+	assertProjectedDeliveryArtifact(t, ctx, pool, projectedDeliveryArtifactExpectation{
+		tenantID:       tenantID,
+		requestID:      requestID,
+		connectionID:   conn.ID,
+		mappingID:      mapping.ID,
+		artifactType:   "pull_request",
+		relationship:   "implements",
+		externalKey:    "acme/app#313",
+		externalURL:    "https://github.com/acme/app/pull/313",
+		displayKey:     "313",
+		title:          "Ship delivery graph",
+		status:         "open",
+		statusCategory: "review_required",
+		stateReason:    "review_required",
+		assignee:       "octo",
+		syncState:      "synced",
+		source:         "external_sync_child",
+		lastSeenAt:     seenAt,
+		payloadNumber:  "313",
+	})
+}
+
+func TestGitHubProviderPullDeliveryArtifactsReachCustomerRequestGraph(t *testing.T) {
+	core.SetEgressPolicy(nethardening.Policy{AllowLoopback: true})
+	t.Cleanup(func() { core.SetEgressPolicy(nethardening.Policy{}) })
+
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+	repository := externalsyncrepo.New(pool)
+	tenantID := insertExternalSyncTenant(t, ctx, pool, "external-sync-github-delivery-graph")
+	insertExternalSyncKey(t, ctx, pool, "kid-external-sync-github-delivery-graph")
+	conn := createExternalSyncConnection(t, ctx, repository, tenantID, "kid-external-sync-github-delivery-graph")
+	mapping := firstExternalSyncMapping(t, ctx, repository, tenantID, conn.ID)
+	requestID := insertExternalSyncCustomerRequest(t, ctx, pool, tenantID, "GitHub delivery graph")
+	run := insertExternalSyncRun(t, ctx, repository, tenantID, conn.ID, mapping.ID)
+	server := newGitHubDeliveryArtifactPullServer(t, requestID)
+	t.Cleanup(server.Close)
+
+	provider := githubadapter.NewProvider(githubadapter.WithHTTPClient(server.Client()))
+	result, err := provider.Pull(ctx, core.PullRequest{
+		Connection: core.Connection{
+			Provider:       "github",
+			ProviderConfig: githubProviderConfig(t, server.URL),
+			Credential:     []byte("github-token"),
+		},
+		Cursor: []byte(`{"updated_since":"2026-07-08T00:00:00Z"}`),
+	})
+	if err != nil {
+		t.Fatalf("GitHub Pull returned error: %v", err)
+	}
+	stats, err := repository.ApplyPullResult(ctx, externalsyncrepo.ApplyPullInput{
+		TenantID:     tenantID,
+		RunID:        run.ID,
+		ConnectionID: conn.ID,
+		MappingID:    mapping.ID,
+		Provider:     "github",
+		StreamKey:    externalsyncrepo.StreamDefault,
+		Records:      repoPullRecords(result.Records),
+		Children:     repoPullChildren(result.Children),
+	})
+	if err != nil {
+		t.Fatalf("ApplyPullResult returned error: %v", err)
+	}
+	assertApplyStats(t, stats, externalsyncrepo.ApplyStats{RecordsSeen: 3, RecordsChanged: 3})
+
+	detail, err := crrepo.New(pool).GetDetail(ctx, tenantID, requestID, 50)
+	if err != nil {
+		t.Fatalf("GetDetail returned error: %v", err)
+	}
+	if len(detail.DeliveryGraph.Artifacts) != 4 || len(detail.DeliveryGraph.Relationships) != 3 {
+		t.Fatalf("delivery graph = %+v, want request plus issue, PR, and commit", detail.DeliveryGraph)
+	}
+	requireDeliveryGraphArtifact(t, detail.DeliveryGraph, "issue", "7", crrepo.DeliveryHealthSynced)
+	requireDeliveryGraphArtifact(t, detail.DeliveryGraph, "pull_request", "acme/app#313", crrepo.DeliveryHealthSynced)
+	requireDeliveryGraphArtifact(t, detail.DeliveryGraph, "commit", "acme/app@0123456789abcdef", crrepo.DeliveryHealthSynced)
+	if detail.DeliveryGraph.HealthExplanation != "3 linked artifacts: 3 synced." {
+		t.Fatalf("delivery graph explanation = %q; want synced artifact rollup", detail.DeliveryGraph.HealthExplanation)
+	}
+}
+
+func newGitHubDeliveryArtifactPullServer(t *testing.T, requestID uuid.UUID) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/repos/acme/app/issues", func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubPullRequest(t, r, "github-token")
+		if got := r.URL.Query().Get("since"); got != "2026-07-08T00:00:00Z" {
+			t.Fatalf("issues since query = %q; want cursor value", got)
+		}
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Fatalf("issues per_page = %q; want 100", got)
+		}
+		writeJSON(t, w, []map[string]any{{
+			"number":       7,
+			"html_url":     "https://github.com/acme/app/issues/7",
+			"title":        "Delivery issue",
+			"state":        "open",
+			"state_reason": nil,
+			"locked":       false,
+			"updated_at":   "2026-07-08T10:00:00Z",
+			"closed_at":    nil,
+			"comments":     0,
+			"body":         "<!-- attune:customer_request_id=" + requestID.String() + " -->",
+		}})
+	})
+	mux.HandleFunc("/repos/acme/app/issues/7/timeline", func(w http.ResponseWriter, r *http.Request) {
+		assertGitHubPullRequest(t, r, "github-token")
+		if got := r.URL.Query().Get("per_page"); got != "100" {
+			t.Fatalf("timeline per_page = %q; want 100", got)
+		}
+		writeJSON(t, w, []map[string]any{
+			{
+				"event":      "cross-referenced",
+				"created_at": "2026-07-08T10:08:00Z",
+				"actor":      map[string]any{"login": "hubot"},
+				"source": map[string]any{
+					"type": "pull_request",
+					"issue": map[string]any{
+						"number":       313,
+						"html_url":     "https://github.com/acme/app/pull/313",
+						"title":        "Implement delivery graph",
+						"state":        "open",
+						"state_reason": "review_required",
+						"assignee":     map[string]any{"login": "octo"},
+						"assignees":    []map[string]any{{"login": "octo"}},
+						"updated_at":   "2026-07-08T10:07:00Z",
+						"pull_request": map[string]any{"url": "https://api.github.com/repos/acme/app/pulls/313"},
+					},
+				},
+			},
+			{
+				"event":      "closed",
+				"commit_id":  "0123456789abcdef",
+				"commit_url": "https://api.github.com/repos/acme/app/commits/0123456789abcdef",
+				"created_at": "2026-07-08T10:09:00Z",
+				"actor":      map[string]any{"login": "octo"},
+			},
+		})
+	})
+	return httptest.NewServer(mux)
+}
+
+func assertGitHubPullRequest(t *testing.T, r *http.Request, token string) {
+	t.Helper()
+	if got := r.Header.Get("Authorization"); got != "Bearer "+token {
+		t.Fatalf("authorization header = %q; want bearer token", got)
+	}
+	if got := r.Header.Get("Accept"); got == "" {
+		t.Fatal("accept header is empty; want GitHub media type")
+	}
+	if got := r.Header.Get("User-Agent"); got == "" {
+		t.Fatal("user-agent header is empty")
+	}
+}
+
+func githubProviderConfig(t *testing.T, apiBaseURL string) []byte {
+	t.Helper()
+	payload, err := json.Marshal(map[string]string{
+		"owner":        "acme",
+		"repo":         "app",
+		"api_base_url": apiBaseURL,
+	})
+	if err != nil {
+		t.Fatalf("marshal github provider config: %v", err)
+	}
+	return payload
+}
+
+func writeJSON(t *testing.T, w http.ResponseWriter, payload any) {
+	t.Helper()
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		t.Fatalf("write json response: %v", err)
+	}
+}
+
+func repoPullRecords(records []core.ExternalRecord) []externalsyncrepo.PullRecord {
+	out := make([]externalsyncrepo.PullRecord, 0, len(records))
+	for _, record := range records {
+		out = append(out, externalsyncrepo.PullRecord{
+			LocalObjectID:     record.LocalObjectID,
+			ExternalKey:       record.Key,
+			ExternalURL:       record.URL,
+			ExternalVersion:   record.Version,
+			ExternalUpdatedAt: ptrext.Of(record.UpdatedAt),
+			Deleted:           record.Deleted,
+			Payload:           record.Payload,
+		})
+	}
+	return out
+}
+
+func repoPullChildren(children []core.ExternalChildRecord) []externalsyncrepo.PullChildRecord {
+	out := make([]externalsyncrepo.PullChildRecord, 0, len(children))
+	for _, child := range children {
+		out = append(out, externalsyncrepo.PullChildRecord{
+			ParentExternalKey: child.ParentKey,
+			Type:              child.Type,
+			ExternalKey:       child.Key,
+			ExternalURL:       child.URL,
+			ExternalVersion:   child.Version,
+			ExternalUpdatedAt: ptrext.Of(child.UpdatedAt),
+			Deleted:           child.Deleted,
+			Payload:           child.Payload,
+		})
+	}
+	return out
+}
+
+func requireDeliveryGraphArtifact(
+	t *testing.T,
+	graph crrepo.DeliveryGraph,
+	artifactType string,
+	externalKey string,
+	wantHealth crrepo.DeliveryHealth,
+) {
+	t.Helper()
+	for _, artifact := range graph.Artifacts {
+		if artifact.ArtifactType == artifactType && artifact.ExternalKey == externalKey {
+			if artifact.Health != wantHealth {
+				t.Fatalf("artifact %s/%s health = %q; want %q", artifactType, externalKey, artifact.Health, wantHealth)
+			}
+			return
+		}
+	}
+	t.Fatalf("delivery graph artifacts = %+v; want %s/%s", graph.Artifacts, artifactType, externalKey)
+}
+
 func TestRepoResetCursorClearsCursorAndEnqueuesPullRun(t *testing.T) {
 	ctx := context.Background()
 	pool := testdb.NewPool(t)
@@ -1979,6 +2517,78 @@ func createExternalSyncConnectionNamed(t *testing.T, ctx context.Context, reposi
 	return ptrext.Indirect(conn)
 }
 
+func createExternalSyncConnectionWithInstallation(t *testing.T, fixture externalSyncManagementFixture, installationID uuid.UUID) externalsyncrepo.Connection {
+	t.Helper()
+	conn, err := fixture.repository.CreateConnection(fixture.ctx, externalsyncrepo.Connection{
+		ID:                     uuid.New(),
+		TenantID:               fixture.tenantID,
+		ProviderInstallationID: ptrext.Of(installationID),
+		Provider:               "github",
+		Name:                   "GitHub Bound",
+		Enabled:                true,
+		Status:                 externalsyncrepo.ConnectionStatusActive,
+		AuthType:               "token",
+		ProviderConfig:         []byte("{}"),
+		Scopes:                 []string{"issues"},
+		CredentialKeyID:        fixture.keyID,
+		CredentialCiphertext:   []byte("ciphertext"),
+		CreatedBy:              "admin-bound",
+		UpdatedBy:              "admin-bound",
+	})
+	if err != nil {
+		t.Fatalf("CreateConnection with provider installation returned error: %v", err)
+	}
+	requireProviderInstallationConnection(t, ptrext.Indirect(conn), installationID)
+	return ptrext.Indirect(conn)
+}
+
+func createExternalProviderInstallation(t *testing.T, ctx context.Context, repository *externalsyncrepo.Repo, tenantID string) externalsyncrepo.ProviderInstallation {
+	t.Helper()
+	id := uuid.New()
+	row, _, err := repository.CreateProviderInstallation(ctx, externalsyncrepo.ProviderInstallationWithResources{
+		Installation: externalsyncrepo.ProviderInstallation{
+			ID:                     id,
+			TenantID:               tenantID,
+			Provider:               "github",
+			DisplayName:            "GitHub App",
+			InstallationKind:       externalsyncrepo.InstallationKindGitHubApp,
+			Status:                 externalsyncrepo.InstallationStatusActive,
+			ExternalInstallationID: id.String(),
+			AccountLogin:           "acme",
+			AccountURL:             "https://github.com/acme",
+			BaseURL:                "https://api.github.com",
+			Permissions:            []byte(`{"metadata":"read","issues":"write"}`),
+			CapabilityProfile:      []byte(`{}`),
+			ResourceSelection:      externalsyncrepo.ResourceSelectionNone,
+			QualificationStatus:    externalsyncrepo.TestStatusOK,
+			CreatedBy:              "admin-installation",
+			UpdatedBy:              "admin-installation",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateProviderInstallation helper returned error: %v", err)
+	}
+	return ptrext.Indirect(row)
+}
+
+func requireProviderInstallationConnection(t *testing.T, conn externalsyncrepo.Connection, want uuid.UUID) {
+	t.Helper()
+	if conn.ProviderInstallationID == nil || ptrext.Indirect(conn.ProviderInstallationID) != want {
+		t.Fatalf("connection provider installation id = %v; want %s", conn.ProviderInstallationID, want)
+	}
+}
+
+func requireListedProviderInstallationConnection(t *testing.T, rows []externalsyncrepo.Connection, id, want uuid.UUID) {
+	t.Helper()
+	for _, row := range rows {
+		if row.ID == id {
+			requireProviderInstallationConnection(t, row, want)
+			return
+		}
+	}
+	t.Fatalf("ListConnections did not include bound connection %s", id)
+}
+
 func setExternalSyncRunForList(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id uuid.UUID, status string, createdAt time.Time) {
 	t.Helper()
 	mustExec(t, ctx, pool, `
@@ -2109,6 +2719,22 @@ func requireRowsAffected(t *testing.T, operation string, affected int64) {
 	t.Helper()
 	if affected != 1 {
 		t.Fatalf("%s affected = %d; want 1", operation, affected)
+	}
+}
+
+func requireProviderResourceSelection(t *testing.T, resources []externalsyncrepo.ProviderInstallationResource, want map[uuid.UUID]bool) {
+	t.Helper()
+	if len(resources) != len(want) {
+		t.Fatalf("resources = %#v; want %d rows", resources, len(want))
+	}
+	for _, resource := range resources {
+		selected, ok := want[resource.ID]
+		if !ok {
+			t.Fatalf("unexpected resource row = %#v", resource)
+		}
+		if resource.Selected != selected {
+			t.Fatalf("resource %s selected = %v; want %v", resource.ID, resource.Selected, selected)
+		}
 	}
 }
 
@@ -2643,6 +3269,112 @@ func assertApplyStats(t *testing.T, got externalsyncrepo.ApplyStats, want extern
 	t.Helper()
 	if got != want {
 		t.Fatalf("apply stats = %#v; want %#v", got, want)
+	}
+}
+
+type projectedDeliveryArtifactExpectation struct {
+	tenantID       string
+	requestID      uuid.UUID
+	connectionID   uuid.UUID
+	mappingID      uuid.UUID
+	artifactType   string
+	relationship   string
+	externalKey    string
+	externalURL    string
+	displayKey     string
+	title          string
+	status         string
+	statusCategory string
+	stateReason    string
+	assignee       string
+	syncState      string
+	source         string
+	lastSeenAt     time.Time
+	payloadNumber  string
+}
+
+func assertProjectedDeliveryArtifact(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	want projectedDeliveryArtifactExpectation,
+) {
+	t.Helper()
+	var connectionID, mappingID string
+	var hasExternalObjectLink bool
+	var artifactType, relationship, externalKey, externalURL, displayKey string
+	var title, status, statusCategory, stateReason, assignee, syncState, source string
+	var lastSeenAt time.Time
+	var payloadNumber sql.NullString
+	if err := pool.QueryRow(ctx, `
+		SELECT connection_id::text,
+		       mapping_id::text,
+		       external_object_link_id IS NOT NULL,
+		       artifact_type,
+		       relationship,
+		       external_key,
+		       external_url,
+		       display_key,
+		       title,
+		       status,
+		       status_category,
+		       state_reason,
+		       assignee,
+		       sync_state,
+		       source,
+		       last_seen_at,
+		       payload->>'number'
+		  FROM customer_request_delivery_artifacts
+		 WHERE tenant_id = $1
+		   AND request_id = $2
+		   AND provider = 'github'
+		   AND artifact_type = $3
+		   AND external_key = $4
+		   AND deleted_at IS NULL`,
+		want.tenantID, want.requestID, want.artifactType, want.externalKey).Scan(
+		&connectionID,
+		&mappingID,
+		&hasExternalObjectLink,
+		&artifactType,
+		&relationship,
+		&externalKey,
+		&externalURL,
+		&displayKey,
+		&title,
+		&status,
+		&statusCategory,
+		&stateReason,
+		&assignee,
+		&syncState,
+		&source,
+		&lastSeenAt,
+		&payloadNumber,
+	); err != nil {
+		t.Fatalf("read projected delivery artifact: %v", err)
+	}
+	got := projectedDeliveryArtifactExpectation{
+		connectionID:   uuid.MustParse(connectionID),
+		mappingID:      uuid.MustParse(mappingID),
+		artifactType:   artifactType,
+		relationship:   relationship,
+		externalKey:    externalKey,
+		externalURL:    externalURL,
+		displayKey:     displayKey,
+		title:          title,
+		status:         status,
+		statusCategory: statusCategory,
+		stateReason:    stateReason,
+		assignee:       assignee,
+		syncState:      syncState,
+		source:         source,
+		lastSeenAt:     lastSeenAt.UTC(),
+		payloadNumber:  payloadNumber.String,
+	}
+	want.tenantID = ""
+	want.requestID = uuid.Nil
+	want.lastSeenAt = want.lastSeenAt.UTC()
+	if got != want || !hasExternalObjectLink {
+		t.Fatalf("projected delivery artifact = %+v external_link=%t; want %+v with external link", got, hasExternalObjectLink, want)
 	}
 }
 

@@ -2,6 +2,7 @@ import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 import { CustomerRequestsPage } from '@/features/customer-requests/components/customer-requests-page'
 import {
+  type CustomerRequestDeliveryGraph,
   CustomerRequestDeliveryHealth,
   type CustomerRequestDetail,
   CustomerRequestImportance,
@@ -1109,7 +1110,7 @@ describe('CustomerRequestsPage', () => {
     await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
     const dialog = await screen.findByRole('dialog')
 
-    expect(await within(dialog).findByText('GitHub #212')).toBeInTheDocument()
+    expect((await within(dialog).findAllByText('GitHub #212')).length).toBeGreaterThan(0)
     expect(
       within(dialog).queryByRole('button', { name: '创建 GitHub Issue' }),
     ).not.toBeInTheDocument()
@@ -1280,8 +1281,11 @@ describe('CustomerRequestsPage', () => {
     expect(await within(dialog).findByText('Need enterprise CSV export')).toBeInTheDocument()
     expect(within(dialog).getByText('Acme buyer')).toBeInTheDocument()
     expect(within(dialog).getByText('Vote champion')).toBeInTheDocument()
-    expect(within(dialog).getByText('GitHub #212')).toBeInTheDocument()
-    expect(within(dialog).getByText('rate limited')).toBeInTheDocument()
+    expect(within(dialog).getByText('交付图谱')).toBeInTheDocument()
+    expect(within(dialog).getByText('2 个交付节点 · 1 条关系')).toBeInTheDocument()
+    expect(within(dialog).getByText('1 linked artifacts: 1 failed.')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('GitHub #212')).toHaveLength(2)
+    expect(within(dialog).getAllByText('rate limited')).toHaveLength(2)
     expect(within(dialog).getByText('Acme Corp')).toBeInTheDocument()
     expect(within(dialog).getByText('CR-9')).toBeInTheDocument()
     expect(within(dialog).getByText('Request created')).toBeInTheDocument()
@@ -1679,11 +1683,13 @@ function sampleDetail(
   overrides: Partial<CustomerRequestDetail> & Partial<CustomerRequestSummary> = {},
 ): CustomerRequestDetail {
   const request = sampleSummary(overrides)
+  const issueLinks = overrides.issueLinks ?? []
   return {
     request,
     description: overrides.description ?? 'Bundle feedback exports for enterprise accounts.',
     feedback: overrides.feedback ?? [],
-    issueLinks: overrides.issueLinks ?? [],
+    issueLinks,
+    deliveryGraph: overrides.deliveryGraph ?? sampleDeliveryGraph(request, issueLinks),
     auditEntries: overrides.auditEntries ?? [],
     customers: overrides.customers ?? [],
     votes: overrides.votes ?? [],
@@ -1705,6 +1711,118 @@ function sampleDetail(
       },
     ],
   }
+}
+
+function sampleDeliveryGraph(
+  request: CustomerRequestSummary,
+  issueLinks: CustomerRequestIssueLink[],
+): CustomerRequestDeliveryGraph {
+  const rootID = `request:${request.id}`
+  const issueArtifacts = issueLinks.map((issue) => ({
+    id: `issue_link:${issue.id}`,
+    provider: issue.provider,
+    artifactType: 'issue',
+    externalKey: issue.externalKey,
+    externalUrl: issue.externalUrl,
+    title: issue.title,
+    status: issue.status,
+    statusCategory: issue.externalStatusCategory,
+    assignee: issue.externalAssignee,
+    syncState: issue.syncState,
+    health: deliveryHealthForSyncState(issue.syncState),
+    lastSeenAt: issue.externalUpdatedAt || issue.lastSyncedAt || issue.updatedAt,
+    source: 'customer_request_issue_link',
+    syncError: issue.syncError,
+  }))
+  return {
+    artifacts: [
+      {
+        id: rootID,
+        provider: 'attune',
+        artifactType: 'customer_request',
+        externalKey: request.displayId,
+        externalUrl: '',
+        title: request.title,
+        status: request.status,
+        statusCategory: '',
+        assignee: request.owner?.email ?? '',
+        syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED,
+        health: request.deliveryHealth,
+        lastSeenAt: request.updatedAt,
+        source: 'customer_request',
+        syncError: '',
+      },
+      ...issueArtifacts,
+    ],
+    relationships: issueLinks.map((issue) => ({
+      id: `rel:${rootID}:issue_link:${issue.id}`,
+      sourceArtifactId: rootID,
+      targetArtifactId: `issue_link:${issue.id}`,
+      relationshipType: 'tracked_by',
+      provider: issue.provider,
+      createdAt: issue.createdAt,
+    })),
+    health: request.deliveryHealth,
+    healthExplanation: deliveryGraphHealthExplanation(issueLinks),
+    updatedAt: issueArtifacts[issueArtifacts.length - 1]?.lastSeenAt ?? request.updatedAt,
+  }
+}
+
+function deliveryHealthForSyncState(state: CustomerRequestIssueSyncState) {
+  switch (state) {
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED:
+      return CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE:
+      return CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED:
+      return CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+    case CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL:
+      return CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+    default:
+      return CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+  }
+}
+
+function deliveryGraphHealthExplanation(issueLinks: CustomerRequestIssueLink[]) {
+  if (issueLinks.length === 0) return 'No delivery artifacts are linked.'
+  const parts = [
+    issueStateCount(
+      issueLinks,
+      CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+      'synced',
+    ),
+    issueStateCount(
+      issueLinks,
+      CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE,
+      'stale',
+    ),
+    issueStateCount(
+      issueLinks,
+      CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED,
+      'failed',
+    ),
+    issueStateCount(
+      issueLinks,
+      CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING,
+      'pending',
+    ),
+    issueStateCount(
+      issueLinks,
+      CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL,
+      'manual',
+    ),
+  ].filter(Boolean)
+  if (parts.length === 0) return `${issueLinks.length} linked artifacts.`
+  return `${issueLinks.length} linked artifacts: ${parts.join(', ')}.`
+}
+
+function issueStateCount(
+  issueLinks: CustomerRequestIssueLink[],
+  state: CustomerRequestIssueSyncState,
+  label: string,
+) {
+  const count = issueLinks.filter((issue) => issue.syncState === state).length
+  return count ? `${count} ${label}` : ''
 }
 
 function sampleNote(overrides: Partial<CustomerRequestNote> = {}): CustomerRequestNote {

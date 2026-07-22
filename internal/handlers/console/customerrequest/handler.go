@@ -878,12 +878,63 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 		Description:     detail.Request.Summary.Description,
 		Feedback:        feedback,
 		IssueLinks:      issues,
+		DeliveryGraph:   deliveryGraphToProto(detail.Request.DeliveryGraph),
 		AuditEntries:    audit,
 		Customers:       customers,
 		Votes:           votes,
 		Notes:           notes,
 		Duplicates:      duplicates,
 		AccountProfiles: accountProfiles,
+	})
+}
+
+func deliveryGraphToProto(graph repo.DeliveryGraph) *attunev1.CustomerRequestDeliveryGraph {
+	artifacts := make([]*attunev1.CustomerRequestDeliveryArtifact, 0, len(graph.Artifacts))
+	for _, item := range graph.Artifacts {
+		artifacts = append(artifacts, deliveryArtifactToProto(item))
+	}
+	relationships := make([]*attunev1.CustomerRequestDeliveryRelationship, 0, len(graph.Relationships))
+	for _, item := range graph.Relationships {
+		relationships = append(relationships, deliveryRelationshipToProto(item))
+	}
+	return ptrext.Of(attunev1.CustomerRequestDeliveryGraph{
+		Artifacts:         artifacts,
+		Relationships:     relationships,
+		Health:            deliveryHealthToProto(graph.Health),
+		HealthExplanation: graph.HealthExplanation,
+		UpdatedAt:         formatTime(graph.UpdatedAt),
+	})
+}
+
+func deliveryArtifactToProto(item repo.DeliveryArtifact) *attunev1.CustomerRequestDeliveryArtifact {
+	return ptrext.Of(attunev1.CustomerRequestDeliveryArtifact{
+		Id:             item.ID,
+		Provider:       item.Provider,
+		ArtifactType:   item.ArtifactType,
+		ExternalKey:    item.ExternalKey,
+		ExternalUrl:    item.ExternalURL,
+		Title:          item.Title,
+		Status:         item.Status,
+		StatusCategory: item.StatusCategory,
+		Assignee:       item.Assignee,
+		SyncState:      syncStateToProto(item.SyncState),
+		Health:         deliveryHealthToProto(item.Health),
+		LastSeenAt:     formatTime(item.LastSeenAt),
+		Source:         item.Source,
+		SyncError:      item.SyncError,
+	})
+}
+
+func deliveryRelationshipToProto(
+	item repo.DeliveryRelationship,
+) *attunev1.CustomerRequestDeliveryRelationship {
+	return ptrext.Of(attunev1.CustomerRequestDeliveryRelationship{
+		Id:               item.ID,
+		SourceArtifactId: item.SourceArtifactID,
+		TargetArtifactId: item.TargetArtifactID,
+		RelationshipType: item.RelationshipType,
+		Provider:         item.Provider,
+		CreatedAt:        formatTime(ptrext.Of(item.CreatedAt)),
 	})
 }
 

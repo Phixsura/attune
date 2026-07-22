@@ -110,6 +110,118 @@ func TestCreateConnectionEncryptsWebhookSecretWithSeparateAAD(t *testing.T) {
 	}
 }
 
+func TestCreateConnectionBindsQualifiedProviderInstallation(t *testing.T) {
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	repository := providerInstallationQualificationRepo(installationID, resourceID, []byte(`{"metadata":"read","issues":"write"}`))
+	installation := repository.installations[installationID]
+	installation.QualificationStatus = repo.TestStatusOK
+	installation.BaseURL = "https://github.enterprise.example"
+	repository.installations[installationID] = installation
+	audit := ptrext.Of(fakeAuditRecorder{})
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+	service.SetAuditLogger(audit)
+
+	row, err := service.CreateConnection(context.Background(), CreateConnectionInput{
+		TenantID:               "tenant-1",
+		ProviderInstallationID: ptrext.Of(installationID),
+		Provider:               "github",
+		Name:                   "GitHub App",
+		AuthType:               "token",
+		Credential:             "gh-token",
+		ProviderConfigJSON:     "{}",
+		Enabled:                true,
+		Actor:                  Actor{ID: "admin-1"},
+		AuditActor:             auditlogsvc.Actor{Type: "admin", ID: "admin-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateConnection returned error: %v", err)
+	}
+	if row.ProviderInstallationID == nil || ptrext.Indirect(row.ProviderInstallationID) != installationID {
+		t.Fatalf("provider installation id = %v; want %s", row.ProviderInstallationID, installationID)
+	}
+	if row.BaseURL != "https://github.enterprise.example" {
+		t.Fatalf("base URL = %q; want inherited installation base URL", row.BaseURL)
+	}
+	if string(row.ProviderConfig) != `{"owner":"acme","repo":"app"}` {
+		t.Fatalf("provider config = %s; want selected repository-derived owner/repo", string(row.ProviderConfig))
+	}
+	if len(audit.events) != 1 || !strings.Contains(fmt.Sprint(audit.events[0].After), installationID.String()) {
+		t.Fatalf("audit after = %#v; want provider installation id", audit.events)
+	}
+}
+
+func TestCreateConnectionBlocksUnqualifiedProviderInstallation(t *testing.T) {
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	repository := providerInstallationQualificationRepo(installationID, resourceID, []byte(`{"metadata":"read","issues":"write"}`))
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+
+	_, err := service.CreateConnection(context.Background(), CreateConnectionInput{
+		TenantID:               "tenant-1",
+		ProviderInstallationID: ptrext.Of(installationID),
+		Provider:               "github",
+		Name:                   "GitHub App",
+		AuthType:               "token",
+		Credential:             "gh-token",
+		ProviderConfigJSON:     "{}",
+		Enabled:                true,
+		Actor:                  Actor{ID: "admin-1"},
+	})
+	if !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "must pass qualification") {
+		t.Fatalf("CreateConnection error = %v; want qualification validation error", err)
+	}
+}
+
+func TestCreateConnectionRequiresExplicitConfigForMultipleSelectedInstallationRepositories(t *testing.T) {
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	otherResourceID := uuid.New()
+	repository := providerInstallationQualificationRepo(installationID, resourceID, []byte(`{"metadata":"read","issues":"write"}`))
+	installation := repository.installations[installationID]
+	installation.QualificationStatus = repo.TestStatusWarning
+	repository.installations[installationID] = installation
+	otherResource := repository.resources[resourceID]
+	otherResource.ID = otherResourceID
+	otherResource.ResourceKey = "acme/other"
+	otherResource.DisplayName = "acme/other"
+	repository.resources[otherResourceID] = otherResource
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+
+	_, err := service.CreateConnection(context.Background(), CreateConnectionInput{
+		TenantID:               "tenant-1",
+		ProviderInstallationID: ptrext.Of(installationID),
+		Provider:               "github",
+		Name:                   "GitHub App",
+		AuthType:               "token",
+		Credential:             "gh-token",
+		ProviderConfigJSON:     "{}",
+		Enabled:                true,
+		Actor:                  Actor{ID: "admin-1"},
+	})
+	if !errors.Is(err, ErrValidation) || !strings.Contains(err.Error(), "multiple repositories") {
+		t.Fatalf("CreateConnection error = %v; want multiple repository validation error", err)
+	}
+
+	row, err := service.CreateConnection(context.Background(), CreateConnectionInput{
+		TenantID:               "tenant-1",
+		ProviderInstallationID: ptrext.Of(installationID),
+		Provider:               "github",
+		Name:                   "GitHub App",
+		AuthType:               "token",
+		Credential:             "gh-token",
+		ProviderConfigJSON:     `{"owner":"acme","repo":"app"}`,
+		Enabled:                true,
+		Actor:                  Actor{ID: "admin-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateConnection with explicit config returned error: %v", err)
+	}
+	if row.ProviderInstallationID == nil || ptrext.Indirect(row.ProviderInstallationID) != installationID {
+		t.Fatalf("provider installation id = %v; want %s", row.ProviderInstallationID, installationID)
+	}
+}
+
 func TestUpdateConnectionRotatesConnectionFields(t *testing.T) {
 	result := updateConnectionRotationFixture(t)
 
@@ -437,6 +549,136 @@ func TestQualifyConnectionReturnsProviderReadinessChecks(t *testing.T) {
 	}
 	if len(audit.events) != 1 || audit.events[0].Action != "external_connection.qualify" {
 		t.Fatalf("audit events = %#v; want external_connection.qualify", audit.events)
+	}
+}
+
+func TestCreateProviderInstallationNormalizesResourcesAndAudits(t *testing.T) {
+	repository := newFakeRepo()
+	audit := ptrext.Of(fakeAuditRecorder{})
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+	service.SetAuditLogger(audit)
+
+	row, resources, err := service.CreateProviderInstallation(context.Background(), CreateProviderInstallationInput{
+		TenantID:               " tenant-1 ",
+		Provider:               "GitHub",
+		DisplayName:            " Production GitHub App ",
+		InstallationKind:       repo.InstallationKindGitHubApp,
+		ExternalInstallationID: " 12345 ",
+		AccountLogin:           " acme ",
+		PermissionsJSON:        `{"metadata":"read","issues":"write"}`,
+		Resources: []ProviderInstallationResourceInput{{
+			ResourceType:    "Repository",
+			ResourceKey:     " acme/app ",
+			DisplayName:     "",
+			HTMLURL:         " https://github.com/acme/app ",
+			Selected:        true,
+			PermissionsJSON: `{"issues":"write"}`,
+		}},
+		Actor:      Actor{ID: "admin-1"},
+		AuditActor: auditlogsvc.Actor{Type: "admin", ID: "admin-1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateProviderInstallation returned error: %v", err)
+	}
+	if row.Provider != "github" || row.DisplayName != "Production GitHub App" ||
+		row.InstallationKind != repo.InstallationKindGitHubApp || row.Status != repo.InstallationStatusActive {
+		t.Fatalf("installation = %#v; want normalized active GitHub app", row)
+	}
+	if len(resources) != 1 || resources[0].ResourceType != repo.ResourceTypeRepository ||
+		resources[0].ResourceKey != "acme/app" || resources[0].DisplayName != "acme/app" ||
+		!resources[0].Selected {
+		t.Fatalf("resources = %#v; want normalized selected repository", resources)
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != "external_provider_installation.create" {
+		t.Fatalf("audit events = %#v; want provider installation create event", audit.events)
+	}
+}
+
+func TestQualifyProviderInstallationGradesFullGitHubApp(t *testing.T) {
+	registerCoreProvider(t, "github", ptrext.Of(fakeProvider{name: "github"}))
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	repository := providerInstallationQualificationRepo(installationID, resourceID, []byte(`{"metadata":"read","issues":"write"}`))
+	audit := ptrext.Of(fakeAuditRecorder{})
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+	service.SetAuditLogger(audit)
+
+	result, err := service.QualifyProviderInstallation(context.Background(), "tenant-1", installationID,
+		Actor{ID: "admin-1"}, auditlogsvc.Actor{Type: "admin", ID: "admin-1"})
+	if err != nil {
+		t.Fatalf("QualifyProviderInstallation returned error: %v", err)
+	}
+	if !result.Ready || result.Grade != ProviderInstallationGradeFullApp {
+		t.Fatalf("qualification = ready %t grade %q checks %#v; want full app", result.Ready, result.Grade, result.Checks)
+	}
+	updated := repository.installations[installationID]
+	if updated.QualificationStatus != QualificationStatusOK ||
+		!strings.Contains(string(updated.CapabilityProfile), `"grade":"full_app"`) {
+		t.Fatalf("updated installation = %#v profile %s; want ok full_app", updated, string(updated.CapabilityProfile))
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != "external_provider_installation.qualify" {
+		t.Fatalf("audit events = %#v; want provider installation qualify event", audit.events)
+	}
+}
+
+func TestQualifyProviderInstallationBlocksMissingGitHubPermissions(t *testing.T) {
+	registerCoreProvider(t, "github", ptrext.Of(fakeProvider{name: "github"}))
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	repository := providerInstallationQualificationRepo(installationID, resourceID, []byte(`{"metadata":"read","issues":"read"}`))
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+
+	result, err := service.QualifyProviderInstallation(context.Background(), "tenant-1", installationID,
+		Actor{ID: "admin-1"}, auditlogsvc.Actor{})
+	if err != nil {
+		t.Fatalf("QualifyProviderInstallation returned error: %v", err)
+	}
+	if result.Ready || result.Grade != ProviderInstallationGradeBlocked {
+		t.Fatalf("qualification = ready %t grade %q; want blocked", result.Ready, result.Grade)
+	}
+	updated := repository.installations[installationID]
+	if updated.QualificationStatus != QualificationStatusFailed ||
+		!strings.Contains(updated.LastError, "missing required issue-sync permissions") {
+		t.Fatalf("updated status/error = %q/%q; want failed permission error", updated.QualificationStatus, updated.LastError)
+	}
+}
+
+func TestSelectProviderInstallationResourcesAuditsSelection(t *testing.T) {
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	otherResourceID := uuid.New()
+	repository := providerInstallationQualificationRepo(installationID, resourceID, []byte(`{"metadata":"read","issues":"write"}`))
+	repository.resources[otherResourceID] = repo.ProviderInstallationResource{
+		ID:             otherResourceID,
+		TenantID:       "tenant-1",
+		InstallationID: installationID,
+		Provider:       "github",
+		ResourceType:   repo.ResourceTypeRepository,
+		ResourceKey:    "acme/other",
+		DisplayName:    "acme/other",
+		Selected:       true,
+		Status:         repo.ResourceStatusActive,
+		Permissions:    []byte(`{}`),
+	}
+	audit := ptrext.Of(fakeAuditRecorder{})
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+	service.SetAuditLogger(audit)
+
+	rows, err := service.SelectProviderInstallationResources(context.Background(), SelectProviderInstallationResourcesInput{
+		TenantID:       "tenant-1",
+		InstallationID: installationID,
+		ResourceIDs:    []uuid.UUID{resourceID, resourceID},
+		Actor:          Actor{ID: "admin-1"},
+		AuditActor:     auditlogsvc.Actor{Type: "admin", ID: "admin-1"},
+	})
+	if err != nil {
+		t.Fatalf("SelectProviderInstallationResources returned error: %v", err)
+	}
+	if len(rows) != 2 || !repository.resources[resourceID].Selected || repository.resources[otherResourceID].Selected {
+		t.Fatalf("resource selection = %#v; want only %s selected", repository.resources, resourceID)
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != "external_provider_installation.resources_select" {
+		t.Fatalf("audit events = %#v; want resources select event", audit.events)
 	}
 }
 
@@ -3164,9 +3406,44 @@ func restoreCoreNoopProvider() {
 	core.Register("noop", "No-op", func() core.Provider { return core.NoopProvider{} })
 }
 
+func providerInstallationQualificationRepo(installationID, resourceID uuid.UUID, permissions []byte) *fakeRepo {
+	repository := newFakeRepo()
+	repository.installations[installationID] = repo.ProviderInstallation{
+		ID:                     installationID,
+		TenantID:               "tenant-1",
+		Provider:               "github",
+		DisplayName:            "GitHub App",
+		InstallationKind:       repo.InstallationKindGitHubApp,
+		Status:                 repo.InstallationStatusActive,
+		ExternalInstallationID: "12345",
+		AccountLogin:           "acme",
+		Permissions:            permissions,
+		CapabilityProfile:      []byte(`{}`),
+		ResourceSelection:      repo.ResourceSelectionSelected,
+		QualificationStatus:    repo.TestStatusUntested,
+		CreatedBy:              "admin-1",
+		UpdatedBy:              "admin-1",
+	}
+	repository.resources[resourceID] = repo.ProviderInstallationResource{
+		ID:             resourceID,
+		TenantID:       "tenant-1",
+		InstallationID: installationID,
+		Provider:       "github",
+		ResourceType:   repo.ResourceTypeRepository,
+		ResourceKey:    "acme/app",
+		DisplayName:    "acme/app",
+		Selected:       true,
+		Status:         repo.ResourceStatusActive,
+		Permissions:    []byte(`{}`),
+	}
+	return repository
+}
+
 type fakeRepo struct {
 	connections            map[uuid.UUID]repo.Connection
 	mappings               map[uuid.UUID]repo.Mapping
+	installations          map[uuid.UUID]repo.ProviderInstallation
+	resources              map[uuid.UUID]repo.ProviderInstallationResource
 	cursor                 []byte
 	claimedRuns            []repo.SyncRun
 	insertedRuns           []repo.SyncRun
@@ -3199,6 +3476,9 @@ type fakeRepo struct {
 	updateConnectionErr    error
 	deleteConnectionErr    error
 	resumeConnectionErr    error
+	createInstallationErr  error
+	deleteInstallationErr  error
+	selectResourcesErr     error
 	resetCursorErr         error
 	enqueueBackfillErr     error
 	insertRunErr           error
@@ -3248,6 +3528,8 @@ func newFakeRepo() *fakeRepo {
 	return ptrext.Of(fakeRepo{
 		connections:         map[uuid.UUID]repo.Connection{},
 		mappings:            map[uuid.UUID]repo.Mapping{},
+		installations:       map[uuid.UUID]repo.ProviderInstallation{},
+		resources:           map[uuid.UUID]repo.ProviderInstallationResource{},
 		events:              map[uuid.UUID]repo.SyncEvent{},
 		cursor:              []byte("{}"),
 		refreshRunClaimRows: 1,
@@ -3260,6 +3542,126 @@ func (r *fakeRepo) ListConnections(context.Context, string) ([]repo.Connection, 
 		out = append(out, conn)
 	}
 	return out, nil
+}
+
+func (r *fakeRepo) ListProviderInstallations(_ context.Context, tenantID string) ([]repo.ProviderInstallation, error) {
+	out := make([]repo.ProviderInstallation, 0, len(r.installations))
+	for _, installation := range r.installations {
+		if installation.TenantID == tenantID {
+			out = append(out, installation)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) GetProviderInstallation(_ context.Context, tenantID string, id uuid.UUID) (*repo.ProviderInstallation, error) {
+	installation, ok := r.installations[id]
+	if !ok || installation.TenantID != tenantID {
+		return nil, repo.ErrInstallationNotFound
+	}
+	return ptrext.Of(installation), nil
+}
+
+func (r *fakeRepo) CreateProviderInstallation(_ context.Context, in repo.ProviderInstallationWithResources) (*repo.ProviderInstallation, []repo.ProviderInstallationResource, error) {
+	if r.createInstallationErr != nil {
+		return nil, nil, r.createInstallationErr
+	}
+	now := time.Date(2026, 7, 8, 1, 2, 3, 0, time.UTC)
+	if in.Installation.CreatedAt.IsZero() {
+		in.Installation.CreatedAt = now
+	}
+	if in.Installation.UpdatedAt.IsZero() {
+		in.Installation.UpdatedAt = now
+	}
+	r.installations[in.Installation.ID] = in.Installation
+	for _, resource := range in.Resources {
+		if resource.CreatedAt.IsZero() {
+			resource.CreatedAt = now
+		}
+		if resource.UpdatedAt.IsZero() {
+			resource.UpdatedAt = now
+		}
+		r.resources[resource.ID] = resource
+	}
+	return ptrext.Of(in.Installation), append([]repo.ProviderInstallationResource(nil), in.Resources...), nil
+}
+
+func (r *fakeRepo) UpdateProviderInstallationQualification(_ context.Context, tenantID string, id uuid.UUID, status string, lastError string, capabilityProfile []byte, actor string) (*repo.ProviderInstallation, error) {
+	installation, ok := r.installations[id]
+	if !ok || installation.TenantID != tenantID {
+		return nil, repo.ErrInstallationNotFound
+	}
+	now := time.Date(2026, 7, 8, 2, 3, 4, 0, time.UTC)
+	installation.QualificationStatus = status
+	installation.LastQualifiedAt = ptrext.Of(now)
+	installation.LastError = lastError
+	installation.CapabilityProfile = append([]byte(nil), capabilityProfile...)
+	installation.UpdatedBy = actor
+	installation.UpdatedAt = now
+	r.installations[id] = installation
+	return ptrext.Of(installation), nil
+}
+
+func (r *fakeRepo) DeleteProviderInstallation(_ context.Context, tenantID string, id uuid.UUID, actor string) error {
+	if r.deleteInstallationErr != nil {
+		return r.deleteInstallationErr
+	}
+	installation, ok := r.installations[id]
+	if !ok || installation.TenantID != tenantID {
+		return repo.ErrInstallationNotFound
+	}
+	installation.Status = repo.InstallationStatusDeleted
+	installation.UpdatedBy = actor
+	r.installations[id] = installation
+	for resourceID, resource := range r.resources {
+		if resource.TenantID == tenantID && resource.InstallationID == id {
+			resource.Selected = false
+			resource.Status = repo.ResourceStatusRemoved
+			r.resources[resourceID] = resource
+		}
+	}
+	return nil
+}
+
+func (r *fakeRepo) ListProviderInstallationResources(_ context.Context, tenantID string, installationID uuid.UUID) ([]repo.ProviderInstallationResource, error) {
+	if _, err := r.GetProviderInstallation(context.Background(), tenantID, installationID); err != nil {
+		return nil, err
+	}
+	out := make([]repo.ProviderInstallationResource, 0, len(r.resources))
+	for _, resource := range r.resources {
+		if resource.TenantID == tenantID && resource.InstallationID == installationID {
+			out = append(out, resource)
+		}
+	}
+	return out, nil
+}
+
+func (r *fakeRepo) SelectProviderInstallationResources(_ context.Context, tenantID string, installationID uuid.UUID, resourceIDs []uuid.UUID, actor string) ([]repo.ProviderInstallationResource, error) {
+	if r.selectResourcesErr != nil {
+		return nil, r.selectResourcesErr
+	}
+	installation, ok := r.installations[installationID]
+	if !ok || installation.TenantID != tenantID {
+		return nil, repo.ErrInstallationNotFound
+	}
+	selected := map[uuid.UUID]bool{}
+	for _, id := range resourceIDs {
+		selected[id] = true
+	}
+	for id, resource := range r.resources {
+		if resource.TenantID == tenantID && resource.InstallationID == installationID {
+			resource.Selected = selected[id]
+			r.resources[id] = resource
+		}
+	}
+	installation.UpdatedBy = actor
+	if len(selected) == 0 {
+		installation.ResourceSelection = repo.ResourceSelectionNone
+	} else {
+		installation.ResourceSelection = repo.ResourceSelectionSelected
+	}
+	r.installations[installationID] = installation
+	return r.ListProviderInstallationResources(context.Background(), tenantID, installationID)
 }
 
 func (r *fakeRepo) GetConnection(_ context.Context, tenantID string, id uuid.UUID) (*repo.Connection, error) {

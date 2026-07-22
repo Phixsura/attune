@@ -83,6 +83,13 @@ type Repo interface {
 	EnqueueEventRun(ctx context.Context, tenantID string, id uuid.UUID, actor string) (*repo.SyncEvent, *repo.SyncRun, error)
 	Health(ctx context.Context, tenantID string) (repo.Health, error)
 	MetricSnapshot(ctx context.Context) (repo.MetricSnapshot, error)
+	ListProviderInstallations(ctx context.Context, tenantID string) ([]repo.ProviderInstallation, error)
+	GetProviderInstallation(ctx context.Context, tenantID string, id uuid.UUID) (*repo.ProviderInstallation, error)
+	CreateProviderInstallation(ctx context.Context, in repo.ProviderInstallationWithResources) (*repo.ProviderInstallation, []repo.ProviderInstallationResource, error)
+	UpdateProviderInstallationQualification(ctx context.Context, tenantID string, id uuid.UUID, status string, lastError string, capabilityProfile []byte, actor string) (*repo.ProviderInstallation, error)
+	DeleteProviderInstallation(ctx context.Context, tenantID string, id uuid.UUID, actor string) error
+	ListProviderInstallationResources(ctx context.Context, tenantID string, installationID uuid.UUID) ([]repo.ProviderInstallationResource, error)
+	SelectProviderInstallationResources(ctx context.Context, tenantID string, installationID uuid.UUID, resourceIDs []uuid.UUID, actor string) ([]repo.ProviderInstallationResource, error)
 }
 
 type Service struct {
@@ -101,18 +108,19 @@ type Actor struct {
 }
 
 type CreateConnectionInput struct {
-	TenantID           string
-	Provider           string
-	Name               string
-	AuthType           string
-	Credential         string
-	WebhookSecret      string
-	BaseURL            string
-	ProviderConfigJSON string
-	Scopes             []string
-	Enabled            bool
-	Actor              Actor
-	AuditActor         auditlogsvc.Actor
+	TenantID               string
+	ProviderInstallationID *uuid.UUID
+	Provider               string
+	Name                   string
+	AuthType               string
+	Credential             string
+	WebhookSecret          string
+	BaseURL                string
+	ProviderConfigJSON     string
+	Scopes                 []string
+	Enabled                bool
+	Actor                  Actor
+	AuditActor             auditlogsvc.Actor
 }
 
 type UpdateConnectionInput struct {
@@ -134,6 +142,50 @@ type ResumeConnectionInput struct {
 	ID         uuid.UUID
 	Actor      Actor
 	AuditActor auditlogsvc.Actor
+}
+
+type CreateProviderInstallationInput struct {
+	TenantID               string
+	Provider               string
+	DisplayName            string
+	InstallationKind       string
+	ExternalInstallationID string
+	AccountLogin           string
+	AccountID              string
+	AccountURL             string
+	BaseURL                string
+	PermissionsJSON        string
+	CapabilityProfileJSON  string
+	ResourceSelection      string
+	Resources              []ProviderInstallationResourceInput
+	Actor                  Actor
+	AuditActor             auditlogsvc.Actor
+}
+
+type ProviderInstallationResourceInput struct {
+	ResourceType       string
+	ExternalResourceID string
+	ResourceKey        string
+	DisplayName        string
+	HTMLURL            string
+	Selected           bool
+	Status             string
+	PermissionsJSON    string
+}
+
+type SelectProviderInstallationResourcesInput struct {
+	TenantID       string
+	InstallationID uuid.UUID
+	ResourceIDs    []uuid.UUID
+	Actor          Actor
+	AuditActor     auditlogsvc.Actor
+}
+
+type ProviderInstallationQualificationResult struct {
+	Installation repo.ProviderInstallation
+	Ready        bool
+	Grade        string
+	Checks       []QualificationCheck
 }
 
 const (
@@ -336,6 +388,12 @@ func (s *Service) CreateConnection(ctx context.Context, in CreateConnectionInput
 	if err != nil {
 		return nil, err
 	}
+	if normalized.ProviderInstallationID != nil {
+		normalized, err = s.applyProviderInstallationBinding(ctx, normalized)
+		if err != nil {
+			return nil, err
+		}
+	}
 	id := uuid.New()
 	encrypted, err := s.store.EncryptValue([]byte(normalized.Credential), connectionAAD(normalized.TenantID, id, normalized.Provider))
 	if err != nil {
@@ -352,6 +410,7 @@ func (s *Service) CreateConnection(ctx context.Context, in CreateConnectionInput
 		ID:                      id,
 		TenantID:                normalized.TenantID,
 		Provider:                normalized.Provider,
+		ProviderInstallationID:  normalized.ProviderInstallationID,
 		Name:                    normalized.Name,
 		Enabled:                 normalized.Enabled,
 		Status:                  connectionStatus(normalized.Enabled),
@@ -372,6 +431,42 @@ func (s *Service) CreateConnection(ctx context.Context, in CreateConnectionInput
 	s.record(ctx, normalized.AuditActor, normalized.TenantID, "external_connection.create",
 		"external_connection", row.ID.String(), "Created external sync connection", nil, connectionAudit(row))
 	return row, nil
+}
+
+func (s *Service) applyProviderInstallationBinding(ctx context.Context, in CreateConnectionInput) (CreateConnectionInput, error) {
+	installation, err := s.repo.GetProviderInstallation(ctx, in.TenantID, ptrext.Indirect(in.ProviderInstallationID))
+	if err != nil {
+		return in, err
+	}
+	if installation.Provider != in.Provider {
+		return in, fmt.Errorf("%w: provider_installation_id provider does not match connection provider", ErrValidation)
+	}
+	switch installation.Status {
+	case repo.InstallationStatusActive, repo.InstallationStatusLimited:
+	default:
+		return in, fmt.Errorf("%w: provider installation is not active", ErrValidation)
+	}
+	switch installation.QualificationStatus {
+	case repo.TestStatusOK, repo.TestStatusWarning:
+	default:
+		return in, fmt.Errorf("%w: provider installation must pass qualification before binding", ErrValidation)
+	}
+	if in.BaseURL == "" {
+		in.BaseURL = installation.BaseURL
+	}
+	if !isEmptyJSONObject(in.ProviderConfigJSON) {
+		return in, nil
+	}
+	resources, err := s.repo.ListProviderInstallationResources(ctx, in.TenantID, ptrext.Indirect(in.ProviderInstallationID))
+	if err != nil {
+		return in, err
+	}
+	cfg, err := providerConfigFromSelectedInstallationResource(installation.Provider, resources)
+	if err != nil {
+		return in, err
+	}
+	in.ProviderConfigJSON = cfg
+	return in, nil
 }
 
 func (s *Service) UpdateConnection(ctx context.Context, in UpdateConnectionInput) (*repo.Connection, error) {
@@ -1414,6 +1509,52 @@ func normalizeJSONObject(raw, field string) (string, error) {
 	return raw, nil
 }
 
+func isEmptyJSONObject(raw string) bool {
+	var v map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &v); err != nil { // ptrext:allow unmarshal-out-param
+		return false
+	}
+	return len(v) == 0
+}
+
+func providerConfigFromSelectedInstallationResource(provider string, resources []repo.ProviderInstallationResource) (string, error) {
+	switch provider {
+	case "github":
+		resource, err := selectedProviderRepository(resources)
+		if err != nil {
+			return "", err
+		}
+		owner, repoName, ok := strings.Cut(resource.ResourceKey, "/")
+		if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(repoName) == "" || strings.Contains(repoName, "/") {
+			return "", fmt.Errorf("%w: selected GitHub repository resource_key must be owner/repo", ErrValidation)
+		}
+		cfg, err := json.Marshal(map[string]string{"owner": owner, "repo": strings.TrimSuffix(repoName, ".git")})
+		if err != nil {
+			return "", fmt.Errorf("encode provider config: %w", err)
+		}
+		return string(cfg), nil
+	default:
+		return "", fmt.Errorf("%w: provider_config_json is required for provider installation binding", ErrValidation)
+	}
+}
+
+func selectedProviderRepository(resources []repo.ProviderInstallationResource) (repo.ProviderInstallationResource, error) {
+	selected := make([]repo.ProviderInstallationResource, 0, 1)
+	for _, resource := range resources {
+		if resource.Selected && resource.Status == repo.ResourceStatusActive && resource.ResourceType == repo.ResourceTypeRepository {
+			selected = append(selected, resource)
+		}
+	}
+	switch len(selected) {
+	case 1:
+		return selected[0], nil
+	case 0:
+		return repo.ProviderInstallationResource{}, fmt.Errorf("%w: selected provider installation repository is required", ErrValidation)
+	default:
+		return repo.ProviderInstallationResource{}, fmt.Errorf("%w: provider_config_json is required when multiple repositories are selected", ErrValidation)
+	}
+}
+
 func normalizeMapping(in UpdateMappingInput) (repo.Mapping, error) {
 	direction := normalizeDirection(in.Direction)
 	if direction == "" {
@@ -1968,7 +2109,7 @@ func connectionAudit(c *repo.Connection) map[string]any {
 	if c == nil {
 		return nil
 	}
-	return map[string]any{
+	fields := map[string]any{
 		"id":                        c.ID.String(),
 		"provider":                  c.Provider,
 		"name":                      c.Name,
@@ -1981,6 +2122,10 @@ func connectionAudit(c *repo.Connection) map[string]any {
 		"webhook_secret_configured": c.WebhookSecretKeyID != "" && len(c.WebhookSecretCiphertext) > 0,
 		"last_test_status":          c.LastTestStatus,
 	}
+	if c.ProviderInstallationID != nil {
+		fields["provider_installation_id"] = ptrext.Indirect(c.ProviderInstallationID).String()
+	}
+	return fields
 }
 
 func testAudit(provider string, result externalsync.CheckResult) map[string]any {

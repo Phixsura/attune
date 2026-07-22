@@ -80,6 +80,20 @@ type apiComment struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type apiTimelineEvent struct {
+	Event     string             `json:"event"`
+	CommitID  string             `json:"commit_id"`
+	CommitURL string             `json:"commit_url"`
+	CreatedAt time.Time          `json:"created_at"`
+	Actor     *apiUser           `json:"actor"`
+	Source    *apiTimelineSource `json:"source"`
+}
+
+type apiTimelineSource struct {
+	Type  string    `json:"type"`
+	Issue *apiIssue `json:"issue"`
+}
+
 type normalizedComment struct {
 	ID               int64  `json:"id"`
 	AuthorLogin      string `json:"author_login,omitempty"`
@@ -92,6 +106,23 @@ type normalizedComment struct {
 	CreatedAt        string `json:"created_at,omitempty"`
 	UpdatedAt        string `json:"updated_at,omitempty"`
 	Deleted          bool   `json:"deleted,omitempty"`
+}
+
+type normalizedDeliveryArtifact struct {
+	Number       int      `json:"number,omitempty"`
+	CommitID     string   `json:"commit_id,omitempty"`
+	Title        string   `json:"title,omitempty"`
+	State        string   `json:"state,omitempty"`
+	StateReason  string   `json:"state_reason,omitempty"`
+	Relationship string   `json:"relationship,omitempty"`
+	SourceEvent  string   `json:"source_event,omitempty"`
+	SourceType   string   `json:"source_type,omitempty"`
+	ActorLogin   string   `json:"actor_login,omitempty"`
+	Assignee     string   `json:"assignee,omitempty"`
+	Assignees    []string `json:"assignees,omitempty"`
+	HTMLURL      string   `json:"html_url,omitempty"`
+	URL          string   `json:"url,omitempty"`
+	UpdatedAt    string   `json:"updated_at,omitempty"`
 }
 
 type pullHint struct {
@@ -158,6 +189,21 @@ func issueURL(cfg settings, number int) (string, error) {
 
 func issueCommentsURL(cfg settings, number int) (string, error) {
 	raw, err := repoAPIURL(cfg, "issues", strconv.Itoa(number), "comments")
+	if err != nil {
+		return "", err
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	q := u.Query()
+	q.Set("per_page", "100")
+	u.RawQuery = q.Encode()
+	return u.String(), nil
+}
+
+func issueTimelineURL(cfg settings, number int) (string, error) {
+	raw, err := repoAPIURL(cfg, "issues", strconv.Itoa(number), "timeline")
 	if err != nil {
 		return "", err
 	}
@@ -317,6 +363,135 @@ func deletedCommentChild(parentKey string, commentID int64) (core.ExternalChildR
 	}, nil
 }
 
+func normalizeTimelineDeliveryChildren(cfg settings, parentKey string, events []apiTimelineEvent) ([]core.ExternalChildRecord, error) {
+	children := make([]core.ExternalChildRecord, 0, len(events))
+	for _, event := range events {
+		children = append(children, timelineDeliveryChildren(cfg, parentKey, event)...)
+	}
+	return dedupeDeliveryChildren(children), nil
+}
+
+func timelineDeliveryChildren(cfg settings, parentKey string, event apiTimelineEvent) []core.ExternalChildRecord {
+	out := []core.ExternalChildRecord{}
+	if child, ok := timelinePullRequestChild(cfg, parentKey, event); ok {
+		out = append(out, child)
+	}
+	if child, ok := timelineCommitChild(cfg, parentKey, event); ok {
+		out = append(out, child)
+	}
+	return out
+}
+
+func timelinePullRequestChild(cfg settings, parentKey string, event apiTimelineEvent) (core.ExternalChildRecord, bool) {
+	if event.Source == nil || event.Source.Issue == nil {
+		return core.ExternalChildRecord{}, false
+	}
+	issue := ptrext.Indirect(event.Source.Issue)
+	if issue.PullRequest == nil && !strings.Contains(issue.HTMLURL, "/pull/") {
+		return core.ExternalChildRecord{}, false
+	}
+	key := repoIssueKey(cfg, issue.Number)
+	if key == "" {
+		return core.ExternalChildRecord{}, false
+	}
+	payload, err := json.Marshal(normalizedPullRequestArtifactPayload(issue, event))
+	if err != nil {
+		return core.ExternalChildRecord{}, false
+	}
+	return core.ExternalChildRecord{
+		ParentKey: parentKey,
+		Type:      "pull_request",
+		Key:       key,
+		URL:       issue.HTMLURL,
+		Version:   timelineEventVersion(event),
+		UpdatedAt: timelineEventUpdatedAt(event, issue.UpdatedAt),
+		Payload:   payload,
+	}, true
+}
+
+func timelineCommitChild(cfg settings, parentKey string, event apiTimelineEvent) (core.ExternalChildRecord, bool) {
+	commitID := strings.TrimSpace(event.CommitID)
+	if commitID == "" {
+		return core.ExternalChildRecord{}, false
+	}
+	key := repoCommitKey(cfg, commitID)
+	if key == "" {
+		return core.ExternalChildRecord{}, false
+	}
+	payload, err := json.Marshal(normalizedCommitArtifactPayload(cfg, event))
+	if err != nil {
+		return core.ExternalChildRecord{}, false
+	}
+	return core.ExternalChildRecord{
+		ParentKey: parentKey,
+		Type:      "commit",
+		Key:       key,
+		URL:       commitHTMLURL(cfg, commitID, event.CommitURL),
+		Version:   timelineEventVersion(event),
+		UpdatedAt: event.CreatedAt,
+		Payload:   payload,
+	}, true
+}
+
+func normalizedPullRequestArtifactPayload(issue apiIssue, event apiTimelineEvent) normalizedDeliveryArtifact {
+	payload := normalizedDeliveryArtifact{
+		Number:       issue.Number,
+		Title:        issue.Title,
+		State:        issue.State,
+		StateReason:  ptrext.Indirect(issue.StateReason),
+		Relationship: "implements",
+		SourceEvent:  strings.TrimSpace(event.Event),
+		SourceType:   timelineSourceType(event),
+		HTMLURL:      issue.HTMLURL,
+		URL:          issue.HTMLURL,
+		UpdatedAt:    optionalNonZeroTimeString(timelineEventUpdatedAt(event, issue.UpdatedAt)),
+		Assignees:    issueAssignees(issue.Assignees),
+	}
+	if issue.Assignee != nil {
+		payload.Assignee = strings.TrimSpace(issue.Assignee.Login)
+	}
+	if event.Actor != nil {
+		payload.ActorLogin = strings.TrimSpace(event.Actor.Login)
+	}
+	return payload
+}
+
+func normalizedCommitArtifactPayload(cfg settings, event apiTimelineEvent) normalizedDeliveryArtifact {
+	commitID := strings.TrimSpace(event.CommitID)
+	payload := normalizedDeliveryArtifact{
+		CommitID:     commitID,
+		Title:        shortCommitTitle(commitID),
+		State:        strings.TrimSpace(event.Event),
+		Relationship: timelineCommitRelationship(event),
+		SourceEvent:  strings.TrimSpace(event.Event),
+		SourceType:   "commit",
+		HTMLURL:      commitHTMLURL(cfg, commitID, event.CommitURL),
+		URL:          commitHTMLURL(cfg, commitID, event.CommitURL),
+		UpdatedAt:    optionalNonZeroTimeString(event.CreatedAt),
+	}
+	if event.Actor != nil {
+		payload.ActorLogin = strings.TrimSpace(event.Actor.Login)
+	}
+	return payload
+}
+
+func dedupeDeliveryChildren(children []core.ExternalChildRecord) []core.ExternalChildRecord {
+	seen := map[string]int{}
+	out := make([]core.ExternalChildRecord, 0, len(children))
+	for _, child := range children {
+		key := child.Type + "\x00" + child.Key
+		if idx, ok := seen[key]; ok {
+			if child.UpdatedAt.After(out[idx].UpdatedAt) {
+				out[idx] = child
+			}
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, child)
+	}
+	return out
+}
+
 func normalizedCommentPayload(comment apiComment) normalizedComment {
 	out := normalizedComment{
 		ID:         comment.ID,
@@ -349,6 +524,27 @@ func commentVersion(comment apiComment) string {
 		return ""
 	}
 	return comment.UpdatedAt.UTC().Format(time.RFC3339Nano)
+}
+
+func timelineEventVersion(event apiTimelineEvent) string {
+	if event.CreatedAt.IsZero() {
+		return ""
+	}
+	return event.CreatedAt.UTC().Format(time.RFC3339Nano)
+}
+
+func timelineEventUpdatedAt(event apiTimelineEvent, fallback time.Time) time.Time {
+	if !event.CreatedAt.IsZero() {
+		return event.CreatedAt
+	}
+	return fallback
+}
+
+func timelineSourceType(event apiTimelineEvent) string {
+	if event.Source == nil {
+		return ""
+	}
+	return strings.TrimSpace(ptrext.Indirect(event.Source).Type)
 }
 
 func optionalTimeString(ts *time.Time) string {
@@ -392,6 +588,49 @@ func issueAssignees(users []apiUser) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func repoIssueKey(cfg settings, number int) string {
+	if number <= 0 {
+		return ""
+	}
+	return cfg.owner + "/" + cfg.repo + "#" + strconv.Itoa(number)
+}
+
+func repoCommitKey(cfg settings, commitID string) string {
+	commitID = strings.TrimSpace(commitID)
+	if commitID == "" {
+		return ""
+	}
+	return cfg.owner + "/" + cfg.repo + "@" + commitID
+}
+
+func commitHTMLURL(cfg settings, commitID, fallback string) string {
+	commitID = strings.TrimSpace(commitID)
+	if commitID != "" && cfg.repoHTMLURL != "" {
+		return strings.TrimRight(cfg.repoHTMLURL, "/") + "/commit/" + commitID
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func shortCommitTitle(commitID string) string {
+	commitID = strings.TrimSpace(commitID)
+	if commitID == "" {
+		return "Commit"
+	}
+	if len(commitID) > 12 {
+		commitID = commitID[:12]
+	}
+	return "Commit " + commitID
+}
+
+func timelineCommitRelationship(event apiTimelineEvent) string {
+	switch strings.TrimSpace(event.Event) {
+	case "closed", "merged", "connected":
+		return "implements"
+	default:
+		return "references"
+	}
 }
 
 func nextCursor(cfg settings, previous cursorState, maxUpdated time.Time, linkHeader string) ([]byte, error) {
@@ -706,6 +945,14 @@ func decodeCommentsResponse(body []byte) ([]apiComment, error) {
 		return nil, fmt.Errorf("decode github issue comments response: %w", err)
 	}
 	return comments, nil
+}
+
+func decodeTimelineResponse(body []byte) ([]apiTimelineEvent, error) {
+	events := []apiTimelineEvent{}
+	if err := json.Unmarshal(body, &events); err != nil { // ptrext:allow unmarshal-out-param
+		return nil, fmt.Errorf("decode github issue timeline response: %w", err)
+	}
+	return events, nil
 }
 
 func decodeCommentResponse(body []byte) (apiComment, error) {
