@@ -408,8 +408,10 @@ func TestPortalBoardLoadError(t *testing.T) {
 	}{
 		{name: "nil", err: nil, want: 0},
 		{name: "service not found", err: portalsvc.ErrNotFound, want: http.StatusNotFound},
+		{name: "public service not found", err: pvsvc.ErrNotFound, want: http.StatusNotFound},
 		{name: "repo not found", err: pvrepo.ErrNotFound, want: http.StatusNotFound},
 		{name: "service validation", err: portalsvc.ErrValidation, want: http.StatusBadRequest},
+		{name: "public service validation", err: pvsvc.ErrValidation, want: http.StatusBadRequest},
 		{name: "repo invalid input", err: pvrepo.ErrInvalidInput, want: http.StatusBadRequest},
 		{name: "unexpected", err: errors.New("boom"), want: http.StatusInternalServerError},
 	}

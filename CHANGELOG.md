@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Public board detail pages now return 404/400 for hidden or invalid public
+  request lookups surfaced by the public-visibility service instead of a generic
+  500 page.
+
 - Console and public portal pages now ship an explicit root favicon asset,
   preventing browser smoke tests and real local sessions from logging missing
   favicon resources.
