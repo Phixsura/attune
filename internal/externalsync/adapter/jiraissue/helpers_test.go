@@ -23,7 +23,8 @@ import (
 
 func TestJiraConfigHelpers(t *testing.T) {
 	testDecodeProviderConfig(t)
-	testNormalizeJiraBases(t)
+	testNormalizeJiraBaseSuccesses(t)
+	testNormalizeJiraBaseFailures(t)
 	testSettingsFromConnectionValidation(t)
 	testCursorHelpers(t)
 }
@@ -42,7 +43,7 @@ func testDecodeProviderConfig(t *testing.T) {
 	}
 }
 
-func testNormalizeJiraBases(t *testing.T) {
+func testNormalizeJiraBaseSuccesses(t *testing.T) {
 	t.Helper()
 	siteOnlySite, siteOnlyAPI, err := normalizeJiraBases("https://jira.example.com/", "")
 	if err != nil {
@@ -71,9 +72,41 @@ func testNormalizeJiraBases(t *testing.T) {
 	if fallbackAPI != "https://jira.example.com/rest/api/3" || fallbackSite != "https://jira.example.com" {
 		t.Fatalf("resolveBases fallback = %q / %q; want site and api base", fallbackAPI, fallbackSite)
 	}
+	proxySite, proxyAPI, err := normalizeJiraBases("", "https://jira-proxy.example.com/api/")
+	if err != nil {
+		t.Fatalf("normalizeJiraBases(proxy API) returned error: %v", err)
+	}
+	if proxySite != "https://jira-proxy.example.com/api" || proxyAPI != "https://jira-proxy.example.com/api" {
+		t.Fatalf("normalizeJiraBases(proxy API) = %q / %q; want API base as site fallback", proxySite, proxyAPI)
+	}
+}
+
+func testNormalizeJiraBaseFailures(t *testing.T) {
+	t.Helper()
+	if _, _, err := normalizeJiraBases("", ""); err == nil {
+		t.Fatal("normalizeJiraBases accepted empty bases")
+	}
+	if _, _, err := resolveBases("", "", ""); err == nil {
+		t.Fatal("resolveBases accepted empty connection and provider bases")
+	}
+	if _, _, err := normalizeJiraBases("http://[::1", ""); err == nil {
+		t.Fatal("normalizeJiraBases accepted invalid site URL")
+	}
+	if _, _, err := normalizeJiraBases("", "http://[::1"); err == nil {
+		t.Fatal("normalizeJiraBases accepted invalid API base URL")
+	}
+	if _, _, err := normalizeJiraBases("http://[::1", "https://jira.example.com/rest/api/3"); err == nil {
+		t.Fatal("normalizeJiraBases accepted invalid explicit site URL")
+	}
 }
 
 func testSettingsFromConnectionValidation(t *testing.T) {
+	t.Helper()
+	testSettingsFromConnectionSuccess(t)
+	testSettingsFromConnectionInvalidInputs(t)
+}
+
+func testSettingsFromConnectionSuccess(t *testing.T) {
 	t.Helper()
 	validConn := core.Connection{
 		BaseURL: "https://jira.example.com",
@@ -91,6 +124,31 @@ func testSettingsFromConnectionValidation(t *testing.T) {
 	if settings.siteURL != "https://jira.example.com" || settings.apiBase != "https://jira.example.com/rest/api/3" {
 		t.Fatalf("settingsFromConnection bases = %q / %q; want site and api base", settings.siteURL, settings.apiBase)
 	}
+	apiOnlyConn := core.Connection{
+		ProviderConfig: mustJSON(t, providerConfig{
+			APIBaseURL:         " https://jira.example.com/rest/api/3/ ",
+			ProjectKey:         " ACME ",
+			IssueTypeID:        " 10001 ",
+			Email:              " bot@example.com ",
+			RequestLabelPrefix: " Acme Requests ",
+			StatusTransitions: map[string]string{
+				" Shipped ": " Done ",
+				" ":         "ignored",
+				"open":      " ",
+			},
+		}),
+		Credential: []byte(" jira-token "),
+	}
+	apiOnlySettings, err := settingsFromConnection(apiOnlyConn)
+	if err != nil {
+		t.Fatalf("settingsFromConnection(api only) returned error: %v", err)
+	}
+	if apiOnlySettings.siteURL != "https://jira.example.com" || apiOnlySettings.apiBase != "https://jira.example.com/rest/api/3" ||
+		apiOnlySettings.issueType != "" || apiOnlySettings.issueTypeID != "10001" ||
+		apiOnlySettings.requestLabelPrefix != "acme-requests-" ||
+		apiOnlySettings.statusTransitions["shipped"] != "Done" || len(apiOnlySettings.statusTransitions) != 1 {
+		t.Fatalf("api-only settings = %+v; want trimmed API base, issue type ID, label prefix, and transitions", apiOnlySettings)
+	}
 	cfgWithID := settings
 	cfgWithID.issueTypeID = "10001"
 	req, err := buildCreateRequest(cfgWithID, core.LocalRecord{}, localIssuePayload{Title: "Create issue"})
@@ -100,7 +158,10 @@ func testSettingsFromConnectionValidation(t *testing.T) {
 	if req.Fields.IssueType.ID != "10001" || req.Fields.IssueType.Name != "" {
 		t.Fatalf("buildCreateRequest issue type = %+v; want ID-only reference", req.Fields.IssueType)
 	}
+}
 
+func testSettingsFromConnectionInvalidInputs(t *testing.T) {
+	t.Helper()
 	cases := []struct {
 		name string
 		conn core.Connection
@@ -189,6 +250,9 @@ func testCursorHelpers(t *testing.T) {
 	if _, err := decodeCursor([]byte(`{"updated_since":"2026-07-08T11:00:00Z","start_at":-1}`)); err == nil {
 		t.Fatal("decodeCursor accepted negative start_at")
 	}
+	if _, err := decodeCursor([]byte(`{`)); err == nil {
+		t.Fatal("decodeCursor accepted invalid JSON")
+	}
 	if _, err := decodeCursor([]byte(`{"updated_since":"bad","start_at":0}`)); err == nil {
 		t.Fatal("decodeCursor accepted invalid timestamp")
 	}
@@ -267,6 +331,9 @@ func testRequestErrorPath(t *testing.T) {
 func testBuildRequestHeaders(t *testing.T) {
 	t.Helper()
 	base := "https://jira.example.com"
+	if _, err := buildRequest(context.Background(), testSettings(base), http.MethodGet, "http://[::1", nil); err == nil {
+		t.Fatal("buildRequest accepted malformed URL")
+	}
 	req, err := buildRequest(context.Background(), testSettings(base), http.MethodPost, base+"/rest/api/3/issue", []byte(`{"summary":"Create issue"}`))
 	if err != nil {
 		t.Fatalf("buildRequest returned error: %v", err)
@@ -338,6 +405,9 @@ func testExtractJiraMessage(t *testing.T) {
 	if got := extractJiraMessage([]byte("plain text")); got != "plain text" {
 		t.Fatalf("extractJiraMessage(plain text) = %q; want trimmed input", got)
 	}
+	if got := jiraErrorMessage(0, "https://jira.example.com/rest/api/3/search", nil); !strings.Contains(got, "provider error") {
+		t.Fatalf("jiraErrorMessage(0) = %q; want provider error fallback", got)
+	}
 }
 
 func testClassifyHTTPStatus(t *testing.T) {
@@ -393,6 +463,9 @@ func testClassifyErrorProvider(t *testing.T) {
 
 func testClassifyErrorFallbacks(t *testing.T) {
 	t.Helper()
+	if got := classifyError(nil); got.Kind != "" || got.Retryable {
+		t.Fatalf("classifyError(nil) = %+v; want zero value", got)
+	}
 	if got := classifyError(validationError("jira local record payload is required")); got.Kind != "validation" || got.Retryable {
 		t.Fatalf("classifyError(validation) = %+v; want non-retryable validation", got)
 	}
@@ -451,6 +524,15 @@ func testIssueURLHelpers(t *testing.T, cfg settings) {
 	if got := issueURLFromIssue(cfg, jiraIssue{Self: "https://jira.example.com/rest/api/3/issue/ACME-2"}); got != "https://jira.example.com/rest/api/3/issue/ACME-2" {
 		t.Fatalf("issueURLFromIssue fallback = %q; want self URL", got)
 	}
+	if got := issueURL(settings{apiBase: "https://jira.example.com/rest/api/3"}, "ACME-3"); got != "https://jira.example.com/browse/ACME-3" {
+		t.Fatalf("issueURL(api fallback) = %q; want browse URL", got)
+	}
+	if got := issueURL(settings{}, "ACME-4"); got != "" {
+		t.Fatalf("issueURL(empty bases) = %q; want empty URL", got)
+	}
+	if got := issueURLFromKey(settings{}, "ACME-5"); got != "ACME-5" {
+		t.Fatalf("issueURLFromKey(no base) = %q; want issue key fallback", got)
+	}
 }
 
 func testCommentAuthorAndTimeHelpers(t *testing.T) {
@@ -482,6 +564,9 @@ func testCommentAuthorAndTimeHelpers(t *testing.T) {
 	}
 	if got, err := parseJiraTime("2026/07/08 11:00"); err != nil || !got.Equal(ts) {
 		t.Fatalf("parseJiraTime = %v, %v; want %v, nil", got, err, ts)
+	}
+	if got := issueCommentCount(jiraCommentPage{Comments: []jiraComment{{ID: "1"}, {ID: "2"}}}); got != 2 {
+		t.Fatalf("issueCommentCount(comments) = %d; want comment length", got)
 	}
 }
 
@@ -515,6 +600,9 @@ func testIssueTextHelpers(t *testing.T) {
 	}
 	if got := adfText(map[string]any{"type": "mention"}); got != "" {
 		t.Fatalf("adfText(unknown) = %q; want empty", got)
+	}
+	if _, err := writeRequestPayload(map[string]any{"bad": make(chan int)}); err == nil {
+		t.Fatal("writeRequestPayload accepted an unsupported value")
 	}
 }
 
@@ -551,6 +639,18 @@ func testExtractCustomerRequestIDHelpers(t *testing.T, cfg settings, customerReq
 	}
 	if got := extractCustomerRequestIDFromText("attune:customer_request_id=not-a-uuid"); got != "" {
 		t.Fatalf("extractCustomerRequestIDFromText(invalid) = %q; want empty", got)
+	}
+	if got := extractCustomerRequestIDFromLabels(cfg, []string{defaultLabelPrefix + "not-a-uuid"}); got != "" {
+		t.Fatalf("extractCustomerRequestIDFromLabels(invalid) = %q; want empty", got)
+	}
+	if got := markerCustomerRequestID(""); got != "" {
+		t.Fatalf("markerCustomerRequestID(empty) = %q; want empty", got)
+	}
+	if got := markerCustomerRequestID("not-a-uuid"); got != "" {
+		t.Fatalf("markerCustomerRequestID(invalid) = %q; want empty", got)
+	}
+	if got := markerCustomerRequestID("prefix " + jiraMarkerCommentText + customerRequestID); got != customerRequestID {
+		t.Fatalf("markerCustomerRequestID(text marker) = %q; want %q", got, customerRequestID)
 	}
 }
 
@@ -615,7 +715,7 @@ func testStatusCategoryHelpers(t *testing.T) {
 	if !statusCategoryMatches("done", "shipped") || !statusCategoryMatches("indeterminate", "in_progress") || !statusCategoryMatches("new", "planned") {
 		t.Fatal("statusCategoryMatches should recognize Jira categories")
 	}
-	if statusCategoryMatches("done", "planned") || statusCategoryMatches("new", "shipped") {
+	if statusCategoryMatches("done", "planned") || statusCategoryMatches("new", "shipped") || statusCategoryMatches("done", "unknown") {
 		t.Fatal("statusCategoryMatches should reject mismatched categories")
 	}
 }
@@ -630,8 +730,7 @@ func testCanSkipTransitionHelpers(t *testing.T) {
 func testIssueHasMarkerHelpers(t *testing.T, cfg settings, customerRequestID string) {
 	t.Helper()
 	labelIssue := jiraIssue{Fields: jiraIssueFields{Labels: []string{requestLabel(cfg, customerRequestID)}}}
-	rawDoc := mustJSON(t, adfDocument("Hello\nWorld"))
-	descIssue := jiraIssue{Fields: jiraIssueFields{Description: rawDoc}}
+	descIssue := jiraIssue{Fields: jiraIssueFields{Description: mustJSON(t, adfDocument("Hello\nWorld"))}}
 	descMarkerDoc := mustJSON(t, adfDocument("Request attune:customer_request_id="+customerRequestID))
 	descIssueWithMarker := jiraIssue{Fields: jiraIssueFields{Description: descMarkerDoc}}
 	commentIssue := jiraIssue{
@@ -646,38 +745,14 @@ func testIssueHasMarkerHelpers(t *testing.T, cfg settings, customerRequestID str
 	if !issueHasMarker(cfg, labelIssue, customerRequestID) || !issueHasMarker(cfg, descIssueWithMarker, customerRequestID) || !issueHasMarker(cfg, commentIssue, customerRequestID) {
 		t.Fatal("issueHasMarker should match label, description, and comment markers")
 	}
+	if issueHasMarker(cfg, labelIssue, "not-a-uuid") {
+		t.Fatal("issueHasMarker should reject invalid marker input")
+	}
 	if issueHasMarker(cfg, jiraIssue{}, customerRequestID) {
 		t.Fatal("issueHasMarker should not match empty issue")
 	}
 	if issueHasMarker(cfg, descIssue, customerRequestID) {
 		t.Fatal("issueHasMarker should not match issue without marker")
-	}
-	if got := issueText(rawDoc); got != "Hello\nWorld" {
-		t.Fatalf("issueText(adf) = %q; want plain text", got)
-	}
-	if got := issueText(json.RawMessage("not-json")); got != "not-json" {
-		t.Fatalf("issueText(fallback) = %q; want raw text", got)
-	}
-	if got := issueText(nil); got != "" {
-		t.Fatalf("issueText(nil) = %q; want empty", got)
-	}
-	if got := extractCustomerRequestID(cfg, labelIssue); got != customerRequestID {
-		t.Fatalf("extractCustomerRequestID(label) = %q; want %q", got, customerRequestID)
-	}
-	if got := extractCustomerRequestID(cfg, descIssue); got != "" {
-		t.Fatalf("extractCustomerRequestID(description without marker) = %q; want empty", got)
-	}
-	if got := extractCustomerRequestID(cfg, descIssueWithMarker); got != customerRequestID {
-		t.Fatalf("extractCustomerRequestID(description) = %q; want %q", got, customerRequestID)
-	}
-	if got := extractCustomerRequestID(cfg, commentIssue); got != customerRequestID {
-		t.Fatalf("extractCustomerRequestID(comment) = %q; want %q", got, customerRequestID)
-	}
-	if got := extractCustomerRequestIDFromText("attune:customer_request_id=" + customerRequestID); got != customerRequestID {
-		t.Fatalf("extractCustomerRequestIDFromText = %q; want %q", got, customerRequestID)
-	}
-	if got := extractCustomerRequestIDFromText("attune:customer_request_id=not-a-uuid"); got != "" {
-		t.Fatalf("extractCustomerRequestIDFromText(invalid) = %q; want empty", got)
 	}
 }
 
@@ -685,6 +760,9 @@ func testNormalizeLocalPayload(t *testing.T, customerRequestID string) {
 	t.Helper()
 	if _, err := normalizeLocalPayload(core.LocalRecord{}); err == nil {
 		t.Fatal("normalizeLocalPayload accepted empty payload")
+	}
+	if _, err := normalizeLocalPayload(core.LocalRecord{Payload: []byte(`{"labels":"not-an-array"}`)}); err == nil {
+		t.Fatal("normalizeLocalPayload accepted payload with invalid label shape")
 	}
 	payload, err := normalizeLocalPayload(core.LocalRecord{Payload: mustJSON(t, map[string]any{
 		"title":               "  Update issue  ",
@@ -710,6 +788,59 @@ func testNormalizeLocalPayload(t *testing.T, customerRequestID string) {
 	}
 	if emptyBodyPayload.BodySet {
 		t.Fatal("normalizeLocalPayload should not set BodySet when body field is absent")
+	}
+}
+
+func TestJiraIssueNormalizationBranches(t *testing.T) {
+	testJiraIssueNormalizesMetadataBranches(t)
+	testJiraIssueNormalizationErrorBranches(t)
+}
+
+func testJiraIssueNormalizesMetadataBranches(t *testing.T) {
+	t.Helper()
+	cfg := testSettings("https://jira.example.com")
+	customerRequestID := uuid.NewString()
+	issue := jiraIssueFixture(t, "ACME-9", customerRequestID)
+	issue.Fields.Assignee = ptrext.Of(jiraUser{DisplayName: "  Assignee  "})
+	issue.Fields.Reporter = ptrext.Of(jiraUser{DisplayName: " Reporter "})
+	issue.Fields.Comment.Total = 0
+	issue.Fields.IssueLinks = append(issue.Fields.IssueLinks, jiraIssueLink{
+		Type: jiraLinkType{Name: "Relates"},
+		InwardIssue: ptrext.Of(jiraLinkedIssue{
+			Key: " ACME-8 ",
+		}),
+	})
+
+	records, maxUpdated, err := normalizeIssues(cfg, []jiraIssue{issue})
+	if err != nil {
+		t.Fatalf("normalizeIssues returned error: %v", err)
+	}
+	if len(records) != 1 || records[0].Key != "ACME-9" || records[0].LocalObjectID != customerRequestID || maxUpdated.IsZero() {
+		t.Fatalf("normalized records = %+v max=%v; want one record with marker and watermark", records, maxUpdated)
+	}
+	var payload normalizedIssue
+	if err := json.Unmarshal(records[0].Payload, &payload); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("decode normalized payload: %v", err)
+	}
+	if payload.Assignee != "Assignee" || payload.Reporter != "Reporter" || payload.CommentCount != 1 || len(payload.IssueLinks) != 2 {
+		t.Fatalf("normalized payload = %+v; want assignee, reporter, count fallback, and both link directions", payload)
+	}
+}
+
+func testJiraIssueNormalizationErrorBranches(t *testing.T) {
+	t.Helper()
+	cfg := testSettings("https://jira.example.com")
+	if _, _, err := normalizeIssues(cfg, []jiraIssue{{Fields: jiraIssueFields{Updated: "bad"}}}); err == nil {
+		t.Fatal("normalizeIssues accepted invalid updated timestamp")
+	}
+	if _, err := decodeIssueResponse([]byte(`{`)); err == nil {
+		t.Fatal("decodeIssueResponse accepted invalid JSON")
+	}
+	if !isNotFound(jiraHTTPError(http.StatusNotFound, "https://jira.example.com/rest/api/3/issue/ACME-404", nil, "", "")) {
+		t.Fatal("isNotFound should recognize Jira 404 provider errors")
+	}
+	if isNotFound(nil) || isNotFound(errors.New("boom")) {
+		t.Fatal("isNotFound should reject nil and generic errors")
 	}
 }
 

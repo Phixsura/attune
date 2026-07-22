@@ -682,6 +682,419 @@ func TestSelectProviderInstallationResourcesAuditsSelection(t *testing.T) {
 	}
 }
 
+func TestProviderInstallationListDeleteAndResourceValidation(t *testing.T) {
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	repository := providerInstallationQualificationRepo(installationID, resourceID, []byte(`{"metadata":"read","issues":"write"}`))
+	audit := ptrext.Of(fakeAuditRecorder{})
+	service := New(repository, ptrext.Of(fakeSecretStore{}))
+	service.SetAuditLogger(audit)
+
+	listed, err := service.ListProviderInstallations(context.Background(), " tenant-1 ")
+	if err != nil {
+		t.Fatalf("ListProviderInstallations returned error: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != installationID {
+		t.Fatalf("installations = %#v; want seeded installation", listed)
+	}
+	resources, err := service.ListProviderInstallationResources(context.Background(), " tenant-1 ", installationID)
+	if err != nil {
+		t.Fatalf("ListProviderInstallationResources returned error: %v", err)
+	}
+	if len(resources) != 1 || resources[0].ID != resourceID {
+		t.Fatalf("resources = %#v; want seeded resource", resources)
+	}
+	if err := service.DeleteProviderInstallation(context.Background(), "tenant-1", installationID,
+		Actor{ID: "  admin-2  "}, auditlogsvc.Actor{Type: "admin", ID: "admin-2"}); err != nil {
+		t.Fatalf("DeleteProviderInstallation returned error: %v", err)
+	}
+	if repository.installations[installationID].Status != repo.InstallationStatusDeleted ||
+		repository.resources[resourceID].Selected ||
+		repository.resources[resourceID].Status != repo.ResourceStatusRemoved {
+		t.Fatalf("deleted installation/resources = %#v / %#v; want deleted and deselected", repository.installations[installationID], repository.resources[resourceID])
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != "external_provider_installation.delete" {
+		t.Fatalf("audit events = %#v; want provider installation delete event", audit.events)
+	}
+	if err := service.DeleteProviderInstallation(context.Background(), "tenant-1", installationID,
+		Actor{}, auditlogsvc.Actor{}); err == nil {
+		t.Fatal("DeleteProviderInstallation accepted empty actor")
+	}
+	if _, err := service.SelectProviderInstallationResources(context.Background(), SelectProviderInstallationResourcesInput{
+		TenantID:       "tenant-1",
+		InstallationID: installationID,
+		Actor:          Actor{},
+	}); err == nil {
+		t.Fatal("SelectProviderInstallationResources accepted empty actor")
+	}
+}
+
+type createProviderInstallationValidationCase struct {
+	name string
+	in   CreateProviderInstallationInput
+	want string
+}
+
+func TestCreateProviderInstallationRequiredValidationBranches(t *testing.T) {
+	assertCreateProviderInstallationValidation(t, []createProviderInstallationValidationCase{
+		{
+			name: "missing tenant",
+			in: CreateProviderInstallationInput{
+				Provider:          "github",
+				DisplayName:       "GitHub",
+				InstallationKind:  repo.InstallationKindGitHubApp,
+				ResourceSelection: repo.ResourceSelectionAll,
+				Actor:             Actor{ID: "admin-1"},
+			},
+			want: "tenant_id is required",
+		},
+		{
+			name: "invalid provider token",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "bad provider",
+				DisplayName:       "Bad Provider",
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: repo.ResourceSelectionNone,
+				Actor:             Actor{ID: "admin-1"},
+			},
+			want: "provider must match",
+		},
+		{
+			name: "invalid display name",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "github",
+				DisplayName:       string([]byte{0xff}),
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: repo.ResourceSelectionNone,
+				Actor:             Actor{ID: "admin-1"},
+			},
+			want: "display_name",
+		},
+		{
+			name: "invalid kind",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "github",
+				DisplayName:       "GitHub",
+				InstallationKind:  "sidecar",
+				ResourceSelection: repo.ResourceSelectionNone,
+				Actor:             Actor{ID: "admin-1"},
+			},
+			want: "installation_kind",
+		},
+		{
+			name: "invalid selection",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "github",
+				DisplayName:       "GitHub",
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: "partial",
+				Actor:             Actor{ID: "admin-1"},
+			},
+			want: "resource_selection",
+		},
+		{
+			name: "missing actor",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "github",
+				DisplayName:       "GitHub",
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: repo.ResourceSelectionNone,
+			},
+			want: "actor is required",
+		},
+	})
+}
+
+func TestCreateProviderInstallationJSONValidationBranches(t *testing.T) {
+	assertCreateProviderInstallationValidation(t, []createProviderInstallationValidationCase{
+		{
+			name: "bad permissions json",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "github",
+				DisplayName:       "GitHub",
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: repo.ResourceSelectionNone,
+				PermissionsJSON:   "{",
+				Actor:             Actor{ID: "admin-1"},
+			},
+			want: "permissions_json",
+		},
+		{
+			name: "bad resource json",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "github",
+				DisplayName:       "GitHub",
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: repo.ResourceSelectionSelected,
+				Resources: []ProviderInstallationResourceInput{{
+					ResourceType:    repo.ResourceTypeRepository,
+					ResourceKey:     "acme/app",
+					PermissionsJSON: "{",
+				}},
+				Actor: Actor{ID: "admin-1"},
+			},
+			want: "resource.permissions_json",
+		},
+		{
+			name: "bad resource shape",
+			in: CreateProviderInstallationInput{
+				TenantID:          "tenant-1",
+				Provider:          "github",
+				DisplayName:       "GitHub",
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: repo.ResourceSelectionSelected,
+				Resources: []ProviderInstallationResourceInput{{
+					ResourceType: "database",
+					ResourceKey:  "acme/app",
+				}},
+				Actor: Actor{ID: "admin-1"},
+			},
+			want: "resource_type",
+		},
+	})
+}
+
+func assertCreateProviderInstallationValidation(t *testing.T, tests []createProviderInstallationValidationCase) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := New(newFakeRepo(), ptrext.Of(fakeSecretStore{}))
+			_, _, err := service.CreateProviderInstallation(context.Background(), tt.in)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("CreateProviderInstallation error = %v; want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestProviderInstallationQualificationFallbackGrades(t *testing.T) {
+	registerCoreProvider(t, "github", ptrext.Of(fakeProvider{name: "github"}))
+	tests := []struct {
+		name         string
+		installation repo.ProviderInstallation
+		resources    []repo.ProviderInstallationResource
+		wantReady    bool
+		wantGrade    string
+		wantStatus   string
+	}{
+		{
+			name: "github app all resources with boolean permissions",
+			installation: repo.ProviderInstallation{
+				Provider:               "github",
+				InstallationKind:       repo.InstallationKindGitHubApp,
+				ExternalInstallationID: "123",
+				ResourceSelection:      repo.ResourceSelectionAll,
+				Permissions:            []byte(`{"metadata":true,"issues":"admin"}`),
+			},
+			wantReady:  true,
+			wantGrade:  ProviderInstallationGradeFullApp,
+			wantStatus: QualificationStatusOK,
+		},
+		{
+			name: "oauth app missing installation id",
+			installation: repo.ProviderInstallation{
+				Provider:          "github",
+				InstallationKind:  repo.InstallationKindOAuthApp,
+				ResourceSelection: repo.ResourceSelectionAll,
+				Permissions:       []byte(`{"metadata":"read","issues":"write"}`),
+			},
+			wantReady:  false,
+			wantGrade:  ProviderInstallationGradeBlocked,
+			wantStatus: QualificationStatusFailed,
+		},
+		{
+			name: "token fallback with provider warnings",
+			installation: repo.ProviderInstallation{
+				Provider:          "jira",
+				InstallationKind:  repo.InstallationKindToken,
+				ResourceSelection: repo.ResourceSelectionSelected,
+				Permissions:       []byte(`not-json`),
+			},
+			resources: []repo.ProviderInstallationResource{{
+				Selected: true,
+				Status:   repo.ResourceStatusActive,
+			}},
+			wantReady:  false,
+			wantGrade:  ProviderInstallationGradeBlocked,
+			wantStatus: QualificationStatusFailed,
+		},
+		{
+			name: "manual setup with selected resources",
+			installation: repo.ProviderInstallation{
+				Provider:          "github",
+				InstallationKind:  repo.InstallationKindManual,
+				ResourceSelection: repo.ResourceSelectionSelected,
+				Permissions:       []byte(`{"metadata":"read","issues":"write"}`),
+			},
+			resources: []repo.ProviderInstallationResource{{
+				Selected: true,
+				Status:   repo.ResourceStatusActive,
+			}},
+			wantReady:  true,
+			wantGrade:  ProviderInstallationGradeManualSetup,
+			wantStatus: QualificationStatusWarning,
+		},
+		{
+			name: "selected mode without selected resources",
+			installation: repo.ProviderInstallation{
+				Provider:               "github",
+				InstallationKind:       repo.InstallationKindGitHubApp,
+				ExternalInstallationID: "123",
+				ResourceSelection:      repo.ResourceSelectionSelected,
+				Permissions:            []byte(`{"metadata":"read","issues":"write"}`),
+			},
+			resources: []repo.ProviderInstallationResource{{
+				Selected: true,
+				Status:   repo.ResourceStatusRemoved,
+			}},
+			wantReady:  false,
+			wantGrade:  ProviderInstallationGradeBlocked,
+			wantStatus: QualificationStatusFailed,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := qualifyProviderInstallation(tt.installation, tt.resources)
+			status, lastError := providerInstallationQualificationStatus(result)
+			if result.Ready != tt.wantReady || result.Grade != tt.wantGrade || status != tt.wantStatus {
+				t.Fatalf("qualification = ready %t grade %q status %q error %q checks %#v; want %t/%q/%q",
+					result.Ready, result.Grade, status, lastError, result.Checks, tt.wantReady, tt.wantGrade, tt.wantStatus)
+			}
+			profile := providerInstallationCapabilityProfile(result, tt.resources)
+			if !strings.Contains(profile, `"grade":"`+tt.wantGrade+`"`) ||
+				!strings.Contains(profile, `"ready":`) {
+				t.Fatalf("profile = %s; want grade and readiness", profile)
+			}
+		})
+	}
+}
+
+func TestProviderInstallationNormalizationHelpers(t *testing.T) {
+	testNormalizeInstallationKind(t)
+	testNormalizeResourceSelection(t)
+	testNormalizeResourceType(t)
+	testNormalizeResourceStatus(t)
+	testInstallationStatusForInput(t)
+	testPermissionAllowsBranches(t)
+}
+
+func testNormalizeInstallationKind(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{raw: " OAuth_App ", want: repo.InstallationKindOAuthApp},
+		{raw: "token", want: repo.InstallationKindToken},
+		{raw: "", want: repo.InstallationKindManual},
+		{raw: "bad", want: ""},
+	}
+	for _, tt := range tests {
+		if got := normalizeInstallationKind(tt.raw); got != tt.want {
+			t.Fatalf("normalizeInstallationKind(%q) = %q; want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+func testNormalizeResourceSelection(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		raw           string
+		resourceCount int
+		want          string
+	}{
+		{raw: "", resourceCount: 0, want: repo.ResourceSelectionNone},
+		{raw: "", resourceCount: 1, want: repo.ResourceSelectionSelected},
+		{raw: "all", resourceCount: 0, want: repo.ResourceSelectionAll},
+		{raw: "bad", resourceCount: 0, want: ""},
+	}
+	for _, tt := range tests {
+		if got := normalizeResourceSelection(tt.raw, tt.resourceCount); got != tt.want {
+			t.Fatalf("normalizeResourceSelection(%q, %d) = %q; want %q", tt.raw, tt.resourceCount, got, tt.want)
+		}
+	}
+}
+
+func testNormalizeResourceType(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{raw: "", want: repo.ResourceTypeRepository},
+		{raw: "project", want: repo.ResourceTypeProject},
+		{raw: "workspace", want: repo.ResourceTypeWorkspace},
+		{raw: "organization", want: repo.ResourceTypeOrganization},
+		{raw: "database", want: ""},
+	}
+	for _, tt := range tests {
+		if got := normalizeResourceType(tt.raw); got != tt.want {
+			t.Fatalf("normalizeResourceType(%q) = %q; want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+func testNormalizeResourceStatus(t *testing.T) {
+	t.Helper()
+	tests := []struct {
+		raw  string
+		want string
+	}{
+		{raw: "", want: repo.ResourceStatusActive},
+		{raw: "removed", want: repo.ResourceStatusRemoved},
+		{raw: "unknown", want: repo.ResourceStatusUnknown},
+		{raw: "broken", want: ""},
+	}
+	for _, tt := range tests {
+		if got := normalizeResourceStatus(tt.raw); got != tt.want {
+			t.Fatalf("normalizeResourceStatus(%q) = %q; want %q", tt.raw, got, tt.want)
+		}
+	}
+}
+
+func testInstallationStatusForInput(t *testing.T) {
+	t.Helper()
+	if installationStatusForInput(CreateProviderInstallationInput{
+		InstallationKind: repo.InstallationKindGitHubApp,
+	}) != repo.InstallationStatusPending {
+		t.Fatal("GitHub app without external id should start pending")
+	}
+	if installationStatusForInput(CreateProviderInstallationInput{
+		InstallationKind:       repo.InstallationKindOAuthApp,
+		ExternalInstallationID: "oauth-1",
+	}) != repo.InstallationStatusActive {
+		t.Fatal("OAuth app with external id should start active")
+	}
+	if installationStatusForInput(CreateProviderInstallationInput{
+		InstallationKind: repo.InstallationKindToken,
+	}) != repo.InstallationStatusLimited {
+		t.Fatal("token installation should start limited")
+	}
+	if installationStatusForInput(CreateProviderInstallationInput{InstallationKind: "bad"}) != repo.InstallationStatusPending {
+		t.Fatal("unknown installation kind should start pending")
+	}
+}
+
+func testPermissionAllowsBranches(t *testing.T) {
+	t.Helper()
+	if parsePermissionObject([]byte(`not-json`)) == nil {
+		t.Fatal("invalid permission JSON should return an empty object")
+	}
+	if !permissionAllows(map[string]any{"issues": true}, "issues", "write") ||
+		!permissionAllows(map[string]any{"issues": " Write "}, "issues", "write") ||
+		permissionAllows(map[string]any{"issues": 1}, "issues", "write") ||
+		permissionAllows(map[string]any{}, "issues", "write") {
+		t.Fatal("permissionAllows did not cover boolean, string, missing, and unsupported branches")
+	}
+}
+
 func TestDiscoverConnectionSchemaDecryptsCredentialAndNormalizesSchemas(t *testing.T) {
 	const providerName = "schema"
 	var discovered core.Connection

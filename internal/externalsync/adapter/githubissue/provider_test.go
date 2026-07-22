@@ -719,6 +719,98 @@ func TestPullUsesIssueHintWithoutAdvancingCursor(t *testing.T) {
 	}
 }
 
+func TestPullSkipsTimelineWhenDeliveryArtifactSyncDisabled(t *testing.T) {
+	setLoopbackEgress(t)
+	syncDeliveryArtifacts := false
+	sawTimeline := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues":
+			writeJSON(t, w, pullIssuesPayload(uuid.NewString())[:1])
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/7/comments":
+			writeJSON(t, w, []map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/7/timeline":
+			sawTimeline = true
+			http.Error(w, `{"message":"timeline should be disabled"}`, http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewProvider(WithHTTPClient(server.Client()))
+	result, err := provider.Pull(t.Context(), core.PullRequest{
+		Connection: testConnectionWithConfig(providerConfig{
+			Owner:                 "acme",
+			Repo:                  "app",
+			APIBaseURL:            server.URL,
+			SyncDeliveryArtifacts: ptrext.Of(syncDeliveryArtifacts),
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Pull returned error: %v", err)
+	}
+	if sawTimeline || len(result.Children) != 0 {
+		t.Fatalf("sawTimeline=%t children=%+v; want delivery artifact sync disabled", sawTimeline, result.Children)
+	}
+}
+
+func TestPullTreatsIssueTimelineNotFoundAsOptional(t *testing.T) {
+	setLoopbackEgress(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues":
+			writeJSON(t, w, pullIssuesPayload(uuid.NewString())[:1])
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/7/comments":
+			writeJSON(t, w, []map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/7/timeline":
+			http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewProvider(WithHTTPClient(server.Client()))
+	result, err := provider.Pull(t.Context(), core.PullRequest{Connection: testConnection(server.URL)})
+	if err != nil {
+		t.Fatalf("Pull returned error for optional timeline 404: %v", err)
+	}
+	if len(result.Records) != 1 || len(result.Children) != 0 {
+		t.Fatalf("result = %+v; want issue record without timeline children", result)
+	}
+}
+
+func TestPullReturnsIssueTimelineProviderError(t *testing.T) {
+	setLoopbackEgress(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues":
+			writeJSON(t, w, pullIssuesPayload(uuid.NewString())[:1])
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/7/comments":
+			writeJSON(t, w, []map[string]any{})
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/app/issues/7/timeline":
+			w.Header().Set("X-GitHub-Request-Id", "gh-timeline-500")
+			http.Error(w, `{"message":"timeline outage"}`, http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := NewProvider(WithHTTPClient(server.Client()))
+	_, err := provider.Pull(t.Context(), core.PullRequest{Connection: testConnection(server.URL)})
+	if err == nil {
+		t.Fatal("Pull returned nil error for timeline 500")
+	}
+	classified := provider.ClassifyError(err)
+	if classified.Kind != "provider_unavailable" || !classified.Retryable ||
+		classified.ProviderRequestID != "gh-timeline-500" ||
+		!strings.Contains(classified.Message, "timeline outage") {
+		t.Fatalf("classified timeline error = %+v; want retryable provider outage with request id", classified)
+	}
+}
+
 func TestPullDeletedIssueCommentHintEmitsTombstone(t *testing.T) {
 	setLoopbackEgress(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

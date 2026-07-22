@@ -124,8 +124,176 @@ func TestEnricherPersistFromTriageMarksFailedWhenPersistFails(t *testing.T) {
 	require.NotEmpty(t, repo.markFailedSnapshot.ReasonClass)
 }
 
+func TestEnrichOneRejectsMissingLLMBeforeRepoUse(t *testing.T) {
+	t.Parallel()
+
+	err := ptrext.Of(Enricher{}).EnrichOne(context.Background(), 47)
+
+	require.ErrorContains(t, err, "llm client not configured")
+}
+
+func TestEnrichOneClaimAndLoadBranches(t *testing.T) {
+	t.Parallel()
+
+	t.Run("claim error", func(t *testing.T) {
+		t.Parallel()
+		repo := ptrext.Of(fakeFeedbackEnrichRepo{
+			tryClaimConfigured: true,
+			tryClaimErr:        errors.New("claim failed"),
+		})
+		enricher := ptrext.Of(Enricher{
+			repo: repo,
+			llm:  ptrext.Of(capturingEnrichLLM{text: `{"title":"Export","rationale":"Need CSV"}`}),
+		})
+
+		err := enricher.EnrichOne(context.Background(), 48)
+
+		require.ErrorContains(t, err, "claim failed")
+		require.Equal(t, 0, repo.markDoneCalls)
+	})
+
+	t.Run("claim contention", func(t *testing.T) {
+		t.Parallel()
+		repo := ptrext.Of(fakeFeedbackEnrichRepo{tryClaimConfigured: true})
+		enricher := ptrext.Of(Enricher{
+			repo: repo,
+			llm:  ptrext.Of(capturingEnrichLLM{text: `{"title":"Export","rationale":"Need CSV"}`}),
+		})
+
+		err := enricher.EnrichOne(context.Background(), 49)
+
+		require.NoError(t, err)
+		require.Equal(t, 0, repo.markDoneCalls)
+	})
+
+	t.Run("load error", func(t *testing.T) {
+		t.Parallel()
+		repo := ptrext.Of(fakeFeedbackEnrichRepo{
+			tryClaimConfigured: true,
+			tryClaim:           true,
+			loadConfigured:     true,
+			loadErr:            errors.New("load failed"),
+		})
+		enricher := ptrext.Of(Enricher{
+			repo: repo,
+			llm:  ptrext.Of(capturingEnrichLLM{text: `{"title":"Export","rationale":"Need CSV"}`}),
+		})
+
+		err := enricher.EnrichOne(context.Background(), 50)
+
+		require.ErrorContains(t, err, "load failed")
+		require.Equal(t, 0, repo.markDoneCalls)
+	})
+}
+
+func TestEnrichOneTriageAndLLMFailureBranches(t *testing.T) {
+	t.Parallel()
+
+	t.Run("triage ignore", func(t *testing.T) {
+		t.Parallel()
+		repo := ptrext.Of(fakeFeedbackEnrichRepo{
+			tryClaimConfigured: true,
+			tryClaim:           true,
+			loadConfigured:     true,
+			loadRow: ptrext.Of(feedback.EnrichInput{
+				TenantID:      "tenant-a",
+				Content:       "!!!!!!!!",
+				DisplayLocale: "en-US",
+			}),
+		})
+		llm := ptrext.Of(capturingEnrichLLM{text: `{"title":"Export","rationale":"Need CSV"}`})
+		enricher := ptrext.Of(Enricher{repo: repo, llm: llm})
+
+		err := enricher.EnrichOne(context.Background(), 51)
+
+		require.NoError(t, err)
+		require.Equal(t, 1, repo.markDoneCalls)
+		require.Equal(t, "[triage-ignored]", repo.markDoneEnriched.Title)
+		require.Empty(t, llm.lastReq.Prompt)
+	})
+
+	t.Run("llm transport error marks failed", func(t *testing.T) {
+		t.Parallel()
+		repo := claimedEnrichRepo("Please export invoices")
+		enricher := ptrext.Of(Enricher{
+			repo: repo,
+			llm:  ptrext.Of(capturingEnrichLLM{err: errors.New("provider down")}),
+		})
+
+		err := enricher.EnrichOne(context.Background(), 52)
+
+		require.ErrorContains(t, err, "llm")
+		require.Equal(t, 1, repo.markFailedCalls)
+		require.Contains(t, repo.markFailedMessage, "provider down")
+	})
+
+	t.Run("parse error marks failed", func(t *testing.T) {
+		t.Parallel()
+		repo := claimedEnrichRepo("Please export invoices")
+		enricher := ptrext.Of(Enricher{
+			repo: repo,
+			llm:  ptrext.Of(capturingEnrichLLM{text: "not json"}),
+		})
+
+		err := enricher.EnrichOne(context.Background(), 53)
+
+		require.ErrorContains(t, err, "parse")
+		require.Equal(t, 1, repo.markFailedCalls)
+		require.Contains(t, repo.markFailedSnapshot.ReasonClass, "parse")
+	})
+}
+
+func TestEnrichPendingListAndLoopBranches(t *testing.T) {
+	t.Parallel()
+
+	errRepo := ptrext.Of(fakeFeedbackEnrichRepo{
+		listPendingConfigured: true,
+		listPendingErr:        errors.New("list failed"),
+	})
+	ptrext.Of(Enricher{repo: errRepo, llm: ptrext.Of(capturingEnrichLLM{})}).EnrichPending(context.Background(), 2)
+
+	loopRepo := ptrext.Of(fakeFeedbackEnrichRepo{
+		listPendingConfigured: true,
+		pendingIDs:            []int64{54},
+		tryClaimConfigured:    true,
+		tryClaim:              true,
+		loadConfigured:        true,
+		loadErr:               errors.New("load failed"),
+	})
+	ptrext.Of(Enricher{
+		repo: loopRepo,
+		llm:  ptrext.Of(capturingEnrichLLM{text: `{"title":"Export","rationale":"Need CSV"}`}),
+	}).EnrichPending(context.Background(), 1)
+
+	require.Equal(t, 0, loopRepo.markDoneCalls)
+}
+
+func claimedEnrichRepo(content string) *fakeFeedbackEnrichRepo {
+	return ptrext.Of(fakeFeedbackEnrichRepo{
+		tryClaimConfigured: true,
+		tryClaim:           true,
+		loadConfigured:     true,
+		loadRow: ptrext.Of(feedback.EnrichInput{
+			TenantID:      "tenant-a",
+			Source:        "api",
+			Content:       content,
+			DisplayLocale: "en-US",
+		}),
+	})
+}
+
 type fakeFeedbackEnrichRepo struct {
 	markDoneErr error
+
+	tryClaimConfigured    bool
+	tryClaim              bool
+	tryClaimErr           error
+	loadConfigured        bool
+	loadRow               *feedback.EnrichInput
+	loadErr               error
+	listPendingConfigured bool
+	pendingIDs            []int64
+	listPendingErr        error
 
 	markDoneCalls    int
 	markDoneID       int64
@@ -141,11 +309,17 @@ type fakeFeedbackEnrichRepo struct {
 }
 
 func (r *fakeFeedbackEnrichRepo) TryClaim(context.Context, int64) (bool, error) {
-	return false, errors.New("unexpected TryClaim call")
+	if !r.tryClaimConfigured {
+		return false, errors.New("unexpected TryClaim call")
+	}
+	return r.tryClaim, r.tryClaimErr
 }
 
 func (r *fakeFeedbackEnrichRepo) LoadForEnrich(context.Context, int64) (*feedback.EnrichInput, error) {
-	return nil, errors.New("unexpected LoadForEnrich call")
+	if !r.loadConfigured {
+		return nil, errors.New("unexpected LoadForEnrich call")
+	}
+	return r.loadRow, r.loadErr
 }
 
 func (r *fakeFeedbackEnrichRepo) MarkFailed(
@@ -201,5 +375,8 @@ func (r *fakeFeedbackEnrichRepo) InsertSemanticExtractionRunTx(
 }
 
 func (r *fakeFeedbackEnrichRepo) ListPending(context.Context, int) ([]int64, error) {
-	return nil, errors.New("unexpected ListPending call")
+	if !r.listPendingConfigured {
+		return nil, errors.New("unexpected ListPending call")
+	}
+	return append([]int64(nil), r.pendingIDs...), r.listPendingErr
 }
