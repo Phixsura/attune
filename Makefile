@@ -109,7 +109,7 @@ test-live-list: ## Show which live backends would run given current env.
 .PHONY: test-integration
 
 test-integration: ## IO tier — real Postgres. Needs Docker or ATTUNE_TEST_DATABASE_URL + PostgreSQL 17 client tools (pg_dump/psql/pg_basebackup/pg_verifybackup) for the restore-drill tests.
-	go test -tags=integration -count=1 -p 1 -timeout=10m ./test/integration/postgres/...
+	bash scripts/test-integration.sh
 
 public-board-smoke: ## Browser runtime smoke — temporary local stack, Console bundle build, and portal + Console Chromium coverage.
 	cd console && $(PNPM) --ignore-workspace test:e2e:public-board

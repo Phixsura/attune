@@ -107,6 +107,7 @@ func buildRouter(
 	r.Use(middleware.Compress(5)) // gzip responses > 500 bytes
 	r.Use(middleware.Timeout(305 * time.Second))
 	mountHealth(r, ready)
+	mountRootAssets(r)
 	// Prometheus scrape endpoint. Restrict to internal CIDR via nginx
 	// in production — no auth at the Go level.
 	r.Handle("/metrics", metrics.Handler())
@@ -587,6 +588,28 @@ func consoleSPAHandler(dir string) http.Handler {
 
 func serveConsoleIndex(w http.ResponseWriter, req *http.Request, dir string) {
 	http.ServeFile(w, req, filepath.Join(dir, "index.html"))
+}
+
+const rootFaviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Attune">
+  <rect width="64" height="64" rx="14" fill="#ffffff" />
+  <path d="M14 32c0-9.941 8.059-18 18-18s18 8.059 18 18-8.059 18-18 18" fill="none" stroke="#18181b" stroke-width="6" stroke-linecap="round" />
+  <path d="M14 32c0-4.418 3.582-8 8-8s8 3.582 8 8-3.582 8-8 8" fill="none" stroke="#f97316" stroke-width="6" stroke-linecap="round" />
+</svg>
+`
+
+func mountRootAssets(r chi.Router) {
+	r.Get("/favicon.svg", rootFaviconHandler)
+	r.Head("/favicon.svg", rootFaviconHandler)
+}
+
+func rootFaviconHandler(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Content-Length", fmt.Sprint(len(rootFaviconSVG)))
+	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+	if req.Method == http.MethodHead {
+		return
+	}
+	_, _ = w.Write([]byte(rootFaviconSVG))
 }
 
 // mountHealth registers the liveness probe at /healthz — the Google/Kubernetes

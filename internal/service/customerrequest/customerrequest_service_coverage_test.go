@@ -16,6 +16,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
@@ -98,6 +99,10 @@ func TestCustomerRequestServiceValidationGuards(t *testing.T) {
 		}},
 		{name: "LinkIssue invalid provider", call: func() error {
 			_, err := s.LinkIssue(ctx, LinkIssueInput{TenantID: "tenant-1", RequestID: requestID, Provider: "jira"})
+			return err
+		}},
+		{name: "CreateGitHubIssue invalid", call: func() error {
+			_, err := s.CreateGitHubIssue(ctx, CreateGitHubIssueInput{TenantID: "tenant-1", RequestID: requestID, Actor: actor})
 			return err
 		}},
 		{name: "UnlinkIssue invalid", call: func() error {
@@ -249,6 +254,7 @@ func TestCustomerRequestServiceIssueMethodsReturnRepoErrors(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	s := newUnreachableCustomerRequestService(t)
+	s.SetIssueCreateRunStore(fakeIssueCreateRunStore{})
 	requestID := uuid.MustParse("aaaaaaaa-1000-4000-8000-000000000006")
 	linkID := uuid.MustParse("aaaaaaaa-1000-4000-8000-000000000007")
 	actor := testCustomerRequestActor()
@@ -262,6 +268,10 @@ func TestCustomerRequestServiceIssueMethodsReturnRepoErrors(t *testing.T) {
 				TenantID: "tenant-1", RequestID: requestID, Provider: "github",
 				ExternalURL: "https://github.com/Phixsura/attune/issues/224", Title: "Request notifications", Actor: actor,
 			})
+			return err
+		}},
+		{name: "CreateGitHubIssue", call: func() error {
+			_, err := s.CreateGitHubIssue(ctx, CreateGitHubIssueInput{TenantID: "tenant-1", RequestID: requestID, Actor: actor})
 			return err
 		}},
 		{name: "UnlinkIssue", call: func() error {
@@ -305,6 +315,28 @@ func TestCustomerRequestServiceRecordAuditTxRecordsDefaults(t *testing.T) {
 	entry := writer.entries[0]
 	if entry.ActorType != "admin" || entry.ActorID != "system" || entry.TargetID != requestID.String() {
 		t.Fatalf("create audit entry = %+v", entry)
+	}
+}
+
+func TestCustomerRequestServiceRecordAuditRecordsEntry(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.MustParse("aaaaaaaa-1000-4000-8000-000000000205")
+	writer := ptrext.Of(fakeCustomerRequestAuditWriter{})
+	s := New(nil, nil, auditlogsvc.New(writer))
+	summary := repo.Summary{
+		ID:       requestID,
+		TenantID: "tenant-1",
+	}
+
+	if err := s.recordAudit(ctx, auditlogsvc.Actor{Type: "user", ID: "user-1"}, "customer_request.create_github_issue", summary, "Queued issue", map[string]any{"provider": "github"}); err != nil {
+		t.Fatalf("recordAudit returned error: %v", err)
+	}
+	if len(writer.entries) != 1 {
+		t.Fatalf("audit entries = %d, want 1", len(writer.entries))
+	}
+	entry := writer.entries[0]
+	if entry.Action != "customer_request.create_github_issue" || entry.ActorID != "user-1" || entry.TargetID != requestID.String() {
+		t.Fatalf("audit entry = %+v", entry)
 	}
 }
 
@@ -374,6 +406,9 @@ func TestCustomerRequestServiceAuditWritersSkipWhenAuditDisabled(t *testing.T) {
 	if err := s.recordAuditTx(ctx, nil, auditlogsvc.Actor{}, "customer_request.create", repo.Summary{ID: requestID, TenantID: "tenant-1"}, "Created", nil); err != nil {
 		t.Fatalf("recordAuditTx without audit returned error: %v", err)
 	}
+	if err := s.recordAudit(ctx, auditlogsvc.Actor{}, "customer_request.create", repo.Summary{ID: requestID, TenantID: "tenant-1"}, "Created", nil); err != nil {
+		t.Fatalf("recordAudit without audit returned error: %v", err)
+	}
 	if err := s.recordMergeAuditTx(ctx, nil, "tenant-1", auditlogsvc.Actor{}, repo.MergeResult{SourceID: requestID, TargetID: requestID}); err != nil {
 		t.Fatalf("recordMergeAuditTx without audit returned error: %v", err)
 	}
@@ -409,12 +444,29 @@ func expectCustomerRequestServiceError(t *testing.T, name string, call func() er
 	}
 }
 
+type fakeIssueCreateRunStore struct{}
+
+func (fakeIssueCreateRunStore) CreateCustomerRequestIssueRun(
+	context.Context,
+	externalsyncrepo.CustomerRequestIssueCreateRunInput,
+) (*externalsyncrepo.CustomerRequestIssueCreateRunResult, error) {
+	return nil, errors.New("unexpected issue create run store call")
+}
+
+func (fakeIssueCreateRunStore) CreateCustomerRequestIssuePullRun(
+	context.Context,
+	externalsyncrepo.CustomerRequestIssuePullRunInput,
+) (*externalsyncrepo.CustomerRequestIssuePullRunResult, error) {
+	return nil, errors.New("unexpected issue pull run store call")
+}
+
 type fakeCustomerRequestAuditWriter struct {
 	entries []auditlogrepo.Entry
 }
 
-func (w *fakeCustomerRequestAuditWriter) Insert(context.Context, auditlogrepo.Entry) error {
-	return errors.New("unexpected Insert call")
+func (w *fakeCustomerRequestAuditWriter) Insert(_ context.Context, entry auditlogrepo.Entry) error {
+	w.entries = append(w.entries, entry)
+	return nil
 }
 
 func (w *fakeCustomerRequestAuditWriter) InsertTx(_ context.Context, _ pgx.Tx, entry auditlogrepo.Entry) error {

@@ -1190,6 +1190,22 @@ func (r *Router) mountCustomerRequestNotes(cr chi.Router) {
 }
 
 func (r *Router) mountCustomerRequestIssues(cr chi.Router) {
+	cr.With(r.requireMember).Post("/{id}/issue-links:create-github", dispatcher.Bind(
+		"console.CustomerRequestHandler.CreateGitHubIssue",
+		dispatcher.Combine(
+			func() *attunev1.CreateCustomerRequestGitHubIssueRequest {
+				return ptrext.Of(attunev1.CreateCustomerRequestGitHubIssueRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.CreateCustomerRequestGitHubIssueRequest],
+			dispatcher.Param("id", func(req *attunev1.CreateCustomerRequestGitHubIssueRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.customerRequests.CreateGitHubIssue,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateCustomerRequestGitHubIssueRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 	cr.With(r.requireMember).Post("/{id}/issue-links", dispatcher.Bind(
 		"console.CustomerRequestHandler.LinkIssue",
 		dispatcher.Combine(
@@ -1496,7 +1512,7 @@ func (r *Router) requireAdminLegacy(next http.Handler) http.Handler {
 				return
 			}
 			if errors.Is(err, context.Canceled) {
-				logext.Warnf(req.Context(), "[%s] canceled,user_id:%s", where, authCtx.UserID)
+				logext.Infof(req.Context(), "[%s] canceled,user_id:%s", where, authCtx.UserID)
 				dispatcher.Reject(req.Context(), w, dispatcher.StatusClientClosedRequest, attunev1.ErrorCode_CLIENT_CANCELED, "client canceled request")
 				return
 			}
@@ -3233,6 +3249,7 @@ func (r *Router) mountExternalSync(m chi.Router) {
 	}
 	m.Route("/external-sync", func(es chi.Router) {
 		es.Use(r.requireDelegatedAdmin)
+		r.mountExternalSyncInstallationRoutes(es)
 		r.mountExternalSyncConnectionRoutes(es)
 		r.mountExternalSyncMappingRoutes(es)
 		r.mountExternalSyncRunRoutes(es)
@@ -3248,6 +3265,90 @@ func (r *Router) mountExternalSync(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) mountExternalSyncInstallationRoutes(es chi.Router) {
+	es.Get("/provider-installations", dispatcher.Bind(
+		"console.ExternalSyncHandler.ListProviderInstallations",
+		dispatcher.Empty(func() *attunev1.ListExternalProviderInstallationsRequest {
+			return ptrext.Of(attunev1.ListExternalProviderInstallationsRequest{})
+		}),
+		r.externalSync.ListProviderInstallations,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExternalProviderInstallationsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/provider-installations", dispatcher.Bind(
+		"console.ExternalSyncHandler.CreateProviderInstallation",
+		dispatcher.JSON(func() *attunev1.CreateExternalProviderInstallationRequest {
+			return ptrext.Of(attunev1.CreateExternalProviderInstallationRequest{})
+		}),
+		r.externalSync.CreateProviderInstallation,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateExternalProviderInstallationRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Delete("/provider-installations/{id}", dispatcher.Bind(
+		"console.ExternalSyncHandler.DeleteProviderInstallation",
+		dispatcher.Path(
+			func() *attunev1.DeleteExternalProviderInstallationRequest {
+				return ptrext.Of(attunev1.DeleteExternalProviderInstallationRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.DeleteExternalProviderInstallationRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.DeleteProviderInstallation,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DeleteExternalProviderInstallationRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/provider-installations/{id}:qualify", dispatcher.Bind(
+		"console.ExternalSyncHandler.QualifyProviderInstallation",
+		dispatcher.Path(
+			func() *attunev1.QualifyExternalProviderInstallationRequest {
+				return ptrext.Of(attunev1.QualifyExternalProviderInstallationRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.QualifyExternalProviderInstallationRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.QualifyProviderInstallation,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.QualifyExternalProviderInstallationRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.Get("/provider-installations/{id}/resources", dispatcher.Bind(
+		"console.ExternalSyncHandler.ListProviderInstallationResources",
+		dispatcher.Path(
+			func() *attunev1.ListExternalProviderInstallationResourcesRequest {
+				return ptrext.Of(attunev1.ListExternalProviderInstallationResourcesRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.ListExternalProviderInstallationResourcesRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.ListProviderInstallationResources,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListExternalProviderInstallationResourcesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	es.With(r.requireDelegatedAdminStrict).Post("/provider-installations/{id}/resources:select", dispatcher.Bind(
+		"console.ExternalSyncHandler.SelectProviderInstallationResources",
+		dispatcher.Combine(
+			func() *attunev1.SelectExternalProviderInstallationResourcesRequest {
+				return ptrext.Of(attunev1.SelectExternalProviderInstallationResourcesRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.SelectExternalProviderInstallationResourcesRequest],
+			dispatcher.Param("id", func(req *attunev1.SelectExternalProviderInstallationResourcesRequest, id string) {
+				req.Id = id
+			}),
+		),
+		r.externalSync.SelectProviderInstallationResources,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SelectExternalProviderInstallationResourcesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountExternalSyncConnectionRoutes(es chi.Router) {

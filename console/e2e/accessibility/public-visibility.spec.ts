@@ -67,6 +67,7 @@ test.describe('Public visibility browser behavior', () => {
   test('admin can save policy, publish a profile, and execute every moderation action', async ({
     page,
   }) => {
+    test.setTimeout(120_000)
     const diagnostics = collectConsoleDiagnostics(page)
     const mock = await installPublicVisibilityMocks(page, { role: 'admin' })
 

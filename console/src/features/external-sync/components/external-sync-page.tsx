@@ -39,11 +39,16 @@ import {
 import {
   batchResolveExternalSyncConflicts,
   type CreateExternalConnectionRequest,
+  type CreateExternalProviderInstallationRequest,
   createExternalConnection,
+  createExternalProviderInstallation,
   deleteExternalConnection,
+  deleteExternalProviderInstallation,
   type ExternalConnection,
   type ExternalObjectMapping,
   type ExternalObjectSchema,
+  type ExternalProviderInstallation,
+  type ExternalProviderInstallationResource,
   type ExternalSyncConflict,
   ExternalSyncConflictResolution,
   ExternalSyncDirection,
@@ -53,6 +58,8 @@ import {
   type ExternalSyncRecordTimelineEntry,
   type ExternalSyncRun,
   type ExternalSyncRunDetail,
+  externalProviderInstallationResourcesQuery,
+  externalProviderInstallationsQuery,
   externalSyncConnectionSchemaQuery,
   externalSyncConnectionsQuery,
   externalSyncEventQuery,
@@ -66,6 +73,7 @@ import {
   getExternalSyncRecordTimeline,
   previewExternalObjectMapping,
   qualifyExternalConnection,
+  qualifyExternalProviderInstallation,
   replayExternalSyncEvent,
   requestExternalSyncBackfill,
   requestExternalSyncRun,
@@ -74,6 +82,7 @@ import {
   resumeExternalConnection,
   retryExternalSyncFailure,
   retryExternalSyncRun,
+  selectExternalProviderInstallationResources,
   testExternalConnection,
   type UpdateExternalConnectionRequest,
   updateExternalConnection,
@@ -170,21 +179,36 @@ export function ExternalSyncPage() {
 
   const health = useQuery(externalSyncHealthQuery())
   const providersQuery = useQuery(externalSyncProvidersQuery())
+  const installationsQuery = useQuery(externalProviderInstallationsQuery())
   const connectionsQuery = useQuery(externalSyncConnectionsQuery())
   const providers = providersQuery.data ?? []
+  const installations = installationsQuery.data ?? []
   const connections = connectionsQuery.data ?? []
+  const [selectedInstallationID, setSelectedInstallationID] = useState('')
   const [selectedConnectionID, setSelectedConnectionID] = useState('')
   const [selectedRunID, setSelectedRunID] = useState('')
   const [selectedEventID, setSelectedEventID] = useState('')
   const [timelineTarget, setTimelineTarget] = useState<RecordTimelineTarget | null>(null)
+  const [createInstallationOpen, setCreateInstallationOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [editingConnection, setEditingConnection] = useState<ExternalConnection | null>(null)
+
+  useEffect(() => {
+    if (selectedInstallationID || installations.length === 0) return
+    setSelectedInstallationID(installations[0]?.id ?? '')
+  }, [installations, selectedInstallationID])
 
   useEffect(() => {
     if (selectedConnectionID || connections.length === 0) return
     setSelectedConnectionID(connections[0]?.id ?? '')
   }, [connections, selectedConnectionID])
 
+  const installationResourcesQuery = useQuery(
+    externalProviderInstallationResourcesQuery(selectedInstallationID || undefined),
+  )
+  const installationResources = installationResourcesQuery.data ?? []
+  const selectedInstallation =
+    installations.find((installation) => installation.id === selectedInstallationID) ?? null
   const selectedConnection = connections.find((conn) => conn.id === selectedConnectionID) ?? null
   const mappingsQuery = useQuery(externalSyncMappingsQuery(selectedConnectionID || undefined))
   const mappings = mappingsQuery.data ?? []
@@ -242,6 +266,60 @@ export function ExternalSyncPage() {
       setSelectedRunID('')
       setSelectedEventID('')
       toast.success(t('external_sync.toast.created'))
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+
+  const createProviderInstallation = useMutation({
+    mutationFn: createExternalProviderInstallation,
+    onSuccess: async (installation) => {
+      await invalidateExternalSync()
+      setCreateInstallationOpen(false)
+      setSelectedInstallationID(installation.id)
+      toast.success(t('external_sync.toast.installation_created'))
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+
+  const qualifyProviderInstallation = useMutation({
+    mutationFn: qualifyExternalProviderInstallation,
+    onSuccess: async (result) => {
+      await invalidateExternalSync()
+      const description = qualificationToastDescription(result.checks)
+      if (result.ready) {
+        toast.success(t('external_sync.toast.installation_ready', { grade: result.grade }), {
+          description,
+        })
+      } else {
+        toast.warning(t('external_sync.toast.installation_attention', { grade: result.grade }), {
+          description,
+        })
+      }
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+
+  const deleteProviderInstallation = useMutation({
+    mutationFn: deleteExternalProviderInstallation,
+    onSuccess: async () => {
+      await invalidateExternalSync()
+      setSelectedInstallationID('')
+      toast.success(t('external_sync.toast.installation_deleted'))
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  })
+
+  const selectProviderResources = useMutation({
+    mutationFn: ({ id, resourceIds }: { id: string; resourceIds: string[] }) =>
+      selectExternalProviderInstallationResources(id, resourceIds),
+    onSuccess: async () => {
+      await invalidateExternalSync()
+      if (selectedInstallationID) {
+        await queryClient.invalidateQueries({
+          queryKey: externalSyncQueryKeys.providerInstallationResources(selectedInstallationID),
+        })
+      }
+      toast.success(t('external_sync.toast.installation_resources_saved'))
     },
     onError: (err) => toast.error(errorMessage(err)),
   })
@@ -494,10 +572,20 @@ export function ExternalSyncPage() {
         title={t('nav.external_sync')}
         subtitle={t('external_sync.subtitle')}
         actions={
-          <Button onClick={() => setCreateOpen(true)} className="gap-2">
-            <Plus className="size-4" />
-            {t('external_sync.actions.new_connection')}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setCreateInstallationOpen(true)}
+              className="gap-2"
+            >
+              <Plus className="size-4" />
+              {t('external_sync.actions.new_installation')}
+            </Button>
+            <Button onClick={() => setCreateOpen(true)} className="gap-2">
+              <Plus className="size-4" />
+              {t('external_sync.actions.new_connection')}
+            </Button>
+          </div>
         }
         metrics={
           <>
@@ -562,6 +650,33 @@ export function ExternalSyncPage() {
 
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
         <div className="min-w-0 space-y-6">
+          <ProviderInstallationsCard
+            installations={installations}
+            resources={installationResources}
+            loading={installationsQuery.isPending}
+            resourcesLoading={
+              installationResourcesQuery.isPending && Boolean(selectedInstallationID)
+            }
+            selectedID={selectedInstallationID}
+            qualifyingID={
+              qualifyProviderInstallation.isPending
+                ? qualifyProviderInstallation.variables
+                : undefined
+            }
+            deletingID={
+              deleteProviderInstallation.isPending
+                ? deleteProviderInstallation.variables
+                : undefined
+            }
+            selecting={selectProviderResources.isPending}
+            onSelect={setSelectedInstallationID}
+            onQualify={(id) => qualifyProviderInstallation.mutate(id)}
+            onDelete={(id) => deleteProviderInstallation.mutate(id)}
+            onSaveResources={(id, resourceIds) =>
+              selectProviderResources.mutate({ id, resourceIds })
+            }
+          />
+
           <ConnectionsCard
             connections={connections}
             loading={connectionsQuery.isPending}
@@ -590,6 +705,8 @@ export function ExternalSyncPage() {
                 mappingId: mapping?.id ?? '',
                 direction:
                   mapping?.direction ?? ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_UNSPECIFIED,
+                localObjectId: '',
+                externalKey: '',
               })
             }
           />
@@ -669,8 +786,17 @@ export function ExternalSyncPage() {
         open={createOpen}
         pending={createConnection.isPending}
         providers={providers}
+        selectedInstallation={selectedInstallation}
+        selectedInstallationResources={installationResources}
         onOpenChange={setCreateOpen}
         onSubmit={(body) => createConnection.mutate(body)}
+      />
+      <CreateProviderInstallationDialog
+        open={createInstallationOpen}
+        pending={createProviderInstallation.isPending}
+        providers={providers}
+        onOpenChange={setCreateInstallationOpen}
+        onSubmit={(body) => createProviderInstallation.mutate(body)}
       />
       <EditConnectionDialog
         open={Boolean(editingConnection)}
@@ -682,6 +808,209 @@ export function ExternalSyncPage() {
         onSubmit={(body) => updateConnection.mutate(body)}
       />
     </div>
+  )
+}
+
+export function ProviderInstallationsCard({
+  installations,
+  resources,
+  loading,
+  resourcesLoading,
+  selectedID,
+  qualifyingID,
+  deletingID,
+  selecting,
+  onSelect,
+  onQualify,
+  onDelete,
+  onSaveResources,
+}: {
+  installations: ExternalProviderInstallation[]
+  resources: ExternalProviderInstallationResource[]
+  loading: boolean
+  resourcesLoading: boolean
+  selectedID: string
+  qualifyingID?: string
+  deletingID?: string
+  selecting: boolean
+  onSelect: (id: string) => void
+  onQualify: (id: string) => void
+  onDelete: (id: string) => void
+  onSaveResources: (id: string, resourceIds: string[]) => void
+}) {
+  const { t } = useTranslation()
+  const selected = installations.find((installation) => installation.id === selectedID) ?? null
+  const [selectedResourceIDs, setSelectedResourceIDs] = useState<string[]>([])
+
+  useEffect(() => {
+    setSelectedResourceIDs(
+      resources.filter((resource) => resource.selected).map((resource) => resource.id),
+    )
+  }, [resources])
+
+  const toggleResource = (resourceID: string, checked: boolean) => {
+    setSelectedResourceIDs((current) => {
+      const next = new Set(current)
+      if (checked) next.add(resourceID)
+      else next.delete(resourceID)
+      return Array.from(next)
+    })
+  }
+
+  return (
+    <Card className="border-border/60 shadow-none">
+      <CardHeader>
+        <CardTitle className="text-base">{t('external_sync.installations.title')}</CardTitle>
+        <CardDescription>
+          {t('external_sync.installations.description', { count: installations.length })}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-6">
+        {loading ? (
+          <Loading />
+        ) : installations.length === 0 ? (
+          <EmptyState
+            icon={GitBranch}
+            title={t('external_sync.installations.empty_title')}
+            description={t('external_sync.installations.empty_body')}
+          />
+        ) : (
+          <div className="space-y-2">
+            {installations.map((installation) => {
+              const grade = capabilityGrade(installation.capabilityProfileJson)
+              return (
+                <div
+                  key={installation.id}
+                  className={cn(
+                    'flex w-full min-w-0 flex-col gap-3 rounded-lg border px-3 py-3 transition-colors sm:flex-row sm:items-start sm:justify-between',
+                    selectedID === installation.id
+                      ? 'border-primary/50 bg-primary/5'
+                      : 'border-border/60 bg-background hover:bg-muted/50',
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => onSelect(installation.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-semibold">
+                        {installation.displayName}
+                      </span>
+                      <StatusPill value={installation.status} />
+                      <StatusPill value={installation.qualificationStatus || 'untested'} />
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                      <span className="font-mono">{installation.provider}</span>
+                      <span>{installation.installationKind}</span>
+                      <span>{installation.resourceSelection}</span>
+                      {grade && <span>{grade}</span>}
+                      {installation.accountLogin && <span>{installation.accountLogin}</span>}
+                    </div>
+                    {installation.lastError && (
+                      <div className="mt-2 line-clamp-2 text-xs text-destructive">
+                        {installation.lastError}
+                      </div>
+                    )}
+                  </button>
+                  <div className="flex w-full flex-wrap items-center gap-1 sm:w-auto sm:shrink-0 sm:justify-end">
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={t('external_sync.actions.qualify_installation')}
+                      onClick={() => onQualify(installation.id)}
+                      disabled={qualifyingID === installation.id}
+                    >
+                      {qualifyingID === installation.id ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <FileSearch className="size-3" />
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={t('external_sync.actions.delete_installation')}
+                      onClick={() => onDelete(installation.id)}
+                      disabled={deletingID === installation.id}
+                    >
+                      {deletingID === installation.id ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {selected && (
+          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="text-sm font-semibold">
+                  {t('external_sync.installations.resources_title')}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {t('external_sync.installations.resources_description', {
+                    name: selected.displayName,
+                    count: resources.length,
+                  })}
+                </div>
+              </div>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => onSaveResources(selected.id, selectedResourceIDs)}
+                disabled={selecting || resourcesLoading}
+              >
+                {selecting && <Loader2 className="size-3 animate-spin" />}
+                {t('common.save')}
+              </Button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {resourcesLoading ? (
+                <Loading />
+              ) : resources.length === 0 ? (
+                <div className="text-sm text-muted-foreground">
+                  {t('external_sync.installations.resources_empty')}
+                </div>
+              ) : (
+                resources.map((resource) => (
+                  <label
+                    key={resource.id}
+                    htmlFor={`provider-resource-${resource.id}`}
+                    className="flex min-w-0 items-start gap-3 rounded border border-border/60 bg-background px-3 py-2"
+                  >
+                    <Checkbox
+                      id={`provider-resource-${resource.id}`}
+                      checked={selectedResourceIDs.includes(resource.id)}
+                      onCheckedChange={(value) => toggleResource(resource.id, Boolean(value))}
+                      disabled={selecting}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium">
+                        {resource.displayName}
+                      </span>
+                      <span className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                        <span className="font-mono">{resource.resourceKey}</span>
+                        <span>{resource.resourceType}</span>
+                        <span>{resource.status}</span>
+                      </span>
+                    </span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -1699,7 +2028,7 @@ export function RunDetailCard({
           />
         ) : (
           <>
-            <div className="grid gap-2 text-xs sm:grid-cols-2">
+            <div className="grid gap-2 text-xs sm:grid-cols-3">
               <JsonBlock
                 label={t('external_sync.detail.cursor_before')}
                 value={run.cursorBeforeJson}
@@ -1707,6 +2036,10 @@ export function RunDetailCard({
               <JsonBlock
                 label={t('external_sync.detail.cursor_after')}
                 value={run.cursorAfterJson}
+              />
+              <JsonBlock
+                label={t('external_sync.detail.input_metadata')}
+                value={run.inputMetadataJson}
               />
             </div>
 
@@ -2021,12 +2354,16 @@ export function CreateConnectionDialog({
   open,
   pending,
   providers = [],
+  selectedInstallation,
+  selectedInstallationResources = [],
   onOpenChange,
   onSubmit,
 }: {
   open: boolean
   pending: boolean
   providers?: ExternalSyncProvider[]
+  selectedInstallation?: ExternalProviderInstallation | null
+  selectedInstallationResources?: ExternalProviderInstallationResource[]
   onOpenChange: (open: boolean) => void
   onSubmit: (body: CreateExternalConnectionRequest) => void
 }) {
@@ -2040,6 +2377,7 @@ export function CreateConnectionDialog({
   const [providerConfig, setProviderConfig] = useState('{}')
   const [scopes, setScopes] = useState('issues')
   const [enabled, setEnabled] = useState(true)
+  const [providerInstallationID, setProviderInstallationID] = useState('')
   const hasProviders = providers.length > 0
   const defaultProvider = providers[0]?.provider ?? 'github'
 
@@ -2049,6 +2387,20 @@ export function CreateConnectionDialog({
       providers.some((entry) => entry.provider === current) ? current : defaultProvider,
     )
   }, [defaultProvider, hasProviders, providers])
+
+  useEffect(() => {
+    if (!open) return
+    if (!selectedInstallation) {
+      setProviderInstallationID('')
+      return
+    }
+    const derivedConfig = providerConfigFromInstallationResources(selectedInstallationResources)
+    setProviderInstallationID(selectedInstallation.id)
+    setProvider(selectedInstallation.provider)
+    setName((current) => current || selectedInstallation.displayName)
+    setBaseURL((current) => current || selectedInstallation.baseUrl)
+    if (derivedConfig) setProviderConfig(derivedConfig)
+  }, [open, selectedInstallation, selectedInstallationResources])
 
   const reset = () => {
     setProvider(defaultProvider)
@@ -2060,6 +2412,7 @@ export function CreateConnectionDialog({
     setProviderConfig('{}')
     setScopes('issues')
     setEnabled(true)
+    setProviderInstallationID(selectedInstallation?.id ?? '')
   }
 
   const submit = (event: FormEvent) => {
@@ -2075,6 +2428,7 @@ export function CreateConnectionDialog({
       providerConfigJson: providerConfig.trim() || '{}',
       scopes: parseScopes(scopes),
       enabled,
+      providerInstallationId: providerInstallationID,
     })
   }
 
@@ -2095,7 +2449,22 @@ export function CreateConnectionDialog({
             <div className="space-y-1.5">
               <Label htmlFor="external-sync-provider">{t('external_sync.create.provider')}</Label>
               {hasProviders ? (
-                <Select value={provider} onValueChange={setProvider} disabled={pending}>
+                <Select
+                  value={provider}
+                  onValueChange={(value) => {
+                    setProvider(value)
+                    if (
+                      providerInstallationID &&
+                      selectedInstallation &&
+                      value !== selectedInstallation.provider
+                    ) {
+                      setProviderInstallationID('')
+                      setBaseURL('')
+                      setProviderConfig('{}')
+                    }
+                  }}
+                  disabled={pending}
+                >
                   <SelectTrigger id="external-sync-provider" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -2127,6 +2496,43 @@ export function CreateConnectionDialog({
                 required
               />
             </div>
+            {selectedInstallation && (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="external-sync-provider-installation">
+                  {t('external_sync.create.provider_installation')}
+                </Label>
+                <Select
+                  value={providerInstallationID || 'none'}
+                  onValueChange={(value) => {
+                    const next = value === 'none' ? '' : value
+                    setProviderInstallationID(next)
+                    if (!next) return
+                    const derivedConfig = providerConfigFromInstallationResources(
+                      selectedInstallationResources,
+                    )
+                    setProvider(selectedInstallation.provider)
+                    setName((current) => current || selectedInstallation.displayName)
+                    setBaseURL((current) => current || selectedInstallation.baseUrl)
+                    if (derivedConfig) setProviderConfig(derivedConfig)
+                  }}
+                  disabled={pending}
+                >
+                  <SelectTrigger id="external-sync-provider-installation" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">
+                      {t('external_sync.create.provider_installation_none')}
+                    </SelectItem>
+                    <SelectItem value={selectedInstallation.id}>
+                      {t('external_sync.create.provider_installation_current', {
+                        name: selectedInstallation.displayName,
+                      })}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="external-sync-auth-type">{t('external_sync.create.auth_type')}</Label>
               <Select value={authType} onValueChange={setAuthType} disabled={pending}>
@@ -2216,6 +2622,256 @@ export function CreateConnectionDialog({
             <Button
               type="submit"
               disabled={pending || !provider.trim() || !name.trim() || !credential.trim()}
+            >
+              {pending && <Loader2 className="size-3 animate-spin" />}
+              {t('common.create')}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function CreateProviderInstallationDialog({
+  open,
+  pending,
+  providers = [],
+  onOpenChange,
+  onSubmit,
+}: {
+  open: boolean
+  pending: boolean
+  providers?: ExternalSyncProvider[]
+  onOpenChange: (open: boolean) => void
+  onSubmit: (body: CreateExternalProviderInstallationRequest) => void
+}) {
+  const { t } = useTranslation()
+  const [provider, setProvider] = useState('github')
+  const [displayName, setDisplayName] = useState('')
+  const [installationKind, setInstallationKind] = useState('github_app')
+  const [externalInstallationID, setExternalInstallationID] = useState('')
+  const [accountLogin, setAccountLogin] = useState('')
+  const [permissions, setPermissions] = useState('{"metadata":"read","issues":"write"}')
+  const [resourceKey, setResourceKey] = useState('')
+  const [resourceName, setResourceName] = useState('')
+  const [resourceURL, setResourceURL] = useState('')
+  const hasProviders = providers.length > 0
+  const defaultProvider = providers[0]?.provider ?? 'github'
+  const permissionsError = parseJSONRecord(permissions).error
+
+  useEffect(() => {
+    if (!hasProviders) return
+    setProvider((current) =>
+      providers.some((entry) => entry.provider === current) ? current : defaultProvider,
+    )
+  }, [defaultProvider, hasProviders, providers])
+
+  const reset = () => {
+    setProvider(defaultProvider)
+    setDisplayName('')
+    setInstallationKind('github_app')
+    setExternalInstallationID('')
+    setAccountLogin('')
+    setPermissions('{"metadata":"read","issues":"write"}')
+    setResourceKey('')
+    setResourceName('')
+    setResourceURL('')
+  }
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    if (!provider.trim() || !displayName.trim() || permissionsError) return
+    const resource = resourceKey.trim()
+      ? [
+          {
+            resourceType: 'repository',
+            externalResourceId: '',
+            resourceKey: resourceKey.trim(),
+            displayName: resourceName.trim() || resourceKey.trim(),
+            htmlUrl: resourceURL.trim(),
+            selected: true,
+            status: 'active',
+            permissionsJson: '{}',
+          },
+        ]
+      : []
+    onSubmit({
+      provider: provider.trim().toLowerCase(),
+      displayName: displayName.trim(),
+      installationKind,
+      externalInstallationId: externalInstallationID.trim(),
+      accountLogin: accountLogin.trim(),
+      accountId: '',
+      accountUrl: '',
+      baseUrl: '',
+      permissionsJson: normalizeJSONInput(permissions),
+      capabilityProfileJson: '{}',
+      resourceSelection: resource.length > 0 ? 'selected' : 'none',
+      resources: resource,
+    })
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v)
+        if (!v) reset()
+      }}
+    >
+      <DialogContent className="sm:max-w-xl" aria-describedby={undefined}>
+        <form onSubmit={submit}>
+          <DialogHeader>
+            <DialogTitle>{t('external_sync.installation_create.title')}</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="external-sync-install-provider">
+                {t('external_sync.create.provider')}
+              </Label>
+              {hasProviders ? (
+                <Select value={provider} onValueChange={setProvider} disabled={pending}>
+                  <SelectTrigger id="external-sync-install-provider" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providers.map((entry) => (
+                      <SelectItem key={entry.provider} value={entry.provider}>
+                        {entry.display}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  id="external-sync-install-provider"
+                  value={provider}
+                  onChange={(e) => setProvider(e.target.value)}
+                  disabled={pending}
+                  required
+                />
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="external-sync-install-kind">
+                {t('external_sync.installation_create.kind')}
+              </Label>
+              <Select
+                value={installationKind}
+                onValueChange={setInstallationKind}
+                disabled={pending}
+              >
+                <SelectTrigger id="external-sync-install-kind" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="github_app">github_app</SelectItem>
+                  <SelectItem value="oauth_app">oauth_app</SelectItem>
+                  <SelectItem value="token">token</SelectItem>
+                  <SelectItem value="manual">manual</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="external-sync-install-name">
+                {t('external_sync.installation_create.display_name')}
+              </Label>
+              <Input
+                id="external-sync-install-name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                disabled={pending}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="external-sync-install-id">
+                {t('external_sync.installation_create.external_id')}
+              </Label>
+              <Input
+                id="external-sync-install-id"
+                value={externalInstallationID}
+                onChange={(e) => setExternalInstallationID(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="external-sync-install-account">
+                {t('external_sync.installation_create.account')}
+              </Label>
+              <Input
+                id="external-sync-install-account"
+                value={accountLogin}
+                onChange={(e) => setAccountLogin(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="external-sync-install-permissions">
+                {t('external_sync.installation_create.permissions')}
+              </Label>
+              <Input
+                id="external-sync-install-permissions"
+                value={permissions}
+                onChange={(e) => setPermissions(e.target.value)}
+                disabled={pending}
+                aria-invalid={permissionsError}
+              />
+              {permissionsError && (
+                <p className="text-xs text-destructive">
+                  {t('external_sync.mappings.json_object_error', {
+                    label: t('external_sync.installation_create.permissions'),
+                  })}
+                </p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="external-sync-install-resource-key">
+                {t('external_sync.installation_create.resource_key')}
+              </Label>
+              <Input
+                id="external-sync-install-resource-key"
+                value={resourceKey}
+                onChange={(e) => setResourceKey(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="external-sync-install-resource-name">
+                {t('external_sync.installation_create.resource_name')}
+              </Label>
+              <Input
+                id="external-sync-install-resource-name"
+                value={resourceName}
+                onChange={(e) => setResourceName(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="external-sync-install-resource-url">
+                {t('external_sync.installation_create.resource_url')}
+              </Label>
+              <Input
+                id="external-sync-install-resource-url"
+                value={resourceURL}
+                onChange={(e) => setResourceURL(e.target.value)}
+                disabled={pending}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={pending}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="submit"
+              disabled={pending || !provider.trim() || !displayName.trim() || permissionsError}
             >
               {pending && <Loader2 className="size-3 animate-spin" />}
               {t('common.create')}
@@ -2411,6 +3067,19 @@ function parseScopes(value: string) {
     .split(',')
     .map((scope) => scope.trim())
     .filter(Boolean)
+}
+
+export function providerConfigFromInstallationResources(
+  resources: ExternalProviderInstallationResource[],
+) {
+  const selected = resources.filter(
+    (resource) =>
+      resource.selected && resource.status === 'active' && resource.resourceType === 'repository',
+  )
+  if (selected.length !== 1) return ''
+  const [owner, repo, ...extra] = selected[0].resourceKey.split('/')
+  if (!owner || !repo || extra.length > 0) return ''
+  return JSON.stringify({ owner, repo: repo.replace(/\.git$/, '') })
 }
 
 const conflictResolutionOptions = [
@@ -2655,6 +3324,18 @@ export function formatDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
+}
+
+export function capabilityGrade(profileJson: string) {
+  const raw = profileJson.trim()
+  if (!raw) return ''
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!isRecord(parsed) || typeof parsed.grade !== 'string') return ''
+    return parsed.grade
+  } catch {
+    return ''
+  }
 }
 
 export function prettyJSON(value: string) {

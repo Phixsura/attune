@@ -5,6 +5,8 @@ import {
   ClipboardList,
   DollarSign,
   ExternalLink,
+  GitBranch,
+  Github,
   GitMerge,
   Loader2,
   Plus,
@@ -47,12 +49,14 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   type CustomerRequestFilters,
   customerRequestDetailQuery,
+  customerRequestGitHubIssueConnectionOptionsQuery,
   customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
+  useCreateCustomerRequestGitHubIssue,
   useCreateCustomerRequestSavedView,
   useDeleteCustomerRequestNote,
   useDeleteCustomerRequestSavedView,
@@ -76,6 +80,8 @@ import { cn } from '@/lib/utils'
 import {
   type CustomerRequestAccountProfile,
   type CustomerRequestCustomerLink,
+  type CustomerRequestDeliveryArtifact,
+  type CustomerRequestDeliveryGraph,
   CustomerRequestDeliveryHealth,
   type CustomerRequestDuplicate,
   type CustomerRequestFeedbackEvidence,
@@ -1111,7 +1117,12 @@ function CustomerRequestDetailSheet({
             {canEdit ? <FeedbackLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
             {canEdit ? <CustomerLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
             {canEdit ? <VoteForm requestID={detail.data.request?.id ?? ''} /> : null}
-            {canEdit ? <IssueLinkForm requestID={detail.data.request?.id ?? ''} /> : null}
+            {canEdit ? (
+              <IssueLinkForm
+                requestID={detail.data.request?.id ?? ''}
+                hasGitHubIssueLink={detail.data.issueLinks.some(isGitHubIssueLink)}
+              />
+            ) : null}
             <DetailSection title={t('customer_requests.notes')}>
               {canEdit ? <NoteForm requestID={detail.data.request?.id ?? ''} /> : null}
               {(detail.data.notes ?? []).length === 0 ? (
@@ -1187,6 +1198,9 @@ function CustomerRequestDetailSheet({
                   ))}
                 </div>
               )}
+            </DetailSection>
+            <DetailSection title={t('customer_requests.delivery_graph')}>
+              <DeliveryGraphPanel graph={detail.data.deliveryGraph} />
             </DetailSection>
             <DetailSection title={t('customer_requests.delivery_links')}>
               {detail.data.issueLinks.length === 0 ? (
@@ -2132,6 +2146,97 @@ function AccountProfileRow({ item }: { item: CustomerRequestAccountProfile }) {
   )
 }
 
+function DeliveryGraphPanel({ graph }: { graph?: CustomerRequestDeliveryGraph }) {
+  const { t } = useTranslation()
+  const artifacts = graph?.artifacts ?? []
+  const relationships = graph?.relationships ?? []
+  const externalArtifacts = artifacts.filter((item) => item.artifactType !== 'customer_request')
+  if (!graph || externalArtifacts.length === 0) {
+    return <EmptyLine text={t('customer_requests.delivery_graph_empty')} />
+  }
+  return (
+    <div className="rounded-md border text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3 p-3">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2 font-medium">
+            <GitBranch className="size-4 text-muted-foreground" />
+            <span>{deliveryHealthLabel(graph.health, t)}</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {graph.healthExplanation ||
+              t('customer_requests.delivery_graph_summary', {
+                count: artifacts.length,
+                relationshipCount: relationships.length,
+              })}
+          </p>
+        </div>
+        <div className="rounded bg-muted px-2 py-1 text-xs font-medium text-muted-foreground">
+          {t('customer_requests.delivery_graph_summary', {
+            count: artifacts.length,
+            relationshipCount: relationships.length,
+          })}
+        </div>
+      </div>
+      <div className="border-t">
+        {externalArtifacts.map((artifact) => (
+          <DeliveryArtifactRow key={artifact.id} artifact={artifact} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DeliveryArtifactRow({ artifact }: { artifact: CustomerRequestDeliveryArtifact }) {
+  const { t } = useTranslation()
+  const label = artifact.title || artifact.externalKey || artifact.externalUrl || artifact.id
+  return (
+    <div className="grid gap-2 border-t p-3 first:border-t-0 sm:grid-cols-[minmax(0,1fr)_auto]">
+      <div className="min-w-0 space-y-1">
+        {artifact.externalUrl ? (
+          <a
+            className="flex min-w-0 items-center gap-2 font-medium hover:underline"
+            href={artifact.externalUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span className="min-w-0 truncate">{label}</span>
+            <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
+          </a>
+        ) : (
+          <div className="truncate font-medium">{label}</div>
+        )}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 font-mono">{artifact.provider}</span>
+          <span>{artifact.artifactType}</span>
+          {artifact.externalKey ? <span>{artifact.externalKey}</span> : null}
+          {artifact.status ? <span>{artifact.status}</span> : null}
+          {artifact.statusCategory ? <span>{artifact.statusCategory}</span> : null}
+          {artifact.assignee ? <span>{artifact.assignee}</span> : null}
+          <span>{syncStateLabel(artifact.syncState, t)}</span>
+          {artifact.lastSeenAt ? (
+            <span>
+              {t('customer_requests.delivery_artifact_last_seen', {
+                value: formatDate(artifact.lastSeenAt),
+              })}
+            </span>
+          ) : null}
+        </div>
+        {artifact.syncError ? (
+          <p className="text-xs text-destructive">{artifact.syncError}</p>
+        ) : null}
+      </div>
+      <div
+        className={cn(
+          'h-fit rounded border px-2 py-1 text-xs font-medium',
+          deliveryHealthClassName(artifact.health),
+        )}
+      >
+        {deliveryHealthLabel(artifact.health, t)}
+      </div>
+    </div>
+  )
+}
+
 function DuplicateRow({ item }: { item: CustomerRequestDuplicate }) {
   return (
     <div className="rounded-md border p-3 text-sm">
@@ -2146,17 +2251,79 @@ function DuplicateRow({ item }: { item: CustomerRequestDuplicate }) {
   )
 }
 
-function IssueLinkForm({ requestID }: { requestID: string }) {
+function isGitHubIssueLink(item: CustomerRequestIssueLink) {
+  return item.provider.toLowerCase() === 'github'
+}
+
+function IssueLinkForm({
+  requestID,
+  hasGitHubIssueLink,
+}: {
+  requestID: string
+  hasGitHubIssueLink: boolean
+}) {
   const { t } = useTranslation()
   const permissions = usePermissions()
   const [url, setURL] = useState('')
   const [provider, setProvider] = useState('github')
+  const [connectionID, setConnectionID] = useState('')
+  const [issueNumber, setIssueNumber] = useState('')
   const link = useLinkCustomerRequestIssue(requestID)
+  const createGitHubIssue = useCreateCustomerRequestGitHubIssue(requestID)
+  const githubConnectionOptionsQuery = useQuery(customerRequestGitHubIssueConnectionOptionsQuery())
+  const githubConnectionOptions = githubConnectionOptionsQuery.data ?? []
+  const githubConnections = githubConnectionOptions.map((option) => option.connection)
+  const selectedGitHubConnectionOption = githubConnectionOptions.find(
+    (option) => option.connection.id === connectionID,
+  )
+  const canUseManagedGitHubLink =
+    provider === 'github' &&
+    url.trim() === '' &&
+    selectedGitHubConnectionOption?.canLink === true &&
+    issueNumber.trim() !== ''
+  const canLinkIssue = url.trim() !== '' || canUseManagedGitHubLink
+  const canCreateGitHubIssue = selectedGitHubConnectionOption?.canCreate === true
+  useEffect(() => {
+    if (provider !== 'github' || connectionID !== '' || githubConnectionOptions.length === 0) {
+      return
+    }
+    const preferred =
+      githubConnectionOptions.find((option) => option.canLink && option.canCreate) ??
+      githubConnectionOptions.find((option) => option.canLink) ??
+      githubConnectionOptions.find((option) => option.canCreate)
+    setConnectionID(preferred?.connection.id ?? '')
+  }, [connectionID, githubConnectionOptions, provider])
   /* v8 ignore next -- @preserve: the issue-link form is hidden unless edit permission and request id exist. */
   if (!permissions.can('customer_request:edit') || !requestID) return null
+  const handleLinkIssue = () => {
+    const trimmedURL = url.trim()
+    const body =
+      trimmedURL === ''
+        ? {
+            provider: 'github',
+            externalUrl: '',
+            connectionId: connectionID,
+            issueNumber: issueNumber.trim(),
+          }
+        : { provider, externalUrl: trimmedURL }
+    link.mutate(body, {
+      onSuccess: () => {
+        setURL('')
+        setIssueNumber('')
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+    })
+  }
   return (
     <div className="rounded-md border p-3">
-      <div className="grid gap-2 sm:grid-cols-[9rem_minmax(0,1fr)_auto]">
+      <div
+        className={cn(
+          'grid gap-2',
+          hasGitHubIssueLink
+            ? 'sm:grid-cols-[9rem_minmax(0,1fr)_auto]'
+            : 'sm:grid-cols-[9rem_minmax(0,1fr)_auto_auto]',
+        )}
+      >
         <Select value={provider} onValueChange={setProvider}>
           <SelectTrigger>
             <SelectValue />
@@ -2174,17 +2341,8 @@ function IssueLinkForm({ requestID }: { requestID: string }) {
           onChange={(event) => setURL(event.target.value)}
         />
         <Button
-          disabled={link.isPending || url.trim().length === 0}
-          onClick={() =>
-            link.mutate(
-              { provider, externalUrl: url },
-              {
-                onSuccess: () => setURL(''),
-                onError: (err) =>
-                  toast.error(err instanceof Error ? err.message : t('common.error')),
-              },
-            )
-          }
+          disabled={link.isPending || createGitHubIssue.isPending || !canLinkIssue}
+          onClick={handleLinkIssue}
         >
           {link.isPending ? (
             <Loader2 className="size-4 animate-spin" />
@@ -2193,7 +2351,62 @@ function IssueLinkForm({ requestID }: { requestID: string }) {
           )}
           {t('customer_requests.link_issue')}
         </Button>
+        {hasGitHubIssueLink ? null : (
+          <Button
+            variant="secondary"
+            disabled={link.isPending || createGitHubIssue.isPending || !canCreateGitHubIssue}
+            onClick={() =>
+              createGitHubIssue.mutate(
+                { connectionId: connectionID },
+                {
+                  onSuccess: () => toast.success(t('customer_requests.create_github_issue_queued')),
+                  onError: (err) =>
+                    toast.error(err instanceof Error ? err.message : t('common.error')),
+                },
+              )
+            }
+          >
+            {createGitHubIssue.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Github className="size-4" />
+            )}
+            {t('customer_requests.create_github_issue')}
+          </Button>
+        )}
       </div>
+      {provider === 'github' ? (
+        <div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_9rem]">
+          <Select value={connectionID} onValueChange={setConnectionID}>
+            <SelectTrigger>
+              <SelectValue placeholder={t('customer_requests.github_connection')} />
+            </SelectTrigger>
+            <SelectContent>
+              {githubConnectionOptionsQuery.isLoading ? (
+                <SelectItem disabled value="__loading">
+                  {t('customer_requests.github_connection_loading')}
+                </SelectItem>
+              ) : null}
+              {!githubConnectionOptionsQuery.isLoading && githubConnections.length === 0 ? (
+                <SelectItem disabled value="__empty">
+                  {t('customer_requests.no_github_connections')}
+                </SelectItem>
+              ) : null}
+              {githubConnections.map((connection) => (
+                <SelectItem key={connection.id} value={connection.id}>
+                  {connection.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            value={issueNumber}
+            inputMode="numeric"
+            placeholder={t('customer_requests.issue_number')}
+            onChange={(event) => setIssueNumber(event.target.value)}
+          />
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -2408,6 +2621,21 @@ export function deliveryHealthLabel(
       return t('customer_requests.delivery_health_states.manual')
     default:
       return t('customer_requests.delivery_health_states.no_links')
+  }
+}
+
+function deliveryHealthClassName(health: CustomerRequestDeliveryHealth | undefined) {
+  switch (health) {
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED:
+      return 'border-destructive/40 bg-destructive/10 text-destructive'
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE:
+      return 'border-amber-500/40 bg-amber-500/10 text-amber-700'
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING:
+      return 'border-sky-500/40 bg-sky-500/10 text-sky-700'
+    case CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED:
+      return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700'
+    default:
+      return 'border-border bg-muted text-muted-foreground'
   }
 }
 

@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- Added external provider installation management for Console external sync,
+  including installation records, authorized resource selection, qualification
+  grading, connection binding with selected-resource provider configuration,
+  audit events, and OpenAPI/proto contract coverage.
+
+- Added a Customer Request delivery graph projection to the generated API,
+  Go detail model, and Console detail drawer, so linked external issue artifacts
+  are presented with provider-neutral nodes, relationships, health, and
+  last-seen context.
+
+- Customer Request delivery graphs now merge provider-normalized external
+  object link metadata into linked issue artifacts, including provider title,
+  status reason, assignee, URL, last-seen time, source, and external-sync
+  failure state.
+
+- Added a provider-neutral Customer Request delivery artifact projection table
+  and repository upsert/read path, so request detail graphs can include pull
+  requests, commits, branches, deployments, releases, project items, sub-issues,
+  and support tickets alongside legacy issue links.
+
+- External sync pull children for pull requests, commits, branches,
+  deployments, releases, project items, sub-issues, and support tickets now
+  project into Customer Request delivery graphs with provider relationship,
+  status, assignee, payload, and last-seen context.
+
+- GitHub issue pulls now read issue timeline events and emit referenced pull
+  requests plus closing commits as delivery artifact children, making provider
+  data reach Customer Request delivery graphs without manual projection code.
+
 ### Security
 
 - Removed `golang.org/x/crypto` from the root dependency graph and raised the
@@ -16,6 +47,21 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   package from the module graph.
 
 ### Fixed
+
+- Console primary buttons now keep an opaque hover background, preserving
+  WCAG text contrast for mouse-driven workflows.
+
+- Public board detail pages now return 404/400 for hidden or invalid public
+  request lookups surfaced by the public-visibility service instead of a generic
+  500 page.
+
+- Console and public portal pages now ship an explicit root favicon asset,
+  preventing browser smoke tests and real local sessions from logging missing
+  favicon resources.
+
+- Customer Request GitHub Issue creation now only enables Console actions for
+  push-capable external-sync mappings and sends the selected connection id,
+  preventing pull-only connections from surfacing a backend conflict.
 
 - Jira issue label construction now avoids an overflow-prone preallocation,
   and Console external-sync internal errors no longer log raw error strings in
@@ -29,6 +75,22 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - Request notification Console now hides public changelog links until the
   tenant enables changelog publishing, and hides the changelog publish kind
   until it can actually be used.
+
+- Console request cancellations caused by normal browser navigation now log at
+  info level instead of warning level while preserving the 499
+  `CLIENT_CANCELED` response.
+
+- Customer Request detail drawers now refresh shortly after queued GitHub Issue
+  creation runs, so the synced external issue link appears without a manual
+  page reload.
+
+- Go SDK end-to-end smoke now indents the generated Tink keyset before writing
+  its temporary config, so the real-stack SDK harness boots the server with a
+  valid YAML config.
+
+- Public portal submission pages now only show the acknowledgement after a
+  successful submission, preventing duplicate success text when visitors submit
+  feedback from the rendered page.
 
 - Request notification previews now wrap long JSON fields inside the card,
   preventing horizontal overflow in deployed Console pages on narrow viewports.
@@ -74,6 +136,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   labels for the column name and order controls, keeping the console
   accessibility gate green on the public visibility configuration page.
 
+- Feedback tag search popovers now expose a named dialog and listbox option
+  semantics for empty states, keeping duplicate-tag suppression accessible in
+  browser checks.
+
 - Feedback list queries now forward the `source` and `type` filters into the
   console list options, so the reserved request parameters actually affect the
   repo query instead of being dropped after binding.
@@ -87,6 +153,24 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 - External sync Console provider selection now loads registered adapters from
   the backend registry and hides the test-only `noop` provider, so GitHub and
   Jira are discoverable from the same create-connection dialog.
+
+- GitHub external sync now supports webhook-triggered bidirectional issue
+  refreshes and pulls issue comments into a deduplicated external comment
+  ledger, including event hints for single-issue replay, deleted-comment
+  tombstones, managed manual-link bridging, single-record manual run selectors,
+  a Customer Request detail action that queues single-request GitHub issue
+  creation through external sync, managed link-existing by GitHub connection
+  and issue number or by matching GitHub URL with an immediate targeted pull
+  run, ambiguous same-repository managed URL links and managed issue rebinding
+  conflicts are rejected, managed issue unlink writes a local tombstone so
+  later pulls and scheduled pushes do not silently relink or recreate it unless
+  an operator explicitly links or creates it again, GitHub status category
+  and assignee projection into Customer Request delivery links, provider payload
+  snapshots for delivery timeline labels and assignees, safe linked-issue
+  updates that avoid overwriting GitHub-authored title/body/labels by default,
+  marker-deduped managed request-context comments, run input metadata
+  diagnostics, and comment timeline entries without advancing the scheduled
+  cursor.
 
 - **Close-the-loop request notifications.**
   Added tenant-scoped request notification settings, sender configuration,

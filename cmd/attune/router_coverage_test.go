@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -164,6 +165,40 @@ func TestConsoleStaticDirAndMount(t *testing.T) {
 		if got := string(body); got != "console.log('mounted')" {
 			t.Fatalf("app.js body = %q, want mounted asset", got)
 		}
+	}
+}
+
+func TestMountRootAssetsServesFavicon(t *testing.T) {
+	r := chi.NewRouter()
+	mountRootAssets(r)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/favicon.svg", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/svg+xml; charset=utf-8" {
+		t.Fatalf("Content-Type = %q, want svg", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=86400" {
+		t.Fatalf("Cache-Control = %q, want cacheable favicon", got)
+	}
+	body, err := io.ReadAll(rec.Result().Body)
+	if err != nil {
+		t.Fatalf("read favicon body: %v", err)
+	}
+	if got := string(body); !strings.Contains(got, `<svg `) || !strings.Contains(got, `aria-label="Attune"`) {
+		t.Fatalf("favicon body = %q, want Attune svg", got)
+	}
+
+	rec = httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodHead, "/favicon.svg", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HEAD status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Length"); got == "" {
+		t.Fatal("HEAD Content-Length is empty")
 	}
 }
 

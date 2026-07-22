@@ -13,7 +13,12 @@ import type {
   PreviewEnrichPromptResponse,
   UpdateEnrichConfigResponse,
 } from '@/proto/attune/v1/enrich_config'
-import type { ListExternalSyncProvidersResponse } from '@/proto/attune/v1/external_sync'
+import type {
+  ListExternalProviderInstallationResourcesResponse,
+  ListExternalProviderInstallationsResponse,
+  ListExternalSyncProvidersResponse,
+  SelectExternalProviderInstallationResourcesResponse,
+} from '@/proto/attune/v1/external_sync'
 import type {
   FeedbackDetail,
   GetFeedbackStatsResponse,
@@ -126,6 +131,13 @@ const defaultExternalSyncProviders: ListExternalSyncProvidersResponse = {
     { provider: 'jira', display: 'Jira' },
   ],
 }
+const defaultExternalProviderInstallations: ListExternalProviderInstallationsResponse = {
+  installations: [],
+}
+const defaultExternalProviderInstallationResources: ListExternalProviderInstallationResourcesResponse =
+  { resources: [] }
+const defaultSelectExternalProviderInstallationResources: SelectExternalProviderInstallationResourcesResponse =
+  { resources: [] }
 const sampleDelivery = {
   id: '101',
   feedbackId: 'f-9',
@@ -559,6 +571,61 @@ export const handlers = [
 
   http.get(`${BASE}/external-sync/providers`, () =>
     HttpResponse.json(defaultExternalSyncProviders),
+  ),
+  http.get(`${BASE}/external-sync/provider-installations`, () =>
+    HttpResponse.json(defaultExternalProviderInstallations),
+  ),
+  http.post(`${BASE}/external-sync/provider-installations`, async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>
+    return HttpResponse.json({
+      id: 'pi-new',
+      tenantId: defaultMe.tenant?.id ?? 't-1',
+      provider: String(body.provider ?? 'github'),
+      displayName: String(body.displayName ?? 'GitHub App'),
+      installationKind: String(body.installationKind ?? 'github_app'),
+      status: 'pending',
+      externalInstallationId: String(body.externalInstallationId ?? ''),
+      accountLogin: String(body.accountLogin ?? ''),
+      accountId: String(body.accountId ?? ''),
+      accountUrl: String(body.accountUrl ?? ''),
+      baseUrl: String(body.baseUrl ?? ''),
+      permissionsJson: String(body.permissionsJson ?? '{}'),
+      capabilityProfileJson: String(body.capabilityProfileJson ?? '{}'),
+      resourceSelection: String(body.resourceSelection ?? 'none'),
+      qualificationStatus: 'untested',
+      lastQualifiedAt: '',
+      lastError: '',
+      createdBy: defaultMe.user?.openId ?? 'u-1',
+      updatedBy: defaultMe.user?.openId ?? 'u-1',
+      createdAt: '2026-07-08T01:00:00Z',
+      updatedAt: '2026-07-08T01:00:00Z',
+    })
+  }),
+  http.delete(
+    `${BASE}/external-sync/provider-installations/:id`,
+    () => new HttpResponse(null, { status: 204 }),
+  ),
+  http.post(
+    /\/fb\/v1\/console\/external-sync\/provider-installations\/([^/]+):qualify$/,
+    ({ request }) => {
+      const installationId =
+        new URL(request.url).pathname.match(
+          /\/external-sync\/provider-installations\/([^/]+):qualify$/,
+        )?.[1] ?? 'pi-1'
+      return HttpResponse.json({
+        installationId: decodeURIComponent(installationId),
+        ready: false,
+        grade: 'blocked',
+        checks: [],
+      })
+    },
+  ),
+  http.get(`${BASE}/external-sync/provider-installations/:id/resources`, () =>
+    HttpResponse.json(defaultExternalProviderInstallationResources),
+  ),
+  http.post(
+    /\/fb\/v1\/console\/external-sync\/provider-installations\/[^/]+\/resources:select$/,
+    () => HttpResponse.json(defaultSelectExternalProviderInstallationResources),
   ),
 
   http.get(`${BASE}/reply-send-hook`, () => HttpResponse.json(defaultReplySendHook)),

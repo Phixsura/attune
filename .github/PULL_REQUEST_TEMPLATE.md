@@ -20,6 +20,7 @@
 - [ ] `go vet ./...`
 - [ ] `go build ./...`
 - [ ] `go test -short ./...`
+- [ ] Full-stack browser acceptance attached for high-risk deployed workflows, or not applicable
 - [ ] Manual verification:
 <!-- Describe what you did to verify, ideally with a curl / log snippet. -->
 

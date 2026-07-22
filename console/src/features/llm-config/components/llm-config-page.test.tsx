@@ -417,7 +417,7 @@ test('creates and deletes a selected channel ability', async () => {
     },
   })
 
-  const abilityRow = screen.getByText('gpt-4o-mini').closest('tr')
+  const abilityRow = (await screen.findByText('gpt-4o-mini')).closest('tr')
   if (!abilityRow) throw new Error('ability row not found')
   await user.click(within(abilityRow).getByTitle('删除'))
   expect(await screen.findByRole('heading', { name: '删除能力' })).toBeInTheDocument()
@@ -451,7 +451,7 @@ test('edits a selected channel ability', async () => {
   const { user } = renderWithProviders(<LLMConfigPage />)
 
   await screen.findAllByText('Primary')
-  const abilityRow = screen.getByText('gpt-4o-mini').closest('tr')
+  const abilityRow = (await screen.findByText('gpt-4o-mini')).closest('tr')
   if (!abilityRow) throw new Error('ability row not found')
   await user.click(within(abilityRow).getByTitle('编辑'))
   await user.selectOptions(

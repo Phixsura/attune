@@ -10,13 +10,16 @@ import (
 )
 
 var (
-	ErrConnectionNotFound = errors.New("external sync connection not found")
-	ErrMappingNotFound    = errors.New("external sync mapping not found")
-	ErrRunNotFound        = errors.New("external sync run not found")
-	ErrFailureNotFound    = errors.New("external sync failure not found")
-	ErrConflictNotFound   = errors.New("external sync conflict not found")
-	ErrEventNotFound      = errors.New("external sync event not found")
-	ErrConflict           = errors.New("external sync conflict")
+	ErrConnectionNotFound   = errors.New("external sync connection not found")
+	ErrMappingNotFound      = errors.New("external sync mapping not found")
+	ErrRunNotFound          = errors.New("external sync run not found")
+	ErrLocalObjectNotFound  = errors.New("external sync local object not found")
+	ErrFailureNotFound      = errors.New("external sync failure not found")
+	ErrConflictNotFound     = errors.New("external sync conflict not found")
+	ErrEventNotFound        = errors.New("external sync event not found")
+	ErrInstallationNotFound = errors.New("external provider installation not found")
+	ErrResourceNotFound     = errors.New("external provider installation resource not found")
+	ErrConflict             = errors.New("external sync conflict")
 )
 
 const (
@@ -27,6 +30,7 @@ const (
 
 	TestStatusUntested = "untested"
 	TestStatusOK       = "ok"
+	TestStatusWarning  = "warning"
 	TestStatusFailed   = "failed"
 
 	DirectionPull          = "pull"
@@ -55,6 +59,8 @@ const (
 	SyncStateConflict = "conflict"
 	SyncStateDeleted  = "deleted"
 
+	ChildTypeComment = "comment"
+
 	EventSignatureVerified    = "verified"
 	EventSignatureFailed      = "failed"
 	EventSignatureNotRequired = "not_required"
@@ -63,12 +69,38 @@ const (
 	EventStatusReplayed = "replayed"
 	EventStatusIgnored  = "ignored"
 	EventStatusFailed   = "failed"
+
+	InstallationKindGitHubApp = "github_app"
+	InstallationKindOAuthApp  = "oauth_app"
+	InstallationKindToken     = "token"
+	InstallationKindManual    = "manual"
+
+	InstallationStatusPending   = "pending"
+	InstallationStatusActive    = "active"
+	InstallationStatusLimited   = "limited"
+	InstallationStatusDrifted   = "drifted"
+	InstallationStatusSuspended = "suspended"
+	InstallationStatusDeleted   = "deleted"
+
+	ResourceSelectionAll      = "all"
+	ResourceSelectionSelected = "selected"
+	ResourceSelectionNone     = "none"
+
+	ResourceTypeRepository   = "repository"
+	ResourceTypeProject      = "project"
+	ResourceTypeWorkspace    = "workspace"
+	ResourceTypeOrganization = "organization"
+
+	ResourceStatusActive  = "active"
+	ResourceStatusRemoved = "removed"
+	ResourceStatusUnknown = "unknown"
 )
 
 type Connection struct {
 	ID                      uuid.UUID
 	TenantID                string
 	Provider                string
+	ProviderInstallationID  *uuid.UUID
 	Name                    string
 	Enabled                 bool
 	Status                  string
@@ -123,6 +155,7 @@ type SyncRun struct {
 	FinishedAt       *time.Time
 	CursorBefore     []byte
 	CursorAfter      []byte
+	InputMetadata    []byte
 	RecordsSeen      int
 	RecordsChanged   int
 	RecordsFailed    int
@@ -181,6 +214,53 @@ type ListEventsFilter struct {
 type ListEventsResult struct {
 	Events       []SyncEvent
 	NextBeforeID string
+}
+
+type ProviderInstallation struct {
+	ID                     uuid.UUID
+	TenantID               string
+	Provider               string
+	DisplayName            string
+	InstallationKind       string
+	Status                 string
+	ExternalInstallationID string
+	AccountLogin           string
+	AccountID              string
+	AccountURL             string
+	BaseURL                string
+	Permissions            []byte
+	CapabilityProfile      []byte
+	ResourceSelection      string
+	QualificationStatus    string
+	LastQualifiedAt        *time.Time
+	LastError              string
+	CreatedBy              string
+	UpdatedBy              string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+}
+
+type ProviderInstallationResource struct {
+	ID                 uuid.UUID
+	TenantID           string
+	InstallationID     uuid.UUID
+	Provider           string
+	ResourceType       string
+	ExternalResourceID string
+	ResourceKey        string
+	DisplayName        string
+	HTMLURL            string
+	Selected           bool
+	Status             string
+	Permissions        []byte
+	LastSeenAt         *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type ProviderInstallationWithResources struct {
+	Installation ProviderInstallation
+	Resources    []ProviderInstallationResource
 }
 
 type SyncAttempt struct {
@@ -262,6 +342,33 @@ type BackfillResult struct {
 	Run     SyncRun
 }
 
+type CustomerRequestIssueCreateRunInput struct {
+	TenantID     string
+	RequestID    uuid.UUID
+	ConnectionID *uuid.UUID
+	MappingID    *uuid.UUID
+	ActorID      string
+}
+
+type CustomerRequestIssuePullRunInput struct {
+	TenantID     string
+	RequestID    uuid.UUID
+	ConnectionID uuid.UUID
+	MappingID    uuid.UUID
+	ExternalKey  string
+	ActorID      string
+}
+
+type CustomerRequestIssueCreateRunResult struct {
+	Mapping Mapping
+	Run     SyncRun
+}
+
+type CustomerRequestIssuePullRunResult struct {
+	Mapping Mapping
+	Run     SyncRun
+}
+
 type BatchResolveConflictsResult struct {
 	Conflicts []ConflictRow
 }
@@ -314,16 +421,29 @@ type PullRecord struct {
 	Payload           []byte
 }
 
+type PullChildRecord struct {
+	ParentExternalKey string
+	Type              string
+	ExternalKey       string
+	ExternalURL       string
+	ExternalVersion   string
+	ExternalUpdatedAt *time.Time
+	Deleted           bool
+	Payload           []byte
+}
+
 type ApplyPullInput struct {
-	TenantID     string
-	RunID        uuid.UUID
-	ConnectionID uuid.UUID
-	MappingID    uuid.UUID
-	Provider     string
-	StreamKey    string
-	CursorBefore []byte
-	CursorAfter  []byte
-	Records      []PullRecord
+	TenantID      string
+	RunID         uuid.UUID
+	ConnectionID  uuid.UUID
+	MappingID     uuid.UUID
+	Provider      string
+	StreamKey     string
+	CursorBefore  []byte
+	CursorAfter   []byte
+	InputMetadata []byte
+	Records       []PullRecord
+	Children      []PullChildRecord
 }
 
 type PushRecord struct {

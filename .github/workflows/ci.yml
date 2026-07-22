@@ -6,14 +6,12 @@
 #     .github/dependabot.yml bumps both together weekly.
 #   * Go + pnpm use the toolchains' BUILT-IN caching (setup-go keyed on go.sum,
 #     setup-node `cache: pnpm`) — no hand-rolled actions/cache.
-#   * dorny/paths-filter keeps unrelated PRs fast, but contract and deploy
-#     changes deliberately fan out: proto changes exercise Go + Console + proto;
-#     deploy changes exercise image/chart paths because production runs the
-#     built backend + SPA together.
+#   * dorny/paths-filter classifies changed areas for policy checks such as the
+#     changelog gate. CI jobs themselves still run and conclude pass/fail instead
+#     of showing up as skipped checks.
 #   * `ci-gate` is an `if: always()` aggregator and is the ONLY job that should
-#     be marked "required" in branch protection — a path-skipped job reports
-#     success, so gating on the real jobs directly would let unrelated PRs pass
-#     without ever running them. The gate fails iff a real job failed/cancelled.
+#     be marked "required" in branch protection. The gate fails iff a real job
+#     failed/cancelled/skipped.
 #
 # govulncheck is informational (continue-on-error): its standard-library
 # findings track the Go toolchain version against a live DB, so they change
@@ -119,7 +117,6 @@ jobs:
   # service container; internal/testdb creates an isolated database per test.
   integration-postgres:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -183,7 +180,6 @@ jobs:
   # ── Go: vet / build / test ─────────────────────────────────────────────────
   go-checks:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -218,7 +214,6 @@ jobs:
   # ── golangci-lint: ~15 linters (subsumes go vet) + §5 layering via depguard ─
   golangci-lint:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -236,7 +231,6 @@ jobs:
   # Pure bash/grep/awk — no Go toolchain. Scans all tracked *.go; --strict gates.
   lint-slog:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -261,7 +255,6 @@ jobs:
   # Pure bash — no Go toolchain. Checks duplicate prefixes, no-tx format, naming.
   lint-migrations:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -275,7 +268,6 @@ jobs:
   # and per-site // ptrext:allow / // ptrext:file-allow markers are exempt.
   lint-rawptr:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -290,7 +282,6 @@ jobs:
   # ── lint-errorcode: ErrorResponse.code must flow from ErrorCode enum ───────
   lint-errorcode:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -305,7 +296,6 @@ jobs:
   # ── Lizard: complexity (CCN ≤ 15) + length (NLOC ≤ 100) ────────────────────
   lizard:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -320,7 +310,6 @@ jobs:
   # ── jscpd: code duplication gate (config in .jscpd.json) ────────────────────
   jscpd:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -334,7 +323,6 @@ jobs:
   # ── Integration layout: keep build-tagged suites centralized ───────────────
   integration-layout:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -345,7 +333,6 @@ jobs:
   # ── govulncheck (informational — never blocks; see header) ─────────────────
   govulncheck:
     needs: changes
-    if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -363,7 +350,6 @@ jobs:
   # ── Console SPA: biome + build + browser accessibility ─────────────────────
   console:
     needs: changes
-    if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -409,7 +395,6 @@ jobs:
   # ── Public board runtime smoke: real PostgreSQL + Chromium + tenant isolation ──
   public-board-smoke:
     needs: changes
-    if: needs.changes.outputs.console == 'true' || needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -455,7 +440,6 @@ jobs:
   # ── Node SDK (@phixsura/attune, #37): typecheck, lint, test, build, examples ─
   sdk-node:
     needs: changes
-    if: needs.changes.outputs.sdk == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -491,7 +475,6 @@ jobs:
   # on sdk/go/go.sum.
   sdk-go:
     needs: changes
-    if: needs.changes.outputs.sdkgo == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -527,17 +510,28 @@ jobs:
   # ── Changelog enforcement: a code PR must update CHANGELOG.md (CLAUDE.md §2) ─
   changelog:
     needs: changes
-    if: >-
-      github.event_name == 'pull_request' &&
-      needs.changes.outputs.code == 'true' &&
-      needs.changes.outputs.changelog != 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Require a CHANGELOG.md entry (unless exempt)
+      - name: Require a CHANGELOG.md entry when code changes
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          CODE_CHANGED: ${{ needs.changes.outputs.code }}
+          CHANGELOG_CHANGED: ${{ needs.changes.outputs.changelog }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           HAS_SKIP_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
         run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "Changelog gate only applies to pull requests."
+            exit 0
+          fi
+          if [ "$CODE_CHANGED" != "true" ]; then
+            echo "No changelog-required code changes detected."
+            exit 0
+          fi
+          if [ "$CHANGELOG_CHANGED" = "true" ]; then
+            echo "CHANGELOG.md was updated."
+            exit 0
+          fi
           if [ "$HAS_SKIP_LABEL" = "true" ]; then
             echo "skip-changelog label present — exempt."
             exit 0
@@ -565,10 +559,6 @@ jobs:
   # ── Docker image smoke build (multi-arch, no push) ──────────────────────────
   docker-build:
     needs: changes
-    if: >-
-      needs.changes.outputs.go == 'true' ||
-      needs.changes.outputs.console == 'true' ||
-      needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -586,7 +576,6 @@ jobs:
   # ── Deploy: docker-compose base + obs overlay parse ────────────────────────
   compose-config:
     needs: changes
-    if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -604,10 +593,6 @@ jobs:
   # ── Helm chart: lint + schema/render validation + kind smoke ──────────────
   helm-chart:
     needs: changes
-    if: >-
-      needs.changes.outputs.go == 'true' ||
-      needs.changes.outputs.console == 'true' ||
-      needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -992,7 +977,6 @@ jobs:
   # ── proto: buf lint + codegen drift gate (issue #19) ───────────────────────
   proto:
     needs: changes
-    if: needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1046,9 +1030,10 @@ jobs:
           bad=0
           for r in $RESULTS; do
             case "$r" in
-              success | skipped) ;;
+              success) ;;
+              skipped) echo "::error::a required job was skipped"; bad=1 ;;
               *) echo "::error::a required job concluded '$r'"; bad=1 ;;
             esac
           done
           if [ "$bad" -ne 0 ]; then exit 1; fi
-          echo "All required jobs passed or were legitimately skipped."
+          echo "All required jobs passed."

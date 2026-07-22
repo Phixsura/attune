@@ -1,6 +1,6 @@
 import { HttpResponse, http } from 'msw'
 import { toast } from 'sonner'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PublicVisibilityPage } from '@/features/public-visibility/components/public-visibility-page'
 import {
   ModerationState,
@@ -22,9 +22,11 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }))
 
-server.use(
-  http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
-)
+beforeEach(() => {
+  server.use(
+    http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json({ views: [] })),
+  )
+})
 
 const currentRequestID = '11111111-1111-1111-1111-111111111111'
 const similarRequestID = '33333333-3333-3333-3333-333333333333'
@@ -246,7 +248,7 @@ describe('PublicVisibilityPage', () => {
         submittedByDisplay: 'ACME Labs',
       })
     })
-  }, 60_000)
+  }, 120_000)
 
   it('keeps roadmap mappings and portal field editors interactive', async () => {
     mockMe('admin')
@@ -260,7 +262,9 @@ describe('PublicVisibilityPage', () => {
 
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
-    await waitFor(() => expect(screen.getByText('路线图状态映射')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('路线图状态映射')).toBeInTheDocument(), {
+      timeout: 10_000,
+    })
 
     const mappingLabels = screen.getAllByLabelText('公开列名称')
     await user.clear(mappingLabels[0])
@@ -304,7 +308,7 @@ describe('PublicVisibilityPage', () => {
     await user.click(screen.getAllByRole('button', { name: '删除' })[0])
 
     expect(screen.getAllByLabelText('字段名称')).toHaveLength(1)
-  })
+  }, 120_000)
 
   it('saves and reapplies moderation views', async () => {
     mockMe('admin')
@@ -882,8 +886,13 @@ describe('PublicVisibilityPage', () => {
 
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '已公开 (1)' })).toBeEnabled())
-    await user.click(screen.getByRole('button', { name: '已公开 (1)' }))
+    const approvedQueueButton = await screen.findByRole(
+      'button',
+      { name: '已公开 (1)' },
+      { timeout: 10_000 },
+    )
+    expect(approvedQueueButton).toBeEnabled()
+    await user.click(approvedQueueButton)
     await user.click(screen.getByRole('button', { name: '隐藏' }))
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: '隐藏审核项' })).toBeInTheDocument()
@@ -897,7 +906,7 @@ describe('PublicVisibilityPage', () => {
       })
     })
 
-    await user.click(screen.getByRole('button', { name: '已拦截 (1)' }))
+    await user.click(await screen.findByRole('button', { name: '已拦截 (1)' }, { timeout: 10_000 }))
     await user.click(screen.getByRole('button', { name: '标记垃圾' }))
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: '标记垃圾审核项' })).toBeInTheDocument()

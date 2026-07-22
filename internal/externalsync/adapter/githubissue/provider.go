@@ -7,6 +7,7 @@ package githubissue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -89,6 +90,17 @@ func (p *Provider) Discover(_ context.Context, _ core.Connection) ([]core.Object
 				"url",
 				"updated_at",
 				"closed_at",
+				"comments",
+				"comment.id",
+				"comment.body",
+				"comment.author_login",
+				"comment.updated_at",
+				"delivery_artifact.type",
+				"delivery_artifact.relationship",
+				"delivery_artifact.external_key",
+				"delivery_artifact.title",
+				"delivery_artifact.status",
+				"delivery_artifact.updated_at",
 			},
 			RequiredFields: []string{"title"},
 			WritableFields: []string{
@@ -112,6 +124,10 @@ func (p *Provider) Pull(ctx context.Context, req core.PullRequest) (core.PullRes
 	if err != nil {
 		return core.PullResult{}, validationError("%v", err)
 	}
+	hint := decodePullHint(req.InputMetadata)
+	if hint.IssueNumber > 0 {
+		return p.pullSingleIssue(ctx, cfg, cursor, hint)
+	}
 	rawURL, err := issuesURL(cfg, cursor)
 	if err != nil {
 		return core.PullResult{}, err
@@ -128,11 +144,202 @@ func (p *Provider) Pull(ctx context.Context, req core.PullRequest) (core.PullRes
 	if err != nil {
 		return core.PullResult{}, validationError("%v", err)
 	}
+	children, err := p.commentChildrenForIssues(ctx, cfg, issues, hint)
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	deliveryChildren, err := p.deliveryArtifactChildrenForIssues(ctx, cfg, issues)
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	children = append(children, deliveryChildren...)
 	next, err := nextCursor(cfg, cursor, maxUpdated, headers.Get("Link"))
 	if err != nil {
 		return core.PullResult{}, err
 	}
-	return core.PullResult{Records: records, NextCursor: next}, nil
+	return core.PullResult{Records: records, Children: children, NextCursor: next}, nil
+}
+
+func (p *Provider) pullSingleIssue(ctx context.Context, cfg settings, cursor cursorState, hint pullHint) (core.PullResult, error) {
+	issue, err := p.fetchIssue(ctx, cfg, hint.IssueNumber)
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	records, _, err := normalizeIssues([]apiIssue{issue})
+	if err != nil {
+		return core.PullResult{}, validationError("%v", err)
+	}
+	children, err := p.commentChildrenForIssues(ctx, cfg, []apiIssue{issue}, hint)
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	deliveryChildren, err := p.deliveryArtifactChildrenForIssues(ctx, cfg, []apiIssue{issue})
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	children = append(children, deliveryChildren...)
+	next, err := encodeCursor(cursor)
+	if err != nil {
+		return core.PullResult{}, err
+	}
+	return core.PullResult{Records: records, Children: children, NextCursor: next}, nil
+}
+
+func (p *Provider) fetchIssue(ctx context.Context, cfg settings, issueNumber int) (apiIssue, error) {
+	rawURL, err := issueURL(cfg, issueNumber)
+	if err != nil {
+		return apiIssue{}, err
+	}
+	body, _, err := p.request(ctx, cfg, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return apiIssue{}, err
+	}
+	issue, err := decodeIssueResponse(body)
+	if err != nil {
+		return apiIssue{}, validationError("%v", err)
+	}
+	return issue, nil
+}
+
+func (p *Provider) commentChildrenForIssues(ctx context.Context, cfg settings, issues []apiIssue, hint pullHint) ([]core.ExternalChildRecord, error) {
+	children := []core.ExternalChildRecord{}
+	for _, issue := range issues {
+		if issue.PullRequest != nil || !shouldFetchComments(issue, hint) {
+			continue
+		}
+		comments, err := p.fetchIssueComments(ctx, cfg, issue.Number)
+		if err != nil {
+			return nil, err
+		}
+		normalized, err := normalizeCommentChildren(strconv.Itoa(issue.Number), comments)
+		if err != nil {
+			return nil, validationError("%v", err)
+		}
+		normalized, err = appendDeletedCommentHint(strconv.Itoa(issue.Number), normalized, issue, hint)
+		if err != nil {
+			return nil, validationError("%v", err)
+		}
+		children = append(children, normalized...)
+	}
+	return children, nil
+}
+
+func (p *Provider) deliveryArtifactChildrenForIssues(ctx context.Context, cfg settings, issues []apiIssue) ([]core.ExternalChildRecord, error) {
+	if !cfg.syncDeliveryArtifacts {
+		return nil, nil
+	}
+	children := []core.ExternalChildRecord{}
+	for _, issue := range issues {
+		if !shouldFetchDeliveryArtifacts(issue) {
+			continue
+		}
+		timeline, err := p.fetchIssueTimeline(ctx, cfg, issue.Number)
+		if isOptionalTimelineUnavailable(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		normalized, err := normalizeTimelineDeliveryChildren(cfg, strconv.Itoa(issue.Number), timeline)
+		if err != nil {
+			return nil, validationError("%v", err)
+		}
+		children = append(children, normalized...)
+	}
+	return children, nil
+}
+
+func shouldFetchDeliveryArtifacts(issue apiIssue) bool {
+	return issue.Number > 0 && issue.PullRequest == nil && extractCustomerRequestID(issue.Body) != ""
+}
+
+func appendDeletedCommentHint(parentKey string, children []core.ExternalChildRecord, issue apiIssue, hint pullHint) ([]core.ExternalChildRecord, error) {
+	if hint.EventType != "issue_comment" || hint.Action != "deleted" ||
+		hint.IssueNumber != issue.Number || hint.CommentID <= 0 {
+		return children, nil
+	}
+	commentKey := strconv.FormatInt(hint.CommentID, 10)
+	for _, child := range children {
+		if child.Type == "comment" && child.Key == commentKey {
+			return children, nil
+		}
+	}
+	child, err := deletedCommentChild(parentKey, hint.CommentID)
+	if err != nil {
+		return nil, err
+	}
+	return append(children, child), nil
+}
+
+func shouldFetchComments(issue apiIssue, hint pullHint) bool {
+	return issue.Comments > 0 || (hint.IssueNumber == issue.Number && hint.CommentID > 0)
+}
+
+func (p *Provider) fetchIssueComments(ctx context.Context, cfg settings, issueNumber int) ([]apiComment, error) {
+	rawURL, err := issueCommentsURL(cfg, issueNumber)
+	if err != nil {
+		return nil, err
+	}
+	var out []apiComment
+	for rawURL != "" {
+		body, headers, err := p.request(ctx, cfg, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		comments, err := decodeCommentsResponse(body)
+		if err != nil {
+			return nil, validationError("%v", err)
+		}
+		out = append(out, comments...)
+		next := parseNextLink(headers.Get("Link"))
+		if next == "" {
+			break
+		}
+		rawURL, err = validateNextURL(cfg, next)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (p *Provider) fetchIssueTimeline(ctx context.Context, cfg settings, issueNumber int) ([]apiTimelineEvent, error) {
+	rawURL, err := issueTimelineURL(cfg, issueNumber)
+	if err != nil {
+		return nil, err
+	}
+	var out []apiTimelineEvent
+	for rawURL != "" {
+		body, headers, err := p.request(ctx, cfg, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		events, err := decodeTimelineResponse(body)
+		if err != nil {
+			return nil, validationError("%v", err)
+		}
+		out = append(out, events...)
+		next := parseNextLink(headers.Get("Link"))
+		if next == "" {
+			break
+		}
+		rawURL, err = validateNextURL(cfg, next)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func isOptionalTimelineUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	providerErr := (*providerError)(nil)
+	if !errors.As(err, &providerErr) { // ptrext:allow errors.As out-param
+		return false
+	}
+	return providerErr.kind == "not_found"
 }
 
 func (p *Provider) Push(ctx context.Context, req core.PushRequest) (core.PushResult, error) {
@@ -163,49 +370,126 @@ func (p *Provider) pushOne(ctx context.Context, cfg settings, record core.LocalR
 	if err != nil {
 		return failedWrite(record.ID, "", err), err
 	}
-	rawURL, body, err := writeTarget(cfg, record, payload)
+	issue, err := p.writeIssue(ctx, cfg, record, payload)
 	if err != nil {
 		return failedWrite(record.ID, payload.ExternalKey, err), err
-	}
-	response, _, err := p.request(ctx, cfg, issueMethod(payload), rawURL, body)
-	if err != nil {
-		return failedWrite(record.ID, payload.ExternalKey, err), err
-	}
-	issue, err := decodeIssueResponse(response)
-	if err != nil {
-		return failedWrite(record.ID, payload.ExternalKey, err), validationError("%v", err)
 	}
 	key := payload.ExternalKey
 	if issue.Number > 0 {
 		key = strconv.Itoa(issue.Number)
 	}
+	if err := p.ensureManagedComment(ctx, cfg, record, payload, issue); err != nil {
+		return failedWriteWithIssue(record.ID, key, issue, err), err
+	}
 	return core.WriteResult{LocalID: record.ID, Key: key, URL: issue.HTMLURL, Version: issueVersion(issue)}, nil
 }
 
-func writeTarget(cfg settings, record core.LocalRecord, payload localIssuePayload) (string, []byte, error) {
-	var req issueWriteRequest
-	var err error
+func (p *Provider) writeIssue(ctx context.Context, cfg settings, record core.LocalRecord, payload localIssuePayload) (apiIssue, error) {
 	if payload.ExternalKey == "" {
-		req, err = buildCreateRequest(record, payload)
-	} else {
-		req, err = buildUpdateRequest(record, payload)
+		req, err := buildCreateRequest(cfg, record, payload)
+		if err != nil {
+			return apiIssue{}, err
+		}
+		return p.sendIssueWrite(ctx, cfg, http.MethodPost, []string{"issues"}, req)
 	}
+
+	issueNumber, normalizedKey, err := normalizeIssueWriteKey(cfg, payload.ExternalKey)
 	if err != nil {
-		return "", nil, err
+		return apiIssue{}, err
 	}
-	parts := []string{"issues"}
-	if payload.ExternalKey != "" {
-		parts = append(parts, payload.ExternalKey)
+	payload.ExternalKey = normalizedKey
+	current, err := p.fetchIssue(ctx, cfg, issueNumber)
+	if err != nil {
+		return apiIssue{}, err
 	}
+	req, err := buildUpdateRequest(cfg, record, payload, current)
+	if err != nil {
+		return apiIssue{}, err
+	}
+	if req.empty() {
+		return current, nil
+	}
+	return p.sendIssueWrite(ctx, cfg, http.MethodPatch, []string{"issues", payload.ExternalKey}, req)
+}
+
+func (p *Provider) sendIssueWrite(ctx context.Context, cfg settings, method string, parts []string, req issueWriteRequest) (apiIssue, error) {
 	rawURL, err := repoAPIURL(cfg, parts...)
 	if err != nil {
-		return "", nil, err
+		return apiIssue{}, err
 	}
 	body, err := writeRequestPayload(req)
 	if err != nil {
-		return "", nil, err
+		return apiIssue{}, err
 	}
-	return rawURL, body, nil
+	response, _, err := p.request(ctx, cfg, method, rawURL, body)
+	if err != nil {
+		return apiIssue{}, err
+	}
+	issue, err := decodeIssueResponse(response)
+	if err != nil {
+		return apiIssue{}, err
+	}
+	return issue, nil
+}
+
+func (p *Provider) ensureManagedComment(ctx context.Context, cfg settings, record core.LocalRecord, payload localIssuePayload, issue apiIssue) error {
+	if !cfg.syncComments || issue.Number <= 0 {
+		return nil
+	}
+	body, marker := managedCommentBody(record, payload)
+	if body == "" || marker == "" {
+		return nil
+	}
+	comments, err := p.fetchIssueComments(ctx, cfg, issue.Number)
+	if err != nil {
+		return err
+	}
+	existing := findManagedComment(comments, marker)
+	if existing != nil {
+		if bodyDigest(existing.Body) == bodyDigest(body) {
+			return nil
+		}
+		return p.updateManagedComment(ctx, cfg, existing.ID, body)
+	}
+	return p.createManagedComment(ctx, cfg, issue.Number, body)
+}
+
+func (p *Provider) createManagedComment(ctx context.Context, cfg settings, issueNumber int, body string) error {
+	rawURL, err := repoAPIURL(cfg, "issues", strconv.Itoa(issueNumber), "comments")
+	if err != nil {
+		return err
+	}
+	payload, err := writeCommentPayload(body)
+	if err != nil {
+		return err
+	}
+	response, _, err := p.request(ctx, cfg, http.MethodPost, rawURL, payload)
+	if err != nil {
+		return err
+	}
+	if _, err := decodeCommentResponse(response); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Provider) updateManagedComment(ctx context.Context, cfg settings, commentID int64, body string) error {
+	rawURL, err := issueCommentURL(cfg, commentID)
+	if err != nil {
+		return err
+	}
+	payload, err := writeCommentPayload(body)
+	if err != nil {
+		return err
+	}
+	response, _, err := p.request(ctx, cfg, http.MethodPatch, rawURL, payload)
+	if err != nil {
+		return err
+	}
+	if _, err := decodeCommentResponse(response); err != nil {
+		return err
+	}
+	return nil
 }
 
 func failedWrite(localID, key string, err error) core.WriteResult {
@@ -216,4 +500,11 @@ func failedWrite(localID, key string, err error) core.WriteResult {
 		Retryable: syncErr.Retryable,
 		Error:     ptrext.Of(syncErr),
 	}
+}
+
+func failedWriteWithIssue(localID, key string, issue apiIssue, err error) core.WriteResult {
+	result := failedWrite(localID, key, err)
+	result.URL = issue.HTMLURL
+	result.Version = issueVersion(issue)
+	return result
 }

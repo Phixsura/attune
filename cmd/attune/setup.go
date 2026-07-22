@@ -332,6 +332,7 @@ func buildCustomerRequestHandler(
 	settingsRepo := systemsettingsrepo.NewRepo(pool)
 	service := customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc)
 	service.SetNotificationSink(notifications)
+	service.SetIssueCreateRunStore(externalsyncrepo.New(pool))
 	handler := console.NewCustomerRequestHandler(service)
 	handler.SetSavedViewService(customerrequestviewsvc.New(customerrequestviewrepo.New(settingsRepo)))
 	return handler

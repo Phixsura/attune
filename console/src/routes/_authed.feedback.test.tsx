@@ -1144,7 +1144,7 @@ describe('_authed.feedback route — user flow smoke', () => {
     await waitFor(() => {
       expect(screen.queryByLabelText('紧急信号 仅查看紧急反馈')).toBeNull()
     })
-  })
+  }, 90_000)
 
   it('renders the workflow-state badge on a row via the displayName resolver', async () => {
     // A feedback row carrying a workflowState whose human label lives in

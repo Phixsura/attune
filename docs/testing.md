@@ -14,11 +14,14 @@ that cheap tests cannot see.
 | **L4 browser** | `cd console && pnpm test:e2e:a11y` | CI on Console changes | browser install | Critical Console routes in real Chromium with API mocks, accessibility, overflow, console-error, and interaction coverage. |
 | **L5 release runtime** | `make runtime-smoke` | pre-release opt-in | Docker only | Built image boots against throwaway pgvector Postgres; health/readiness, Console assets, metrics, migrations, Control Tower routing, and quality schemas are verified. |
 | **L6 live** | `make test-live` | manual only | real API calls | LLM provider round-trips and outbound provider smoke deliveries, all env-gated. |
+| **L7 full-stack browser acceptance** | no single command; see checklist below | PR evidence for high-risk product workflows | Docker + real browser + provider mock or sandbox | Production image, real Postgres, real Console, mouse-driven browser actions, provider-side evidence, database evidence, and log review for workflows where scripts are not enough. |
 
 Use `make release-smoke` before release candidates or large production-facing
 changes. It runs `ci-check`, PostgreSQL integration, proto lint/breaking checks,
 observability rule/dashboard validation, Compose parsing, whitespace checks,
-the public board + Console browser smoke, and the runtime image smoke.
+the public board + Console browser smoke, and the runtime image smoke. L7
+acceptance is intentionally separate because it requires a human-operated
+browser session and saved evidence.
 
 ## Unit and fast local tier
 
@@ -62,8 +65,7 @@ The integration tier is gated with `//go:build integration`, so the
 default unit sweep stays offline. PostgreSQL suites live under
 `test/integration/postgres/<area>` and use `internal/testdb` to open a
 real `pgxpool`, run every embedded migration before each smoke test,
-and isolate test data with one temporary database, Docker container,
-or local PostgreSQL cluster per test.
+and isolate test data with one temporary database per test.
 
 ```bash
 make test-integration
@@ -72,9 +74,9 @@ make test-integration
 Requirements:
 
 - Docker daemon running locally is the preferred path.
-- When Docker is available, local runs start `pgvector/pgvector:pg17` with
-  a short-lived Docker container, matching the CI service-container image and
-  the private deploy Compose stack.
+- When Docker is available and `ATTUNE_TEST_DATABASE_URL` is unset, the make
+  target starts one shared `pgvector/pgvector:pg17` service container, matching
+  the CI service-container image and the private deploy Compose stack.
 - When Docker is unavailable, the harness falls back to installed PostgreSQL
   binaries (`initdb` and `pg_ctl`) and still runs against a real temporary
   cluster on `127.0.0.1`.
@@ -82,6 +84,7 @@ Requirements:
   `ATTUNE_TEST_DATABASE_URL`; the harness connects to that admin
   database, creates a temporary database per test, runs migrations
   there, and drops it during cleanup.
+- To override the Go test timeout, set `ATTUNE_TEST_INTEGRATION_TIMEOUT`.
 
 CI uses the second path: `.github/workflows/ci.yml` runs an
 `integration-postgres` job with a GitHub Actions `pgvector/pgvector:pg17`
@@ -89,9 +92,9 @@ service container and exports `ATTUNE_TEST_DATABASE_URL` for
 `make test-integration`.
 
 `make test-integration` runs packages with `-p 1`. That keeps local
-fallback runs from starting many Postgres containers at once; test
-isolation still comes from a fresh container locally or a fresh
-temporary database in CI.
+fallback runs from stampeding the shared Postgres instance; test
+isolation comes from a fresh temporary database in both local Docker
+and CI service-container mode.
 
 Layout:
 
@@ -176,9 +179,13 @@ The script:
 - verifies `/console/control-tower`,
   `/console/analytics/classification-quality`, and referenced JS/CSS assets;
 - verifies `/metrics` exposes Go or attune series;
-- checks pgvector is installed, migrations reached at least version 96, and the
+- checks pgvector is installed, migrations reached at least version 112, and the
   classification-quality tables, classification-quality indexes, and
-  feedback-quality action table exist.
+  feedback-quality action table exist;
+- checks the production schema contains the external sync metadata required by
+  managed GitHub Issue sync: `external_sync_runs.input_metadata`,
+  `external_object_links.normalized_payload`, `external_object_comments`, and
+  the `customer_request_issue_links.external_object_link_id` bridge.
 
 You can smoke a prebuilt image without rebuilding:
 
@@ -186,6 +193,87 @@ You can smoke a prebuilt image without rebuilding:
 ATTUNE_RUNTIME_SMOKE_IMAGE=ghcr.io/phixsura/attune:tag \
   bash scripts/runtime-smoke.sh
 ```
+
+## Full-stack browser acceptance
+
+Detailed runbook and copyable evidence template:
+[`docs/full-stack-browser-acceptance.md`](full-stack-browser-acceptance.md).
+
+Use this tier when a workflow crosses all of these boundaries:
+
+- the production Docker image and embedded Console bundle;
+- real PostgreSQL migrations and background workers;
+- authenticated Console sessions;
+- outbound provider HTTP, webhooks, retry, cursor, or dedupe behavior;
+- a user-visible state change that lower-level tests can miss.
+
+This tier is not a substitute for L0-L6. It is the final operator-style proof
+that the built artifact works through the same surfaces a tenant will use.
+
+Required setup:
+
+- build the production image from the exact source state under review;
+- run the image with a throwaway pgvector PostgreSQL database;
+- use an HTTPS provider mock or a disposable provider sandbox;
+- make the provider mock record method, path, query, and whether authorization
+  was present, without logging secret values;
+- keep the app, database, and mock running until evidence has been captured.
+
+Required browser discipline:
+
+- use a visible browser window;
+- use mouse clicks, mouse scrolling, and ordinary form entry for the acceptance
+  path;
+- use read-only DOM inspection only to confirm what is visible or to copy exact
+  evidence text;
+- do not replace the acceptance path with Playwright locators, direct API
+  mutations, or database writes.
+
+Required evidence:
+
+- deployed base URL, image tag or digest, and compose/project identifier;
+- screenshots for the key before/after UI states;
+- provider mock or sandbox evidence for every expected outbound request;
+- database rows proving durable state, such as queued/succeeded runs, object
+  links, delivery links, comments, or event dedupe rows;
+- service logs for the same time window, including a note about unrelated
+  warnings and every error found;
+- teardown command, or an explicit note that the stack was intentionally left
+  running for review.
+
+After the mouse-driven path is complete, use
+`scripts/collect-full-stack-evidence.sh` to collect read-only deployment,
+database, provider, and log evidence. The collector is supporting evidence only;
+it does not satisfy the mouse-driven browser requirement by itself.
+
+Hard failures:
+
+- the Console cannot be reached from the production image;
+- the relevant workflow can pass only through direct API or database mutation;
+- provider calls are absent, unsigned when signatures are required, missing
+  authorization, or aimed at the wrong host;
+- sync run status is `failed`, `dead`, or `partial` without an accepted product
+  explanation;
+- the UI does not show the durable state that the database contains;
+- service logs show TLS, SSRF, refused connection, panic, migration, worker, or
+  permission errors in the workflow under validation.
+
+For GitHub Issue sync changes, the acceptance path must cover:
+
+- Console login against the deployed image;
+- creating or selecting a Customer Request in the real Console;
+- creating a GitHub connection against an HTTPS mock or sandbox;
+- testing the connection from the Console and confirming the provider saw a
+  repository read with authorization;
+- setting the Customer Request to Issue mapping to `bidirectional` or `push`;
+- creating a GitHub Issue from the Customer Request detail page;
+- confirming the provider saw `POST /repos/{owner}/{repo}/issues`;
+- confirming any managed backlink/comment path, when enabled, is marker-deduped
+  and visible in provider evidence;
+- confirming the Customer Request detail page shows the issue link, external
+  state, sync state, and timestamp;
+- confirming the external sync page shows a succeeded `push` run with one seen
+  record, one changed record, zero failures, and zero conflicts.
 
 ## Developer parity loop — demo workspace
 

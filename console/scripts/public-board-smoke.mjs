@@ -988,9 +988,27 @@ async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
     await portalPopup.waitForLoadState('domcontentloaded')
     await expect(portalPopup).toHaveURL(new RegExp(`/portal/${tenant.slug}(?:\\?|$)`))
     await expect(portalPopup.getByRole('heading').first()).toBeVisible()
+    await verifyPortalSubmissionForm(portalPopup)
   } finally {
     await context.close()
   }
+}
+
+async function verifyPortalSubmissionForm(page) {
+  const acknowledgement = 'Thanks. We will review your submission.'
+  await expect(page.getByText(acknowledgement, { exact: true })).toHaveCount(0)
+  await expect(page.locator('#portal-status')).toHaveText('')
+
+  const title = `Browser smoke portal submission ${Date.now()}`
+  await page.getByPlaceholder('Summarize the problem or idea', { exact: true }).fill(title)
+  await page
+    .getByPlaceholder('Tell us what happened, what you expected, and any helpful context.', {
+      exact: true,
+    })
+    .fill('Browser smoke verifies the acknowledgement is only rendered after submit.')
+  await page.getByRole('button', { name: 'Submit feedback', exact: true }).click()
+  await expect(page.locator('#portal-status')).toHaveText(acknowledgement)
+  await expect(page.getByText(acknowledgement, { exact: true })).toHaveCount(1)
 }
 
 async function approveModerationSubject(page, subjectId) {

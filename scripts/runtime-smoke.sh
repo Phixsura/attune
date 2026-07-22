@@ -208,15 +208,40 @@ quality_action_tables="$(
   docker exec "$postgres" psql -U attune -d attune -tAc \
     "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='feedback_quality_actions'"
 )"
+external_sync_input_metadata_columns="$(
+  docker exec "$postgres" psql -U attune -d attune -tAc \
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='external_sync_runs' AND column_name='input_metadata'"
+)"
+external_object_payload_columns="$(
+  docker exec "$postgres" psql -U attune -d attune -tAc \
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='external_object_links' AND column_name='normalized_payload'"
+)"
+external_comment_tables="$(
+  docker exec "$postgres" psql -U attune -d attune -tAc \
+    "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='external_object_comments'"
+)"
+external_comment_indexes="$(
+  docker exec "$postgres" psql -U attune -d attune -tAc \
+    "SELECT count(*) FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'idx_external_object_comments%'"
+)"
+customer_request_link_bridge_columns="$(
+  docker exec "$postgres" psql -U attune -d attune -tAc \
+    "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='customer_request_issue_links' AND column_name='external_object_link_id'"
+)"
 
 if [[ -z "$pgvector_version" ]]; then
   echo "runtime-smoke: pgvector extension is missing" >&2
   exit 1
 fi
-assert_ge schema_migrations_feedback_max_version 96 "$migration_version"
+assert_ge schema_migrations_feedback_max_version 112 "$migration_version"
 assert_ge classification_quality_tables 4 "$quality_tables"
 assert_ge classification_quality_indexes 5 "$quality_indexes"
 assert_ge feedback_quality_action_tables 1 "$quality_action_tables"
+assert_ge external_sync_runs_input_metadata_columns 1 "$external_sync_input_metadata_columns"
+assert_ge external_object_links_normalized_payload_columns 1 "$external_object_payload_columns"
+assert_ge external_object_comments_tables 1 "$external_comment_tables"
+assert_ge external_object_comments_indexes 4 "$external_comment_indexes"
+assert_ge customer_request_issue_link_bridge_columns 1 "$customer_request_link_bridge_columns"
 
 cat <<EOF
 runtime-smoke: ok
@@ -234,4 +259,9 @@ runtime-smoke: ok
   classification_quality_tables=$quality_tables
   classification_quality_indexes=$quality_indexes
   feedback_quality_action_tables=$quality_action_tables
+  external_sync_runs_input_metadata_columns=$external_sync_input_metadata_columns
+  external_object_links_normalized_payload_columns=$external_object_payload_columns
+  external_object_comments_tables=$external_comment_tables
+  external_object_comments_indexes=$external_comment_indexes
+  customer_request_issue_link_bridge_columns=$customer_request_link_bridge_columns
 EOF

@@ -5,6 +5,7 @@ package jiraissue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -55,6 +56,53 @@ func TestCustomRequestLabelPrefixIsRespected(t *testing.T) {
 	}
 }
 
+func TestProviderRegisteredAndDiscoversIssueSchema(t *testing.T) {
+	provider, ok := core.Lookup(providerID)
+	if !ok {
+		t.Fatal("Lookup(jira) returned ok=false")
+	}
+	if provider.Provider() != providerID {
+		t.Fatalf("provider id = %q, want jira", provider.Provider())
+	}
+	schemas, err := provider.Discover(context.Background(), core.Connection{})
+	if err != nil {
+		t.Fatalf("Discover returned error: %v", err)
+	}
+	if len(schemas) != 1 || schemas[0].Type != "issue" || !containsString(schemas[0].Fields, "request_marker") {
+		t.Fatalf("schemas = %#v; want issue schema with request_marker", schemas)
+	}
+}
+
+func TestCheckFailureBranches(t *testing.T) {
+	provider := NewProvider()
+	result, err := provider.Check(context.Background(), core.Connection{})
+	if err != nil || result.OK || !strings.Contains(result.Error, "project_key") {
+		t.Fatalf("invalid settings Check = %+v err=%v; want failed result without top-level error", result, err)
+	}
+
+	setLoopbackEgress(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertJiraHeaders(t, r)
+		w.Header().Set("X-Atlassian-Request-Id", "jira-auth-1")
+		http.Error(w, `{"message":"bad credentials"}`, http.StatusUnauthorized)
+	}))
+	t.Cleanup(server.Close)
+	provider = NewProvider(WithHTTPClient(server.Client()))
+	result, err = provider.Check(context.Background(), testConnection(server.URL))
+	if err != nil || result.OK || result.RequestID != "jira-auth-1" ||
+		!strings.Contains(result.Error, "bad credentials") {
+		t.Fatalf("HTTP failed Check = %+v err=%v; want provider error result", result, err)
+	}
+
+	provider = NewProvider(WithHTTPClient(ptrext.Of(http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("dial failed")
+	})})))
+	result, err = provider.Check(context.Background(), testConnection(server.URL))
+	if err == nil || result.OK || !strings.Contains(result.Error, "dial failed") {
+		t.Fatalf("transport failed Check = %+v err=%v; want top-level transport error", result, err)
+	}
+}
+
 func TestCheckAndPullIssues(t *testing.T) {
 	setLoopbackEgress(t)
 	customerRequestID := uuid.NewString()
@@ -80,6 +128,40 @@ func TestCheckAndPullIssues(t *testing.T) {
 	}
 	assertJiraPullResult(t, result, server.URL, customerRequestID)
 	assertJiraPullNextCursor(t, result.NextCursor)
+}
+
+func TestPullFailureBranches(t *testing.T) {
+	provider := NewProvider()
+	if _, err := provider.Pull(context.Background(), core.PullRequest{Connection: core.Connection{}}); err == nil {
+		t.Fatal("Pull accepted invalid connection settings")
+	}
+	if _, err := provider.Pull(context.Background(), core.PullRequest{
+		Connection: testConnection("https://jira.example.com"),
+		Cursor:     []byte(`{"updated_since":"bad"}`),
+	}); err == nil {
+		t.Fatal("Pull accepted invalid cursor")
+	}
+
+	setLoopbackEgress(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertJiraHeaders(t, r)
+		_, _ = w.Write([]byte(`{"issues":"not-an-array"}`))
+	}))
+	t.Cleanup(server.Close)
+	provider = NewProvider(WithHTTPClient(server.Client()))
+	if _, err := provider.Pull(context.Background(), core.PullRequest{Connection: testConnection(server.URL)}); err == nil {
+		t.Fatal("Pull accepted malformed search response")
+	}
+
+	providerErrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertJiraHeaders(t, r)
+		http.Error(w, `{"message":"jira unavailable"}`, http.StatusBadGateway)
+	}))
+	t.Cleanup(providerErrServer.Close)
+	provider = NewProvider(WithHTTPClient(providerErrServer.Client()))
+	if _, err := provider.Pull(context.Background(), core.PullRequest{Connection: testConnection(providerErrServer.URL)}); err == nil {
+		t.Fatal("Pull swallowed provider search error")
+	}
 }
 
 func assertJiraSettingsBases(t *testing.T, settings settings) {
@@ -278,6 +360,368 @@ func TestPushUpdatesExistingIssueByMarker(t *testing.T) {
 	if len(result.Results) != 1 || result.Results[0].Key != "ACME-7" {
 		t.Fatalf("push result = %+v; want existing issue key", result.Results)
 	}
+}
+
+func TestPushFailureAndNoopBranches(t *testing.T) {
+	provider := NewProvider()
+	empty, err := provider.Push(context.Background(), core.PushRequest{})
+	if err != nil || len(empty.Results) != 0 {
+		t.Fatalf("empty Push = %+v err=%v; want no-op", empty, err)
+	}
+	if _, err := provider.Push(context.Background(), core.PushRequest{
+		Connection: core.Connection{},
+		Records:    []core.LocalRecord{{ID: "cr-1", Payload: []byte(`{"title":"Bug"}`)}},
+	}); err == nil {
+		t.Fatal("Push accepted invalid connection settings")
+	}
+
+	result, err := provider.Push(context.Background(), core.PushRequest{
+		Connection: testConnection("https://jira.example.com"),
+		Records: []core.LocalRecord{
+			{ID: "cr-bad-json", Payload: []byte(`{`)},
+			{ID: "cr-empty-title", Payload: marshalPayload(t, localIssuePayload{})},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Push returned top-level error: %v", err)
+	}
+	if len(result.Results) != 2 {
+		t.Fatalf("results len = %d; want per-record failures", len(result.Results))
+	}
+	for _, row := range result.Results {
+		if row.Error == nil || row.Error.Kind != "validation" || row.Retryable {
+			t.Fatalf("failure row = %+v; want non-retryable validation error", row)
+		}
+	}
+}
+
+func TestJiraWriteHelperBranches(t *testing.T) {
+	setLoopbackEgress(t)
+	provider := NewProvider()
+	cfg := testSettings("https://jira.example.com")
+	issue := jiraIssue{
+		Key: "ACME-1",
+		Fields: jiraIssueFields{
+			Status: jiraStatus{StatusCategory: jiraStatusCategory{Key: "done"}},
+		},
+	}
+
+	if err := provider.updateIssue(context.Background(), cfg, issue, core.LocalRecord{}, localIssuePayload{}); err != nil {
+		t.Fatalf("empty updateIssue returned error: %v", err)
+	}
+	if err := provider.ensureRequestComment(context.Background(), cfg, issue, localIssuePayload{}); err != nil {
+		t.Fatalf("empty ensureRequestComment returned error: %v", err)
+	}
+	if err := provider.ensureRequestedStatus(context.Background(), cfg, issue, "shipped"); err != nil {
+		t.Fatalf("matching status category returned error: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assertJiraHeaders(t, r)
+		if r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/issue/ACME-1/transitions" {
+			writeJSON(t, w, map[string]any{"transitions": []map[string]any{}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	provider = NewProvider(WithHTTPClient(server.Client()))
+	cfg = testSettings(server.URL)
+	err := provider.ensureRequestedStatus(context.Background(), cfg, jiraIssue{Key: "ACME-1"}, "shipped")
+	if err == nil || !strings.Contains(err.Error(), "does not expose a transition") {
+		t.Fatalf("ensureRequestedStatus error = %v; want missing transition validation", err)
+	}
+	if err := provider.ensureRequestedStatus(context.Background(), cfg, jiraIssue{Key: "ACME-1"}, "planned"); err != nil {
+		t.Fatalf("planned status without transition should be skippable, got %v", err)
+	}
+}
+
+func TestJiraProviderWriteEdgeBranches(t *testing.T) {
+	setLoopbackEgress(t)
+	customerRequestID := uuid.NewString()
+
+	t.Run("external key not found falls back to marker search", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/issue/ACME-404":
+				http.Error(w, `{"message":"missing"}`, http.StatusNotFound)
+			case r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/search":
+				writeJSON(t, w, jiraSearchResponse{
+					StartAt:    0,
+					MaxResults: 100,
+					Total:      1,
+					Issues:     []jiraIssue{jiraIssueFixture(t, "ACME-22", customerRequestID)},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		provider := NewProvider(WithHTTPClient(server.Client()))
+		issue, err := provider.resolveWriteIssue(context.Background(), testSettings(server.URL), localIssuePayload{
+			ExternalKey:       "ACME-404",
+			CustomerRequestID: customerRequestID,
+		})
+		if err != nil {
+			t.Fatalf("resolveWriteIssue returned error: %v", err)
+		}
+		if issue == nil || issue.Key != "ACME-22" {
+			t.Fatalf("resolved issue = %+v; want marker search match", issue)
+		}
+	})
+
+	t.Run("create issue rejects malformed response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			if r.Method != http.MethodPost || r.URL.Path != "/rest/api/3/issue" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(`{`))
+		}))
+		t.Cleanup(server.Close)
+
+		provider := NewProvider(WithHTTPClient(server.Client()))
+		_, err := provider.createIssue(context.Background(), testSettings(server.URL), core.LocalRecord{ID: customerRequestID}, localIssuePayload{
+			Title:             "Bad create response",
+			CustomerRequestID: customerRequestID,
+		})
+		if err == nil || !strings.Contains(err.Error(), "decode jira issue response") {
+			t.Fatalf("createIssue error = %v; want decode validation error", err)
+		}
+	})
+
+	t.Run("get issue rejects malformed response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			if r.Method != http.MethodGet || r.URL.Path != "/rest/api/3/issue/ACME-1" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(`{`))
+		}))
+		t.Cleanup(server.Close)
+
+		provider := NewProvider(WithHTTPClient(server.Client()))
+		_, err := provider.getIssue(context.Background(), testSettings(server.URL), "ACME-1")
+		if err == nil || !strings.Contains(err.Error(), "decode jira issue response") {
+			t.Fatalf("getIssue error = %v; want decode validation error", err)
+		}
+	})
+}
+
+func TestJiraPushStageFailureBranches(t *testing.T) {
+	setLoopbackEgress(t)
+
+	t.Run("update failure returns per-record error", func(t *testing.T) {
+		customerRequestID := uuid.NewString()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			if r.URL.Path != "/rest/api/3/issue/ACME-1" {
+				http.NotFound(w, r)
+				return
+			}
+			switch r.Method {
+			case http.MethodGet:
+				writeJSON(t, w, jiraIssueFixture(t, "ACME-1", customerRequestID))
+			case http.MethodPut:
+				http.Error(w, `{"message":"update failed"}`, http.StatusBadGateway)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		result, err := NewProvider(WithHTTPClient(server.Client())).Push(context.Background(), core.PushRequest{
+			Connection: testConnection(server.URL),
+			Records: []core.LocalRecord{{
+				ID: customerRequestID,
+				Payload: marshalPayload(t, localIssuePayload{
+					ExternalKey:       "ACME-1",
+					Title:             "Update issue",
+					CustomerRequestID: customerRequestID,
+				}),
+			}},
+		})
+		if err != nil {
+			t.Fatalf("Push returned top-level error: %v", err)
+		}
+		assertSingleFailedJiraWrite(t, result, "ACME-1", "update failed")
+	})
+
+	t.Run("comment failure returns per-record error", func(t *testing.T) {
+		customerRequestID := uuid.NewString()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/rest/api/3/issue/ACME-1":
+				writeJSON(t, w, jiraIssue{
+					Key: "ACME-1",
+					Fields: jiraIssueFields{
+						Summary: "Update issue",
+						Updated: "2026-07-08T11:00:00Z",
+					},
+				})
+			case r.Method == http.MethodPut && r.URL.Path == "/rest/api/3/issue/ACME-1":
+				w.WriteHeader(http.StatusNoContent)
+			case r.Method == http.MethodPost && r.URL.Path == "/rest/api/3/issue/ACME-1/comment":
+				http.Error(w, `{"message":"comment failed"}`, http.StatusBadGateway)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		result, err := NewProvider(WithHTTPClient(server.Client())).Push(context.Background(), core.PushRequest{
+			Connection: testConnection(server.URL),
+			Records: []core.LocalRecord{{
+				ID: customerRequestID,
+				Payload: marshalPayload(t, localIssuePayload{
+					ExternalKey:       "ACME-1",
+					Title:             "Update issue",
+					CustomerRequestID: customerRequestID,
+				}),
+			}},
+		})
+		if err != nil {
+			t.Fatalf("Push returned top-level error: %v", err)
+		}
+		assertSingleFailedJiraWrite(t, result, "ACME-1", "comment failed")
+	})
+
+	t.Run("final refresh failure returns per-record error", func(t *testing.T) {
+		customerRequestID := uuid.NewString()
+		getCalls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			if r.URL.Path != "/rest/api/3/issue/ACME-1" {
+				http.NotFound(w, r)
+				return
+			}
+			switch r.Method {
+			case http.MethodGet:
+				getCalls++
+				if getCalls == 1 {
+					writeJSON(t, w, jiraIssueFixture(t, "ACME-1", customerRequestID))
+					return
+				}
+				http.Error(w, `{"message":"refresh failed"}`, http.StatusBadGateway)
+			case http.MethodPut:
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		result, err := NewProvider(WithHTTPClient(server.Client())).Push(context.Background(), core.PushRequest{
+			Connection: testConnection(server.URL),
+			Records: []core.LocalRecord{{
+				ID: customerRequestID,
+				Payload: marshalPayload(t, localIssuePayload{
+					ExternalKey:       "ACME-1",
+					Title:             "Update issue",
+					CustomerRequestID: customerRequestID,
+				}),
+			}},
+		})
+		if err != nil {
+			t.Fatalf("Push returned top-level error: %v", err)
+		}
+		assertSingleFailedJiraWrite(t, result, "ACME-1", "refresh failed")
+	})
+}
+
+func TestJiraTransitionProviderBranches(t *testing.T) {
+	setLoopbackEgress(t)
+
+	t.Run("configured transition is preferred", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			if r.Method != http.MethodGet || r.URL.Path != "/rest/api/3/issue/ACME-1/transitions" {
+				http.NotFound(w, r)
+				return
+			}
+			writeJSON(t, w, map[string]any{"transitions": []map[string]any{
+				transitionJSON("90", "Release", "done"),
+				transitionJSON("31", "Done", "done"),
+			}})
+		}))
+		t.Cleanup(server.Close)
+
+		cfg := testSettings(server.URL)
+		cfg.statusTransitions = map[string]string{"shipped": "Release"}
+		provider := NewProvider(WithHTTPClient(server.Client()))
+		transition, err := provider.chooseTransition(context.Background(), cfg, "ACME-1", "shipped")
+		if err != nil {
+			t.Fatalf("chooseTransition returned error: %v", err)
+		}
+		if transition == nil || transition.ID != "90" {
+			t.Fatalf("chosen transition = %+v; want configured Release transition", transition)
+		}
+	})
+
+	t.Run("list transitions rejects malformed JSON", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			_, _ = w.Write([]byte(`{"transitions":`))
+		}))
+		t.Cleanup(server.Close)
+
+		provider := NewProvider(WithHTTPClient(server.Client()))
+		_, err := provider.listTransitions(context.Background(), testSettings(server.URL), "ACME-1")
+		if err == nil || !strings.Contains(err.Error(), "decode jira transitions response") {
+			t.Fatalf("listTransitions error = %v; want decode error", err)
+		}
+	})
+
+	t.Run("empty transition id is a no-op", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			switch r.Method {
+			case http.MethodGet:
+				writeJSON(t, w, map[string]any{"transitions": []map[string]any{
+					transitionJSON("", "Done", "done"),
+				}})
+			case http.MethodPost:
+				t.Fatal("transition POST should not be called for an empty transition id")
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		provider := NewProvider(WithHTTPClient(server.Client()))
+		err := provider.ensureRequestedStatus(context.Background(), testSettings(server.URL), jiraIssue{Key: "ACME-1"}, "shipped")
+		if err != nil {
+			t.Fatalf("ensureRequestedStatus returned error: %v", err)
+		}
+	})
+
+	t.Run("transition post failure bubbles up", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assertJiraHeaders(t, r)
+			switch r.Method {
+			case http.MethodGet:
+				writeJSON(t, w, map[string]any{"transitions": []map[string]any{
+					transitionJSON("31", "Done", "done"),
+				}})
+			case http.MethodPost:
+				http.Error(w, `{"message":"workflow failed"}`, http.StatusBadGateway)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		provider := NewProvider(WithHTTPClient(server.Client()))
+		err := provider.ensureRequestedStatus(context.Background(), testSettings(server.URL), jiraIssue{Key: "ACME-1"}, "shipped")
+		if err == nil || !strings.Contains(err.Error(), "workflow failed") {
+			t.Fatalf("ensureRequestedStatus error = %v; want transition provider failure", err)
+		}
+	})
 }
 
 func newJiraPushCreateServer(t *testing.T, customerRequestID string) (*httptest.Server, *jiraPushCreateCounts) {
@@ -652,4 +1096,44 @@ func serverURL(r *http.Request) string {
 		scheme = "https"
 	}
 	return scheme + "://" + r.Host
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func transitionJSON(id, name, category string) map[string]any {
+	return map[string]any{
+		"id":   id,
+		"name": name,
+		"to": map[string]any{
+			"id":   id + "-to",
+			"name": name,
+			"statusCategory": map[string]any{
+				"key": category,
+			},
+		},
+	}
+}
+
+func assertSingleFailedJiraWrite(t *testing.T, result core.PushResult, key, message string) {
+	t.Helper()
+	if len(result.Results) != 1 {
+		t.Fatalf("push results len = %d; want one failure", len(result.Results))
+	}
+	row := result.Results[0]
+	if row.Key != key || row.Error == nil || !row.Retryable || !strings.Contains(row.Error.Message, message) {
+		t.Fatalf("push result = %+v; want retryable failure for %s containing %q", row, key, message)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }

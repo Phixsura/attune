@@ -17,6 +17,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
@@ -107,6 +108,130 @@ func TestNormalizeIssueInputDerivesExternalKey(t *testing.T) {
 	}
 }
 
+func TestResolveManagedIssueLinkTargetRejectsAmbiguousLocatorInput(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	connectionID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	service := &Service{}
+
+	tests := []struct {
+		name string
+		in   LinkIssueInput
+		want error
+	}{
+		{
+			name: "url and issue number",
+			in: LinkIssueInput{
+				TenantID:     "tenant-a",
+				RequestID:    requestID,
+				Provider:     "github",
+				ExternalURL:  "https://github.com/Phixsura/attune/issues/212",
+				ConnectionID: ptrext.Of(connectionID),
+				IssueNumber:  "212",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "issue number without connection",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "github",
+				IssueNumber: "212",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "non github provider with issue number",
+			in: LinkIssueInput{
+				TenantID:     "tenant-a",
+				RequestID:    requestID,
+				Provider:     "jira",
+				ConnectionID: ptrext.Of(connectionID),
+				IssueNumber:  "212",
+			},
+			want: ErrUnsupportedProvider,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := service.resolveManagedIssueLinkTarget(context.Background(), tt.in)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("resolveManagedIssueLinkTarget() error = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveManagedIssueLinkTargetAllowsDirectURLInput(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	service := &Service{}
+	in := LinkIssueInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		IssueNumber: "   ",
+	}
+
+	got, err := service.resolveManagedIssueLinkTarget(context.Background(), in)
+	if err != nil {
+		t.Fatalf("resolveManagedIssueLinkTarget() error = %v", err)
+	}
+	if got.ExternalURL != in.ExternalURL || got.IssueNumber != "" {
+		t.Fatalf("resolveManagedIssueLinkTarget() = %+v, want direct URL unchanged with blank issue number", got)
+	}
+}
+
+func TestEnqueueManagedIssuePullBranches(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	connectionID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	mappingID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	input := LinkIssueInput{
+		TenantID:  "tenant-a",
+		RequestID: requestID,
+		Provider:  "github",
+		Actor:     auditlogsvc.Actor{ID: "user-1"},
+	}
+	target := &repo.ManagedIssueSyncTarget{
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+		ExternalKey:  "Phixsura/attune#228",
+	}
+
+	(&Service{}).enqueueManagedIssuePull(ctx, input, target)
+
+	store := &recordingIssueCreateRunStore{}
+	service := &Service{issueCreates: store}
+	service.enqueueManagedIssuePull(ctx, input, nil)
+	service.enqueueManagedIssuePull(ctx, LinkIssueInput{Provider: "jira"}, target)
+	service.enqueueManagedIssuePull(ctx, input, &repo.ManagedIssueSyncTarget{ConnectionID: connectionID, MappingID: mappingID})
+	if len(store.pullInputs) != 0 {
+		t.Fatalf("skip branches enqueued %d pull runs, want 0", len(store.pullInputs))
+	}
+
+	service.enqueueManagedIssuePull(ctx, input, target)
+	if len(store.pullInputs) != 1 {
+		t.Fatalf("pull run enqueues = %d, want 1", len(store.pullInputs))
+	}
+	enqueued := store.pullInputs[0]
+	if enqueued.TenantID != input.TenantID ||
+		enqueued.RequestID != requestID ||
+		enqueued.ConnectionID != connectionID ||
+		enqueued.MappingID != mappingID ||
+		enqueued.ExternalKey != "Phixsura/attune#228" ||
+		enqueued.ActorID != "user-1" {
+		t.Fatalf("pull input = %+v", enqueued)
+	}
+
+	failingStore := &recordingIssueCreateRunStore{pullErr: errors.New("queue failed")}
+	(&Service{issueCreates: failingStore}).enqueueManagedIssuePull(ctx, input, target)
+	if len(failingStore.pullInputs) != 1 {
+		t.Fatalf("failing store pull inputs = %d, want 1", len(failingStore.pullInputs))
+	}
+}
+
 func TestNormalizeCustomerLinkTrimsIdentityFields(t *testing.T) {
 	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	got, err := normalizeCustomerLink(LinkCustomerInput{
@@ -184,6 +309,143 @@ func TestNormalizeSupporterRejectsOversizedFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeSupporterProfileAndValidationBranches(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	revenue := int64(125000)
+
+	gotLink, err := normalizeCustomerLink(LinkCustomerInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		AccountKey: " account:acme ",
+		AccountProfile: AccountProfileInput{
+			RevenueCents:    ptrext.Of(revenue),
+			RevenueCurrency: " ",
+			Tier:            " enterprise ",
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeCustomerLink(profile) error = %v", err)
+	}
+	if gotLink.AccountProfile.RevenueCurrency != "USD" ||
+		gotLink.AccountProfile.Tier != "enterprise" ||
+		accountRevenueCents(gotLink.AccountProfile) != revenue {
+		t.Fatalf("normalizeCustomerLink(profile) = %+v, want normalized account profile", gotLink.AccountProfile)
+	}
+
+	gotVote, err := normalizeVote(VoteInput{
+		TenantID:       "tenant-a",
+		RequestID:      requestID,
+		AccountKey:     " account:acme ",
+		AccountProfile: AccountProfileInput{LifecycleStatus: " active "},
+	})
+	if err != nil {
+		t.Fatalf("normalizeVote(profile) error = %v", err)
+	}
+	if gotVote.Weight != 1 ||
+		gotVote.AccountProfile.RevenueCurrency != "USD" ||
+		gotVote.AccountProfile.LifecycleStatus != "active" {
+		t.Fatalf("normalizeVote(profile) = %+v, want default weight and normalized profile", gotVote)
+	}
+
+	cases := []struct {
+		name string
+		link LinkCustomerInput
+	}{
+		{
+			name: "missing tenant",
+			link: LinkCustomerInput{
+				RequestID:  requestID,
+				AccountKey: "account:acme",
+			},
+		},
+		{
+			name: "missing request id",
+			link: LinkCustomerInput{
+				TenantID:   "tenant-a",
+				AccountKey: "account:acme",
+			},
+		},
+		{
+			name: "profile without account key",
+			link: LinkCustomerInput{
+				TenantID:       "tenant-a",
+				RequestID:      requestID,
+				SubjectKey:     "user:42",
+				AccountProfile: AccountProfileInput{Tier: "enterprise"},
+			},
+		},
+		{
+			name: "invalid profile currency",
+			link: LinkCustomerInput{
+				TenantID:       "tenant-a",
+				RequestID:      requestID,
+				AccountKey:     "account:acme",
+				AccountProfile: AccountProfileInput{RevenueCurrency: "US"},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeCustomerLink(tc.link); !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizeCustomerLink() error = %v, want ErrValidation", err)
+			}
+		})
+	}
+
+	if _, err := normalizeVote(VoteInput{
+		TenantID:   "tenant-a",
+		RequestID:  requestID,
+		AccountKey: "account:acme",
+		Weight:     -1,
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeVote(weight=-1) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeVote(VoteInput{
+		TenantID:       "tenant-a",
+		RequestID:      requestID,
+		SubjectKey:     "user:42",
+		AccountProfile: AccountProfileInput{CRMProvider: "salesforce"},
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeVote(profile without account) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeVote(VoteInput{
+		TenantID:       "tenant-a",
+		RequestID:      requestID,
+		AccountKey:     "account:acme",
+		AccountProfile: AccountProfileInput{RevenueCents: ptrext.Of(int64(-1))},
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeVote(negative revenue) error = %v, want ErrValidation", err)
+	}
+}
+
+func TestValidSupporterFieldsEachLimit(t *testing.T) {
+	valid := []string{"subject-key", "subject-hash", "Subject Display", "account-key", "Account Display", "note"}
+	tests := []struct {
+		name  string
+		field int
+		value string
+	}{
+		{name: "subject key", field: 0, value: strings.Repeat("x", 513)},
+		{name: "subject hash", field: 1, value: strings.Repeat("x", 129)},
+		{name: "subject display", field: 2, value: strings.Repeat("x", 501)},
+		{name: "account key", field: 3, value: strings.Repeat("x", 513)},
+		{name: "account display", field: 4, value: strings.Repeat("x", 501)},
+		{name: "note", field: 5, value: strings.Repeat("x", 5001)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fields := append([]string(nil), valid...)
+			fields[tt.field] = tt.value
+			if validSupporterFields(fields[0], fields[1], fields[2], fields[3], fields[4], fields[5]) {
+				t.Fatal("validSupporterFields() = true, want false")
+			}
+		})
+	}
+	if !validSupporterFields(valid[0], valid[1], valid[2], valid[3], valid[4], valid[5]) {
+		t.Fatal("validSupporterFields(valid) = false, want true")
+	}
+}
+
 func TestNormalizeIssueInputRejectsUnsupportedProvider(t *testing.T) {
 	_, err := normalizeIssueInput(LinkIssueInput{
 		TenantID:    "tenant-a",
@@ -193,6 +455,107 @@ func TestNormalizeIssueInputRejectsUnsupportedProvider(t *testing.T) {
 	})
 	if !errors.Is(err, ErrUnsupportedProvider) {
 		t.Fatalf("normalizeIssueInput() error = %v, want ErrUnsupportedProvider", err)
+	}
+}
+
+func TestNormalizeIssueInputValidationBranches(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	got, err := normalizeIssueInput(LinkIssueInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    " GitHub ",
+		ExternalURL: " http://github.com/Phixsura/attune/issues/228 ",
+		ExternalKey: " Phixsura/attune#228 ",
+		Title:       " Bidirectional sync ",
+		Status:      " open ",
+	})
+	if err != nil {
+		t.Fatalf("normalizeIssueInput(http) error = %v", err)
+	}
+	if got.Provider != "github" ||
+		got.ExternalURL != "http://github.com/Phixsura/attune/issues/228" ||
+		got.ExternalKey != "Phixsura/attune#228" ||
+		got.Title != "Bidirectional sync" ||
+		got.Status != "open" {
+		t.Fatalf("normalizeIssueInput(http) = %+v, want trimmed issue fields", got)
+	}
+
+	cases := []struct {
+		name string
+		in   LinkIssueInput
+		want error
+	}{
+		{
+			name: "missing tenant",
+			in: LinkIssueInput{
+				RequestID:   requestID,
+				Provider:    "github",
+				ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "missing request id",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				Provider:    "github",
+				ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "missing url host",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "github",
+				ExternalURL: "https:///issues/228",
+			},
+			want: ErrInvalidIssueURL,
+		},
+		{
+			name: "long url",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "other",
+				ExternalURL: "https://tracker.example.com/" + strings.Repeat("x", 2049),
+				ExternalKey: "tracker-1",
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "long title",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "other",
+				ExternalURL: "https://tracker.example.com/items/1",
+				ExternalKey: "tracker-1",
+				Title:       strings.Repeat("x", 501),
+			},
+			want: ErrValidation,
+		},
+		{
+			name: "long status",
+			in: LinkIssueInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				Provider:    "other",
+				ExternalURL: "https://tracker.example.com/items/1",
+				ExternalKey: "tracker-1",
+				Status:      strings.Repeat("x", 121),
+			},
+			want: ErrValidation,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeIssueInput(tc.in); !errors.Is(err, tc.want) {
+				t.Fatalf("normalizeIssueInput() error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -320,6 +683,12 @@ func TestNormalizeNoteAndListDefaults(t *testing.T) {
 	}
 	if _, err := normalizeNote(NoteInput{TenantID: "tenant-a", RequestID: requestID}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizeNote(empty) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeNote(NoteInput{RequestID: requestID, Body: "note"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeNote(missing tenant) error = %v, want ErrValidation", err)
+	}
+	if _, err := normalizeNote(NoteInput{TenantID: "tenant-a", Body: "note"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("normalizeNote(missing request) error = %v, want ErrValidation", err)
 	}
 	if _, err := normalizeNote(NoteInput{
 		TenantID:  "tenant-a",
@@ -449,6 +818,66 @@ func TestNormalizeIssueSync(t *testing.T) {
 	if _, err := normalizeIssueSync(IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: linkID, SyncError: strings.Repeat("x", 2001)}); !errors.Is(err, ErrValidation) {
 		t.Fatalf("normalizeIssueSync(long sync error) error = %v, want ErrValidation", err)
 	}
+
+	for _, tc := range []struct {
+		name string
+		in   IssueSyncInput
+	}{
+		{
+			name: "missing tenant",
+			in: IssueSyncInput{
+				RequestID:   requestID,
+				IssueLinkID: linkID,
+			},
+		},
+		{
+			name: "missing request",
+			in: IssueSyncInput{
+				TenantID:    "tenant-a",
+				IssueLinkID: linkID,
+			},
+		},
+		{
+			name: "missing issue link",
+			in: IssueSyncInput{
+				TenantID:  "tenant-a",
+				RequestID: requestID,
+			},
+		},
+		{
+			name: "long status",
+			in: IssueSyncInput{
+				TenantID:    "tenant-a",
+				RequestID:   requestID,
+				IssueLinkID: linkID,
+				Status:      strings.Repeat("x", 121),
+			},
+		},
+		{
+			name: "long status category",
+			in: IssueSyncInput{
+				TenantID:               "tenant-a",
+				RequestID:              requestID,
+				IssueLinkID:            linkID,
+				ExternalStatusCategory: strings.Repeat("x", 121),
+			},
+		},
+		{
+			name: "long assignee",
+			in: IssueSyncInput{
+				TenantID:         "tenant-a",
+				RequestID:        requestID,
+				IssueLinkID:      linkID,
+				ExternalAssignee: strings.Repeat("x", 501),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeIssueSync(tc.in); !errors.Is(err, ErrValidation) {
+				t.Fatalf("normalizeIssueSync() error = %v, want ErrValidation", err)
+			}
+		})
+	}
 }
 
 func TestIssueKeyDerivation(t *testing.T) {
@@ -470,6 +899,37 @@ func TestIssueKeyDerivation(t *testing.T) {
 	}
 	if got := deriveExternalKey("github", mustParseCustomerRequestIssueURL(t, "https://github.com/Phixsura/attune/pull/1")); got != "https://github.com/Phixsura/attune/pull/1" {
 		t.Fatalf("deriveExternalKey(non-issue github) = %q", got)
+	}
+}
+
+func TestGitHubIssueCreateHelpers(t *testing.T) {
+	if hasGitHubIssueLink(nil) {
+		t.Fatal("hasGitHubIssueLink(nil) = true, want false")
+	}
+	detail := &Detail{Request: repo.Detail{
+		IssueLinks: []repo.IssueLink{
+			{Provider: "jira"},
+			{Provider: "GitHub"},
+		},
+	}}
+	if !hasGitHubIssueLink(detail) {
+		t.Fatal("hasGitHubIssueLink() = false, want true for GitHub provider")
+	}
+	if hasGitHubIssueLink(&Detail{Request: repo.Detail{IssueLinks: []repo.IssueLink{{Provider: "linear"}}}}) {
+		t.Fatal("hasGitHubIssueLink(linear) = true, want false")
+	}
+
+	for _, err := range []error{externalsyncrepo.ErrMappingNotFound, externalsyncrepo.ErrConflict} {
+		if got := mapIssueCreateRunError(err); !errors.Is(got, repo.ErrConflict) {
+			t.Fatalf("mapIssueCreateRunError(%v) = %v, want repo.ErrConflict", err, got)
+		}
+	}
+	if got := mapIssueCreateRunError(externalsyncrepo.ErrLocalObjectNotFound); !errors.Is(got, repo.ErrNotFound) {
+		t.Fatalf("mapIssueCreateRunError(local object not found) = %v, want repo.ErrNotFound", got)
+	}
+	other := errors.New("boom")
+	if got := mapIssueCreateRunError(other); !errors.Is(got, other) {
+		t.Fatalf("mapIssueCreateRunError(other) = %v, want original error", got)
 	}
 }
 
@@ -497,6 +957,9 @@ func TestAuditMetadataHelpers(t *testing.T) {
 	}
 	if got := createAuditSummary("customer_request.promote_feedback", repo.Summary{}); got != "Promoted feedback to customer request" {
 		t.Fatalf("createAuditSummary(promote) = %q", got)
+	}
+	if got := createAuditSummary("customer_request.create", repo.Summary{}); got != "Created customer request" {
+		t.Fatalf("createAuditSummary(create without display id) = %q", got)
 	}
 	if createAuditMetadata(summary, "idempotency-key")["owner_member_id"] != ownerID.String() {
 		t.Fatalf("createAuditMetadata() = %+v, want owner member id", createAuditMetadata(summary, "idempotency-key"))
@@ -740,6 +1203,31 @@ func mustParseCustomerRequestIssueURL(t *testing.T, raw string) *url.URL {
 
 func repoActor() auditlogsvc.Actor {
 	return auditlogsvc.Actor{ID: "actor-1"}
+}
+
+type recordingIssueCreateRunStore struct {
+	createInputs []externalsyncrepo.CustomerRequestIssueCreateRunInput
+	createResult *externalsyncrepo.CustomerRequestIssueCreateRunResult
+	createErr    error
+	pullInputs   []externalsyncrepo.CustomerRequestIssuePullRunInput
+	pullResult   *externalsyncrepo.CustomerRequestIssuePullRunResult
+	pullErr      error
+}
+
+func (s *recordingIssueCreateRunStore) CreateCustomerRequestIssueRun(
+	_ context.Context,
+	in externalsyncrepo.CustomerRequestIssueCreateRunInput,
+) (*externalsyncrepo.CustomerRequestIssueCreateRunResult, error) {
+	s.createInputs = append(s.createInputs, in)
+	return s.createResult, s.createErr
+}
+
+func (s *recordingIssueCreateRunStore) CreateCustomerRequestIssuePullRun(
+	_ context.Context,
+	in externalsyncrepo.CustomerRequestIssuePullRunInput,
+) (*externalsyncrepo.CustomerRequestIssuePullRunResult, error) {
+	s.pullInputs = append(s.pullInputs, in)
+	return s.pullResult, s.pullErr
 }
 
 type fakeIdempotencyStore struct {

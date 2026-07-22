@@ -41,6 +41,7 @@ type service interface {
 	DeleteNote(ctx context.Context, tenantID string, requestID, noteID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
 	Merge(ctx context.Context, in svc.MergeInput) (*svc.Detail, error)
 	LinkIssue(ctx context.Context, in svc.LinkIssueInput) (*svc.Detail, error)
+	CreateGitHubIssue(ctx context.Context, in svc.CreateGitHubIssueInput) (*svc.CreateGitHubIssueResult, error)
 	UnlinkIssue(ctx context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error)
 	RecordIssueSync(ctx context.Context, in svc.IssueSyncInput) (*svc.Detail, error)
 }
@@ -537,20 +538,68 @@ func (h *Handler) LinkIssue(
 	if err != nil {
 		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid customer request id")
 	}
+	connectionID, err := optionalUUID(req.ConnectionId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external connection id")
+	}
+	mappingID, err := optionalUUID(req.MappingId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external mapping id")
+	}
 	detail, err := h.service.LinkIssue(ctx, svc.LinkIssueInput{
-		TenantID:    ctx.Auth.TenantID,
-		RequestID:   id,
-		Provider:    req.GetProvider(),
-		ExternalURL: req.GetExternalUrl(),
-		ExternalKey: req.GetExternalKey(),
-		Title:       req.GetTitle(),
-		Status:      req.GetStatus(),
-		Actor:       actor(ctx),
+		TenantID:     ctx.Auth.TenantID,
+		RequestID:    id,
+		Provider:     req.GetProvider(),
+		ExternalURL:  req.GetExternalUrl(),
+		ExternalKey:  req.GetExternalKey(),
+		Title:        req.GetTitle(),
+		Status:       req.GetStatus(),
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+		IssueNumber:  req.GetIssueNumber(),
+		Actor:        actor(ctx),
 	})
 	if err != nil {
 		return h.detailError(ctx, err)
 	}
 	return dispatcher.OK(detailToProto(ptrext.Indirect(detail)))
+}
+
+func (h *Handler) CreateGitHubIssue(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.CreateCustomerRequestGitHubIssueRequest,
+) (dispatcher.Result[*attunev1.CreateCustomerRequestGitHubIssueResponse], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid customer request id")
+	}
+	connectionID, err := optionalUUID(req.ConnectionId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external connection id")
+	}
+	mappingID, err := optionalUUID(req.MappingId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid external mapping id")
+	}
+	result, err := h.service.CreateGitHubIssue(ctx, svc.CreateGitHubIssueInput{
+		TenantID:     ctx.Auth.TenantID,
+		RequestID:    id,
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+		Actor:        actor(ctx),
+	})
+	if err != nil {
+		return h.createGitHubIssueError(ctx, err)
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.CreateCustomerRequestGitHubIssueResponse{
+		Detail:       detailToProto(ptrext.Indirect(result.Detail)),
+		RunId:        result.RunID.String(),
+		ConnectionId: result.ConnectionID.String(),
+		MappingId:    result.MappingID.String(),
+	}))
 }
 
 func (h *Handler) UnlinkIssue(
@@ -698,6 +747,24 @@ func (h *Handler) detailError(
 	}
 }
 
+func (h *Handler) createGitHubIssueError(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	err error,
+) (dispatcher.Result[*attunev1.CreateCustomerRequestGitHubIssueResponse], error) {
+	const where = "console.CustomerRequestHandler.CreateGitHubIssue"
+	switch {
+	case errors.Is(err, svc.ErrValidation), errors.Is(err, repo.ErrInvalidInput):
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "invalid customer request input")
+	case errors.Is(err, repo.ErrNotFound), errors.Is(err, repo.ErrLinkNotFound), errors.Is(err, repo.ErrOwnerNotFound):
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "customer request resource not found")
+	case errors.Is(err, repo.ErrConflict):
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusConflict, attunev1.ErrorCode_CONFLICT, "customer request conflict")
+	default:
+		logext.Errorf(ctx, "[%s] failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
+		return dispatcher.Fail[*attunev1.CreateCustomerRequestGitHubIssueResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "customer request operation failed")
+	}
+}
+
 func (h *Handler) listError(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	err error,
@@ -811,12 +878,63 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 		Description:     detail.Request.Summary.Description,
 		Feedback:        feedback,
 		IssueLinks:      issues,
+		DeliveryGraph:   deliveryGraphToProto(detail.Request.DeliveryGraph),
 		AuditEntries:    audit,
 		Customers:       customers,
 		Votes:           votes,
 		Notes:           notes,
 		Duplicates:      duplicates,
 		AccountProfiles: accountProfiles,
+	})
+}
+
+func deliveryGraphToProto(graph repo.DeliveryGraph) *attunev1.CustomerRequestDeliveryGraph {
+	artifacts := make([]*attunev1.CustomerRequestDeliveryArtifact, 0, len(graph.Artifacts))
+	for _, item := range graph.Artifacts {
+		artifacts = append(artifacts, deliveryArtifactToProto(item))
+	}
+	relationships := make([]*attunev1.CustomerRequestDeliveryRelationship, 0, len(graph.Relationships))
+	for _, item := range graph.Relationships {
+		relationships = append(relationships, deliveryRelationshipToProto(item))
+	}
+	return ptrext.Of(attunev1.CustomerRequestDeliveryGraph{
+		Artifacts:         artifacts,
+		Relationships:     relationships,
+		Health:            deliveryHealthToProto(graph.Health),
+		HealthExplanation: graph.HealthExplanation,
+		UpdatedAt:         formatTime(graph.UpdatedAt),
+	})
+}
+
+func deliveryArtifactToProto(item repo.DeliveryArtifact) *attunev1.CustomerRequestDeliveryArtifact {
+	return ptrext.Of(attunev1.CustomerRequestDeliveryArtifact{
+		Id:             item.ID,
+		Provider:       item.Provider,
+		ArtifactType:   item.ArtifactType,
+		ExternalKey:    item.ExternalKey,
+		ExternalUrl:    item.ExternalURL,
+		Title:          item.Title,
+		Status:         item.Status,
+		StatusCategory: item.StatusCategory,
+		Assignee:       item.Assignee,
+		SyncState:      syncStateToProto(item.SyncState),
+		Health:         deliveryHealthToProto(item.Health),
+		LastSeenAt:     formatTime(item.LastSeenAt),
+		Source:         item.Source,
+		SyncError:      item.SyncError,
+	})
+}
+
+func deliveryRelationshipToProto(
+	item repo.DeliveryRelationship,
+) *attunev1.CustomerRequestDeliveryRelationship {
+	return ptrext.Of(attunev1.CustomerRequestDeliveryRelationship{
+		Id:               item.ID,
+		SourceArtifactId: item.SourceArtifactID,
+		TargetArtifactId: item.TargetArtifactID,
+		RelationshipType: item.RelationshipType,
+		Provider:         item.Provider,
+		CreatedAt:        formatTime(ptrext.Of(item.CreatedAt)),
 	})
 }
 

@@ -95,7 +95,7 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 111, count, "should match current migration count")
+	require.Equal(t, 114, count, "should match current migration count")
 }
 
 func TestPublicVisibilityMigrationAllowsPublicModerationAuditActions(t *testing.T) {
@@ -140,6 +140,54 @@ func TestExternalSyncMigrationAllowsAllExternalSyncAuditActions(t *testing.T) {
 		"external_sync_event.replay",
 	} {
 		require.Contains(t, sql, "'"+action+"'", "audit action must be accepted by chk_audit_action_value")
+	}
+}
+
+func TestGitHubBidirectionalSyncMigrationAllowsCreateIssueAuditAction(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/112_github_bidirectional_issue_sync.sql")
+	require.NoError(t, err)
+	require.Contains(t, string(body), "'customer_request.create_github_issue'")
+}
+
+func TestExternalProviderInstallationsMigrationAllowsAuditActions(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/113_external_provider_installations.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, action := range []string{
+		"external_provider_installation.create",
+		"external_provider_installation.delete",
+		"external_provider_installation.qualify",
+		"external_provider_installation.resources_select",
+	} {
+		require.Contains(t, sql, "'"+action+"'", "audit action must be accepted by chk_audit_action_value")
+	}
+}
+
+func TestCustomerRequestDeliveryArtifactsMigrationDefinesProjectionContract(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/114_customer_request_delivery_artifacts.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, value := range []string{
+		"customer_request_delivery_artifacts",
+		"'pull_request'",
+		"'commit'",
+		"'deployment'",
+		"'release'",
+		"'project_item'",
+		"'support_ticket'",
+		"'implements'",
+		"'ships_in'",
+		"'tracked_by'",
+		"idx_customer_request_delivery_artifacts_unique",
+		"jsonb_typeof(payload) = 'object'",
+	} {
+		require.Contains(t, sql, value, "delivery artifact migration should include %s", value)
 	}
 }
 

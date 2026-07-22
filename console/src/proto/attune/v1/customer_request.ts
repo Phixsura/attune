@@ -160,6 +160,40 @@ export interface CustomerRequestIssueLink {
   syncError: string;
 }
 
+export interface CustomerRequestDeliveryArtifact {
+  id: string;
+  provider: string;
+  artifactType: string;
+  externalKey: string;
+  externalUrl: string;
+  title: string;
+  status: string;
+  statusCategory: string;
+  assignee: string;
+  syncState: CustomerRequestIssueSyncState;
+  health: CustomerRequestDeliveryHealth;
+  lastSeenAt: string;
+  source: string;
+  syncError: string;
+}
+
+export interface CustomerRequestDeliveryRelationship {
+  id: string;
+  sourceArtifactId: string;
+  targetArtifactId: string;
+  relationshipType: string;
+  provider: string;
+  createdAt: string;
+}
+
+export interface CustomerRequestDeliveryGraph {
+  artifacts: CustomerRequestDeliveryArtifact[];
+  relationships: CustomerRequestDeliveryRelationship[];
+  health: CustomerRequestDeliveryHealth;
+  healthExplanation: string;
+  updatedAt: string;
+}
+
 export interface CustomerRequestCustomerLink {
   id: string;
   subjectKey: string;
@@ -235,6 +269,7 @@ export interface CustomerRequestDetail {
   duplicates: CustomerRequestDuplicate[];
   accountProfiles: CustomerRequestAccountProfile[];
   notes: CustomerRequestNote[];
+  deliveryGraph?: CustomerRequestDeliveryGraph | undefined;
 }
 
 export interface CustomerRequestScoringSettings {
@@ -458,6 +493,22 @@ export interface LinkCustomerRequestIssueRequest {
   externalKey?: string | undefined;
   title?: string | undefined;
   status?: string | undefined;
+  connectionId?: string | undefined;
+  mappingId?: string | undefined;
+  issueNumber?: string | undefined;
+}
+
+export interface CreateCustomerRequestGitHubIssueRequest {
+  id: string;
+  connectionId?: string | undefined;
+  mappingId?: string | undefined;
+}
+
+export interface CreateCustomerRequestGitHubIssueResponse {
+  detail?: CustomerRequestDetail | undefined;
+  runId: string;
+  connectionId: string;
+  mappingId: string;
 }
 
 export interface UnlinkCustomerRequestIssueRequest {
@@ -510,6 +561,9 @@ export interface CustomerRequestService {
   DeleteCustomerRequestNote(request: DeleteCustomerRequestNoteRequest): Promise<CustomerRequestDetail>;
   MergeCustomerRequests(request: MergeCustomerRequestsRequest): Promise<CustomerRequestDetail>;
   LinkCustomerRequestIssue(request: LinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
+  CreateCustomerRequestGitHubIssue(
+    request: CreateCustomerRequestGitHubIssueRequest,
+  ): Promise<CreateCustomerRequestGitHubIssueResponse>;
   UnlinkCustomerRequestIssue(request: UnlinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
   RecordCustomerRequestIssueSync(request: RecordCustomerRequestIssueSyncRequest): Promise<CustomerRequestDetail>;
 }

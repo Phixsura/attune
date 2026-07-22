@@ -23,6 +23,7 @@ var portalRoadmapTemplate = template.Must(template.New("portal-roadmap").Parse(`
   <meta name="robots" content="{{if .NoIndex}}noindex,nofollow{{else}}index,follow{{end}}">
   <meta name="description" content="{{.TenantName}} public roadmap for planned, in-progress, and shipped requests.">
   <link rel="canonical" href="{{.RoadmapURL}}">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   {{if .NextURL}}<link rel="next" href="{{.NextURL}}">{{end}}
   <title>{{.TenantName}} | Public roadmap{{if .HasQuery}} | {{.Query}}{{end}}</title>
   <style>

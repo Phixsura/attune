@@ -143,6 +143,7 @@ func TestLoadDetailScansAllCollections(t *testing.T) {
 	ownerID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	mergedID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
 	issueID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	artifactID := uuid.MustParse("5a5a5a5a-5a5a-5a5a-5a5a-5a5a5a5a5a5a")
 	customerID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
 	voteID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 	noteID := uuid.MustParse("88888888-8888-8888-8888-888888888888")
@@ -157,11 +158,8 @@ func TestLoadDetailScansAllCollections(t *testing.T) {
 				int64(42), "Please add exports", "slack", "request", "user-1", "Ada", "Export request",
 				string(ImportanceCritical), "renewal blocker", "admin-1", now.Add(-time.Hour), now.Add(-2 * time.Hour),
 			}}},
-			{rows: [][]any{{
-				issueID, "github", "Phixsura/attune#212", "https://github.com/Phixsura/attune/issues/212",
-				"Customer request object", "open", "admin-1", now.Add(-time.Hour), now,
-				&syncedAt, string(IssueSyncStateSynced), "done", "octo", &latest, "",
-			}}},
+			{rows: [][]any{issueLinkRow(issueID, now, &syncedAt).values}},
+			{rows: [][]any{deliveryArtifactProjectionValues(artifactID, now.Add(90*time.Minute), &syncedAt)}},
 			{rows: [][]any{customerLinkValues(customerID, "user:ada", "hash:ada", "Ada", "acct:acme", "Acme", "buyer", "admin-1", now, "acct:acme", "Acme", 1200000)}},
 			{rows: [][]any{
 				voteValues(voteID, "user:ada", "hash:ada", "Ada", "acct:acme", "Acme", 5, "same account", "admin-2", now, "acct:acme", "Acme", 1200000),
@@ -183,6 +181,9 @@ func TestLoadDetailScansAllCollections(t *testing.T) {
 	require.Equal(t, ImportanceCritical, detail.Feedback[0].Importance)
 	require.Len(t, detail.IssueLinks, 1)
 	require.Equal(t, IssueSyncStateSynced, detail.IssueLinks[0].SyncState)
+	require.Len(t, detail.DeliveryGraph.Artifacts, 3)
+	require.Equal(t, "delivery_artifact:"+artifactID.String(), detail.DeliveryGraph.Artifacts[2].ID)
+	require.Equal(t, "pull_request", detail.DeliveryGraph.Artifacts[2].ArtifactType)
 	require.Len(t, detail.CustomerLinks, 1)
 	require.NotNil(t, detail.CustomerLinks[0].AccountProfile)
 	require.Len(t, detail.Votes, 2)
@@ -207,7 +208,7 @@ func TestGetDetailTxUsesTransactionQueryer(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, requestID, detail.Summary.ID)
 	require.Empty(t, detail.Feedback)
-	require.Equal(t, 6, tx.queryIdx)
+	require.Equal(t, 7, tx.queryIdx)
 }
 
 func TestScanHelpersAndErrorMapping(t *testing.T) {
@@ -280,6 +281,209 @@ func TestScanHelpersAndErrorMapping(t *testing.T) {
 	}
 }
 
+func TestBuildDeliveryGraph(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	issueID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	rootUpdatedAt := time.Date(2026, 7, 7, 1, 0, 0, 0, time.UTC)
+	linkedAt := time.Date(2026, 7, 7, 1, 5, 0, 0, time.UTC)
+	linkUpdatedAt := time.Date(2026, 7, 7, 1, 10, 0, 0, time.UTC)
+	externalUpdatedAt := time.Date(2026, 7, 7, 1, 20, 0, 0, time.UTC)
+
+	graph := buildDeliveryGraph(
+		Summary{
+			ID:             requestID,
+			DisplayID:      "CR-42",
+			Title:          "Enterprise export",
+			Status:         StatusInProgress,
+			UpdatedAt:      rootUpdatedAt,
+			DeliveryHealth: DeliveryHealthSynced,
+		},
+		[]IssueLink{{
+			ID:                     issueID,
+			Provider:               "github",
+			ExternalKey:            "owner/repo#228",
+			ExternalURL:            "https://github.com/owner/repo/issues/228",
+			Title:                  "Sync GitHub issues",
+			Status:                 "open",
+			CreatedAt:              linkedAt,
+			UpdatedAt:              linkUpdatedAt,
+			ExternalStatusCategory: "open",
+			ExternalAssignee:       "ada",
+			ExternalUpdatedAt:      &externalUpdatedAt,
+			SyncState:              IssueSyncStateSynced,
+		}},
+	)
+
+	require.Len(t, graph.Artifacts, 2)
+	require.Len(t, graph.Relationships, 1)
+	require.Equal(t, DeliveryHealthSynced, graph.Health)
+	require.Equal(t, "1 linked artifacts: 1 synced.", graph.HealthExplanation)
+	require.Equal(t, externalUpdatedAt, *graph.UpdatedAt)
+
+	root := graph.Artifacts[0]
+	require.Equal(t, "request:"+requestID.String(), root.ID)
+	require.Equal(t, deliveryProviderAttune, root.Provider)
+	require.Equal(t, deliveryArtifactTypeCustomerRequest, root.ArtifactType)
+	require.Equal(t, "CR-42", root.ExternalKey)
+
+	issue := graph.Artifacts[1]
+	require.Equal(t, "issue_link:"+issueID.String(), issue.ID)
+	require.Equal(t, deliveryArtifactTypeIssue, issue.ArtifactType)
+	require.Equal(t, DeliveryHealthSynced, issue.Health)
+	require.Equal(t, "ada", issue.Assignee)
+	require.Equal(t, externalUpdatedAt, *issue.LastSeenAt)
+
+	relationship := graph.Relationships[0]
+	require.Equal(t, root.ID, relationship.SourceArtifactID)
+	require.Equal(t, issue.ID, relationship.TargetArtifactID)
+	require.Equal(t, deliveryRelationshipTrackedBy, relationship.RelationshipType)
+}
+
+func TestBuildDeliveryGraphUsesExternalObjectPayload(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	issueID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	objectLinkID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	updatedAt := time.Date(2026, 7, 7, 1, 0, 0, 0, time.UTC)
+	payloadUpdatedAt := time.Date(2026, 7, 7, 1, 30, 0, 0, time.UTC)
+
+	graph := buildDeliveryGraph(
+		Summary{
+			ID:             requestID,
+			DisplayID:      "CR-42",
+			Title:          "Enterprise export",
+			Status:         StatusOpen,
+			UpdatedAt:      updatedAt,
+			DeliveryHealth: DeliveryHealthPending,
+		},
+		[]IssueLink{{
+			ID:                      issueID,
+			Provider:                "github",
+			ExternalKey:             "owner/repo#228",
+			CreatedAt:               updatedAt,
+			UpdatedAt:               updatedAt,
+			SyncState:               IssueSyncStateSynced,
+			ExternalObjectLinkID:    &objectLinkID,
+			ExternalObjectSyncState: deliveryExternalSyncStateFailed,
+			ExternalObjectSyncError: "secondary rate limit",
+			ExternalObjectPayload: []byte(`{
+				"title":"GitHub native title",
+				"state":"closed",
+				"state_reason":"completed",
+				"html_url":"https://github.com/owner/repo/issues/228",
+				"updated_at":"2026-07-07T01:30:00Z",
+				"assignees":[{"login":"octo"},{"login":"hubot"}]
+			}`),
+		}},
+	)
+
+	artifact := graph.Artifacts[1]
+	require.Equal(t, DeliveryHealthFailed, graph.Health)
+	require.Equal(t, "1 linked artifacts: 1 failed.", graph.HealthExplanation)
+	require.Equal(t, deliverySourceExternalObjectLink, artifact.Source)
+	require.Equal(t, "GitHub native title", artifact.Title)
+	require.Equal(t, "closed", artifact.Status)
+	require.Equal(t, "completed", artifact.StatusCategory)
+	require.Equal(t, "octo, hubot", artifact.Assignee)
+	require.Equal(t, "https://github.com/owner/repo/issues/228", artifact.ExternalURL)
+	require.Equal(t, DeliveryHealthFailed, artifact.Health)
+	require.Equal(t, "secondary rate limit", artifact.SyncError)
+	require.Equal(t, payloadUpdatedAt, *artifact.LastSeenAt)
+}
+
+func TestBuildDeliveryGraphUsesProjectedDeliveryArtifacts(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	issueID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	artifactID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	rootUpdatedAt := time.Date(2026, 7, 7, 1, 0, 0, 0, time.UTC)
+	prSeenAt := time.Date(2026, 7, 7, 2, 0, 0, 0, time.UTC)
+
+	graph := buildDeliveryGraph(
+		Summary{
+			ID:             requestID,
+			DisplayID:      "CR-42",
+			Title:          "Enterprise export",
+			Status:         StatusInProgress,
+			UpdatedAt:      rootUpdatedAt,
+			DeliveryHealth: DeliveryHealthSynced,
+		},
+		[]IssueLink{{
+			ID:          issueID,
+			Provider:    "github",
+			ExternalKey: "owner/repo#228",
+			Title:       "Tracking issue",
+			Status:      "open",
+			CreatedAt:   rootUpdatedAt,
+			UpdatedAt:   rootUpdatedAt,
+			SyncState:   IssueSyncStateSynced,
+		}},
+		DeliveryArtifactProjection{
+			ID:             artifactID,
+			Provider:       "github",
+			ArtifactType:   "pull_request",
+			Relationship:   "implements",
+			ExternalKey:    "owner/repo#313",
+			DisplayKey:     "PR #313",
+			ExternalURL:    "https://github.com/owner/repo/pull/313",
+			Title:          "Implement delivery graph projection",
+			Status:         "merged",
+			StatusCategory: "shipped",
+			Assignee:       "octo",
+			SyncState:      deliveryExternalSyncStateSynced,
+			Source:         deliverySourceDeliveryArtifact,
+			FirstSeenAt:    rootUpdatedAt,
+			LastSeenAt:     &prSeenAt,
+			UpdatedAt:      prSeenAt,
+		},
+	)
+
+	require.Len(t, graph.Artifacts, 3)
+	require.Len(t, graph.Relationships, 2)
+	require.Equal(t, DeliveryHealthSynced, graph.Health)
+	require.Equal(t, "2 linked artifacts: 2 synced.", graph.HealthExplanation)
+	require.Equal(t, prSeenAt, *graph.UpdatedAt)
+
+	projected := graph.Artifacts[2]
+	require.Equal(t, "delivery_artifact:"+artifactID.String(), projected.ID)
+	require.Equal(t, "pull_request", projected.ArtifactType)
+	require.Equal(t, "owner/repo#313", projected.ExternalKey)
+	require.Equal(t, "Implement delivery graph projection", projected.Title)
+	require.Equal(t, "shipped", projected.StatusCategory)
+	require.Equal(t, IssueSyncStateSynced, projected.SyncState)
+	require.Equal(t, DeliveryHealthSynced, projected.Health)
+
+	relationship := graph.Relationships[1]
+	require.Equal(t, "implements", relationship.RelationshipType)
+	require.Equal(t, projected.ID, relationship.TargetArtifactID)
+}
+
+func TestBuildDeliveryGraphWithoutIssueLinks(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	updatedAt := time.Date(2026, 7, 7, 1, 0, 0, 0, time.UTC)
+
+	graph := buildDeliveryGraph(Summary{
+		ID:             requestID,
+		DisplayID:      "CR-42",
+		Title:          "Enterprise export",
+		Status:         StatusOpen,
+		UpdatedAt:      updatedAt,
+		DeliveryHealth: DeliveryHealthNoLinks,
+	}, nil)
+
+	require.Len(t, graph.Artifacts, 1)
+	require.Empty(t, graph.Relationships)
+	require.Equal(t, DeliveryHealthNoLinks, graph.Health)
+	require.Equal(t, "No delivery artifacts are linked.", graph.HealthExplanation)
+	require.Equal(t, updatedAt, *graph.UpdatedAt)
+}
+
 func TestTransactionHelpers(t *testing.T) {
 	t.Parallel()
 
@@ -344,6 +548,23 @@ func TestTransactionHelpers(t *testing.T) {
 	require.Equal(t, IssueSyncStateSynced, issue.SyncState)
 	_, err = repo.RecordIssueSyncTx(ctx, &fakeRepoTx{execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 0")}}, IssueSyncInput{TenantID: "tenant-a", RequestID: requestID, IssueLinkID: issueID})
 	require.ErrorIs(t, err, ErrLinkNotFound)
+
+	artifactID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	artifactTx := &fakeRepoTx{
+		rows: []fakeRepoRow{{values: deliveryArtifactProjectionValues(artifactID, now, &now)}},
+	}
+	artifact, err := repo.UpsertDeliveryArtifactTx(ctx, artifactTx, DeliveryArtifactProjectionInput{
+		TenantID:     "tenant-a",
+		RequestID:    requestID,
+		Provider:     "github",
+		ArtifactType: "pull_request",
+		ExternalKey:  "Phixsura/attune#313",
+		Title:        "Add projection",
+		Status:       "merged",
+	})
+	require.NoError(t, err)
+	require.Equal(t, artifactID, artifact.ID)
+	require.Equal(t, "pull_request", artifact.ArtifactType)
 
 	_, err = repo.MergeTx(ctx, &fakeRepoTx{}, "tenant-a", requestID, requestID, "admin-1")
 	require.ErrorIs(t, err, ErrConflict)
@@ -471,11 +692,620 @@ func TestVoteAndIssueTransactions(t *testing.T) {
 	require.Equal(t, linkID, issue.ID)
 	require.Equal(t, "github", issue.Provider)
 
-	unlinkIssueTx := &fakeRepoTx{rows: []fakeRepoRow{issueLinkRow(linkID, now, nil)}, execs: []pgconn.CommandTag{pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("UPDATE 1")}}
+	unlinkIssueTx := &fakeRepoTx{
+		rows: []fakeRepoRow{issueLinkRow(linkID, now, nil)},
+		execs: []pgconn.CommandTag{
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("DELETE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+		},
+	}
 	removedIssue, err := repo.UnlinkIssueTx(ctx, unlinkIssueTx, "tenant-a", requestID, linkID, "admin-1")
 	require.NoError(t, err)
 	require.Equal(t, linkID, removedIssue.ID)
 	require.NoError(t, upsertAccountProfileTx(ctx, &fakeRepoTx{}, "tenant-a", AccountProfileInput{}))
+}
+
+func TestLinkIssueBindsManagedGitHubExternalObjectLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 14, 0, 0, 0, time.UTC)
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{err: pgx.ErrNoRows},
+			{err: pgx.ErrNoRows},
+			{values: []any{externalLinkID}},
+			issueLinkRow(issueID, now, nil),
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"repo_url":"https://github.com/Phixsura/attune.git"}`),
+			"",
+		}}}},
+		execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 1"), pgconn.NewCommandTag("UPDATE 1")},
+	}
+
+	issue, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		Title:       "Customer request object",
+		Status:      "open",
+		ActorID:     "admin-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, issueID, issue.ID)
+	require.Equal(t, 5, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 2, tx.execIdx)
+}
+
+func TestLinkIssueRejectsManagedGitHubIssueAlreadyLinkedElsewhere(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, "11111111-1111-1111-1111-111111111111", false}},
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+	}
+
+	_, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.ErrorIs(t, err, ErrConflict)
+	require.Equal(t, 2, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 0, tx.execIdx)
+}
+
+func TestLinkIssueRefreshesExistingManagedGitHubExternalObjectLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 14, 0, 0, 0, time.UTC)
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, requestID.String(), false}},
+			issueLinkRow(issueID, now, nil),
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+		execs: []pgconn.CommandTag{
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+		},
+	}
+
+	issue, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, issueID, issue.ID)
+	require.Equal(t, 3, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 3, tx.execIdx)
+}
+
+func TestLinkIssueRebindsLocallyTombstonedGitHubExternalObjectLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 7, 14, 0, 0, 0, time.UTC)
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	oldRequestID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, oldRequestID.String(), true}},
+			{err: pgx.ErrNoRows},
+			issueLinkRow(issueID, now, nil),
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+		execs: []pgconn.CommandTag{
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+			pgconn.NewCommandTag("UPDATE 1"),
+		},
+	}
+
+	issue, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, issueID, issue.ID)
+	require.Equal(t, 4, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 3, tx.execIdx)
+}
+
+func TestLinkIssueRejectsLocallyTombstonedGitHubExternalObjectLinkWhenRequestHasDifferentActiveLink(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	repo := Repo{}
+	requestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	issueID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	externalLinkID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	tx := &fakeRepoTx{
+		rows: []fakeRepoRow{
+			{values: []any{issueID}},
+			{values: []any{externalLinkID, requestID.String(), true}},
+			{values: []any{"213"}},
+		},
+		queries: []*fakeRepoRows{{rows: [][]any{{
+			mappingID,
+			[]byte(`{"owner":"Phixsura","repo":"attune"}`),
+			"",
+		}}}},
+	}
+
+	_, err := repo.LinkIssueTx(ctx, tx, IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		Provider:    "github",
+		ExternalKey: "Phixsura/attune#212",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/212",
+		ActorID:     "admin-1",
+	})
+
+	require.ErrorIs(t, err, ErrConflict)
+	require.Equal(t, 3, tx.rowIdx)
+	require.Equal(t, 1, tx.queryIdx)
+	require.Equal(t, 0, tx.execIdx)
+}
+
+func TestGitHubRepoTargetFromConfigDerivesBrowserURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		cfg               githubExternalConnectionConfig
+		connectionBaseURL string
+		wantURL           string
+	}{
+		{
+			name:    "repo url",
+			cfg:     githubExternalConnectionConfig{RepoURL: "https://github.com/acme/app.git"},
+			wantURL: "https://github.com/acme/app/issues/42",
+		},
+		{
+			name:    "api github default",
+			cfg:     githubExternalConnectionConfig{Owner: "acme", Repo: "app", APIBaseURL: "https://api.github.com"},
+			wantURL: "https://github.com/acme/app/issues/42",
+		},
+		{
+			name:              "enterprise connection base",
+			cfg:               githubExternalConnectionConfig{Owner: "acme", Repo: "app"},
+			connectionBaseURL: "https://github.example.com/api/v3",
+			wantURL:           "https://github.example.com/acme/app/issues/42",
+		},
+		{
+			name:    "enterprise provider base",
+			cfg:     githubExternalConnectionConfig{Owner: "acme", Repo: "app", APIBaseURL: "https://github.example.com/api/v3"},
+			wantURL: "https://github.example.com/acme/app/issues/42",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			target, ok := githubRepoTargetFromConfig(tt.cfg, tt.connectionBaseURL)
+			require.True(t, ok)
+			got, err := target.issueURL("42")
+			require.NoError(t, err)
+			require.Equal(t, tt.wantURL, got)
+		})
+	}
+}
+
+func TestGitHubRepoTargetRejectsInvalidConfig(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		cfg               githubExternalConnectionConfig
+		connectionBaseURL string
+	}{
+		{
+			name: "repo url with no path",
+			cfg:  githubExternalConnectionConfig{RepoURL: "https://github.com"},
+		},
+		{
+			name: "bad repo url",
+			cfg:  githubExternalConnectionConfig{RepoURL: "https://%zz"},
+		},
+		{
+			name: "missing owner",
+			cfg:  githubExternalConnectionConfig{Repo: "app", APIBaseURL: "https://api.github.com"},
+		},
+		{
+			name: "missing repo",
+			cfg:  githubExternalConnectionConfig{Owner: "acme", APIBaseURL: "https://api.github.com"},
+		},
+		{
+			name:              "bad connection base",
+			cfg:               githubExternalConnectionConfig{Owner: "acme", Repo: "app"},
+			connectionBaseURL: "://not-a-url",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, ok := githubRepoTargetFromConfig(tt.cfg, tt.connectionBaseURL)
+			require.False(t, ok)
+		})
+	}
+
+	if _, ok := githubRepoTargetFromRaw([]byte(`not-json`), ""); ok {
+		t.Fatal("githubRepoTargetFromRaw(invalid JSON) ok = true, want false")
+	}
+	if _, _, ok := githubBrowserBaseFromAPIBase("", "://bad"); ok {
+		t.Fatal("githubBrowserBaseFromAPIBase(invalid URL) ok = true, want false")
+	}
+}
+
+func TestGitHubConnectionMatchesIssueRefEnterpriseHosts(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name              string
+		raw               []byte
+		connectionBaseURL string
+		ref               githubIssueRef
+		want              bool
+	}{
+		{
+			name: "provider api base matches enterprise browser host",
+			raw:  []byte(`{"owner":"acme","repo":"app","api_base_url":"https://github.example.com/api/v3"}`),
+			ref: githubIssueRef{
+				host:        "github.example.com",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: true,
+		},
+		{
+			name: "enterprise repo rejects same repository on public github",
+			raw:  []byte(`{"owner":"acme","repo":"app","api_base_url":"https://github.example.com/api/v3"}`),
+			ref: githubIssueRef{
+				host:        "github.com",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: false,
+		},
+		{
+			name:              "connection base host with port matches browser hostname",
+			raw:               []byte(`{"owner":"acme","repo":"app"}`),
+			connectionBaseURL: "https://github.enterprise.test:8443/api/v3",
+			ref: githubIssueRef{
+				host:        "github.enterprise.test",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: true,
+		},
+		{
+			name: "repo url host matches",
+			raw:  []byte(`{"repo_url":"https://github.example.com/acme/app.git"}`),
+			ref: githubIssueRef{
+				host:        "github.example.com",
+				owner:       "acme",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: true,
+		},
+		{
+			name: "owner mismatch rejects",
+			raw:  []byte(`{"repo_url":"https://github.example.com/acme/app.git"}`),
+			ref: githubIssueRef{
+				host:        "github.example.com",
+				owner:       "other",
+				repo:        "app",
+				issueNumber: "42",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := githubConnectionMatchesIssueRef(tt.raw, tt.connectionBaseURL, tt.ref)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGitHubIssueReferenceParsers(t *testing.T) {
+	t.Parallel()
+
+	ref, ok := parseGitHubIssueKey(" Phixsura/attune.git#00228 ")
+	require.True(t, ok)
+	require.Equal(t, githubIssueRef{owner: "Phixsura", repo: "attune", issueNumber: "228"}, ref)
+
+	ref, ok = parseGitHubIssueRef(" github ", "", "Phixsura/attune#228")
+	require.True(t, ok)
+	require.Equal(t, "228", ref.issueNumber)
+
+	ref, ok = parseGitHubIssueRef("github", "https://github.com/Phixsura/attune/issues/00229", "Phixsura/attune#228")
+	require.True(t, ok)
+	require.Equal(t, githubIssueRef{host: "github.com", owner: "Phixsura", repo: "attune", issueNumber: "229"}, ref)
+
+	if ref, ok := parseGitHubIssueRef("jira", "https://github.com/Phixsura/attune/issues/228", "Phixsura/attune#228"); ok {
+		t.Fatalf("parseGitHubIssueRef(non-github) = %+v, true; want false", ref)
+	}
+	for _, raw := range []string{
+		"",
+		"https://github.com/Phixsura/attune/pull/228",
+		"https://github.com/Phixsura/attune/issues/not-a-number",
+		"https://github.com/Phixsura/issues/228",
+	} {
+		if ref, ok := parseGitHubIssueURL(raw); ok {
+			t.Fatalf("parseGitHubIssueURL(%q) = %+v, true; want false", raw, ref)
+		}
+	}
+	for _, raw := range []string{"", "Phixsura/attune", "Phixsura/attune#", "Phixsura/attune#0", "too/many/parts#1"} {
+		if ref, ok := parseGitHubIssueKey(raw); ok {
+			t.Fatalf("parseGitHubIssueKey(%q) = %+v, true; want false", raw, ref)
+		}
+	}
+
+	got, ok := normalizeGitHubIssueNumber(" 00228 ")
+	require.True(t, ok)
+	require.Equal(t, "228", got)
+	for _, raw := range []string{"", "0", "-1", "not-a-number"} {
+		if got, ok := normalizeGitHubIssueNumber(raw); ok {
+			t.Fatalf("normalizeGitHubIssueNumber(%q) = %q, true; want false", raw, got)
+		}
+	}
+}
+
+func TestResolveGitHubIssueLinkTargetValidationAndQueryError(t *testing.T) {
+	t.Parallel()
+
+	repository := newUnreachableCustomerRequestRepo(t)
+	connectionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	if target, err := repository.ResolveGitHubIssueLinkTarget(context.Background(), GitHubIssueLinkTargetInput{
+		TenantID:     "tenant-a",
+		ConnectionID: connectionID,
+		IssueNumber:  "0",
+	}); !errors.Is(err, ErrInvalidInput) || target != nil {
+		t.Fatalf("target=%+v err=%v, want invalid input", target, err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	target, err := repository.ResolveGitHubIssueLinkTarget(ctx, GitHubIssueLinkTargetInput{
+		TenantID:     "tenant-a",
+		ConnectionID: connectionID,
+		IssueNumber:  "228",
+	})
+	if err == nil || target != nil {
+		t.Fatalf("target=%+v err=%v, want query error", target, err)
+	}
+}
+
+func TestEnsureGitHubExternalIssueLinkBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	otherRequestID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	mappingID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	linkID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	input := IssueLinkInput{
+		TenantID:    "tenant-a",
+		RequestID:   requestID,
+		ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+	}
+	ref := githubIssueRef{owner: "Phixsura", repo: "attune", issueNumber: "228"}
+
+	t.Run("refreshes an existing active link for the same request", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{{values: []any{linkID, requestID.String(), false}}}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 1, tx.rowIdx)
+		require.Equal(t, 1, tx.execIdx)
+	})
+
+	t.Run("rejects an active link owned by another request", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{{values: []any{linkID, otherRequestID.String(), false}}}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.ErrorIs(t, err, ErrConflict)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+		require.Equal(t, 0, tx.execIdx)
+	})
+
+	t.Run("refreshes a local tombstone when no active link conflicts", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{values: []any{linkID, requestID.String(), true}},
+			{err: pgx.ErrNoRows},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 2, tx.rowIdx)
+		require.Equal(t, 1, tx.execIdx)
+	})
+
+	t.Run("rejects a local tombstone when another active external key exists", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{values: []any{linkID, requestID.String(), true}},
+			{values: []any{"229"}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.ErrorIs(t, err, ErrConflict)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+	})
+
+	t.Run("refreshes an existing local link with the same issue key", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{err: pgx.ErrNoRows},
+			{values: []any{linkID, "228"}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 2, tx.rowIdx)
+		require.Equal(t, 1, tx.execIdx)
+	})
+
+	t.Run("rejects an existing local link with a different issue key", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{err: pgx.ErrNoRows},
+			{values: []any{linkID, "229"}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.ErrorIs(t, err, ErrConflict)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+	})
+
+	t.Run("inserts a new external issue link when no existing link matches", func(t *testing.T) {
+		t.Parallel()
+
+		tx := &fakeRepoTx{rows: []fakeRepoRow{
+			{err: pgx.ErrNoRows},
+			{err: pgx.ErrNoRows},
+			{values: []any{linkID}},
+		}}
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, tx, input, mappingID, ref)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, linkID, gotID)
+		require.Equal(t, 3, tx.rowIdx)
+	})
+
+	t.Run("wraps lookup errors", func(t *testing.T) {
+		t.Parallel()
+
+		errBoom := errors.New("boom")
+		gotID, ok, err := ensureGitHubExternalIssueLink(ctx, &fakeRepoTx{
+			rows: []fakeRepoRow{{err: errBoom}},
+		}, input, mappingID, ref)
+		require.ErrorContains(t, err, "find existing github external issue link")
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, gotID)
+	})
+}
+
+func TestTruncateText(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, "", truncateText("value", 0))
+	require.Equal(t, "short", truncateText("short", 10))
+	require.Equal(t, "abc", truncateText("abcdef", 3))
+	require.Equal(t, "世界", truncateText("世界hello", 2))
+}
+
+func TestManagedIssueSyncTargetTxBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	issueLinkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	connectionID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	mappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	repository := &Repo{}
+
+	target, err := repository.ManagedIssueSyncTargetTx(ctx, &fakeRepoTx{rows: []fakeRepoRow{{
+		values: []any{connectionID, mappingID, "Phixsura/attune#228"},
+	}}}, "tenant-a", requestID, issueLinkID)
+	require.NoError(t, err)
+	require.NotNil(t, target)
+	require.Equal(t, connectionID, target.ConnectionID)
+	require.Equal(t, mappingID, target.MappingID)
+	require.Equal(t, "Phixsura/attune#228", target.ExternalKey)
+
+	target, err = repository.ManagedIssueSyncTargetTx(ctx, &fakeRepoTx{rows: []fakeRepoRow{{
+		err: pgx.ErrNoRows,
+	}}}, "tenant-a", requestID, issueLinkID)
+	require.NoError(t, err)
+	require.Nil(t, target)
+
+	errBoom := errors.New("boom")
+	target, err = repository.ManagedIssueSyncTargetTx(ctx, &fakeRepoTx{rows: []fakeRepoRow{{
+		err: errBoom,
+	}}}, "tenant-a", requestID, issueLinkID)
+	require.Nil(t, target)
+	require.ErrorContains(t, err, "load managed issue sync target")
 }
 
 func TestMergeTransactionMovesBacklinks(t *testing.T) {
@@ -681,6 +1511,12 @@ func TestAllocateAndWriteErrorBranches(t *testing.T) {
 	if err := repo.UnlinkFeedbackTx(ctx, &fakeRepoTx{execErrs: []error{boom}}, "tenant-a", requestID, 42, "admin-1"); !errors.Is(err, boom) {
 		t.Fatalf("UnlinkFeedbackTx(delete error) = %v, want boom", err)
 	}
+	if _, err := repo.UnlinkIssueTx(ctx, &fakeRepoTx{
+		rows:     []fakeRepoRow{issueLinkRow(uuid.New(), now, nil)},
+		execErrs: []error{boom},
+	}, "tenant-a", requestID, uuid.New(), "admin-1"); !errors.Is(err, boom) {
+		t.Fatalf("UnlinkIssueTx(tombstone error) = %v, want boom", err)
+	}
 }
 
 func summaryRow(id uuid.UUID, tenantID, displayID string, ownerID uuid.UUID, mergedID *uuid.UUID, now time.Time, latestFeedbackAt *time.Time) fakeRepoRow {
@@ -824,7 +1660,42 @@ func issueLinkRow(id uuid.UUID, now time.Time, syncedAt *time.Time) fakeRepoRow 
 		"octo",
 		syncedAt,
 		"",
+		sql.NullString{},
+		sql.NullString{},
+		"",
+		nil,
+		"",
+		"",
+		"{}",
 	}}
+}
+
+func deliveryArtifactProjectionValues(id uuid.UUID, now time.Time, syncedAt *time.Time) []any {
+	return []any{
+		id,
+		"github",
+		sql.NullString{},
+		sql.NullString{},
+		sql.NullString{},
+		"pull_request",
+		"implements",
+		"Phixsura/attune#313",
+		"https://github.com/Phixsura/attune/pull/313",
+		"PR #313",
+		"Add request graph projection",
+		"merged",
+		"shipped",
+		"merged",
+		"octo",
+		deliveryExternalSyncStateSynced,
+		"",
+		deliverySourceDeliveryArtifact,
+		syncedAt,
+		now.Add(-time.Hour),
+		syncedAt,
+		now,
+		`{"merged":true}`,
+	}
 }
 
 func lockRowValues(displayID string, mergedID *uuid.UUID, archivedAt *time.Time) []any {
