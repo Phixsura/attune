@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -327,6 +328,78 @@ func TestResolveGitHubIssueLinkTargetValidationAndQueryError(t *testing.T) {
 	}
 }
 
+func TestFindMatchingGitHubIssueMappingBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	mappingID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	otherMappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	ref := githubIssueRef{
+		host:        "github.com",
+		owner:       "Phixsura",
+		repo:        "attune",
+		issueNumber: "228",
+	}
+
+	t.Run("returns the only matching mapping", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{queryRows: []fakeRows{{rows: []fakeRow{
+			{values: []any{otherMappingID, []byte(`{"owner":"other","repo":"attune"}`), ""}},
+			{values: []any{mappingID, []byte(`{"owner":"Phixsura","repo":"attune"}`), ""}},
+		}}}})
+		got, ok, err := findMatchingGitHubIssueMapping(ctx, tx, "tenant-a", ref, ptrext.Of(mappingID))
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, mappingID, got)
+		require.Equal(t, 1, tx.queryIdx)
+	})
+
+	t.Run("returns no match when no connection targets the issue repo", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{queryRows: []fakeRows{{rows: []fakeRow{{
+			values: []any{otherMappingID, []byte(`{"owner":"other","repo":"attune"}`), ""},
+		}}}}})
+		got, ok, err := findMatchingGitHubIssueMapping(ctx, tx, "tenant-a", ref, nil)
+		require.NoError(t, err)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, got)
+	})
+
+	t.Run("rejects ambiguous matching mappings", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{queryRows: []fakeRows{{rows: []fakeRow{
+			{values: []any{mappingID, []byte(`{"owner":"Phixsura","repo":"attune"}`), ""}},
+			{values: []any{otherMappingID, []byte(`{"repo_url":"https://github.com/Phixsura/attune"}`), ""}},
+		}}}})
+		got, ok, err := findMatchingGitHubIssueMapping(ctx, tx, "tenant-a", ref, nil)
+		require.ErrorIs(t, err, ErrConflict)
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, got)
+	})
+
+	t.Run("wraps query and rows errors", func(t *testing.T) {
+		t.Parallel()
+
+		errBoom := errors.New("boom")
+		got, ok, err := findMatchingGitHubIssueMapping(ctx, ptrext.Of(fakeTx{
+			queryErrs: []error{errBoom},
+		}), "tenant-a", ref, nil)
+		require.ErrorContains(t, err, "find github issue sync mapping")
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, got)
+
+		got, ok, err = findMatchingGitHubIssueMapping(ctx, ptrext.Of(fakeTx{
+			queryRows: []fakeRows{{err: errBoom}},
+		}), "tenant-a", ref, nil)
+		require.ErrorContains(t, err, "find github issue sync mapping rows")
+		require.False(t, ok)
+		require.Equal(t, uuid.Nil, got)
+	})
+}
+
 func TestEnsureGitHubExternalIssueLinkBranches(t *testing.T) {
 	t.Parallel()
 
@@ -458,6 +531,27 @@ func TestTruncateGitHubIssueLinkText(t *testing.T) {
 	require.Equal(t, "世界", truncateGitHubIssueLinkText("世界hello", 2))
 }
 
+func TestTombstoneLocalIssueExternalLinkTx(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	repository := ptrext.Of(Repo{})
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	externalObjectLinkID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
+	tx := ptrext.Of(fakeTx{})
+	err := repository.TombstoneLocalIssueExternalLinkTx(ctx, tx, "tenant-a", requestID, externalObjectLinkID)
+	require.NoError(t, err)
+	require.Equal(t, 1, tx.execIdx)
+	require.Equal(t, []any{"tenant-a", requestID, externalObjectLinkID}, tx.execArgs[0])
+
+	errBoom := errors.New("boom")
+	err = repository.TombstoneLocalIssueExternalLinkTx(ctx, ptrext.Of(fakeTx{
+		execErrs: []error{errBoom},
+	}), "tenant-a", requestID, externalObjectLinkID)
+	require.ErrorContains(t, err, "tombstone local external issue link")
+}
+
 func TestManagedIssueSyncTargetTxBranches(t *testing.T) {
 	t.Parallel()
 
@@ -488,4 +582,19 @@ func TestManagedIssueSyncTargetTxBranches(t *testing.T) {
 	}}}), "tenant-a", requestID, externalObjectLinkID)
 	require.Nil(t, target)
 	require.ErrorContains(t, err, "load managed issue sync target")
+}
+
+func TestMapGitHubIssueLinkWriteError(t *testing.T) {
+	t.Parallel()
+
+	require.ErrorIs(t, mapGitHubIssueLinkWriteError(ptrext.Of(pgconn.PgError{
+		Code: "23514",
+	}), "insert"), ErrInvalidInput)
+	require.ErrorIs(t, mapGitHubIssueLinkWriteError(ptrext.Of(pgconn.PgError{
+		Code: "23505",
+	}), "insert"), ErrConflict)
+	require.ErrorIs(t, mapGitHubIssueLinkWriteError(ptrext.Of(pgconn.PgError{
+		Code: "23503",
+	}), "insert"), ErrLocalObjectNotFound)
+	require.ErrorContains(t, mapGitHubIssueLinkWriteError(errors.New("boom"), "insert"), "insert")
 }
