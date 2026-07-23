@@ -69,6 +69,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   normalize the `oidc` session alias to `oidc_user`, preventing successful SSO
   sessions from being denied by tenant RBAC as `not a tenant member`.
 
+- Production readiness now reports an already-created Console admin with the
+  bootstrap seed removed as passing; it only warns when bootstrap credentials
+  are still configured after the first admin exists.
+
 - Local Docker-backed `make test-integration` now starts PostgreSQL with an
   explicit shared-memory size, preventing Docker's small default `/dev/shm`
   from destabilizing long PostgreSQL integration runs; the secret-scan
