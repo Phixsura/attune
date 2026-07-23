@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- OIDC Console login now syncs the authenticated IdP user into
+  `tenant_members` before issuing the session, and tenant membership lookups
+  normalize the `oidc` session alias to `oidc_user`, preventing successful SSO
+  sessions from being denied by tenant RBAC as `not a tenant member`.
+
 - Local Docker-backed `make test-integration` now starts PostgreSQL with an
   explicit shared-memory size, preventing Docker's small default `/dev/shm`
   from destabilizing long PostgreSQL integration runs; the secret-scan
