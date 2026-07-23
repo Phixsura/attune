@@ -11,6 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 postgres_image="${ATTUNE_TEST_POSTGRES_IMAGE:-pgvector/pgvector:pg17}"
+postgres_shm_size="${ATTUNE_TEST_POSTGRES_SHM_SIZE:-1g}"
 timeout="${ATTUNE_TEST_INTEGRATION_TIMEOUT:-30m}"
 packages=("$@")
 if [[ "${#packages[@]}" -eq 0 ]]; then
@@ -48,6 +49,7 @@ trap cleanup EXIT
 
 echo "test-integration: starting $postgres_image as $postgres"
 docker run -d --rm --name "$postgres" \
+  --shm-size "$postgres_shm_size" \
   -e POSTGRES_USER=attune \
   -e POSTGRES_PASSWORD=attune \
   -e POSTGRES_DB=attune \
@@ -77,6 +79,6 @@ if [[ -z "$host_port" ]]; then
 fi
 
 export ATTUNE_TEST_DATABASE_URL="postgres://attune:attune@127.0.0.1:${host_port}/attune?sslmode=disable"
-echo "test-integration: postgres=$postgres port=$host_port timeout=$timeout"
+echo "test-integration: postgres=$postgres port=$host_port shm=$postgres_shm_size timeout=$timeout"
 
 run_tests

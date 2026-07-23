@@ -64,6 +64,12 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Local Docker-backed `make test-integration` now starts PostgreSQL with an
+  explicit shared-memory size, preventing Docker's small default `/dev/shm`
+  from destabilizing long PostgreSQL integration runs; the secret-scan
+  allow-list also covers fake embedded-credential validation fixtures so
+  network verification timeouts cannot turn them into unknown findings.
+
 - Startup migrations now strip legacy top-level `BEGIN` plus `COMMIT` or
   `ROLLBACK` wrappers, including transaction-control lines with trailing SQL
   comments, from the execution body while preserving migration checksums. This
