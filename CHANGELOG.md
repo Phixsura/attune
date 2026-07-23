@@ -50,17 +50,7 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   requests plus closing commits as delivery artifact children, making provider
   data reach Customer Request delivery graphs without manual projection code.
 
-### Changed
-
-- Managed GitHub issue-link binding now runs through the external sync
-  repository boundary, keeping Customer Request persistence focused on local
-  issue links while preserving managed pull enqueue behavior.
-
 ### Security
-
-- GitHub and Jira webhook diagnostic payloads now redact comment bodies and Jira
-  email addresses, retaining only safe identity fields plus body digest metadata
-  for troubleshooting.
 
 - `make ci-check` now runs the TruffleHog secret scan through a required local
   binary or pinned Docker fallback, removing the previous local skip when the
@@ -74,25 +64,9 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
-- OIDC Console login now syncs the authenticated IdP user into
-  `tenant_members` before issuing the session, and tenant membership lookups
-  normalize the `oidc` session alias to `oidc_user`, preventing successful SSO
-  sessions from being denied by tenant RBAC as `not a tenant member`.
-
-- Production readiness now reports an already-created Console admin with the
-  bootstrap seed removed as passing; it only warns when bootstrap credentials
-  are still configured after the first admin exists.
-
-- Local Docker-backed `make test-integration` now starts PostgreSQL with an
-  explicit shared-memory size, preventing Docker's small default `/dev/shm`
-  from destabilizing long PostgreSQL integration runs; the secret-scan
-  allow-list also covers fake embedded-credential validation fixtures so
-  network verification timeouts cannot turn them into unknown findings.
-
-- Startup migrations now strip legacy top-level `BEGIN` plus `COMMIT` or
-  `ROLLBACK` wrappers, including transaction-control lines with trailing SQL
-  comments, from the execution body while preserving migration checksums. This
-  prevents PostgreSQL transaction-state warnings during fresh local stack boots.
+- Startup migrations now strip legacy top-level `BEGIN` / `COMMIT` wrappers
+  from the execution body while preserving migration checksums, preventing
+  PostgreSQL transaction-state warnings during fresh local stack boots.
 
 - Console primary buttons now keep an opaque hover background, preserving
   WCAG text contrast for mouse-driven workflows.

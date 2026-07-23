@@ -157,32 +157,6 @@ ALTER TABLE example_items ADD COLUMN title TEXT;
 	require.NotContains(t, strings.ToLower(got), "commit")
 }
 
-func TestMigrationExecutionBodyStripsEnvelopeWithTrailingComments(t *testing.T) {
-	body := []byte(`-- legacy wrapper with comments
-BEGIN; -- explicit transaction starts here
-ALTER TABLE example_items ADD COLUMN subtitle TEXT;
-COMMIT; -- explicit transaction ends here
-`)
-
-	got := string(migrationExecutionBody(body))
-
-	require.Contains(t, got, "legacy wrapper with comments")
-	require.Contains(t, got, "ALTER TABLE example_items ADD COLUMN subtitle TEXT")
-	require.NotContains(t, got, "explicit transaction starts here")
-	require.NotContains(t, got, "explicit transaction ends here")
-}
-
-func TestMigrationExecutionBodyStripsRollbackEnvelope(t *testing.T) {
-	body := []byte(`BEGIN;
-CREATE TABLE example_items (id TEXT PRIMARY KEY);
-ROLLBACK;
-`)
-
-	got := string(migrationExecutionBody(body))
-
-	require.Equal(t, "CREATE TABLE example_items (id TEXT PRIMARY KEY);\n", got)
-}
-
 func TestMigrationExecutionBodyKeepsUnpairedTransactionControlLines(t *testing.T) {
 	tests := []struct {
 		name string
@@ -202,15 +176,6 @@ func TestMigrationExecutionBodyKeepsUnpairedTransactionControlLines(t *testing.T
 			require.Equal(t, tt.body, string(migrationExecutionBody([]byte(tt.body))))
 		})
 	}
-}
-
-func TestMigrationExecutionBodyKeepsCommentOnlyTransactionMentions(t *testing.T) {
-	body := []byte(`-- BEGIN;
-CREATE TABLE example_items (id TEXT PRIMARY KEY);
--- COMMIT;
-`)
-
-	require.Equal(t, string(body), string(migrationExecutionBody(body)))
 }
 
 func TestMigrationExecutionBodyNormalizesEmbeddedLegacyWrappers(t *testing.T) {

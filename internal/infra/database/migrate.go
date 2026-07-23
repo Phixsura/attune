@@ -498,9 +498,6 @@ func isIgnorableSQLLine(line []byte) bool {
 
 func isTransactionControlLine(line []byte, keyword string) bool {
 	trimmed := bytes.TrimSpace(line)
-	if comment := bytes.Index(trimmed, []byte("--")); comment >= 0 {
-		trimmed = bytes.TrimSpace(trimmed[:comment])
-	}
 	trimmed = bytes.TrimSuffix(trimmed, []byte(";"))
 	trimmed = bytes.TrimSpace(trimmed)
 	return bytes.EqualFold(trimmed, []byte(keyword))

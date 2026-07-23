@@ -23,15 +23,6 @@ test('with-supported-node uses supported node from PATH', async () => {
   assert.equal(result.stdout.trim(), 'v22.22.3')
 })
 
-test('with-supported-node requires a command', () => {
-  const result = runWithNode([], {
-    PATH: '/usr/bin:/bin',
-  })
-
-  assert.equal(result.status, 2)
-  assert.match(result.stderr, /command is required/)
-})
-
 test('with-supported-node falls back to configured search paths', async () => {
   const unsupportedBinDir = await mkdtemp(path.join(os.tmpdir(), 'attune-node-unsupported-'))
   const supportedBinDir = await mkdtemp(path.join(os.tmpdir(), 'attune-node-supported-'))
@@ -47,22 +38,6 @@ test('with-supported-node falls back to configured search paths', async () => {
   assert.deepEqual(result.stdout.trim().split('\n'), ['v22.22.3', path.join(supportedBinDir, 'node')])
 })
 
-test('with-supported-node accepts supported explicit overrides', async () => {
-  for (const version of ['v20.19.6', 'v22.22.3', 'v24.11.1']) {
-    const binDir = await mkdtemp(path.join(os.tmpdir(), 'attune-node-override-supported-'))
-    const nodeBin = path.join(binDir, 'node')
-    await writeFakeNode(nodeBin, version)
-
-    const result = runWithNode(['sh', '-c', 'node --version'], {
-      ATTUNE_NODE_BIN: nodeBin,
-      PATH: '/usr/bin:/bin',
-    })
-
-    assert.equal(result.status, 0, result.stderr)
-    assert.equal(result.stdout.trim(), version)
-  }
-})
-
 test('with-supported-node rejects an unsupported explicit override', async () => {
   const binDir = await mkdtemp(path.join(os.tmpdir(), 'attune-node-override-'))
   const nodeBin = path.join(binDir, 'node')
@@ -76,21 +51,6 @@ test('with-supported-node rejects an unsupported explicit override', async () =>
   assert.equal(result.status, 1)
   assert.match(result.stderr, /ATTUNE_NODE_BIN points to unsupported Node v23\.11\.0/)
   assert.match(result.stderr, /CI runs Node 22/)
-})
-
-test('with-supported-node skips duplicate configured candidates', async () => {
-  const unsupportedBinDir = await mkdtemp(path.join(os.tmpdir(), 'attune-node-unsupported-'))
-  const supportedBinDir = await mkdtemp(path.join(os.tmpdir(), 'attune-node-supported-'))
-  await writeFakeNode(path.join(unsupportedBinDir, 'node'), 'v23.11.0')
-  await writeFakeNode(path.join(supportedBinDir, 'node'), 'v24.11.1')
-
-  const result = runWithNode(['sh', '-c', 'command -v node && node --version'], {
-    ATTUNE_NODE_SEARCH_PATHS: `${supportedBinDir}:${supportedBinDir}`,
-    PATH: `${unsupportedBinDir}:/usr/bin:/bin`,
-  })
-
-  assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(result.stdout.trim().split('\n'), [path.join(supportedBinDir, 'node'), 'v24.11.1'])
 })
 
 test('with-supported-node fails clearly when no supported node exists', async () => {

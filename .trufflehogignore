@@ -18,9 +18,5 @@ sdk/node/test/client.test.ts
 # Go SDK test with a fake embedded-credentials URL used for validation
 sdk/go/client_test.go
 
-# Validation tests with fake embedded-credentials URLs used to assert rejection
-internal/handlers/console/notifytarget/notify_targets_test.go
-internal/service/llmconfig/service_test.go
-
 # Documentation with example localhost postgres URIs
 docs/private-deploy.md
