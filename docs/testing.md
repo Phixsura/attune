@@ -8,7 +8,7 @@ that cheap tests cannot see.
 | Tier | Command | Default? | Cost | What it covers |
 |---|---|---|---|---|
 | **L0 fast local** | `make fast-check` | local opt-in | $0 | Fast Go unit sweep plus Console typecheck and Vitest. |
-| **L1 CI preflight** | `make ci-check` | PR / before push | $0 | Go race unit tests, lint, complexity, duplication, Console type/build/test/arch checks, and local secret scan when installed. |
+| **L1 CI preflight** | `make ci-check` | PR / before push | $0 | Go race unit tests, lint, helper-script tests, complexity, duplication, Console type/build/test/arch checks, and a required local TruffleHog secret scan. |
 | **L2 contract** | `make proto-lint`, `make proto-breaking`, `make proto` | CI on proto changes | network for Buf remote plugins | Protobuf/OpenAPI/SDK contract shape and generation consistency. |
 | **L3 integration** | `make test-integration` | CI on Go changes; local opt-in | Docker preferred; local PostgreSQL binaries fallback | Real pgvector PostgreSQL migrations, repos, service/repo transaction paths, restore drills, and queue/outbox smoke tests. |
 | **L4 browser** | `cd console && pnpm test:e2e:a11y` | CI on Console changes | browser install | Critical Console routes in real Chromium with API mocks, accessibility, overflow, console-error, and interaction coverage. |
@@ -31,12 +31,21 @@ Default behaviour. Nothing to set up.
 go test ./...          # full Go unit sweep
 go test -short ./...   # CI default for the unit tier
 make fast-check        # Go unit + Console typecheck + Console Vitest
+make script-tests      # Node tests for repository helper scripts
 make ci-check          # full local PR preflight
 ```
 
 `make ci-check` mirrors the repository quality gate and also tolerates a local
 `console/pnpm-workspace.yaml` file by invoking Console commands with
-`pnpm --ignore-workspace`.
+`pnpm --ignore-workspace`. Node-based gates run through
+`scripts/with-supported-node.sh`, which follows CI's Node 22 baseline while
+accepting Node 20, 22, or 24+. Set `ATTUNE_NODE_BIN` or
+`ATTUNE_NODE_SEARCH_PATHS` if the supported runtime is installed in a custom
+location. Its secret scan uses a `trufflehog` binary from `PATH` when available,
+or the pinned Docker image fallback from `scripts/secret-scan.sh`. The local
+scan covers current checkout files, staged index files, and the current HEAD, or
+commits since `origin/main` when the branch has local commits; set
+`TRUFFLEHOG_BASE_REF` to compare against a different base.
 
 ## Adversarial and property tier — `make adversarial-check`
 

@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Added `make dev-stack`, a disposable source-tree launcher that builds the
+  Console bundle, starts temporary local PostgreSQL, boots the current Go
+  server with generated runtime secrets, seeds demo data, and prints the exact
+  Console URL for browser verification.
+
+- Added `make script-tests` and wired it into `make ci-check`, so repository
+  helper scripts have a required local unit-test gate.
+
+- Added a supported-Node wrapper for local repository scripts, keeping
+  `make ci-check` aligned with CI's Node 22 runtime even when another Node
+  version is first on `PATH`.
+
 - Added external provider installation management for Console external sync,
   including installation records, authorized resource selection, qualification
   grading, connection binding with selected-resource provider configuration,
@@ -40,6 +52,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Security
 
+- `make ci-check` now runs the TruffleHog secret scan through a required local
+  binary or pinned Docker fallback, removing the previous local skip when the
+  binary was absent.
+
 - Removed `golang.org/x/crypto` from the root dependency graph and raised the
   Go floor to `1.26.5`. Console password hashing plus break-glass token and
   recovery-code hashing now use `github.com/ProtonMail/bcrypt`, which keeps
@@ -47,6 +63,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   package from the module graph.
 
 ### Fixed
+
+- Startup migrations now strip legacy top-level `BEGIN` / `COMMIT` wrappers
+  from the execution body while preserving migration checksums, preventing
+  PostgreSQL transaction-state warnings during fresh local stack boots.
 
 - Console primary buttons now keep an opaque hover background, preserving
   WCAG text contrast for mouse-driven workflows.
