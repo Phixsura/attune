@@ -122,7 +122,7 @@ func normalizeJiraWebhookPayload(body []byte) jiraWebhookPayload {
 		}
 	}
 	if user, ok := jsonObject(payload["user"]); ok {
-		out["user"] = pickJSONFields(user, "accountId", "displayName", "emailAddress", "active", "accountType", "timeZone")
+		out["user"] = pickJSONFields(user, "accountId", "displayName", "active", "accountType", "timeZone")
 	}
 	if eventType == "" {
 		eventType = "jira:webhook"
@@ -194,10 +194,10 @@ func normalizeJiraWebhookIssue(issue map[string]any) map[string]any {
 	if fields, ok := jsonObject(issue["fields"]); ok {
 		out["fields"] = pickJSONFields(fields, "summary", "status", "project", "issuetype", "labels", "updated", "created", "resolutiondate")
 		if assignee, ok := jsonObject(fields["assignee"]); ok {
-			out["assignee"] = pickJSONFields(assignee, "accountId", "displayName", "emailAddress", "active", "accountType")
+			out["assignee"] = pickJSONFields(assignee, "accountId", "displayName", "active", "accountType")
 		}
 		if reporter, ok := jsonObject(fields["reporter"]); ok {
-			out["reporter"] = pickJSONFields(reporter, "accountId", "displayName", "emailAddress", "active", "accountType")
+			out["reporter"] = pickJSONFields(reporter, "accountId", "displayName", "active", "accountType")
 		}
 	}
 	return out
@@ -220,10 +220,10 @@ func normalizeJiraWebhookChangelog(changelog map[string]any) map[string]any {
 func normalizeJiraWebhookComment(comment map[string]any) map[string]any {
 	out := pickJSONFields(comment, "id", "created", "updated")
 	if body, ok := comment["body"]; ok {
-		out["body"] = body
+		addWebhookBodyMetadata(out, body)
 	}
 	if author, ok := jsonObject(comment["author"]); ok {
-		out["author"] = pickJSONFields(author, "accountId", "displayName", "emailAddress", "active", "accountType")
+		out["author"] = pickJSONFields(author, "accountId", "displayName", "active", "accountType")
 	}
 	return out
 }

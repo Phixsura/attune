@@ -79,6 +79,22 @@ type notificationSink interface {
 }
 
 type issueCreateRunStore interface {
+	ResolveGitHubIssueLinkTarget(
+		ctx context.Context,
+		in externalsyncrepo.GitHubIssueLinkTargetInput,
+	) (*externalsyncrepo.GitHubIssueLinkTarget, error)
+	BindManagedGitHubIssueLinkTx(
+		ctx context.Context,
+		tx pgx.Tx,
+		in externalsyncrepo.ManagedGitHubIssueLinkInput,
+	) (*externalsyncrepo.ManagedGitHubIssueLinkBinding, error)
+	TombstoneLocalIssueExternalLinkTx(
+		ctx context.Context,
+		tx pgx.Tx,
+		tenantID string,
+		requestID uuid.UUID,
+		externalObjectLinkID uuid.UUID,
+	) error
 	CreateCustomerRequestIssueRun(
 		ctx context.Context,
 		in externalsyncrepo.CustomerRequestIssueCreateRunInput,
@@ -739,16 +755,19 @@ func (s *Service) LinkIssue(ctx context.Context, in LinkIssueInput) (*Detail, er
 	if err != nil {
 		return nil, err
 	}
+	pullTarget, boundLink, err := s.bindManagedIssueLinkTx(ctx, tx, normalized, ptrext.Indirect(link))
+	if err != nil {
+		return nil, err
+	}
+	if boundLink != nil {
+		link = boundLink
+	}
 	summary, err := s.repo.GetDetailTx(ctx, tx, normalized.TenantID, normalized.RequestID, 0)
 	if err != nil {
 		return nil, err
 	}
 	if err := s.recordAuditTx(ctx, tx, normalized.Actor, "customer_request.link_issue", summary.Summary,
 		"Linked issue to customer request", issueAuditMetadata(normalized.RequestID, ptrext.Indirect(link))); err != nil {
-		return nil, err
-	}
-	pullTarget, err := s.repo.ManagedIssueSyncTargetTx(ctx, tx, normalized.TenantID, normalized.RequestID, link.ID)
-	if err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -772,14 +791,17 @@ func (s *Service) resolveManagedIssueLinkTarget(ctx context.Context, in LinkIssu
 	if strings.TrimSpace(in.Provider) != "" && !strings.EqualFold(strings.TrimSpace(in.Provider), "github") {
 		return LinkIssueInput{}, ErrUnsupportedProvider
 	}
-	target, err := s.repo.ResolveGitHubIssueLinkTarget(ctx, repo.GitHubIssueLinkTargetInput{
+	if s.issueCreates == nil {
+		return LinkIssueInput{}, ErrValidation
+	}
+	target, err := s.issueCreates.ResolveGitHubIssueLinkTarget(ctx, externalsyncrepo.GitHubIssueLinkTargetInput{
 		TenantID:     in.TenantID,
 		ConnectionID: ptrext.Indirect(in.ConnectionID),
 		MappingID:    in.MappingID,
 		IssueNumber:  in.IssueNumber,
 	})
 	if err != nil {
-		return LinkIssueInput{}, err
+		return LinkIssueInput{}, mapManagedIssueLinkError(err)
 	}
 	in.Provider = "github"
 	in.ExternalURL = target.ExternalURL
@@ -797,7 +819,38 @@ func (s *Service) resolveManagedIssueLinkTarget(ctx context.Context, in LinkIssu
 	return in, nil
 }
 
-func (s *Service) enqueueManagedIssuePull(ctx context.Context, in LinkIssueInput, target *repo.ManagedIssueSyncTarget) {
+func (s *Service) bindManagedIssueLinkTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	in LinkIssueInput,
+	link repo.IssueLink,
+) (*externalsyncrepo.ManagedIssueSyncTarget, *repo.IssueLink, error) {
+	if s.issueCreates == nil {
+		return nil, nil, nil
+	}
+	binding, err := s.issueCreates.BindManagedGitHubIssueLinkTx(ctx, tx, externalsyncrepo.ManagedGitHubIssueLinkInput{
+		TenantID:    in.TenantID,
+		RequestID:   in.RequestID,
+		Provider:    in.Provider,
+		ExternalKey: in.ExternalKey,
+		ExternalURL: in.ExternalURL,
+		MappingID:   in.MappingID,
+	})
+	if err != nil || binding == nil {
+		return nil, nil, mapManagedIssueLinkError(err)
+	}
+	updated, err := s.repo.BindIssueExternalObjectLinkTx(ctx, tx, in.TenantID, in.RequestID, link.ID, binding.ExternalObjectLinkID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ptrext.Of(externalsyncrepo.ManagedIssueSyncTarget{
+		ConnectionID: binding.ConnectionID,
+		MappingID:    binding.MappingID,
+		ExternalKey:  binding.ExternalKey,
+	}), updated, nil
+}
+
+func (s *Service) enqueueManagedIssuePull(ctx context.Context, in LinkIssueInput, target *externalsyncrepo.ManagedIssueSyncTarget) {
 	if s.issueCreates == nil || !strings.EqualFold(in.Provider, "github") || target == nil {
 		return
 	}
@@ -877,6 +930,9 @@ func (s *Service) UnlinkIssue(ctx context.Context, tenantID string, requestID, i
 	if err != nil {
 		return nil, err
 	}
+	if err := s.tombstoneManagedIssueLinkTx(ctx, tx, tenantID, requestID, ptrext.Indirect(link)); err != nil {
+		return nil, err
+	}
 	summary, err := s.repo.GetDetailTx(ctx, tx, tenantID, requestID, 0)
 	if err != nil {
 		return nil, err
@@ -889,6 +945,20 @@ func (s *Service) UnlinkIssue(ctx context.Context, tenantID string, requestID, i
 		return nil, err
 	}
 	return s.detail(ctx, tenantID, requestID, 50)
+}
+
+func (s *Service) tombstoneManagedIssueLinkTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	link repo.IssueLink,
+) error {
+	if s.issueCreates == nil || link.ExternalObjectLinkID == nil {
+		return nil
+	}
+	err := s.issueCreates.TombstoneLocalIssueExternalLinkTx(ctx, tx, tenantID, requestID, ptrext.Indirect(link.ExternalObjectLinkID))
+	return mapManagedIssueLinkError(err)
 }
 
 func (s *Service) RecordIssueSync(ctx context.Context, in IssueSyncInput) (*Detail, error) {
@@ -1398,6 +1468,21 @@ func hasGitHubIssueLink(detail *Detail) bool {
 
 func mapIssueCreateRunError(err error) error {
 	switch {
+	case errors.Is(err, externalsyncrepo.ErrMappingNotFound), errors.Is(err, externalsyncrepo.ErrConflict):
+		return repo.ErrConflict
+	case errors.Is(err, externalsyncrepo.ErrLocalObjectNotFound):
+		return repo.ErrNotFound
+	default:
+		return err
+	}
+}
+
+func mapManagedIssueLinkError(err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, externalsyncrepo.ErrInvalidInput):
+		return repo.ErrInvalidInput
 	case errors.Is(err, externalsyncrepo.ErrMappingNotFound), errors.Is(err, externalsyncrepo.ErrConflict):
 		return repo.ErrConflict
 	case errors.Is(err, externalsyncrepo.ErrLocalObjectNotFound):

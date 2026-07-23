@@ -20,6 +20,7 @@ var (
 	ErrInstallationNotFound = errors.New("external provider installation not found")
 	ErrResourceNotFound     = errors.New("external provider installation resource not found")
 	ErrConflict             = errors.New("external sync conflict")
+	ErrInvalidInput         = errors.New("external sync invalid input")
 )
 
 const (

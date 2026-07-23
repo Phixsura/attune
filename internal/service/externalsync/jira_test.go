@@ -155,7 +155,10 @@ func TestNormalizeJiraWebhookPayloadHelpers(t *testing.T) {
 	if !strings.Contains(payload.JSON, `"provider":"jira"`) ||
 		!strings.Contains(payload.JSON, `"comment":`) ||
 		!strings.Contains(payload.JSON, `"user":`) ||
-		strings.Contains(payload.JSON, "secret") {
+		strings.Contains(payload.JSON, "secret") ||
+		strings.Contains(payload.JSON, "Looks good") ||
+		strings.Contains(payload.JSON, "alice@example.com") ||
+		strings.Contains(payload.JSON, "emailAddress") {
 		t.Fatalf("normalized JSON = %s; want compact safe payload", payload.JSON)
 	}
 }
@@ -219,6 +222,7 @@ func assertRecordedJiraWebhookNormalizedPayload(t *testing.T, raw []byte) {
 	assertRecordedJiraWebhookObjectField(t, normalized, "changelog", "id", "200")
 	assertRecordedJiraWebhookObjectField(t, normalized, "comment", "id", "300")
 	assertRecordedJiraWebhookObjectField(t, normalized, "user", "displayName", "Alice")
+	assertRecordedJiraWebhookSensitiveFieldsRedacted(t, raw, normalized)
 }
 
 func assertRecordedJiraWebhookObjectField(t *testing.T, normalized map[string]any, fieldName, key, want string) {
@@ -226,6 +230,22 @@ func assertRecordedJiraWebhookObjectField(t *testing.T, normalized map[string]an
 	obj, ok := normalized[fieldName].(map[string]any)
 	if !ok || obj[key] != want {
 		t.Fatalf("normalized %s = %#v; want %s=%s", fieldName, normalized[fieldName], key, want)
+	}
+}
+
+func assertRecordedJiraWebhookSensitiveFieldsRedacted(t *testing.T, raw []byte, normalized map[string]any) {
+	t.Helper()
+	if strings.Contains(string(raw), "Looks good") ||
+		strings.Contains(string(raw), "alice@example.com") ||
+		strings.Contains(string(raw), "emailAddress") {
+		t.Fatalf("normalized payload = %s; want body and email redacted", string(raw))
+	}
+	comment, ok := normalized["comment"].(map[string]any)
+	if !ok {
+		t.Fatalf("normalized comment = %#v; want object", normalized["comment"])
+	}
+	if _, ok := comment["body"]; ok || comment["body_present"] != true || comment["body_digest"] == "" {
+		t.Fatalf("normalized comment = %#v; want body digest metadata without body", comment)
 	}
 }
 
