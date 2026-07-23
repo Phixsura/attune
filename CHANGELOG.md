@@ -64,9 +64,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
-- Startup migrations now strip legacy top-level `BEGIN` / `COMMIT` wrappers
-  from the execution body while preserving migration checksums, preventing
-  PostgreSQL transaction-state warnings during fresh local stack boots.
+- Startup migrations now strip legacy top-level `BEGIN` plus `COMMIT` or
+  `ROLLBACK` wrappers, including transaction-control lines with trailing SQL
+  comments, from the execution body while preserving migration checksums. This
+  prevents PostgreSQL transaction-state warnings during fresh local stack boots.
 
 - Console primary buttons now keep an opaque hover background, preserving
   WCAG text contrast for mouse-driven workflows.
