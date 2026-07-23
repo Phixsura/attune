@@ -253,13 +253,24 @@ func (m *mockTenantResolver) FirstActiveID(ctx context.Context) (string, error) 
 	return "", nil
 }
 
+type mockMembershipStore struct {
+	ensureFn func(ctx context.Context, tenantID, userID string, role domain.Role) error
+}
+
+func (m *mockMembershipStore) EnsureOIDCMember(ctx context.Context, tenantID, userID string, role domain.Role) error {
+	if m.ensureFn != nil {
+		return m.ensureFn(ctx, tenantID, userID, role)
+	}
+	return nil
+}
+
 // --- NewService tests ---
 
 func TestNewService_Disabled(t *testing.T) {
 	t.Parallel()
 
 	cfg := ptrext.Of(config.OIDCConfig{Enabled: false})
-	svc, err := NewService(context.Background(), cfg, nil, nil)
+	svc, err := NewService(context.Background(), cfg, nil, nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, svc)
 }
@@ -274,7 +285,7 @@ func TestNewService_Disabled_ReturnsNilNil(t *testing.T) {
 		IssuerURL: "https://should-not-be-contacted.example.com",
 		ClientID:  "ignored",
 	})
-	svc, err := NewService(context.Background(), cfg, nil, nil)
+	svc, err := NewService(context.Background(), cfg, nil, nil, nil)
 	require.Nil(t, svc)
 	require.Nil(t, err)
 }
@@ -296,7 +307,7 @@ func TestNewService_DiscoverySuccess(t *testing.T) {
 		InsecureSkipVerify: true,
 	})
 
-	svc, err := NewService(t.Context(), cfg, nil, nil)
+	svc, err := NewService(t.Context(), cfg, nil, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, svc)
 	require.Contains(t, svc.AuthCodeURL("state-1", "verifier-1", "nonce-1"), server.URL+"/authorize")
@@ -316,7 +327,7 @@ func TestNewService_DiscoveryFailure(t *testing.T) {
 		InsecureSkipVerify: true,
 	})
 
-	svc, err := NewService(t.Context(), cfg, nil, nil)
+	svc, err := NewService(t.Context(), cfg, nil, nil, nil)
 	require.Nil(t, svc)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "oidc discovery failed")
@@ -447,6 +458,85 @@ func TestFindOrCreateUser(t *testing.T) {
 		require.Equal(t, "editor", captured.Role)
 		require.Equal(t, []string{"alpha", "beta", "gamma"}, captured.Groups)
 		require.Equal(t, "upserted-id", user.ID)
+	})
+}
+
+func TestEnsureMembership(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil store is no-op", func(t *testing.T) {
+		t.Parallel()
+
+		svc := ptrext.Of(Service{})
+		require.NoError(t, svc.EnsureMembership(t.Context(), "tenant-1", "user-1", "member"))
+	})
+
+	t.Run("syncs parsed role", func(t *testing.T) {
+		t.Parallel()
+
+		var gotTenantID string
+		var gotUserID string
+		var gotRole domain.Role
+		svc := ptrext.Of(Service{memberships: ptrext.Of(mockMembershipStore{
+			ensureFn: func(_ context.Context, tenantID, userID string, role domain.Role) error {
+				gotTenantID = tenantID
+				gotUserID = userID
+				gotRole = role
+				return nil
+			},
+		})})
+
+		require.NoError(t, svc.EnsureMembership(t.Context(), "tenant-1", "user-1", "admin"))
+		require.Equal(t, "tenant-1", gotTenantID)
+		require.Equal(t, "user-1", gotUserID)
+		require.Equal(t, domain.RoleAdmin, gotRole)
+	})
+
+	t.Run("invalid role becomes viewer", func(t *testing.T) {
+		t.Parallel()
+
+		var gotRole domain.Role
+		svc := ptrext.Of(Service{memberships: ptrext.Of(mockMembershipStore{
+			ensureFn: func(_ context.Context, _, _ string, role domain.Role) error {
+				gotRole = role
+				return nil
+			},
+		})})
+
+		require.NoError(t, svc.EnsureMembership(t.Context(), "tenant-1", "user-1", "editor"))
+		require.Equal(t, domain.RoleViewer, gotRole)
+	})
+
+	t.Run("tenant required", func(t *testing.T) {
+		t.Parallel()
+
+		svc := ptrext.Of(Service{memberships: ptrext.Of(mockMembershipStore{})})
+		err := svc.EnsureMembership(t.Context(), "", "user-1", "member")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "tenant_id")
+	})
+
+	t.Run("user required", func(t *testing.T) {
+		t.Parallel()
+
+		svc := ptrext.Of(Service{memberships: ptrext.Of(mockMembershipStore{})})
+		err := svc.EnsureMembership(t.Context(), "tenant-1", "", "member")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "user_id")
+	})
+
+	t.Run("store error propagates", func(t *testing.T) {
+		t.Parallel()
+
+		svc := ptrext.Of(Service{memberships: ptrext.Of(mockMembershipStore{
+			ensureFn: func(context.Context, string, string, domain.Role) error {
+				return errors.New("write failed")
+			},
+		})})
+
+		err := svc.EnsureMembership(t.Context(), "tenant-1", "user-1", "member")
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "write failed")
 	})
 }
 
@@ -762,7 +852,7 @@ func TestExtractGroups_UserInfoFallback(t *testing.T) {
 		ClientID:           "client-1",
 		GroupsClaim:        "roles",
 		InsecureSkipVerify: true,
-	}), nil, nil)
+	}), nil, nil, nil)
 	require.NoError(t, err)
 
 	groups := svc.extractGroups(t.Context(), map[string]any{}, ptrext.Of(oauth2.Token{AccessToken: "token-1", TokenType: "Bearer"}))
@@ -784,7 +874,7 @@ func TestExtractGroups_UserInfoFallbackFailures(t *testing.T) {
 			ClientID:           "client-1",
 			GroupsClaim:        "groups",
 			InsecureSkipVerify: true,
-		}), nil, nil)
+		}), nil, nil, nil)
 		require.NoError(t, err)
 
 		groups := svc.extractGroups(t.Context(), map[string]any{}, ptrext.Of(oauth2.Token{AccessToken: "token-1", TokenType: "Bearer"}))
@@ -804,7 +894,7 @@ func TestExtractGroups_UserInfoFallbackFailures(t *testing.T) {
 			ClientID:           "client-1",
 			GroupsClaim:        "groups",
 			InsecureSkipVerify: true,
-		}), nil, nil)
+		}), nil, nil, nil)
 		require.NoError(t, err)
 
 		groups := svc.extractGroups(t.Context(), map[string]any{}, ptrext.Of(oauth2.Token{AccessToken: "token-1", TokenType: "Bearer"}))

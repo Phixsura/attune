@@ -747,6 +747,15 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+Implementation note, 2026-07-23: local production-profile OIDC validation found
+this membership sync missing in the shipped callback path. The implementation
+now injects an OIDC membership store into `oidcauth`, syncs the IdP user into
+`tenant_members` before issuing an OIDC session, and fails closed if the
+membership write cannot be completed. That keeps `/me`, the session cookie, and
+tenant-scoped RBAC aligned for OIDC users. Tenant membership reads also
+normalize the historical session user type `oidc` to the canonical membership
+type `oidc_user`, so existing OIDC cookies resolve the same row that login syncs.
+
 ```go
 // internal/repo/tenantmember/oidc.go
 

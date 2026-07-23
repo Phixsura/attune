@@ -47,7 +47,7 @@ func TestCoverage_NewService_Disabled(t *testing.T) {
 	t.Parallel()
 
 	cfg := ptrext.Of(config.OIDCConfig{Enabled: false})
-	svc, err := NewService(t.Context(), cfg, nil, nil)
+	svc, err := NewService(t.Context(), cfg, nil, nil, nil)
 
 	assert.Nil(t, svc)
 	assert.NoError(t, err)

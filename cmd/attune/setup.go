@@ -561,7 +561,8 @@ func buildOIDCHandler(
 	}
 
 	oidcUsers := oidcuserrepo.NewRepo(pool)
-	oidcSvc, err := oidcauth.NewService(ctx, &cfg.OIDC, oidcUsers, tenants) // ptrext:allow struct-field
+	memberships := oidcMembershipStore{members: tenantmember.NewRepo(pool)}
+	oidcSvc, err := oidcauth.NewService(ctx, &cfg.OIDC, oidcUsers, tenants, memberships) // ptrext:allow struct-field
 	if err != nil {
 		logext.Errorf(ctx, "[buildOIDCHandler] OIDC service init failed,err:%s", err.Error())
 		return nil
@@ -582,6 +583,15 @@ func buildOIDCHandler(
 	}
 
 	return consoleoidc.NewHandler(oidcSvc, signer, aead, cfg.ConsoleBaseURL)
+}
+
+type oidcMembershipStore struct {
+	members *tenantmember.Repo
+}
+
+func (s oidcMembershipStore) EnsureOIDCMember(ctx context.Context, tenantID, userID string, role domain.Role) error {
+	_, err := s.members.EnsureOIDCMember(ctx, tenantID, userID, role)
+	return err
 }
 
 func enrichmentRuntimeBootstrapSpec(cfg *config.Config) enrichruntime.Spec {
