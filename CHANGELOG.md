@@ -50,7 +50,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   requests plus closing commits as delivery artifact children, making provider
   data reach Customer Request delivery graphs without manual projection code.
 
+### Changed
+
+- Managed GitHub issue-link binding now runs through the external sync
+  repository boundary, keeping Customer Request persistence focused on local
+  issue links while preserving managed pull enqueue behavior.
+
 ### Security
+
+- GitHub and Jira webhook diagnostic payloads now redact comment bodies and Jira
+  email addresses, retaining only safe identity fields plus body digest metadata
+  for troubleshooting.
 
 - `make ci-check` now runs the TruffleHog secret scan through a required local
   binary or pinned Docker fallback, removing the previous local skip when the
