@@ -71,11 +71,12 @@ func bootstrapAdminResult(ctx context.Context, cfg *config.Config, counter boots
 		return r
 	}
 	if n > 0 {
-		r.Status = preflight.StatusWarn
 		if cfg.Console.BootstrapAdmin.Email != "" || cfg.Console.BootstrapAdmin.Password != "" {
+			r.Status = preflight.StatusWarn
 			r.Message = fmt.Sprintf("%d admin(s) already exist; bootstrap seed is still configured and will be skipped", n)
 			r.Remediation = "Remove console.bootstrap_admin from config after the first admin login."
 		} else {
+			r.Status = preflight.StatusPass
 			r.Message = fmt.Sprintf("%d admin(s) already exist", n)
 		}
 		return r

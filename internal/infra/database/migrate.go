@@ -351,7 +351,7 @@ func applyMigrationTx(ctx context.Context, conn *pgxpool.Conn, version int, name
 		logext.Errorf(ctx, "[%s] begin tx failed,version:%d,err:%+v", where, version, err.Error())
 		return fmt.Errorf("begin tx for %d: %w", version, err)
 	}
-	if _, err := tx.Exec(ctx, string(body)); err != nil {
+	if _, err := tx.Exec(ctx, string(migrationExecutionBody(body))); err != nil {
 		_ = tx.Rollback(ctx)
 		logext.Errorf(ctx, "[%s] apply failed,file:%s,err:%+v", where, name, err.Error())
 		return fmt.Errorf("apply %s: %w", name, err)
@@ -455,6 +455,55 @@ func markMigrationCompleteSQL() string {
 // that don't have the extended columns.
 func recordMigrationLegacySQL() string {
 	return fmt.Sprintf("INSERT INTO %s (version, filename) VALUES ($1, $2)", trackerTable)
+}
+
+// migrationExecutionBody preserves the persisted checksum input but removes a
+// legacy top-level transaction envelope before executing inside pgx's tx.
+func migrationExecutionBody(body []byte) []byte {
+	lines := bytes.SplitAfter(body, []byte("\n"))
+	first := firstExecutableSQLLine(lines)
+	last := lastExecutableSQLLine(lines)
+	if first >= 0 && last >= 0 &&
+		isTransactionControlLine(lines[first], "begin") &&
+		(isTransactionControlLine(lines[last], "commit") ||
+			isTransactionControlLine(lines[last], "rollback")) {
+		lines[first] = nil
+		lines[last] = nil
+	}
+	return bytes.Join(lines, nil)
+}
+
+func firstExecutableSQLLine(lines [][]byte) int {
+	for i, line := range lines {
+		if !isIgnorableSQLLine(line) {
+			return i
+		}
+	}
+	return -1
+}
+
+func lastExecutableSQLLine(lines [][]byte) int {
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !isIgnorableSQLLine(lines[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+func isIgnorableSQLLine(line []byte) bool {
+	trimmed := bytes.TrimSpace(line)
+	return len(trimmed) == 0 || bytes.HasPrefix(trimmed, []byte("--"))
+}
+
+func isTransactionControlLine(line []byte, keyword string) bool {
+	trimmed := bytes.TrimSpace(line)
+	if comment := bytes.Index(trimmed, []byte("--")); comment >= 0 {
+		trimmed = bytes.TrimSpace(trimmed[:comment])
+	}
+	trimmed = bytes.TrimSuffix(trimmed, []byte(";"))
+	trimmed = bytes.TrimSpace(trimmed)
+	return bytes.EqualFold(trimmed, []byte(keyword))
 }
 
 // backfillChecksums updates all applied migrations that have empty checksum.

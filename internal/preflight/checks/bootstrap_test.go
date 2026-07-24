@@ -119,13 +119,13 @@ func TestBootstrapAdminResult_PassesWhenAdminsExist(t *testing.T) {
 	require.Contains(t, r.Remediation, "Remove console.bootstrap_admin")
 }
 
-func TestBootstrapAdminResult_WarnsWhenAdminsExistAndSeedCleared(t *testing.T) {
+func TestBootstrapAdminResult_PassesWhenAdminsExistAndSeedCleared(t *testing.T) {
 	t.Parallel()
 
 	r := bootstrapAdminResult(context.Background(), &config.Config{
 		ConsoleSessionKey: "this-is-a-sufficiently-long-session-key-for-testing",
 	}, fakeBootstrapAdminCounter{count: 1})
-	require.Equal(t, preflight.StatusWarn, r.Status)
+	require.Equal(t, preflight.StatusPass, r.Status)
 	require.Equal(t, "1 admin(s) already exist", r.Message)
 	require.Empty(t, r.Remediation)
 }

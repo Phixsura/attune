@@ -40,6 +40,12 @@ docker compose logs attune        # expect: ...OK,path:/app/config.yaml,port:809
 curl http://localhost:8090/healthz   # -> ok
 ```
 
+For source-tree development, prefer `make dev-stack` from the repository root.
+It starts a disposable PostgreSQL cluster and the current Go server with a
+generated temporary config, then prints the exact Console URL to open. This is
+the quickest recovery path when an old localhost tab shows `Failed to fetch`
+because its port no longer has a backend behind it.
+
 ## 3. Create tenant, API key, and LLM route
 
 The admin subcommands do **not** run migrations, so run them only **after** the

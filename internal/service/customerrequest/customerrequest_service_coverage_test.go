@@ -446,6 +446,31 @@ func expectCustomerRequestServiceError(t *testing.T, name string, call func() er
 
 type fakeIssueCreateRunStore struct{}
 
+func (fakeIssueCreateRunStore) ResolveGitHubIssueLinkTarget(
+	context.Context,
+	externalsyncrepo.GitHubIssueLinkTargetInput,
+) (*externalsyncrepo.GitHubIssueLinkTarget, error) {
+	return nil, errors.New("unexpected issue link target store call")
+}
+
+func (fakeIssueCreateRunStore) BindManagedGitHubIssueLinkTx(
+	context.Context,
+	pgx.Tx,
+	externalsyncrepo.ManagedGitHubIssueLinkInput,
+) (*externalsyncrepo.ManagedGitHubIssueLinkBinding, error) {
+	return nil, errors.New("unexpected issue link bind store call")
+}
+
+func (fakeIssueCreateRunStore) TombstoneLocalIssueExternalLinkTx(
+	context.Context,
+	pgx.Tx,
+	string,
+	uuid.UUID,
+	uuid.UUID,
+) error {
+	return errors.New("unexpected issue link tombstone store call")
+}
+
 func (fakeIssueCreateRunStore) CreateCustomerRequestIssueRun(
 	context.Context,
 	externalsyncrepo.CustomerRequestIssueCreateRunInput,

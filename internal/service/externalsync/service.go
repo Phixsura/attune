@@ -1762,7 +1762,7 @@ func normalizeGitHubWebhookPayload(eventType, deliveryID string, body []byte) st
 		}
 	}
 	if comment, ok := jsonObject(payload["comment"]); ok {
-		out["comment"] = pickJSONFields(comment, "id", "node_id", "html_url", "body", "created_at", "updated_at", "author_association")
+		out["comment"] = normalizeWebhookCommentForDiagnostics(comment, "id", "node_id", "html_url", "created_at", "updated_at", "author_association")
 		if user, ok := jsonObject(comment["user"]); ok {
 			out["comment_user"] = pickJSONFields(user, "id", "login", "html_url", "type")
 		}
@@ -1771,6 +1771,30 @@ func normalizeGitHubWebhookPayload(eventType, deliveryID string, body []byte) st
 		out["sender"] = pickJSONFields(sender, "id", "login", "html_url", "type")
 	}
 	return mustMarshalJSONObject(out)
+}
+
+func normalizeWebhookCommentForDiagnostics(comment map[string]any, fields ...string) map[string]any {
+	out := pickJSONFields(comment, fields...)
+	if body, ok := comment["body"]; ok {
+		addWebhookBodyMetadata(out, body)
+	}
+	return out
+}
+
+func addWebhookBodyMetadata(out map[string]any, body any) {
+	out["body_present"] = true
+	out["body_digest"] = webhookBodyDigest(body)
+}
+
+func webhookBodyDigest(body any) string {
+	if raw, ok := body.(string); ok {
+		return eventPayloadDigest([]byte(raw))
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return eventPayloadDigest([]byte("unencodable_body"))
+	}
+	return eventPayloadDigest(encoded)
 }
 
 func copyJSONField(dst map[string]any, src map[string]any, key string) {

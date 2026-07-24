@@ -90,12 +90,178 @@ func TestIsNoTxMigration(t *testing.T) {
 	}
 }
 
+func TestMigrationExecutionBodyStripsOuterTransactionEnvelope(t *testing.T) {
+	body := []byte(`-- legacy migration with explicit transaction wrapper
+
+BEGIN;
+CREATE TABLE IF NOT EXISTS example_items (
+    id TEXT PRIMARY KEY
+);
+COMMIT;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Contains(t, got, "legacy migration")
+	require.Contains(t, got, "CREATE TABLE IF NOT EXISTS example_items")
+	require.NotContains(t, got, "\nBEGIN;\n")
+	require.NotContains(t, got, "\nCOMMIT;\n")
+}
+
+func TestMigrationExecutionBodyKeepsPLpgSQLBlocks(t *testing.T) {
+	body := []byte(`DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1) THEN
+    RAISE NOTICE 'ok';
+  END IF;
+END $$;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Equal(t, string(body), got)
+	require.Contains(t, got, "\nBEGIN\n")
+	require.Contains(t, got, "END $$;")
+}
+
+func TestMigrationExecutionBodyKeepsOnlyInnerPLpgSQLBlocksWhenWrapped(t *testing.T) {
+	body := []byte(`BEGIN;
+DO $$
+BEGIN
+  RAISE NOTICE 'inside';
+END $$;
+COMMIT;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.NotContains(t, got, "BEGIN;\nDO")
+	require.Contains(t, got, "DO $$\nBEGIN\n")
+	require.Contains(t, got, "END $$;")
+	require.NotContains(t, got, "\nCOMMIT;")
+}
+
+func TestMigrationExecutionBodyStripsCaseInsensitiveLegacyEnvelope(t *testing.T) {
+	body := []byte(`-- old hand-written migration
+
+ begin  ;
+ALTER TABLE example_items ADD COLUMN title TEXT;
+ commit ;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Contains(t, got, "-- old hand-written migration")
+	require.Contains(t, got, "ALTER TABLE example_items")
+	require.NotContains(t, strings.ToLower(got), "begin")
+	require.NotContains(t, strings.ToLower(got), "commit")
+}
+
+func TestMigrationExecutionBodyStripsEnvelopeWithTrailingComments(t *testing.T) {
+	body := []byte(`-- legacy wrapper with comments
+BEGIN; -- explicit transaction starts here
+ALTER TABLE example_items ADD COLUMN subtitle TEXT;
+COMMIT; -- explicit transaction ends here
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Contains(t, got, "legacy wrapper with comments")
+	require.Contains(t, got, "ALTER TABLE example_items ADD COLUMN subtitle TEXT")
+	require.NotContains(t, got, "explicit transaction starts here")
+	require.NotContains(t, got, "explicit transaction ends here")
+}
+
+func TestMigrationExecutionBodyStripsRollbackEnvelope(t *testing.T) {
+	body := []byte(`BEGIN;
+CREATE TABLE example_items (id TEXT PRIMARY KEY);
+ROLLBACK;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Equal(t, "CREATE TABLE example_items (id TEXT PRIMARY KEY);\n", got)
+}
+
+func TestMigrationExecutionBodyKeepsUnpairedTransactionControlLines(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "begin without terminal commit",
+			body: "BEGIN;\nCREATE TABLE example_items (id TEXT PRIMARY KEY);\n",
+		},
+		{
+			name: "commit without opening begin",
+			body: "CREATE TABLE example_items (id TEXT PRIMARY KEY);\nCOMMIT;\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.body, string(migrationExecutionBody([]byte(tt.body))))
+		})
+	}
+}
+
+func TestMigrationExecutionBodyKeepsCommentOnlyTransactionMentions(t *testing.T) {
+	body := []byte(`-- BEGIN;
+CREATE TABLE example_items (id TEXT PRIMARY KEY);
+-- COMMIT;
+`)
+
+	require.Equal(t, string(body), string(migrationExecutionBody(body)))
+}
+
+func TestMigrationExecutionBodyNormalizesEmbeddedLegacyWrappers(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+
+	normalized := 0
+	for _, name := range names {
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		require.NoError(t, err)
+		execBody := migrationExecutionBody(body)
+		if string(execBody) == string(body) {
+			continue
+		}
+		normalized++
+		require.False(t, isTransactionControlLine([]byte(firstEffectiveLine(execBody)), "begin"), name)
+		require.False(t, isTransactionControlLine([]byte(lastEffectiveLine(execBody)), "commit"), name)
+		require.False(t, isTransactionControlLine([]byte(lastEffectiveLine(execBody)), "rollback"), name)
+	}
+
+	require.GreaterOrEqual(t, normalized, 1)
+}
+
 func TestMigrationCount(t *testing.T) {
 	t.Parallel()
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
 	require.Equal(t, 114, count, "should match current migration count")
+}
+
+func firstEffectiveLine(body []byte) string {
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(strings.TrimSpace(line), "--") {
+			return line
+		}
+	}
+	return ""
+}
+
+func lastEffectiveLine(body []byte) string {
+	lines := strings.Split(string(body), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(strings.TrimSpace(line), "--") {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestPublicVisibilityMigrationAllowsPublicModerationAuditActions(t *testing.T) {

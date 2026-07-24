@@ -838,20 +838,27 @@ describe('PublicVisibilityPage', () => {
     let hideBody: unknown
     let spamBody: unknown
     let restoreBody: unknown
+    let queueSubjects = moderationSubjects()
+    const replaceSubject = (next: ModerationSubject) => {
+      queueSubjects = queueSubjects.map((subject) => (subject.id === next.id ? next : subject))
+      return next
+    }
     server.use(
       http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
       http.get('/fb/v1/console/public-visibility/moderation', () =>
-        HttpResponse.json({ subjects: moderationSubjects() }),
+        HttpResponse.json({ subjects: queueSubjects }),
       ),
       http.post(
         '/fb/v1/console/public-visibility/moderation/moderation-approved\\:hide',
         async ({ request }) => {
           hideBody = await request.json()
           return HttpResponse.json(
-            moderationSubject(
-              'moderation-approved',
-              'profile-approved',
-              ModerationState.MODERATION_STATE_HIDDEN,
+            replaceSubject(
+              moderationSubject(
+                'moderation-approved',
+                'profile-approved',
+                ModerationState.MODERATION_STATE_HIDDEN,
+              ),
             ),
           )
         },
@@ -861,10 +868,12 @@ describe('PublicVisibilityPage', () => {
         async ({ request }) => {
           spamBody = await request.json()
           return HttpResponse.json(
-            moderationSubject(
-              'moderation-hidden',
-              'profile-hidden',
-              ModerationState.MODERATION_STATE_SPAM,
+            replaceSubject(
+              moderationSubject(
+                'moderation-hidden',
+                'profile-hidden',
+                ModerationState.MODERATION_STATE_SPAM,
+              ),
             ),
           )
         },
@@ -874,10 +883,12 @@ describe('PublicVisibilityPage', () => {
         async ({ request }) => {
           restoreBody = await request.json()
           return HttpResponse.json(
-            moderationSubject(
-              'moderation-hidden',
-              'profile-hidden',
-              ModerationState.MODERATION_STATE_PENDING,
+            replaceSubject(
+              moderationSubject(
+                'moderation-hidden',
+                'profile-hidden',
+                ModerationState.MODERATION_STATE_PENDING,
+              ),
             ),
           )
         },
@@ -905,9 +916,17 @@ describe('PublicVisibilityPage', () => {
         reasonNote: 'Internal-only detail',
       })
     })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '隐藏审核项' })).not.toBeInTheDocument()
+    })
 
-    await user.click(await screen.findByRole('button', { name: '已拦截 (1)' }, { timeout: 10_000 }))
-    await user.click(screen.getByRole('button', { name: '标记垃圾' }))
+    await user.click(await screen.findByRole('button', { name: '已拦截 (2)' }, { timeout: 10_000 }))
+    await waitFor(() => {
+      expect(screen.getByText('profile-hidden')).toBeInTheDocument()
+    })
+    await user.click(
+      within(moderationRowForSubject('profile-hidden')).getByRole('button', { name: '标记垃圾' }),
+    )
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: '标记垃圾审核项' })).toBeInTheDocument()
     })
@@ -919,8 +938,13 @@ describe('PublicVisibilityPage', () => {
         reasonNote: 'Repeated bot content',
       })
     })
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '标记垃圾审核项' })).not.toBeInTheDocument()
+    })
 
-    await user.click(screen.getByRole('button', { name: '恢复' }))
+    await user.click(
+      within(moderationRowForSubject('profile-hidden')).getByRole('button', { name: '恢复' }),
+    )
     await waitFor(() => {
       expect(screen.getByRole('dialog', { name: '恢复审核项' })).toBeInTheDocument()
     })
@@ -994,6 +1018,12 @@ function mockMe(role: 'admin' | 'delegated_admin' | 'member' | 'viewer') {
       }),
     ),
   )
+}
+
+function moderationRowForSubject(subjectId: string): HTMLElement {
+  const row = screen.getByText(subjectId).closest('li')
+  if (!row) throw new Error(`missing moderation row for ${subjectId}`)
+  return row
 }
 
 function policyFixture(overrides: Partial<PublicVisibilityPolicy> = {}): PublicVisibilityPolicy {

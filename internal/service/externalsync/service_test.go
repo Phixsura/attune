@@ -1887,7 +1887,7 @@ func TestRecordGitHubWebhookVerifiesSignatureAndStoresRawDigest(t *testing.T) {
 	secret := []byte("webhook-secret-123")
 	store := ptrext.Of(fakeSecretStore{decryptPlaintext: secret})
 	service := New(repository, store)
-	body := []byte(`{"action":"opened","repository":{"full_name":"acme/widget","html_url":"https://github.com/acme/widget"},"issue":{"number":42,"title":"Need SSO","state":"open","html_url":"https://github.com/acme/widget/issues/42"},"sender":{"login":"octo"}}`)
+	body := []byte(`{"action":"opened","repository":{"full_name":"acme/widget","html_url":"https://github.com/acme/widget"},"issue":{"number":42,"title":"Need SSO","state":"open","html_url":"https://github.com/acme/widget/issues/42"},"comment":{"id":9001,"body":"customer token abc123","html_url":"https://github.com/acme/widget/issues/42#issuecomment-9001"},"sender":{"login":"octo"}}`)
 
 	event, err := service.RecordGitHubWebhook(context.Background(), GitHubWebhookInput{
 		TenantID:        "tenant-1",
@@ -1914,6 +1914,11 @@ func TestRecordGitHubWebhookVerifiesSignatureAndStoresRawDigest(t *testing.T) {
 	if !strings.Contains(string(event.NormalizedPayload), `"number":42`) ||
 		strings.Contains(string(event.NormalizedPayload), "webhook-secret-123") {
 		t.Fatalf("normalized payload = %s; want compact issue payload without secrets", string(event.NormalizedPayload))
+	}
+	if strings.Contains(string(event.NormalizedPayload), "customer token abc123") ||
+		!strings.Contains(string(event.NormalizedPayload), `"body_present":true`) ||
+		!strings.Contains(string(event.NormalizedPayload), `"body_digest":`) {
+		t.Fatalf("normalized payload = %s; want comment body redacted with digest metadata", string(event.NormalizedPayload))
 	}
 	if string(store.decryptAAD) != string(connectionWebhookSecretAAD("tenant-1", connectionID, "github")) {
 		t.Fatalf("decrypt AAD = %q; want webhook-scoped AAD", string(store.decryptAAD))

@@ -99,3 +99,23 @@ func TestRoleIsValid(t *testing.T) {
 	assert.True(t, domain.RoleViewer.IsValid())
 	assert.False(t, domain.Role("invalid").IsValid())
 }
+
+func TestNormalizeMemberType(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"legacy admin empty", "", "admin"},
+		{"explicit admin", "admin", "admin"},
+		{"oidc session alias", "oidc", "oidc_user"},
+		{"canonical oidc user", "oidc_user", "oidc_user"},
+		{"api key unchanged", "api_key", "api_key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, normalizeMemberType(tt.in))
+		})
+	}
+}

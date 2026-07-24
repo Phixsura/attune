@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
@@ -194,7 +195,7 @@ func TestEnqueueManagedIssuePullBranches(t *testing.T) {
 		Provider:  "github",
 		Actor:     auditlogsvc.Actor{ID: "user-1"},
 	}
-	target := &repo.ManagedIssueSyncTarget{
+	target := &externalsyncrepo.ManagedIssueSyncTarget{
 		ConnectionID: connectionID,
 		MappingID:    mappingID,
 		ExternalKey:  "Phixsura/attune#228",
@@ -206,7 +207,7 @@ func TestEnqueueManagedIssuePullBranches(t *testing.T) {
 	service := &Service{issueCreates: store}
 	service.enqueueManagedIssuePull(ctx, input, nil)
 	service.enqueueManagedIssuePull(ctx, LinkIssueInput{Provider: "jira"}, target)
-	service.enqueueManagedIssuePull(ctx, input, &repo.ManagedIssueSyncTarget{ConnectionID: connectionID, MappingID: mappingID})
+	service.enqueueManagedIssuePull(ctx, input, &externalsyncrepo.ManagedIssueSyncTarget{ConnectionID: connectionID, MappingID: mappingID})
 	if len(store.pullInputs) != 0 {
 		t.Fatalf("skip branches enqueued %d pull runs, want 0", len(store.pullInputs))
 	}
@@ -1206,12 +1207,48 @@ func repoActor() auditlogsvc.Actor {
 }
 
 type recordingIssueCreateRunStore struct {
-	createInputs []externalsyncrepo.CustomerRequestIssueCreateRunInput
-	createResult *externalsyncrepo.CustomerRequestIssueCreateRunResult
-	createErr    error
-	pullInputs   []externalsyncrepo.CustomerRequestIssuePullRunInput
-	pullResult   *externalsyncrepo.CustomerRequestIssuePullRunResult
-	pullErr      error
+	resolveInput  *externalsyncrepo.GitHubIssueLinkTargetInput
+	resolveTarget *externalsyncrepo.GitHubIssueLinkTarget
+	resolveErr    error
+	bindInputs    []externalsyncrepo.ManagedGitHubIssueLinkInput
+	bindResult    *externalsyncrepo.ManagedGitHubIssueLinkBinding
+	bindErr       error
+	tombstones    []uuid.UUID
+	tombstoneErr  error
+	createInputs  []externalsyncrepo.CustomerRequestIssueCreateRunInput
+	createResult  *externalsyncrepo.CustomerRequestIssueCreateRunResult
+	createErr     error
+	pullInputs    []externalsyncrepo.CustomerRequestIssuePullRunInput
+	pullResult    *externalsyncrepo.CustomerRequestIssuePullRunResult
+	pullErr       error
+}
+
+func (s *recordingIssueCreateRunStore) ResolveGitHubIssueLinkTarget(
+	_ context.Context,
+	in externalsyncrepo.GitHubIssueLinkTargetInput,
+) (*externalsyncrepo.GitHubIssueLinkTarget, error) {
+	s.resolveInput = ptrext.Of(in)
+	return s.resolveTarget, s.resolveErr
+}
+
+func (s *recordingIssueCreateRunStore) BindManagedGitHubIssueLinkTx(
+	_ context.Context,
+	_ pgx.Tx,
+	in externalsyncrepo.ManagedGitHubIssueLinkInput,
+) (*externalsyncrepo.ManagedGitHubIssueLinkBinding, error) {
+	s.bindInputs = append(s.bindInputs, in)
+	return s.bindResult, s.bindErr
+}
+
+func (s *recordingIssueCreateRunStore) TombstoneLocalIssueExternalLinkTx(
+	_ context.Context,
+	_ pgx.Tx,
+	_ string,
+	_ uuid.UUID,
+	externalObjectLinkID uuid.UUID,
+) error {
+	s.tombstones = append(s.tombstones, externalObjectLinkID)
+	return s.tombstoneErr
 }
 
 func (s *recordingIssueCreateRunStore) CreateCustomerRequestIssueRun(

@@ -10,6 +10,9 @@ Vite 6 · React 19 · TS 5.9 · TanStack Router · TanStack Query 5 · shadcn/ui
 + Radix · Tailwind 4 · react-i18next · date-fns 3 · Biome 2 · Vitest 4
 \+ Testing Library + MSW (tests).
 
+Use Node 22 for local Console work; it matches CI and the repository
+`.node-version` file.
+
 ## Run
 
 ```bash

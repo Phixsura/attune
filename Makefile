@@ -9,9 +9,12 @@
 # falls back to fixed-version local plugins. To change a proto dependency, run
 # `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality maturity-contract demo-seed demo-reset demo-bootstrap test fast-check adversarial-check test-live test-live-list test-integration public-board-smoke runtime-smoke release-smoke ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality maturity-contract dev-stack demo-seed demo-reset demo-bootstrap test fast-check adversarial-check script-tests test-live test-live-list test-integration public-board-smoke runtime-smoke secret-scan release-smoke ci-check
 
-PNPM ?= corepack pnpm
+NODE_RUNNER ?= bash $(CURDIR)/scripts/with-supported-node.sh
+NODE ?= $(NODE_RUNNER) node
+NPX ?= $(NODE_RUNNER) npx
+PNPM ?= $(NODE_RUNNER) corepack pnpm
 FUZZTIME ?= 10s
 
 help: ## List targets.
@@ -61,6 +64,9 @@ search-quality: ## Verify the committed semantic-search relevance baseline.
 maturity-contract: ## Verify the platform maturity proposal graph and verification links.
 	bash scripts/lint-maturity-contract.sh
 
+dev-stack: ## Start disposable local Postgres + Attune + Console demo stack.
+	$(NODE) scripts/dev-local-stack.mjs
+
 demo-seed: ## Seed or refresh the local demo workspace.
 	go run ./cmd/attune demo seed
 
@@ -90,6 +96,9 @@ adversarial-check: ## Bug-hunting tier — focused adversarial tests plus short 
 	go test ./internal/repo/feedback -run '^$$' -fuzz=FuzzNormalizeQualityValue -fuzztime=$(FUZZTIME)
 	go test ./internal/repo/feedback -run '^$$' -fuzz=FuzzQualityAccumulatorMalformedPayloads -fuzztime=$(FUZZTIME)
 
+script-tests: ## Unit-test repository helper scripts.
+	$(NODE) --test scripts/*.test.mjs
+
 test-live: ## Live tier — runs test/live/... against real external endpoints. See docs/testing.md.
 	go test -tags=live -count=1 -timeout=10m -run '^TestLive_' ./test/live/...
 
@@ -118,6 +127,9 @@ runtime-smoke: ## Build the production image and boot it against throwaway pgvec
 	docker build -t attune:runtime-smoke .
 	ATTUNE_RUNTIME_SMOKE_IMAGE=attune:runtime-smoke bash scripts/runtime-smoke.sh
 
+secret-scan: ## Run TruffleHog secret scan through local binary or Docker fallback.
+	bash scripts/secret-scan.sh
+
 release-smoke: ## Heavy pre-release sweep: CI checks, contracts, integration, deploy, observability, image runtime.
 	$(MAKE) ci-check
 	$(MAKE) test-integration
@@ -135,7 +147,7 @@ release-smoke: ## Heavy pre-release sweep: CI checks, contracts, integration, de
 # ── CI pre-flight (docs/ci-troubleshooting.md) ───────────────────────────
 #
 # `ci-check` mirrors the full CI gate locally. Run before pushing to catch
-# issues early. Requires: go, golangci-lint, lizard, pnpm, trufflehog (optional).
+# issues early. Requires: go, golangci-lint, lizard, pnpm, and TruffleHog or Docker.
 
 ci-check: ## Run all CI checks locally before push.
 	@echo "══════════════════════════════════════════════════════════════"
@@ -199,8 +211,12 @@ ci-check: ## Run all CI checks locally before push.
 	@bash scripts/lint-outbound-conformance.sh
 	@echo "✓ lint-outbound-conformance"
 	@echo
+	@echo "▸ scripts: node tests"
+	@$(NODE) --test scripts/*.test.mjs
+	@echo "✓ scripts node tests"
+	@echo
 	@echo "▸ jscpd (duplication < 5%, test files excluded)"
-	@npx -y jscpd . --silent
+	@$(NPX) -y jscpd . --silent
 	@echo "✓ jscpd"
 	@echo
 	@echo "▸ console: biome check"
@@ -223,8 +239,8 @@ ci-check: ## Run all CI checks locally before push.
 	@cd console && $(PNPM) --ignore-workspace arch
 	@echo "✓ console arch"
 	@echo
-	@echo "▸ trufflehog (if installed)"
-	@command -v trufflehog >/dev/null 2>&1 && trufflehog git file://. --only-verified --fail || echo "⚠ trufflehog not installed, skipping"
+	@echo "▸ trufflehog"
+	@bash scripts/secret-scan.sh
 	@echo
 	@echo "══════════════════════════════════════════════════════════════"
 	@echo "  ✓ ci-check passed — ready to push"

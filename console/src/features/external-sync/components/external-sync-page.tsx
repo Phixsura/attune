@@ -49,15 +49,11 @@ import {
   type ExternalObjectSchema,
   type ExternalProviderInstallation,
   type ExternalProviderInstallationResource,
-  type ExternalSyncConflict,
-  ExternalSyncConflictResolution,
+  type ExternalSyncConflictResolution,
   ExternalSyncDirection,
   type ExternalSyncEvent,
   type ExternalSyncProvider,
-  type ExternalSyncRecordFailure,
-  type ExternalSyncRecordTimelineEntry,
   type ExternalSyncRun,
-  type ExternalSyncRunDetail,
   externalProviderInstallationResourcesQuery,
   externalProviderInstallationsQuery,
   externalSyncConnectionSchemaQuery,
@@ -90,22 +86,54 @@ import {
 } from '@/features/external-sync/api/external-sync'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { cn } from '@/lib/utils'
+import {
+  EventDetailCard,
+  type RecordTimelineTarget,
+  RunDetailCard,
+} from './external-sync-detail-cards'
+import {
+  capabilityGrade,
+  directionLabel,
+  eventSignatureLabel,
+  eventStatusLabel,
+  formatDate,
+  isActiveRun,
+  isRecord,
+  isReplayableEvent,
+  isRetryableRunStatus,
+  StatusPill,
+  shortID,
+  statusLabel,
+} from './external-sync-ui'
+
+export {
+  BatchConflictResolutionControls,
+  ConflictResolutionControls,
+  canShowRecordTimeline,
+  EventDetailCard,
+  RecordTimelinePanel,
+  RunDetailCard,
+  recordTimelineTargetFromConflict,
+  recordTimelineTargetFromFailure,
+} from './external-sync-detail-cards'
+export {
+  capabilityGrade,
+  DiagnosticRows,
+  directionLabel,
+  eventSignatureLabel,
+  eventStatusLabel,
+  formatDate,
+  isActiveRun,
+  isReplayableEvent,
+  isRetryableRunStatus,
+  prettyJSON,
+  StatusPill,
+  shortID,
+  statusLabel,
+} from './external-sync-ui'
 
 const runLimit = 25
 const activeRunRefreshMs = 2_000
-const activeRunStatuses = [
-  'running',
-  'queued',
-  'EXTERNAL_SYNC_RUN_STATUS_RUNNING',
-  'EXTERNAL_SYNC_RUN_STATUS_QUEUED',
-]
-
-type RecordTimelineTarget = {
-  mappingId: string
-  localObjectId: string
-  externalKey: string
-  label: string
-}
 
 type PendingValue<T> = {
   isPending: boolean
@@ -1610,10 +1638,6 @@ function parseJSONRecord(raw: string): { value: Record<string, unknown> | null; 
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 export function normalizeJSONInput(raw: string) {
   return raw.trim() || '{}'
 }
@@ -1898,456 +1922,6 @@ export function EventsCard({
       </CardContent>
     </Card>
   )
-}
-
-export function EventDetailCard({
-  event,
-  loading,
-}: {
-  event?: ExternalSyncEvent
-  loading: boolean
-}) {
-  const { t } = useTranslation()
-  return (
-    <Card className="border-border/60 shadow-none">
-      <CardHeader>
-        <CardTitle className="text-base">{t('external_sync.event_detail.title')}</CardTitle>
-        <CardDescription>
-          {event
-            ? t('external_sync.event_detail.description', { id: shortID(event.id) })
-            : t('external_sync.event_detail.empty_body')}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-6">
-        {loading ? (
-          <Loading />
-        ) : !event ? (
-          <EmptyState
-            icon={GitBranch}
-            title={t('external_sync.event_detail.empty_title')}
-            description={t('external_sync.event_detail.empty_body')}
-          />
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusPill value={eventStatusLabel(event.status)} />
-              <StatusPill value={eventSignatureLabel(event.signatureStatus)} />
-            </div>
-            <DiagnosticRows
-              rows={[
-                { label: t('external_sync.event_detail.provider'), value: event.provider },
-                { label: t('external_sync.event_detail.event_type'), value: event.eventType },
-                {
-                  label: t('external_sync.event_detail.external_event_id'),
-                  value: event.externalEventId,
-                },
-                { label: t('external_sync.event_detail.dedupe_key'), value: event.dedupeKey },
-                { label: t('external_sync.event_detail.run_id'), value: event.runId },
-                {
-                  label: t('external_sync.event_detail.payload_digest'),
-                  value: event.payloadDigest,
-                },
-                {
-                  label: t('external_sync.event_detail.received_at'),
-                  value: formatDate(event.receivedAt),
-                },
-                {
-                  label: t('external_sync.event_detail.replayed_at'),
-                  value: formatDate(event.replayedAt),
-                },
-                { label: t('external_sync.event_detail.replayed_by'), value: event.replayedBy },
-              ]}
-            />
-            {event.failureReason && (
-              <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                {event.failureReason}
-              </div>
-            )}
-            <JsonBlock
-              label={t('external_sync.event_detail.normalized_payload')}
-              value={event.normalizedPayloadJson}
-            />
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-export function RunDetailCard({
-  detail,
-  loading,
-  retryingFailureID,
-  resolvingConflictID,
-  batchResolving,
-  timelineEntries,
-  timelineLoading,
-  timelineTarget,
-  onRetryFailure,
-  onShowTimeline,
-  onResolveConflict,
-  onBatchResolveConflicts,
-}: {
-  detail?: ExternalSyncRunDetail
-  loading: boolean
-  retryingFailureID?: string
-  resolvingConflictID?: string
-  batchResolving: boolean
-  timelineEntries: ExternalSyncRecordTimelineEntry[]
-  timelineLoading: boolean
-  timelineTarget: RecordTimelineTarget | null
-  onRetryFailure: (id: string) => void
-  onShowTimeline: (target: RecordTimelineTarget) => void
-  onResolveConflict: (id: string, resolution: ExternalSyncConflictResolution) => void
-  onBatchResolveConflicts: (ids: string[], resolution: ExternalSyncConflictResolution) => void
-}) {
-  const { t } = useTranslation()
-  const run = detail?.run
-  const openConflictIDs =
-    detail?.conflicts
-      .filter((conflict) => conflict.status === 'open')
-      .map((conflict) => conflict.id) ?? []
-  return (
-    <Card className="border-border/60 shadow-none">
-      <CardHeader>
-        <CardTitle className="text-base">{t('external_sync.detail.title')}</CardTitle>
-        <CardDescription>
-          {run
-            ? t('external_sync.detail.description', { id: shortID(run.id) })
-            : t('external_sync.detail.empty_body')}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5 pt-6">
-        {loading ? (
-          <Loading />
-        ) : !detail || !run ? (
-          <EmptyState
-            icon={RefreshCcw}
-            title={t('external_sync.detail.empty_title')}
-            description={t('external_sync.detail.empty_body')}
-          />
-        ) : (
-          <>
-            <div className="grid gap-2 text-xs sm:grid-cols-3">
-              <JsonBlock
-                label={t('external_sync.detail.cursor_before')}
-                value={run.cursorBeforeJson}
-              />
-              <JsonBlock
-                label={t('external_sync.detail.cursor_after')}
-                value={run.cursorAfterJson}
-              />
-              <JsonBlock
-                label={t('external_sync.detail.input_metadata')}
-                value={run.inputMetadataJson}
-              />
-            </div>
-
-            <DetailSection title={t('external_sync.detail.attempts')}>
-              {detail.attempts.length === 0 ? (
-                <MutedLine>{t('external_sync.detail.none')}</MutedLine>
-              ) : (
-                detail.attempts.map((attempt) => (
-                  <div
-                    key={attempt.id}
-                    className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{attempt.result}</span>
-                      <span className="text-muted-foreground">
-                        #{attempt.attemptNumber} · {formatDate(attempt.startedAt)}
-                      </span>
-                    </div>
-                    {attempt.errorMessage && (
-                      <div className="mt-1 text-destructive">{attempt.errorMessage}</div>
-                    )}
-                    <DiagnosticRows
-                      rows={[
-                        {
-                          label: t('external_sync.detail.http_status'),
-                          value: attempt.httpStatus > 0 ? String(attempt.httpStatus) : '',
-                        },
-                        {
-                          label: t('external_sync.detail.provider_request_id'),
-                          value: attempt.providerRequestId,
-                        },
-                        {
-                          label: t('external_sync.detail.retry_after'),
-                          value: formatDate(attempt.retryAfter),
-                        },
-                        {
-                          label: t('external_sync.detail.error_kind'),
-                          value: attempt.errorKind,
-                        },
-                      ]}
-                    />
-                  </div>
-                ))
-              )}
-            </DetailSection>
-
-            <DetailSection title={t('external_sync.detail.failures')}>
-              {detail.failures.length === 0 ? (
-                <MutedLine>{t('external_sync.detail.none')}</MutedLine>
-              ) : (
-                detail.failures.map((failure) => (
-                  <div
-                    key={failure.id}
-                    className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">
-                        {failure.externalKey || failure.operation}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => onShowTimeline(recordTimelineTargetFromFailure(failure))}
-                          disabled={
-                            !canShowRecordTimeline(failure.localObjectId, failure.externalKey)
-                          }
-                        >
-                          <FileSearch className="size-3" />
-                          {t('external_sync.detail.timeline')}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => onRetryFailure(failure.id)}
-                          disabled={!failure.retryable || retryingFailureID === failure.id}
-                        >
-                          {retryingFailureID === failure.id && (
-                            <Loader2 className="size-3 animate-spin" />
-                          )}
-                          {t('common.retry')}
-                        </Button>
-                      </div>
-                    </div>
-                    <div className="mt-1 text-muted-foreground">{failure.failureKind}</div>
-                    {failure.message && (
-                      <div className="mt-1 text-destructive">{failure.message}</div>
-                    )}
-                    <DiagnosticRows
-                      rows={[
-                        {
-                          label: t('external_sync.detail.operation'),
-                          value: failure.operation,
-                        },
-                        {
-                          label: t('external_sync.detail.local_object_id'),
-                          value: failure.localObjectId,
-                        },
-                        {
-                          label: t('external_sync.detail.payload_digest'),
-                          value: failure.payloadDigest,
-                        },
-                        {
-                          label: t('external_sync.detail.retry_mode'),
-                          value: failure.retryMode,
-                        },
-                        {
-                          label: t('external_sync.detail.resolved_by'),
-                          value: failure.resolvedBy,
-                        },
-                      ]}
-                    />
-                    {failure.normalizedPayloadJson && (
-                      <div className="mt-2">
-                        <JsonBlock
-                          label={t('external_sync.detail.normalized_payload')}
-                          value={failure.normalizedPayloadJson}
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </DetailSection>
-
-            <DetailSection title={t('external_sync.detail.conflicts')}>
-              {detail.conflicts.length === 0 ? (
-                <MutedLine>{t('external_sync.detail.none')}</MutedLine>
-              ) : (
-                <div className="space-y-2">
-                  {openConflictIDs.length > 1 && (
-                    <BatchConflictResolutionControls
-                      conflictCount={openConflictIDs.length}
-                      pending={batchResolving}
-                      onResolve={(resolution) =>
-                        onBatchResolveConflicts(openConflictIDs, resolution)
-                      }
-                    />
-                  )}
-                  {detail.conflicts.map((conflict) => (
-                    <div
-                      key={conflict.id}
-                      className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">
-                          {conflict.externalKey || conflict.conflictKind}
-                        </span>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="ghost"
-                            onClick={() =>
-                              onShowTimeline(recordTimelineTargetFromConflict(conflict))
-                            }
-                            disabled={
-                              !canShowRecordTimeline(conflict.localObjectId, conflict.externalKey)
-                            }
-                          >
-                            <FileSearch className="size-3" />
-                            {t('external_sync.detail.timeline')}
-                          </Button>
-                          <ConflictResolutionControls
-                            conflictID={conflict.id}
-                            status={conflict.status}
-                            pending={resolvingConflictID === conflict.id}
-                            onResolve={(resolution) => onResolveConflict(conflict.id, resolution)}
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-1 text-muted-foreground">
-                        {conflict.conflictKind} · {conflict.status}
-                      </div>
-                      <DiagnosticRows
-                        rows={[
-                          {
-                            label: t('external_sync.detail.local_object_id'),
-                            value: conflict.localObjectId,
-                          },
-                          {
-                            label: t('external_sync.detail.resolution'),
-                            value: conflict.resolution,
-                          },
-                          {
-                            label: t('external_sync.detail.resolved_by'),
-                            value: conflict.resolvedBy,
-                          },
-                        ]}
-                      />
-                      {(conflict.localSnapshotJson || conflict.externalSnapshotJson) && (
-                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                          {conflict.localSnapshotJson && (
-                            <JsonBlock
-                              label={t('external_sync.detail.local_snapshot')}
-                              value={conflict.localSnapshotJson}
-                            />
-                          )}
-                          {conflict.externalSnapshotJson && (
-                            <JsonBlock
-                              label={t('external_sync.detail.external_snapshot')}
-                              value={conflict.externalSnapshotJson}
-                            />
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </DetailSection>
-
-            {timelineTarget && (
-              <RecordTimelinePanel
-                target={timelineTarget}
-                entries={timelineEntries}
-                loading={timelineLoading}
-              />
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
-
-export function RecordTimelinePanel({
-  target,
-  entries,
-  loading,
-}: {
-  target: RecordTimelineTarget
-  entries: ExternalSyncRecordTimelineEntry[]
-  loading: boolean
-}) {
-  const { t } = useTranslation()
-  return (
-    <DetailSection title={t('external_sync.detail.timeline_title', { record: target.label })}>
-      {loading ? (
-        <Loading />
-      ) : entries.length === 0 ? (
-        <MutedLine>{t('external_sync.detail.timeline_empty')}</MutedLine>
-      ) : (
-        <div className="space-y-2">
-          {entries.map((entry) => (
-            <div
-              key={`${entry.kind}-${entry.occurredAt}-${entry.runId}-${entry.summary}`}
-              className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium">{entry.summary || entry.kind}</span>
-                <span className="text-muted-foreground">{formatDate(entry.occurredAt)}</span>
-              </div>
-              <DiagnosticRows
-                rows={[
-                  { label: t('external_sync.detail.kind'), value: entry.kind },
-                  { label: t('external_sync.detail.status'), value: entry.status },
-                  { label: t('external_sync.detail.operation'), value: entry.operation },
-                  { label: t('external_sync.detail.run_id'), value: shortID(entry.runId) },
-                  {
-                    label: t('external_sync.detail.local_object_id'),
-                    value: entry.localObjectId,
-                  },
-                  { label: t('external_sync.detail.external_key'), value: entry.externalKey },
-                ]}
-              />
-              {entry.detailJson && (
-                <div className="mt-2">
-                  <JsonBlock
-                    label={t('external_sync.detail.timeline_detail')}
-                    value={entry.detailJson}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </DetailSection>
-  )
-}
-
-export function recordTimelineTargetFromFailure(
-  failure: ExternalSyncRecordFailure,
-): RecordTimelineTarget {
-  return {
-    mappingId: failure.mappingId,
-    localObjectId: failure.localObjectId,
-    externalKey: failure.externalKey,
-    label: failure.externalKey || failure.localObjectId || shortID(failure.id),
-  }
-}
-
-export function recordTimelineTargetFromConflict(
-  conflict: ExternalSyncConflict,
-): RecordTimelineTarget {
-  return {
-    mappingId: conflict.mappingId,
-    localObjectId: conflict.localObjectId,
-    externalKey: conflict.externalKey,
-    label: conflict.externalKey || conflict.localObjectId || shortID(conflict.id),
-  }
-}
-
-export function canShowRecordTimeline(localObjectId: string, externalKey: string) {
-  return localObjectId.length > 0 || externalKey.length > 0
 }
 
 export function CreateConnectionDialog({
@@ -3080,275 +2654,6 @@ export function providerConfigFromInstallationResources(
   const [owner, repo, ...extra] = selected[0].resourceKey.split('/')
   if (!owner || !repo || extra.length > 0) return ''
   return JSON.stringify({ owner, repo: repo.replace(/\.git$/, '') })
-}
-
-const conflictResolutionOptions = [
-  ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_EXTERNAL_WINS,
-  ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_LOCAL_WINS,
-  ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_MANUAL_MERGE,
-  ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_IGNORED,
-]
-
-export function BatchConflictResolutionControls({
-  conflictCount,
-  pending,
-  onResolve,
-}: {
-  conflictCount: number
-  pending: boolean
-  onResolve: (resolution: ExternalSyncConflictResolution) => void
-}) {
-  const { t } = useTranslation()
-  const [resolution, setResolution] = useState(
-    ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_EXTERNAL_WINS,
-  )
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-xs">
-      <span className="font-medium">
-        {t('external_sync.conflict_resolution.batch_label', { count: conflictCount })}
-      </span>
-      <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-        <Select
-          value={resolution}
-          onValueChange={(value) => setResolution(value as ExternalSyncConflictResolution)}
-          disabled={pending}
-        >
-          <SelectTrigger
-            size="sm"
-            aria-label={t('external_sync.conflict_resolution.batch_label', {
-              count: conflictCount,
-            })}
-            className="w-[8.75rem] max-w-full text-xs"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {conflictResolutionOptions.map((option) => (
-              <SelectItem key={option} value={option}>
-                {t(conflictResolutionLabelKey(option))}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          type="button"
-          size="xs"
-          variant="ghost"
-          onClick={() => onResolve(resolution)}
-          disabled={pending}
-        >
-          {pending && <Loader2 className="size-3 animate-spin" />}
-          {t('external_sync.actions.resolve_conflicts')}
-        </Button>
-      </div>
-    </div>
-  )
-}
-
-export function ConflictResolutionControls({
-  conflictID,
-  status,
-  pending,
-  onResolve,
-}: {
-  conflictID: string
-  status: string
-  pending: boolean
-  onResolve: (resolution: ExternalSyncConflictResolution) => void
-}) {
-  const { t } = useTranslation()
-  const [resolution, setResolution] = useState(
-    ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_EXTERNAL_WINS,
-  )
-  const disabled = status !== 'open' || pending
-  const labelID = `conflict-resolution-label-${conflictID}`
-
-  return (
-    <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-      <Label id={labelID} className="sr-only">
-        {t('external_sync.conflict_resolution.label')}
-      </Label>
-      <Select
-        value={resolution}
-        onValueChange={(value) => setResolution(value as ExternalSyncConflictResolution)}
-        disabled={disabled}
-      >
-        <SelectTrigger
-          size="sm"
-          aria-labelledby={labelID}
-          className="w-[8.75rem] max-w-full text-xs"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {conflictResolutionOptions.map((option) => (
-            <SelectItem key={option} value={option}>
-              {t(conflictResolutionLabelKey(option))}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Button
-        type="button"
-        size="xs"
-        variant="ghost"
-        onClick={() => onResolve(resolution)}
-        disabled={disabled}
-      >
-        {pending && <Loader2 className="size-3 animate-spin" />}
-        {t('external_sync.actions.resolve_conflict')}
-      </Button>
-    </div>
-  )
-}
-
-function conflictResolutionLabelKey(resolution: ExternalSyncConflictResolution) {
-  switch (resolution) {
-    case ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_LOCAL_WINS:
-      return 'external_sync.conflict_resolution.local_wins'
-    case ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_MANUAL_MERGE:
-      return 'external_sync.conflict_resolution.manual_merge'
-    case ExternalSyncConflictResolution.EXTERNAL_SYNC_CONFLICT_RESOLUTION_IGNORED:
-      return 'external_sync.conflict_resolution.ignored'
-    default:
-      return 'external_sync.conflict_resolution.external_wins'
-  }
-}
-
-function DetailSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="space-y-2">
-      <h2 className="text-xs font-semibold tracking-[0.12em] text-muted-foreground uppercase">
-        {title}
-      </h2>
-      {children}
-    </section>
-  )
-}
-
-function JsonBlock({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0 rounded-lg border border-border/60 bg-muted/25 px-3 py-2">
-      <div className="text-[11px] font-semibold text-muted-foreground">{label}</div>
-      <pre className="mt-1 max-h-24 overflow-auto text-xs whitespace-pre-wrap">
-        {prettyJSON(value)}
-      </pre>
-    </div>
-  )
-}
-
-type DiagnosticRow = {
-  label: string
-  value: string
-}
-
-export function DiagnosticRows({ rows }: { rows: DiagnosticRow[] }) {
-  const visibleRows = rows.filter((row) => row.value.trim())
-  if (visibleRows.length === 0) return null
-
-  return (
-    <dl className="mt-2 grid gap-x-3 gap-y-1 text-[11px] sm:grid-cols-2">
-      {visibleRows.map((row) => (
-        <div key={`${row.label}-${row.value}`} className="min-w-0">
-          <dt className="text-muted-foreground">{row.label}</dt>
-          <dd className="truncate font-mono">{row.value}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
-function MutedLine({ children }: { children: React.ReactNode }) {
-  return <div className="text-sm text-muted-foreground">{children}</div>
-}
-
-export function StatusPill({ value }: { value: string }) {
-  const urgent = [
-    'failed',
-    'dead',
-    'deleted',
-    'EXTERNAL_SYNC_RUN_STATUS_FAILED',
-    'EXTERNAL_SYNC_RUN_STATUS_DEAD',
-  ]
-  const active = [...activeRunStatuses, 'received']
-  return (
-    <span
-      className={cn(
-        'inline-flex max-w-36 items-center rounded-full border px-2 py-0.5 text-[11px] font-medium',
-        urgent.includes(value)
-          ? 'border-destructive/20 bg-destructive/10 text-destructive'
-          : active.includes(value)
-            ? 'border-amber-300/40 bg-amber-100/60 text-amber-800 dark:bg-amber-900/20 dark:text-amber-200'
-            : 'border-border bg-muted/50 text-muted-foreground',
-      )}
-    >
-      <span className="truncate">{value}</span>
-    </span>
-  )
-}
-
-export function isActiveRun(run: ExternalSyncRun) {
-  return run.inFlight || activeRunStatuses.includes(run.status)
-}
-
-export function statusLabel(value: string) {
-  return value.replace('EXTERNAL_SYNC_RUN_STATUS_', '').toLowerCase()
-}
-
-export function eventStatusLabel(value: string) {
-  return value.replace('EXTERNAL_SYNC_EVENT_STATUS_', '').toLowerCase()
-}
-
-export function eventSignatureLabel(value: string) {
-  return value.replace('EXTERNAL_SYNC_EVENT_SIGNATURE_STATUS_', '').toLowerCase()
-}
-
-export function isRetryableRunStatus(value: string) {
-  const status = statusLabel(value)
-  return status === 'failed' || status === 'dead'
-}
-
-export function isReplayableEvent(event: ExternalSyncEvent) {
-  const status = eventStatusLabel(event.status)
-  const signature = eventSignatureLabel(event.signatureStatus)
-  return status === 'received' && (signature === 'verified' || signature === 'not_required')
-}
-
-export function directionLabel(value: string) {
-  return value.replace('EXTERNAL_SYNC_DIRECTION_', '').toLowerCase()
-}
-
-export function formatDate(value: string) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
-
-export function capabilityGrade(profileJson: string) {
-  const raw = profileJson.trim()
-  if (!raw) return ''
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!isRecord(parsed) || typeof parsed.grade !== 'string') return ''
-    return parsed.grade
-  } catch {
-    return ''
-  }
-}
-
-export function prettyJSON(value: string) {
-  if (!value) return '{}'
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2)
-  } catch {
-    return value
-  }
-}
-
-export function shortID(value: string) {
-  return value.slice(0, 8)
 }
 
 export function qualificationToastDescription(checks: Array<{ status: string; summary: string }>) {
