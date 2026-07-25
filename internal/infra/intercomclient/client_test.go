@@ -23,10 +23,10 @@ func newTestClient(t *testing.T, handler http.Handler) intercomclient.Client {
 	intercomclient.SetEgressPolicy(nethardening.Policy{AllowLoopback: true})
 	t.Cleanup(func() {
 		srv.Close()
-		intercomclient.SetTestBaseURL("")
+		intercomclient.SetAPIBaseURL("")
 		intercomclient.SetEgressPolicy(nethardening.Policy{})
 	})
-	intercomclient.SetTestBaseURL(srv.URL)
+	intercomclient.SetAPIBaseURL(srv.URL)
 	return intercomclient.New("us", "test-token")
 }
 
@@ -399,7 +399,7 @@ func TestValidRegion(t *testing.T) {
 }
 
 func TestValidateHost(t *testing.T) {
-	intercomclient.SetTestBaseURL("")
+	intercomclient.SetAPIBaseURL("")
 	if err := intercomclient.ValidateHost("https://api.intercom.io"); err != nil {
 		t.Errorf("api.intercom.io rejected: %v", err)
 	}
@@ -410,8 +410,8 @@ func TestValidateHost(t *testing.T) {
 		t.Error("evil.example.com accepted")
 	}
 	// Test override exempts host validation.
-	intercomclient.SetTestBaseURL("http://127.0.0.1:9999")
-	defer intercomclient.SetTestBaseURL("")
+	intercomclient.SetAPIBaseURL("http://127.0.0.1:9999")
+	defer intercomclient.SetAPIBaseURL("")
 	if err := intercomclient.ValidateHost("http://127.0.0.1:9999"); err != nil {
 		t.Errorf("test override rejected: %v", err)
 	}

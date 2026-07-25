@@ -21,7 +21,9 @@ const (
 	// "this came up N more times", not an exhaustive listing.
 	similarFeedbackLimit = 5
 	// similarFeedbackMinSimilarity filters to genuinely-the-same-issue
-	// neighbors; matches the embedding worker's clustering threshold band.
+	// neighbors. Deliberately below the clustering worker's 0.85 default
+	// threshold: recurrence suggestions are operator-reviewed, so a
+	// wider net beats a missed recurring signal.
 	similarFeedbackMinSimilarity = 0.78
 )
 
@@ -80,6 +82,7 @@ func (h *FeedbackHandler) SimilarFeedback(w http.ResponseWriter, r *http.Request
 	}
 
 	items := []similarFeedbackItem{}
+	anchorLinks := []linkedRequestRef{}
 	if h.similarFinder != nil {
 		hits, ferr := h.similarFinder.FindSimilarFeedback(r.Context(), auth.TenantID, feedbackID, similarFeedbackLimit, similarFeedbackMinSimilarity)
 		if ferr != nil {
@@ -103,39 +106,51 @@ func (h *FeedbackHandler) SimilarFeedback(w http.ResponseWriter, r *http.Request
 				CreatedAt:  hit.Feedback.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 			})
 		}
-		h.attachLinkedRequests(r.Context(), auth.TenantID, items, where)
+		anchorLinks = h.attachLinkedRequests(r.Context(), auth.TenantID, feedbackID, items, where)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"items": items}) //nolint:errcheck
+	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		"items": items,
+		// The anchor's own links come first in the dedup decision: if
+		// THIS feedback is already tracked, the card must offer "link"
+		// (or nothing), never a duplicate "promote".
+		"anchor_linked_requests": anchorLinks,
+	})
 }
 
 // attachLinkedRequests hydrates each neighbor with the customer requests
-// already tracking it — the dedup signal. Best-effort: a resolver
-// failure leaves the field empty rather than failing the endpoint.
-func (h *FeedbackHandler) attachLinkedRequests(ctx context.Context, tenantID string, items []similarFeedbackItem, where string) {
-	if h.requestLinks == nil || len(items) == 0 {
-		return
+// already tracking it and returns the anchor's own links — the dedup
+// signal. Best-effort: a resolver failure leaves everything empty rather
+// than failing the endpoint.
+func (h *FeedbackHandler) attachLinkedRequests(ctx context.Context, tenantID string, anchorID int64, items []similarFeedbackItem, where string) []linkedRequestRef {
+	anchorLinks := []linkedRequestRef{}
+	if h.requestLinks == nil {
+		return anchorLinks
 	}
-	ids := make([]int64, 0, len(items))
+	ids := make([]int64, 0, len(items)+1)
+	ids = append(ids, anchorID)
 	for _, item := range items {
 		ids = append(ids, item.ID)
 	}
 	linked, err := h.requestLinks.RequestsLinkedToFeedback(ctx, tenantID, ids)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] resolve linked requests failed,tenant_id:%s,err:%+v", where, tenantID, err.Error())
-		return
+		return anchorLinks
+	}
+	for _, ref := range linked[anchorID] {
+		anchorLinks = append(anchorLinks, toLinkedRequestRef(ref))
 	}
 	for i := range items {
 		for _, ref := range linked[items[i].ID] {
-			items[i].LinkedRequests = append(items[i].LinkedRequests, linkedRequestRef{
-				ID:     ref.ID,
-				CrNo:   ref.CrNo,
-				Title:  ref.Title,
-				Status: ref.Status,
-			})
+			items[i].LinkedRequests = append(items[i].LinkedRequests, toLinkedRequestRef(ref))
 		}
 	}
+	return anchorLinks
+}
+
+func toLinkedRequestRef(ref repofeedback.LinkedRequestRef) linkedRequestRef {
+	return linkedRequestRef{ID: ref.ID, CrNo: ref.CrNo, Title: ref.Title, Status: ref.Status}
 }
 
 // isNoEmbeddingError matches the repo's has-no-embedding failure, which
@@ -145,13 +160,14 @@ func isNoEmbeddingError(err error) bool {
 }
 
 // firstLine trims content to its first line, capped for display.
+// Rune-safe: CJK content must not be cut mid-character.
 func firstLine(content string) string {
 	if idx := strings.IndexByte(content, '\n'); idx > 0 {
 		content = content[:idx]
 	}
 	content = strings.TrimSpace(content)
-	if len(content) > 120 {
-		content = content[:120]
+	if runes := []rune(content); len(runes) > 120 {
+		content = string(runes[:120])
 	}
 	return content
 }

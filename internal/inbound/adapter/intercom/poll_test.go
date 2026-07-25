@@ -446,9 +446,11 @@ func TestPollSource_DetailBudgetStopsWatermark(t *testing.T) {
 		t.Fatalf("expected 1 ingest under budget=1, got %d", len(ingestFake.Calls))
 	}
 	stored, _ := sources.Get(context.Background(), "src-1")
-	// Watermark must stop at c1 so c2 is re-covered next tick.
-	if stored.State.LastUID != 1700000500 {
-		t.Errorf("LastUID = %d, want 1700000500 (budget boundary)", stored.State.LastUID)
+	// Watermark stops one second before c1 so any unprocessed
+	// conversation sharing c1's updated_at second (and c2) is re-covered
+	// next tick; c1's own re-fetch dedups by idempotency key.
+	if stored.State.LastUID != 1700000499 {
+		t.Errorf("LastUID = %d, want 1700000499 (budget boundary - 1s)", stored.State.LastUID)
 	}
 }
 
@@ -703,10 +705,11 @@ func TestPollSource_RateBudgetFloorStopsTick(t *testing.T) {
 	if len(ingestFake.Calls) != 1 {
 		t.Errorf("ingests = %d, want 1", len(ingestFake.Calls))
 	}
-	// Watermark advanced only past processed items; c2 re-covered next tick.
+	// Early stop mid-window: watermark steps back one second so the
+	// boundary second is fully re-covered next tick.
 	stored, _ := sources.Get(context.Background(), "src-1")
-	if stored.State.LastUID != 1700000500 {
-		t.Errorf("LastUID = %d, want 1700000500", stored.State.LastUID)
+	if stored.State.LastUID != 1700000499 {
+		t.Errorf("LastUID = %d, want 1700000499", stored.State.LastUID)
 	}
 	// Source stays enabled and healthy — this is throttling, not an error.
 	if !stored.Enabled {
@@ -784,7 +787,7 @@ func TestPollSource_CompanyProfileResolvedAndCached(t *testing.T) {
 		t.Errorf("companyCalls = %d, want 1 (per-tick cache)", fake.companyCalls)
 	}
 	meta := ingestFake.Calls[0].In.SourceMeta
-	if meta["intercom_company_monthly_spend"] != 1200 {
+	if meta["intercom_company_monthly_spend"] != float64(1200) {
 		t.Errorf("monthly_spend = %v", meta["intercom_company_monthly_spend"])
 	}
 	if meta["intercom_company_plan"] != "Pro" {

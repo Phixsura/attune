@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - US / EU / AU regional host selection with per-region host allowlist.
   - Watermark-based incremental sync in `LastUID` (no opaque cursor):
     UTC-day-floored search windows + client-side second-precision
-    filtering (Intercom search timestamps are date-indexed).
+    filtering (Intercom search timestamps are date-indexed). Early
+    stops (budget, rate floor, transient failure) step the watermark
+    back one second so boundary-second conversations are never lost;
+    transient detail/ingest failures retry next tick instead of
+    permanently degrading the snapshot.
   - Full-thread extraction via one `display_as=plaintext` detail call per
     conversation; `[customer]`/`[agent]`/`[bot]` role tagging; internal
     notes and redacted parts excluded; bot parts dropped first under the
@@ -58,14 +62,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     and a one-click promote that pre-fills the customer-request flow.
   - Recurring-signal detection: new `GET /feedback/{id}/similar`
     endpoint surfaces semantically-similar feedback (pgvector, ≥0.78
-    similarity); the candidate card shows "该问题已在其他反馈中出现 N
-    次" with the top neighbors and upgrades the promote action to
-    bundle the whole recurring cluster as evidence in one click.
-  - Duplicate-request prevention: similar-feedback neighbors carry the
-    customer requests already tracking them; when the recurring cluster
-    is already being tracked, the candidate card recommends linking to
-    the existing request ("相似反馈已关联到 CR-N") with a one-click
-    link action instead of creating a duplicate.
+    similarity); snapshots of the same conversation/ticket collapse to
+    one neighbor so evolution capture never inflates the recurrence
+    count. The candidate card shows "该问题已在其他反馈中出现 N 次"
+    with the top neighbors and upgrades the promote action to bundle
+    the whole recurring cluster as evidence in one click.
+  - Duplicate-request prevention: the endpoint returns the anchor's own
+    linked requests plus each neighbor's; when the anchor or its
+    recurring cluster is already tracked, the candidate card recommends
+    linking to the existing request ("相似反馈已关联到 CR-N") instead
+    of creating a duplicate.
   - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
     rating, last answer type); escalated / negative-feedback Fin
     conversations produce a `complaint` enrichment hint.
@@ -74,19 +80,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - Test-connection returns the connected workspace name
     (`TestInboundConnectionResponse.workspace_name`, channel-generic).
   - `intercom.api_base_url` config knob points the adapter at a mock
-    API for local stacks (Slack `api_base_url` parity);
+    API for local stacks (Slack `api_base_url` parity; refused under
+    `profile: production` since it bypasses the host allowlist);
     `make dev-stack --intercom-stub <url>` wires it plus loopback
     egress, and `scripts/intercom-stub.mjs` ships a deterministic
     Intercom API stub for full-pipeline E2E.
   - SSRF-hardened via `nethardening.Policy`, wired in
     `applyRuntimeHardening`.
-
-### Fixed
-
-- Fixed the inbound recent-preview endpoint returning 500 on live
-  PostgreSQL: `created_at` (timestamptz) was scanned into a string; it
-  now scans into `time.Time` and serializes RFC3339. The preview also
-  surfaces `intercom_conversation_id`/`intercom_state` metadata.
 
 - Added Zendesk inbound adapter (#229): polls Zendesk's incremental ticket
   export API to extract product signals from support tickets.
@@ -174,6 +174,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   package from the module graph.
 
 ### Fixed
+
+- Fixed the inbound recent-preview endpoint returning 500 on live
+  PostgreSQL: `created_at` (timestamptz) was scanned into a string; it
+  now scans into `time.Time` and serializes RFC3339. The preview also
+  surfaces `intercom_conversation_id`/`intercom_state` metadata.
 
 - OIDC Console login now syncs the authenticated IdP user into
   `tenant_members` before issuing the session, and tenant membership lookups

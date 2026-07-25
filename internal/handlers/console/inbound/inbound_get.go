@@ -61,10 +61,17 @@ func (h *Handler) enrichWithSyncStats(src inbound.Source, out *attunev1.InboundS
 	if synced == 0 {
 		synced = wrapper.SyncStats.ConversationsSynced
 	}
-	if synced > 0 {
+	if synced > 0 || wrapper.SyncStats.BackfillDone {
+		// backfill_done can be true over an empty window (0 synced) —
+		// still worth surfacing so "done, nothing found" is
+		// distinguishable from "not started".
 		out.TicketsSynced = ptrext.Of(synced)
-		out.LastSyncedTicketId = ptrext.Of(wrapper.SyncStats.LastTicketID)
 		out.BackfillDone = ptrext.Of(wrapper.SyncStats.BackfillDone)
+	}
+	if wrapper.SyncStats.LastTicketID > 0 {
+		// Zendesk-only; Intercom has no numeric last-ticket concept, so
+		// never emit a present-but-zero value.
+		out.LastSyncedTicketId = ptrext.Of(wrapper.SyncStats.LastTicketID)
 	}
 }
 

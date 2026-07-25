@@ -9,8 +9,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
@@ -81,13 +83,13 @@ func TestSimilarFeedback_EmptyOnNoEmbeddingOrNilFinder(t *testing.T) {
 	h.SetSimilarFinder(stubSimilarFinder{err: errors.New("repo: feedback 11 has no embedding")})
 	rr := serveSimilar(h, "11")
 	require.Equal(t, http.StatusOK, rr.Code)
-	require.JSONEq(t, `{"items":[]}`, rr.Body.String())
+	require.JSONEq(t, `{"items":[],"anchor_linked_requests":[]}`, rr.Body.String())
 
 	// Nil finder (embeddings disabled) → empty list, 200.
 	bare := ptrext.Of(FeedbackHandler{})
 	rr2 := serveSimilar(bare, "11")
 	require.Equal(t, http.StatusOK, rr2.Code)
-	require.JSONEq(t, `{"items":[]}`, rr2.Body.String())
+	require.JSONEq(t, `{"items":[],"anchor_linked_requests":[]}`, rr2.Body.String())
 }
 
 type stubRequestLinks struct {
@@ -107,18 +109,25 @@ func TestSimilarFeedback_AttachesLinkedRequests(t *testing.T) {
 	}})
 	h.SetRequestLinkReader(stubRequestLinks{links: map[int64][]repofeedback.LinkedRequestRef{
 		42: {{ID: "uuid-1", CrNo: 7, Title: "Existing request", Status: "open"}},
+		// The anchor (id 11) is itself already tracked — must surface
+		// as anchor_linked_requests so the card never offers a
+		// duplicate promote.
+		11: {{ID: "uuid-2", CrNo: 9, Title: "Anchor request", Status: "open"}},
 	}})
 
 	rr := serveSimilar(h, "11")
 	require.Equal(t, http.StatusOK, rr.Code)
 	var out struct {
-		Items []similarFeedbackItem `json:"items"`
+		Items       []similarFeedbackItem `json:"items"`
+		AnchorLinks []linkedRequestRef    `json:"anchor_linked_requests"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out))
 	require.Len(t, out.Items, 1)
 	require.Len(t, out.Items[0].LinkedRequests, 1)
 	require.Equal(t, int64(7), out.Items[0].LinkedRequests[0].CrNo)
 	require.Equal(t, "Existing request", out.Items[0].LinkedRequests[0].Title)
+	require.Len(t, out.AnchorLinks, 1)
+	require.Equal(t, int64(9), out.AnchorLinks[0].CrNo)
 
 	// Resolver failure degrades to no linked_requests, not an error.
 	h2 := ptrext.Of(FeedbackHandler{})
@@ -151,4 +160,9 @@ func TestFirstLine(t *testing.T) {
 		long[i] = 'x'
 	}
 	require.Len(t, firstLine(string(long)), 120)
+	// Rune-safe: CJK content truncates at a character boundary.
+	cjk := strings.Repeat("中", 200)
+	got := firstLine(cjk)
+	require.Equal(t, strings.Repeat("中", 120), got)
+	require.True(t, utf8.ValidString(got))
 }

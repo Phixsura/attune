@@ -2008,10 +2008,17 @@ function promoteIDList(feedbackId: string, similar: SimilarFeedbackItem[]): stri
   return [...new Set(ids)].join(',')
 }
 
-// existingRequestFor picks the customer request already tracking any of
-// the neighbors — the dedup target. Most-recently-updated wins (the
-// backend orders refs that way).
-function existingRequestFor(similar: SimilarFeedbackItem[]): LinkedRequestRef | null {
+// existingRequestFor picks the customer request already tracking this
+// cluster — the dedup target. The anchor's own links win outright (if
+// THIS feedback is already tracked, never offer a duplicate promote);
+// otherwise the highest-similarity neighbor with a link wins, and within
+// one row's links the most-recently-updated request is first (backend
+// order).
+function existingRequestFor(
+  anchorLinks: LinkedRequestRef[],
+  similar: SimilarFeedbackItem[],
+): LinkedRequestRef | null {
+  if (anchorLinks[0]) return anchorLinks[0]
   for (const item of similar) {
     const ref = item.linked_requests?.[0]
     if (ref) return ref
@@ -2029,7 +2036,9 @@ function SupportPromoteCard({
   const { t } = useTranslation()
   const enabled = !!candidate && isPositiveIntString(feedbackId)
   const similar = useQuery({ ...similarFeedbackQuery(feedbackId), enabled })
-  const existingRequest = existingRequestFor(similar.data?.items ?? [])
+  const anchorLinks = similar.data?.anchor_linked_requests ?? []
+  const existingRequest = existingRequestFor(anchorLinks, similar.data?.items ?? [])
+  const anchorAlreadyLinked = anchorLinks.some((ref) => ref.id === existingRequest?.id)
   const linkExisting = useLinkCustomerRequestFeedback(existingRequest?.id ?? '')
   if (!candidate || !enabled) return null
   const signalKey =
@@ -2079,7 +2088,7 @@ function SupportPromoteCard({
           ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-stretch gap-2">
-          {existingRequest ? (
+          {existingRequest && !anchorAlreadyLinked ? (
             <Button
               size="sm"
               variant="secondary"

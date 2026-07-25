@@ -4,6 +4,7 @@ package customerrequest
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -15,10 +16,12 @@ import (
 )
 
 // derivedAttribution is the customer/account identity extracted from an
-// inbound-channel feedback row's source_meta. Channel adapters emit
-// `<channel>_contact_*` / `<channel>_company_*` keys; this derivation is
-// the channel-agnostic bridge that turns them into customer links so a
-// promoted request already knows who asked and what they are worth.
+// inbound-channel feedback row's source_meta. Intercom emits
+// `intercom_contact_*` / `intercom_company_*` keys; Zendesk emits
+// `zendesk_requester_*` / `zendesk_organization_*` — the lookups below
+// cover both vocabularies. This derivation is the channel-agnostic
+// bridge that turns them into customer links so a promoted request
+// already knows who asked and what they are worth.
 type derivedAttribution struct {
 	SubjectKey     string
 	SubjectDisplay string
@@ -73,7 +76,8 @@ func deriveAttribution(source string, meta map[string]any) (derivedAttribution, 
 			// channel itself travels in CRMProvider.
 			Source: "integration",
 		}
-		// Intercom company.monthly_spend is whole currency units.
+		// Intercom company.monthly_spend is whole currency units with no
+		// currency attached; USD matches the repo-wide COALESCE default.
 		if spend := metaNumber(meta, prefix+"company_monthly_spend"); spend > 0 {
 			out.Profile.RevenueCents = int64(spend * 100)
 			out.Profile.RevenueCurrency = "USD"
@@ -90,40 +94,17 @@ func (s *Service) autoLinkCustomersTx(ctx context.Context, tx pgx.Tx, tenantID s
 	seen := map[string]bool{}
 	linked := 0
 	for _, feedbackID := range feedbackIDs {
-		source, meta, err := s.repo.FeedbackSourceMetaTx(ctx, tx, tenantID, feedbackID)
-		if err != nil {
-			continue
-		}
-		attr, ok := deriveAttribution(source, meta)
-		if !ok {
-			continue
-		}
-		dedupeKey := attr.SubjectKey + "|" + attr.AccountKey
-		if seen[dedupeKey] {
-			continue
-		}
-		seen[dedupeKey] = true
-		attr.Profile.ActorID = actorID
-		// Savepoint-isolate each link: a failed INSERT aborts the whole
-		// PostgreSQL transaction otherwise, which would poison the promote.
+		// Savepoint-isolate the whole per-row unit (read + link): any
+		// failed statement aborts the surrounding PostgreSQL transaction
+		// otherwise, which would poison the promote.
 		sp, err := tx.Begin(ctx)
 		if err != nil {
 			logext.Warnf(ctx, "[service.customerrequest.autoLink] savepoint failed,feedback_id:%d,err:%+v", feedbackID, err.Error())
 			continue
 		}
-		if _, err := s.repo.LinkCustomerTx(ctx, sp, repo.CustomerLinkInput{
-			TenantID:       tenantID,
-			RequestID:      requestID,
-			SubjectKey:     attr.SubjectKey,
-			SubjectDisplay: attr.SubjectDisplay,
-			AccountKey:     attr.AccountKey,
-			AccountDisplay: attr.AccountDisplay,
-			Note:           "Auto-attributed from " + source + " feedback",
-			ActorID:        actorID,
-			AccountProfile: attr.Profile,
-		}); err != nil {
+		ok, err := s.linkOneCustomerTx(ctx, sp, tenantID, requestID, feedbackID, actorID, seen)
+		if err != nil || !ok {
 			_ = sp.Rollback(ctx)
-			logext.Warnf(ctx, "[service.customerrequest.autoLink] link failed,feedback_id:%d,err:%+v", feedbackID, err.Error())
 			continue
 		}
 		if err := sp.Commit(ctx); err != nil {
@@ -133,6 +114,44 @@ func (s *Service) autoLinkCustomersTx(ctx context.Context, tx pgx.Tx, tenantID s
 		linked++
 	}
 	return linked
+}
+
+// linkOneCustomerTx derives and inserts one feedback row's customer link
+// inside its savepoint. Returns ok=false (no error) when the row simply
+// carries no linkable identity or duplicates an already-linked one.
+func (s *Service) linkOneCustomerTx(ctx context.Context, sp pgx.Tx, tenantID string, requestID uuid.UUID, feedbackID int64, actorID string, seen map[string]bool) (bool, error) {
+	source, meta, err := s.repo.FeedbackSourceMetaTx(ctx, sp, tenantID, feedbackID)
+	if err != nil {
+		if !errors.Is(err, repo.ErrFeedbackNotFound) {
+			logext.Warnf(ctx, "[service.customerrequest.autoLink] read source_meta failed,feedback_id:%d,err:%+v", feedbackID, err.Error())
+		}
+		return false, err
+	}
+	attr, ok := deriveAttribution(source, meta)
+	if !ok {
+		return false, nil
+	}
+	dedupeKey := attr.SubjectKey + "|" + attr.AccountKey
+	if seen[dedupeKey] {
+		return false, nil
+	}
+	seen[dedupeKey] = true
+	attr.Profile.ActorID = actorID
+	if _, err := s.repo.LinkCustomerTx(ctx, sp, repo.CustomerLinkInput{
+		TenantID:       tenantID,
+		RequestID:      requestID,
+		SubjectKey:     attr.SubjectKey,
+		SubjectDisplay: attr.SubjectDisplay,
+		AccountKey:     attr.AccountKey,
+		AccountDisplay: attr.AccountDisplay,
+		Note:           "Auto-attributed from " + source + " feedback",
+		ActorID:        actorID,
+		AccountProfile: attr.Profile,
+	}); err != nil {
+		logext.Warnf(ctx, "[service.customerrequest.autoLink] link failed,feedback_id:%d,err:%+v", feedbackID, err.Error())
+		return false, err
+	}
+	return true, nil
 }
 
 // firstMetaString returns the first non-empty string value among keys.

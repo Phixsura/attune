@@ -930,6 +930,11 @@ func (c *Config) validateIntercomConfig() error {
 	if c.IntercomAPIBaseURL == "" {
 		return nil
 	}
+	// The override bypasses the client's *.intercom.io host allowlist
+	// (it exists for local mock stacks), so production refuses it.
+	if c.IsProduction() {
+		return fmt.Errorf("config: intercom.api_base_url must not be set with profile: production")
+	}
 	parsed, err := url.ParseRequestURI(c.IntercomAPIBaseURL)
 	if err != nil {
 		return fmt.Errorf("config: intercom.api_base_url must be a valid URL")

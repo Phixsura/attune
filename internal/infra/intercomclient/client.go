@@ -68,19 +68,23 @@ type Client interface {
 }
 
 // ---------------------------------------------------------------------------
-// Test seam for API base URL override
+// API base URL override (tests + local mock stacks)
 // ---------------------------------------------------------------------------
 
-var testBaseOverride atomic.Value
+var baseURLOverride atomic.Value
 
-// SetTestBaseURL points the client at a different API origin (tests only).
-func SetTestBaseURL(u string) {
+// SetAPIBaseURL points the client at a different API origin. Used by
+// tests and by `intercom.api_base_url` for local mock stacks (Slack
+// `api_base_url` parity). Because the override bypasses the
+// *.intercom.io host allowlist, config validation refuses it under
+// `profile: production`; the egress dial policy still applies.
+func SetAPIBaseURL(u string) {
 	trimmed := strings.TrimRight(strings.TrimSpace(u), "/")
-	testBaseOverride.Store(trimmed)
+	baseURLOverride.Store(trimmed)
 }
 
-func currentTestOverride() string {
-	if v := testBaseOverride.Load(); v != nil {
+func currentBaseURLOverride() string {
+	if v := baseURLOverride.Load(); v != nil {
 		if s, ok := v.(string); ok {
 			return s
 		}
@@ -95,7 +99,7 @@ func currentTestOverride() string {
 // New creates an Intercom API client for the given region and access token.
 func New(region, accessToken string) Client {
 	base := BaseURL(region)
-	if override := currentTestOverride(); override != "" {
+	if override := currentBaseURLOverride(); override != "" {
 		base = override
 	}
 	c := ptrext.Of(httpClient{
@@ -137,10 +141,11 @@ func normalizeRegion(region string) string {
 	return strings.ToLower(strings.TrimSpace(region))
 }
 
-// ValidateHost ensures the target host is *.intercom.io in production.
-// The test-override path (SetTestBaseURL) is exempt.
+// ValidateHost ensures the target host is *.intercom.io. The override
+// path (SetAPIBaseURL) is exempt — it is refused in production by
+// config validation, and the egress dial policy still applies to it.
 func ValidateHost(base string) error {
-	if currentTestOverride() != "" {
+	if currentBaseURLOverride() != "" {
 		return nil
 	}
 	parsed, err := url.Parse(base)

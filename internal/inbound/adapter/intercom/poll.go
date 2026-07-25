@@ -166,8 +166,11 @@ type syncResult struct {
 
 // syncPages walks the updated_at-ascending search results and processes
 // each qualifying conversation. The watermark only advances past
-// conversations that were actually processed (ingested or filtered), so
-// budget-exhausted items are re-covered next tick.
+// conversations that were actually processed (ingested or filtered);
+// any early stop (budget, rate floor, transient failure, ctx) also steps
+// the watermark back one second so unprocessed conversations sharing the
+// boundary second are re-covered next tick (updated_at is
+// second-precision; the re-covered snapshot dedups by idempotency key).
 func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config, client apiClient, where string) syncResult {
 	watermark := src.State.LastUID
 	if watermark == 0 {
@@ -176,8 +179,10 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 	// Day-floor the query start (date-indexed search); re-filter
 	// client-side at second precision below.
 	queryStart := (watermark / daySeconds) * daySeconds
-	// Exclusive upper bound: "now" so in-flight updates land next tick.
-	queryEnd := nowFn().Unix() + 1
+	// Exclusive upper bound (the API filter is updated_at < end): items
+	// updated at exactly "now" land next tick, so an update racing the
+	// fetch inside the current second is never half-captured.
+	queryEnd := nowFn().Unix()
 
 	st := pageState{
 		res:           syncResult{watermark: watermark},
@@ -186,46 +191,52 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		companyCache:  map[string]intercomCompany{},
 	}
 	cursor := ""
+	endOfResults := false
 
-	for pageNum := 0; pageNum < maxPagesPerTick; pageNum++ {
+	for pageNum := 0; pageNum < maxPagesPerTick && !endOfResults; pageNum++ {
 		if ctx.Err() != nil {
-			return st.res
+			break
 		}
 		page, err := client.SearchConversations(ctx, queryStart, queryEnd, cursor)
 		if err != nil {
 			a.handleSearchFailure(ctx, src, where, err)
 			st.res.failed = true
-			return st.res
+			break
 		}
 
 		var stop bool
 		st, stop = a.processConversationPage(ctx, client, src, cfg, page, st, where)
 		if stop {
-			return st.res
+			break
 		}
 
 		if page.StartingAfter == "" {
 			// End of results — backfill complete for this window.
 			cfg.SyncStats.BackfillDone = true
-			cfg.SyncStats.ConversationsSynced += int64(st.totalSynced)
-			a.persistSyncStats(ctx, src.ID, cfg, where)
-			logext.Infof(ctx, "[%s] progress,source_id:%s,page:%d,conversations_synced:%d,end_of_results:true",
-				where, src.ID, pageNum+1, st.totalSynced)
-			return st.res
+			endOfResults = true
 		}
+		logext.Infof(ctx, "[%s] progress,source_id:%s,page:%d,conversations_synced:%d,end_of_results:%t",
+			where, src.ID, pageNum+1, st.totalSynced, endOfResults)
 		// Proactive self-throttle: stop the tick before Intercom starts
 		// returning 429s. The watermark holds only processed items, so
 		// the remainder is re-covered next tick.
-		if budget := client.RateBudget(); budget >= 0 && budget < rateBudgetFloor {
+		if budget := client.RateBudget(); !endOfResults && budget >= 0 && budget < rateBudgetFloor {
 			logext.Infof(ctx, "[%s] rate budget low,stopping tick,source_id:%s,remaining:%d", where, src.ID, budget)
 			break
 		}
 		cursor = page.StartingAfter
-		logext.Infof(ctx, "[%s] progress,source_id:%s,page:%d,conversations_synced:%d,end_of_results:false",
-			where, src.ID, pageNum+1, st.totalSynced)
 	}
-	cfg.SyncStats.ConversationsSynced += int64(st.totalSynced)
-	a.persistSyncStats(ctx, src.ID, cfg, where)
+	if !endOfResults && st.res.watermark > st.baseWatermark {
+		// Early stop mid-window: re-cover the boundary second (see the
+		// function comment) at the cost of one deduped re-fetch.
+		st.res.watermark--
+	}
+	// Accumulate stats on every exit path — budget-exhausted stops are
+	// the common case during backfill and must not drop their counts.
+	if st.totalSynced > 0 || endOfResults {
+		cfg.SyncStats.ConversationsSynced += int64(st.totalSynced)
+		a.persistSyncStats(ctx, src.ID, cfg, where)
+	}
 	return st.res
 }
 
@@ -247,7 +258,8 @@ type pageState struct {
 
 // processConversationPage handles one search page. Returns the updated
 // state and stop=true when the caller should stop paginating (budget
-// exhausted or source disabled).
+// exhausted or a transient per-conversation failure that must be
+// retried next tick).
 func (a *adapter) processConversationPage(
 	ctx context.Context,
 	client apiClient,
@@ -287,11 +299,15 @@ func (a *adapter) processConversationPage(
 			st.admins = a.resolveAdmins(ctx, client, where)
 		}
 
-		disabled, ingested := a.fetchAndIngest(ctx, client, src, cfg, summary, st.companyCache, st.admins, where)
-		if disabled {
+		outcome := a.fetchAndIngest(ctx, client, src, cfg, summary, st.companyCache, st.admins, where)
+		if outcome == outcomeRetry {
+			// Transient failure: stop here without advancing the
+			// watermark past this conversation so it is re-covered next
+			// tick, and surface the degradation on the source state.
+			st.res.pollError = "conversation sync: transient"
 			return st, true
 		}
-		if ingested {
+		if outcome == outcomeIngested {
 			st.totalSynced++
 		}
 		if summary.UpdatedAt > st.res.watermark {
@@ -301,23 +317,46 @@ func (a *adapter) processConversationPage(
 	return st, false
 }
 
+// ingestOutcome classifies one conversation's processing result.
+type ingestOutcome int
+
+const (
+	// outcomeIngested — a new feedback row was created.
+	outcomeIngested ingestOutcome = iota
+	// outcomeDuplicate — replay of an already-ingested snapshot; the
+	// conversation counts as processed but not as newly synced.
+	outcomeDuplicate
+	// outcomeRetry — transient failure; the tick must stop before this
+	// conversation so the watermark never advances past an item that
+	// was neither ingested nor filtered.
+	outcomeRetry
+)
+
 // fetchAndIngest pulls the full thread for one conversation and ingests
-// it. Returns disabled=true when a permanent error on the search-level
-// API disabled the source; per-conversation failures degrade gracefully.
-func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbound.Source, cfg Config, summary conversation, companyCache map[string]intercomCompany, admins map[int64]intercomAdmin, where string) (disabled, ingested bool) {
+// it. Permanent per-conversation conditions (deleted/restricted — the
+// zendesk #229 lesson §4b) degrade to the summary shape so they never
+// block the sync; transient failures return outcomeRetry so the full
+// thread is re-fetched next tick instead of permanently ingesting a
+// degraded snapshot under its idempotency key.
+func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbound.Source, cfg Config, summary conversation, companyCache map[string]intercomCompany, admins map[int64]intercomAdmin, where string) ingestOutcome {
 	conv, err := client.GetConversation(ctx, summary.ID)
 	if err != nil {
-		// Per-conversation degradation: a deleted/restricted conversation
-		// must not block the rest of the sync (zendesk #229 lesson §4b).
-		logext.Warnf(ctx, "[%s] detail fetch failed,skipping,source_id:%s,conversation_id:%s,err:%s",
+		if isTransientDetailError(err) {
+			logext.Warnf(ctx, "[%s] detail fetch failed,will retry next tick,source_id:%s,conversation_id:%s,err:%s",
+				where, src.ID, summary.ID, err.Error())
+			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
+			return outcomeRetry
+		}
+		// Permanent per-conversation condition: retrying can never
+		// succeed, so fall back to the summary shape (no parts) — the
+		// seed message still carries signal.
+		logext.Warnf(ctx, "[%s] detail fetch failed,degrading to summary,source_id:%s,conversation_id:%s,err:%s",
 			where, src.ID, summary.ID, err.Error())
 		if isPermanentIntercomError(err) {
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "detail_auth_err")
 		} else {
-			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
+			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
 		}
-		// Fall back to the summary shape (no parts) — the seed message
-		// still carries signal.
 		conv = summary
 	}
 
@@ -327,15 +366,32 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 	if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
 		if isDuplicateError(err) {
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
-		} else {
-			logext.Warnf(ctx, "[%s] ingest failed,source_id:%s,conversation_id:%s,err:%+v",
-				where, src.ID, conv.ID, err.Error())
-			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
+			return outcomeDuplicate
 		}
-		return false, false
+		logext.Warnf(ctx, "[%s] ingest failed,will retry next tick,source_id:%s,conversation_id:%s,err:%+v",
+			where, src.ID, conv.ID, err.Error())
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
+		return outcomeRetry
 	}
 	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
-	return false, true
+	return outcomeIngested
+}
+
+// isTransientDetailError reports whether a GetConversation failure is
+// worth retrying next tick (rate limit, server error, network) as
+// opposed to a permanent per-conversation condition (deleted,
+// restricted, plan-gated) that degrades to the summary shape.
+func isTransientDetailError(err error) bool {
+	var rle rateLimitError
+	if errors.As(err, &rle) {
+		return true
+	}
+	var ae apiError
+	if errors.As(err, &ae) {
+		return ae.Status >= 500
+	}
+	// Non-API errors (network, timeout) are transient by nature.
+	return true
 }
 
 // resolveAdmins fetches the workspace teammate directory once per tick.
@@ -521,9 +577,10 @@ func (a *adapter) transientError(ctx context.Context, src inbound.Source, reason
 }
 
 // shouldSkipBackoff returns true if the source has consecutive failures
-// and the backoff interval hasn't elapsed since the last attempt.
-// Backoff schedule: 0-2 failures → no skip (60s tick is enough),
-// 3+ → doubling: effectively 120s, 240s, ... max 900s.
+// and the backoff interval hasn't elapsed since the last successful
+// poll (never-succeeded sources keep the base 60s cadence). Backoff
+// schedule: 0-2 failures → no skip (60s tick is enough), 3+ →
+// doubling, capped at 900s. Same shape as the zendesk adapter.
 func (a *adapter) shouldSkipBackoff(slug string) bool {
 	a.mu.Lock()
 	failures := a.failureCount[slug]

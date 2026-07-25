@@ -31,7 +31,7 @@ type clientFactory func(region, accessToken string) intercomclient.Client
 var newAPIClient clientFactory = intercomclient.New
 
 // SetAPIBaseURL points the Intercom client at a test server.
-func SetAPIBaseURL(u string) { intercomclient.SetTestBaseURL(u) }
+func SetAPIBaseURL(u string) { intercomclient.SetAPIBaseURL(u) }
 
 // SetEgressPolicy overrides the SSRF dial policy.
 func SetEgressPolicy(p nethardening.Policy) { intercomclient.SetEgressPolicy(p) }

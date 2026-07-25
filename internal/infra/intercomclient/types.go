@@ -134,7 +134,7 @@ type Company struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	// Profile fields (GET /companies/{id}).
-	MonthlySpend int         `json:"monthly_spend"` // revenue this company generates
+	MonthlySpend float64     `json:"monthly_spend"` // revenue this company generates; fractional on some workspaces
 	Size         int         `json:"size"`          // employee count
 	Industry     string      `json:"industry"`
 	Plan         CompanyPlan `json:"plan"`

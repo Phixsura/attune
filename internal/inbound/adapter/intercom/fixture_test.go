@@ -193,7 +193,7 @@ func verifyFixtureMeta501(t *testing.T, meta map[string]any) {
 		t.Errorf("custom_attributes = %v", meta["intercom_custom_attributes"])
 	}
 	// Company profile resolved via GET /companies/{id} (revenue context).
-	if meta["intercom_company_monthly_spend"] != 1200 {
+	if meta["intercom_company_monthly_spend"] != float64(1200) {
 		t.Errorf("company_monthly_spend = %v", meta["intercom_company_monthly_spend"])
 	}
 	if meta["intercom_company_plan"] != "Pro" {

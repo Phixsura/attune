@@ -19,6 +19,9 @@ export interface SimilarFeedbackItem {
 
 interface SimilarFeedbackResponse {
   items: SimilarFeedbackItem[]
+  // The anchor feedback's own linked requests — if present, the anchor
+  // is already tracked and the card must not offer a duplicate promote.
+  anchor_linked_requests?: LinkedRequestRef[]
 }
 
 // similarFeedbackQuery fetches semantically-similar feedback — the
