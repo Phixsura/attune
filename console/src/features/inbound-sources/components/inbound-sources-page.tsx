@@ -105,6 +105,12 @@ export function InboundSourcesPage() {
               subdomain: body.zendeskConfig.subdomain,
             }),
           )
+        } else if (body.channel === 'intercom') {
+          toast.success(
+            t('inbound_sources.toast.intercom_connected', {
+              region: (body.intercomConfig?.region ?? 'us').toUpperCase(),
+            }),
+          )
         } else {
           toast.success(
             source
@@ -483,7 +489,9 @@ function SourceDetailCard({
                       <span className="text-muted-foreground">
                         {item.source_meta?.zendesk_ticket_id
                           ? `#${item.source_meta.zendesk_ticket_id} · `
-                          : ''}
+                          : item.source_meta?.intercom_conversation_id
+                            ? `#${item.source_meta.intercom_conversation_id} · `
+                            : ''}
                       </span>
                       <span className="text-foreground">{item.content_preview}</span>
                     </div>

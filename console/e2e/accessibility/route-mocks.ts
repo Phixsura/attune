@@ -984,6 +984,8 @@ function buildTestInboundSourceConnectionResponse(
     channel?: string
     emailConfig?: { host?: string }
     slackConfig?: { botToken?: string; channelId?: string }
+    zendeskConfig?: { subdomain?: string }
+    intercomConfig?: { region?: string; accessToken?: string }
   } | null,
 ): TestInboundConnectionResponse {
   if (body?.channel === 'slack') {
@@ -1003,6 +1005,20 @@ function buildTestInboundSourceConnectionResponse(
       return { ok: false, error: 'email_config.host must not be empty' }
     }
     return { ok: true, latencyMs: '5' }
+  }
+  if (body?.channel === 'zendesk') {
+    const subdomain = body.zendeskConfig?.subdomain?.trim() ?? ''
+    if (!subdomain) {
+      return { ok: false, error: 'zendesk_config.subdomain must not be empty' }
+    }
+    return { ok: true, latencyMs: '8' }
+  }
+  if (body?.channel === 'intercom') {
+    const token = body.intercomConfig?.accessToken?.trim() ?? ''
+    if (!token) {
+      return { ok: false, error: 'intercom_config.access_token must not be empty' }
+    }
+    return { ok: true, latencyMs: '6' }
   }
   return { ok: false, error: 'unsupported channel' }
 }
@@ -1070,7 +1086,7 @@ function buildCreateInboundSourceResponse(
       },
     }
   }
-  if (channel === 'email') {
+  if (channel === 'email' || channel === 'zendesk' || channel === 'intercom') {
     const source = createInboundSourceRow(state, {
       channel,
       name,

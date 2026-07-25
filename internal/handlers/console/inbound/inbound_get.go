@@ -44,18 +44,25 @@ func (h *Handler) enrichWithSyncStats(src inbound.Source, out *attunev1.InboundS
 		return
 	}
 	// Quick JSON extraction — we only need the sync_stats subtree.
+	// The proto fields are channel-generic: Zendesk fills tickets_synced,
+	// Intercom fills conversations_synced; both surface as TicketsSynced.
 	var wrapper struct {
 		SyncStats struct {
-			TicketsSynced int64 `json:"tickets_synced"`
-			LastTicketID  int64 `json:"last_ticket_id"`
-			BackfillDone  bool  `json:"backfill_done"`
+			TicketsSynced       int64 `json:"tickets_synced"`
+			ConversationsSynced int64 `json:"conversations_synced"`
+			LastTicketID        int64 `json:"last_ticket_id"`
+			BackfillDone        bool  `json:"backfill_done"`
 		} `json:"sync_stats"`
 	}
 	if err := json.Unmarshal(decoded, &wrapper); err != nil { // ptrext:allow json-unmarshal
 		return
 	}
-	if wrapper.SyncStats.TicketsSynced > 0 {
-		out.TicketsSynced = ptrext.Of(wrapper.SyncStats.TicketsSynced)
+	synced := wrapper.SyncStats.TicketsSynced
+	if synced == 0 {
+		synced = wrapper.SyncStats.ConversationsSynced
+	}
+	if synced > 0 {
+		out.TicketsSynced = ptrext.Of(synced)
 		out.LastSyncedTicketId = ptrext.Of(wrapper.SyncStats.LastTicketID)
 		out.BackfillDone = ptrext.Of(wrapper.SyncStats.BackfillDone)
 	}

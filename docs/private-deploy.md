@@ -584,10 +584,11 @@ columns are hard-deleted. Pre-1.0 carries no retention guarantee.
    and reset `migrations.confirm_lark_delete` if desired.
 8. **Re-onboard** any feedback that used to flow via Lark — the console's
    `Inbound Sources` page (route `/console/inbound-sources`) is where you
-   create webhook, email, Slack, or Zendesk sources. The webhook adapter
-   speaks Stripe-style HMAC; the email adapter polls IMAP; the Slack adapter
-   polls a channel; the Zendesk adapter polls the incremental ticket export
-   API (API token or OAuth 2.0).
+   create webhook, email, Slack, Zendesk, or Intercom sources. The webhook
+   adapter speaks Stripe-style HMAC; the email adapter polls IMAP; the Slack
+   adapter polls a channel; the Zendesk adapter polls the incremental ticket
+   export API (API token or OAuth 2.0); the Intercom adapter polls the
+   conversations search API (private-app access token, US/EU/AU regions).
 
 If a step fails, the migration is wrapped in a single transaction — Postgres
 rolls back and the image keeps the old schema. Diagnose, fix, retry.

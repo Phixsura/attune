@@ -29,6 +29,7 @@ import (
 	slackadapter "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/intercomclient"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -235,6 +236,7 @@ func applyRuntimeHardening(cfg *config.Config) {
 	llmclient.SetEgressPolicy(egress)
 	replydraftsvc.SetEgressPolicy(egress)
 	zendeskclient.SetEgressPolicy(egress)
+	intercomclient.SetEgressPolicy(egress)
 	// Trusted-proxy hop count for client-IP resolution outside the API-key
 	// middleware (audit actor IP, etc.).
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)

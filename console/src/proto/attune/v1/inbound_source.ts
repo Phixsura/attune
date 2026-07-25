@@ -12,7 +12,7 @@ export const protobufPackage = "attune.v1";
 export interface InboundSource {
   id: string;
   tenantId: string;
-  /** "webhook" | "email" | "slack" | "zendesk" | future channels */
+  /** "webhook" | "email" | "slack" | "zendesk" | "intercom" | future channels */
   channel: string;
   name: string;
   slug: string;
@@ -59,6 +59,7 @@ export interface CreateInboundSourceRequest {
   emailConfig?: EmailCreateConfig | undefined;
   slackConfig?: SlackConnConfig | undefined;
   zendeskConfig?: ZendeskConnConfig | undefined;
+  intercomConfig?: IntercomConnConfig | undefined;
 }
 
 /**
@@ -140,11 +141,12 @@ export interface DeleteInboundSourceResponse {
  * the upstream rejects credentials or channel access.
  */
 export interface TestInboundConnectionRequest {
-  /** currently "email", "slack", or "zendesk" */
+  /** currently "email", "slack", "zendesk", or "intercom" */
   channel: string;
   emailConfig?: EmailConnConfig | undefined;
   slackConfig?: SlackConnConfig | undefined;
   zendeskConfig?: ZendeskConnConfig | undefined;
+  intercomConfig?: IntercomConnConfig | undefined;
 }
 
 export interface TestInboundConnectionResponse {
@@ -221,10 +223,30 @@ export interface ZendeskConnConfig {
 }
 
 /**
+ * IntercomConnConfig carries the Intercom connection parameters for
+ * create and test-connection flows. Auth is a private-app Access Token
+ * (Bearer) — Intercom's documented model for same-workspace server
+ * integrations; OAuth applies to public/multi-workspace apps (#32).
+ */
+export interface IntercomConnConfig {
+  /** "us" | "eu" | "au" */
+  region: string;
+  /** write-only, never returned */
+  accessToken: string;
+  /** "now" (default) | "full" */
+  startFrom?:
+    | string
+    | undefined;
+  /** open/closed/snoozed; empty = all */
+  filterStates: string[];
+  maxDetailFetches?: number | undefined;
+}
+
+/**
  * InboundSourceService manages a tenant's inbound source rows (#66
  * channel-agnostic inbound framework). Sources back the webhook,
- * email IMAP, Slack, and Zendesk adapters; future channels (RSS,
- * scrape, MQ, …) hang off the same shape.
+ * email IMAP, Slack, Zendesk, and Intercom adapters; future channels
+ * (RSS, scrape, MQ, …) hang off the same shape.
  */
 export interface InboundSourceService {
   /** GET /fb/v1/console/inbound/sources */

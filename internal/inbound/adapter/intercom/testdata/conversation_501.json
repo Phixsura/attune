@@ -1,0 +1,75 @@
+{
+  "type": "conversation",
+  "id": "501",
+  "title": "Cannot export dashboard",
+  "state": "open",
+  "priority": "priority",
+  "created_at": 1753300000,
+  "updated_at": 1753400000,
+  "admin_assignee_id": 991267,
+  "team_assignee_id": 5017,
+  "ai_agent_participated": false,
+  "source": {
+    "type": "conversation",
+    "subject": "",
+    "body": "The PDF export button is greyed out on the Team plan.",
+    "author": {
+      "type": "user",
+      "id": "contact-alice",
+      "name": "Alice Zhang",
+      "email": "alice@customer.com"
+    }
+  },
+  "contacts": {
+    "type": "contact.list",
+    "contacts": [
+      { "type": "contact", "id": "contact-alice", "external_id": "cust-70" }
+    ]
+  },
+  "tags": {
+    "type": "tag.list",
+    "tags": [
+      { "type": "tag", "id": "t1", "name": "export" },
+      { "type": "tag", "id": "t2", "name": "bug" }
+    ]
+  },
+  "conversation_rating": null,
+  "company": { "type": "company", "id": "co-9", "name": "Customer Co" },
+  "conversation_parts": {
+    "type": "conversation_part.list",
+    "conversation_parts": [
+      {
+        "type": "conversation_part",
+        "id": "part-1",
+        "part_type": "comment",
+        "body": "Thanks for reporting! Which browser are you using?",
+        "created_at": 1753310000,
+        "author": { "type": "admin", "id": "admin-1", "name": "Sam Support" },
+        "redacted": false
+      },
+      {
+        "type": "conversation_part",
+        "id": "part-2",
+        "part_type": "note",
+        "body": "Internal: this looks like the plan-gating bug from last sprint.",
+        "created_at": 1753320000,
+        "author": { "type": "admin", "id": "admin-1", "name": "Sam Support" },
+        "redacted": false
+      },
+      {
+        "type": "conversation_part",
+        "id": "part-3",
+        "part_type": "comment",
+        "body": "Chrome. Also happens in Safari. This blocks our Monday reporting.",
+        "created_at": 1753330000,
+        "author": {
+          "type": "user",
+          "id": "contact-alice",
+          "name": "Alice Zhang",
+          "email": "alice@customer.com"
+        },
+        "redacted": false
+      }
+    ]
+  }
+}

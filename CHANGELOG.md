@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Added Intercom inbound adapter (#230): polls Intercom's conversations
+  search API with an `updated_at` watermark to extract product signals
+  from support conversations.
+  - Shared `internal/infra/intercomclient/` HTTP client (reusable by #32
+    bidirectional sync), pinned to Intercom API version 2.16.
+  - US / EU / AU regional host selection with per-region host allowlist.
+  - Watermark-based incremental sync in `LastUID` (no opaque cursor):
+    UTC-day-floored search windows + client-side second-precision
+    filtering (Intercom search timestamps are date-indexed).
+  - Full-thread extraction via one `display_as=plaintext` detail call per
+    conversation; `[customer]`/`[agent]`/`[bot]` role tagging; internal
+    notes and redacted parts excluded; bot parts dropped first under the
+    4,500-char budget, then structural truncation (first 3 + last 2
+    customer messages).
+  - Contact identity (`intercom_contact_external_id`, email, name) and
+    company metadata carried in SourceMeta as customer-profile join keys;
+    Intercom inbox permalink as the operator backlink.
+  - Replay-safe idempotency key `intercom_{workspace}_{id}_{updatedAt}` —
+    conversation updates produce new feedback rows, replays dedup.
+  - 429 handling via `X-RateLimit-Reset`; per-conversation detail
+    failures degrade gracefully (skip, never disable the source);
+    exponential backoff on consecutive failures.
+  - Conversation state filtering (open/closed/snoozed) and per-tick
+    detail budget (Console advanced UI); sync-now, sync stats, and
+    recent-preview reuse the existing machinery.
+  - SSRF-hardened via `nethardening.Policy`, wired in
+    `applyRuntimeHardening`.
+
 - Added Zendesk inbound adapter (#229): polls Zendesk's incremental ticket
   export API to extract product signals from support tickets.
   - Shared `internal/infra/zendeskclient/` HTTP client (reusable by #31).

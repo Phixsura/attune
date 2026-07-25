@@ -129,6 +129,7 @@ var defaultSourceSet = func() SourceSet {
 	m["email"] = "Email"
 	m["slack"] = "Slack"
 	m["zendesk"] = "Zendesk"
+	m["intercom"] = "Intercom"
 	return NewSourceSet(m)
 }()
 

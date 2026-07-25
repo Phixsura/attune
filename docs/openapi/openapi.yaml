@@ -11140,6 +11140,8 @@ components:
                     $ref: '#/components/schemas/SlackConnConfig'
                 zendeskConfig:
                     $ref: '#/components/schemas/ZendeskConnConfig'
+                intercomConfig:
+                    $ref: '#/components/schemas/IntercomConnConfig'
             description: |-
                 CreateInboundSourceRequest — one of webhook_config / email_config is
                  required based on channel. The framework selects the relevant payload;
@@ -14203,6 +14205,30 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        IntercomConnConfig:
+            required:
+                - region
+                - accessToken
+            type: object
+            properties:
+                region:
+                    type: string
+                accessToken:
+                    type: string
+                startFrom:
+                    type: string
+                filterStates:
+                    type: array
+                    items:
+                        type: string
+                maxDetailFetches:
+                    type: integer
+                    format: int32
+            description: |-
+                IntercomConnConfig carries the Intercom connection parameters for
+                 create and test-connection flows. Auth is a private-app Access Token
+                 (Bearer) — Intercom's documented model for same-workspace server
+                 integrations; OAuth applies to public/multi-workspace apps (#32).
         InviteMemberRequest:
             required:
                 - email
@@ -17637,6 +17663,8 @@ components:
                     $ref: '#/components/schemas/SlackConnConfig'
                 zendeskConfig:
                     $ref: '#/components/schemas/ZendeskConnConfig'
+                intercomConfig:
+                    $ref: '#/components/schemas/IntercomConnConfig'
             description: |-
                 TestInboundConnectionRequest validates an IMAP config without
                  persisting it. Returns ok=false + error message rather than 5xx when
@@ -18603,8 +18631,8 @@ tags:
       description: |-
         InboundSourceService manages a tenant's inbound source rows (#66
          channel-agnostic inbound framework). Sources back the webhook,
-         email IMAP, Slack, and Zendesk adapters; future channels (RSS,
-         scrape, MQ, …) hang off the same shape.
+         email IMAP, Slack, Zendesk, and Intercom adapters; future channels
+         (RSS, scrape, MQ, …) hang off the same shape.
     - name: JobService
       description: JobService provides status tracking for async batch operations (#30).
     - name: LLMConfigService
