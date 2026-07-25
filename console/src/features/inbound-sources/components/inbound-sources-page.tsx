@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { format, formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { InboxIcon, Loader2 } from 'lucide-react'
+import { InboxIcon, Loader2, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -21,8 +21,10 @@ import {
   inboundSourcesQuery,
 } from '@/features/inbound-sources/api/list-inbound-sources'
 import { usePauseInboundSource } from '@/features/inbound-sources/api/pause-inbound-source'
+import { useRecentFeedback } from '@/features/inbound-sources/api/recent-feedback'
 import { useResumeInboundSource } from '@/features/inbound-sources/api/resume-inbound-source'
 import { useRotateInboundSource } from '@/features/inbound-sources/api/rotate-inbound-source'
+import { useSyncNow } from '@/features/inbound-sources/api/sync-now'
 import { CreateInboundSourceDialog } from '@/features/inbound-sources/components/create-dialog'
 import { DeleteInboundSourceDialog } from '@/features/inbound-sources/components/delete-dialog'
 import { RotateConfirmDialog } from '@/features/inbound-sources/components/rotate-dialog'
@@ -97,7 +99,19 @@ export function InboundSourcesPage() {
           queryClient.setQueryData(['console', 'inbound-sources', 'detail', source.id], source)
           setSelectedSourceID(source.id)
         }
-        toast.success(t('inbound_sources.toast.created'))
+        if (body.channel === 'zendesk' && body.zendeskConfig?.subdomain) {
+          toast.success(
+            t('inbound_sources.toast.zendesk_connected', {
+              subdomain: body.zendeskConfig.subdomain,
+            }),
+          )
+        } else {
+          toast.success(
+            source
+              ? t('inbound_sources.toast.created_with_name', { name: source.name })
+              : t('inbound_sources.toast.created'),
+          )
+        }
         if (res.webhookSecretReveal?.secretHex) {
           setReveal({
             url: res.webhookSecretReveal.url || undefined,
@@ -311,6 +325,8 @@ function SourceDetailCard({
   onCreate: () => void
 }) {
   const { t } = useTranslation()
+  const syncNow = useSyncNow()
+  const recent = useRecentFeedback(source?.id ?? null)
 
   return (
     <Card className="border-border/60 shadow-none">
@@ -348,6 +364,28 @@ function SourceDetailCard({
                 </span>
               )}
             </div>
+
+            {source.enabled && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={syncNow.isPending}
+                onClick={() => {
+                  syncNow.mutate(source.id, {
+                    onSuccess: () => toast.success(t('inbound_sources.toast.sync_requested')),
+                    onError: (err) =>
+                      toast.error(err instanceof Error ? err.message : t('common.error')),
+                  })
+                }}
+              >
+                {syncNow.isPending ? (
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                )}
+                {t('inbound_sources.detail.sync_now')}
+              </Button>
+            )}
 
             <DetailGrid
               rows={[
@@ -393,6 +431,20 @@ function SourceDetailCard({
                   }),
                   hint: format(new Date(source.updatedAt), 'PPP HH:mm', { locale: zhCN }),
                 },
+                ...(source.ticketsSynced
+                  ? [
+                      {
+                        label: t('inbound_sources.detail.tickets_synced'),
+                        value: String(source.ticketsSynced),
+                      },
+                      {
+                        label: t('inbound_sources.detail.backfill_status'),
+                        value: source.backfillDone
+                          ? t('inbound_sources.detail.backfill_done')
+                          : t('inbound_sources.detail.backfill_in_progress'),
+                      },
+                    ]
+                  : []),
               ]}
             />
 
@@ -416,6 +468,29 @@ function SourceDetailCard({
                 {source.lastError || t('inbound_sources.detail.no_error')}
               </div>
             </div>
+
+            {recent.data?.items && recent.data.items.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  {t('inbound_sources.detail.recent_title')}
+                </div>
+                <div className="space-y-1.5">
+                  {recent.data.items.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs"
+                    >
+                      <span className="text-muted-foreground">
+                        {item.source_meta?.zendesk_ticket_id
+                          ? `#${item.source_meta.zendesk_ticket_id} · `
+                          : ''}
+                      </span>
+                      <span className="text-foreground">{item.content_preview}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         )}
       </CardContent>

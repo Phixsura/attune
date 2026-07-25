@@ -29,6 +29,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/mcp"
 	"github.com/Phixsura/attune/internal/handlers/portal"
 	"github.com/Phixsura/attune/internal/handlers/security"
+	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/metrics"
@@ -78,6 +79,7 @@ func buildRouter(
 	inboundMux chi.Router,
 	inboundSecrets *secretstore.TinkStore,
 	inboundSources *inboundsourcerepo.Repo,
+	inboundManager *inbound.Manager,
 	adminRepo *admin.Repo,
 	enrichRuntime *enrichruntimesvc.Service,
 	ingestor *ingest.Ingestor,
@@ -156,7 +158,7 @@ func buildRouter(
 	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {
-		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo, llm, enrichRuntime, sources)
+		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, inboundManager, adminRepo, llm, enrichRuntime, sources)
 		if err != nil {
 			return nil, fmt.Errorf("build console: %w", err)
 		}

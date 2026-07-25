@@ -18,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
 	"github.com/Phixsura/attune/internal/inbound/adapter/slack"
+	"github.com/Phixsura/attune/internal/inbound/adapter/zendesk"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -41,10 +42,10 @@ func (h *Handler) TestConnection(ctx *dispatcher.RequestContext[*session.AuthCtx
 	const where = "console.inbound.TestConnection"
 	auth := ctx.Auth
 	channel := strings.TrimSpace(strings.ToLower(req.GetChannel()))
-	if channel != channelEmail && channel != channelSlack {
+	if channel != channelEmail && channel != channelSlack && channel != channelZendesk {
 		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
 			Ok:    false,
-			Error: ptrext.Of("test-connection only supports the email or slack channel"),
+			Error: ptrext.Of("test-connection only supports the email, slack, or zendesk channel"),
 		}))
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, testConnTimeout)
@@ -104,6 +105,8 @@ func (h *Handler) resolveTestConnection(ctx context.Context, req *attunev1.TestI
 		return h.testEmailConnection(ctx, req.GetEmailConfig())
 	case channelSlack:
 		return h.testSlackConnection(ctx, req.GetSlackConfig())
+	case channelZendesk:
+		return h.testZendeskConnection(ctx, req.GetZendeskConfig())
 	default:
 		return "", "", nil, fmt.Errorf("unsupported channel %q", channel)
 	}
@@ -178,6 +181,49 @@ func (h *Handler) testSlackChannel(ctx context.Context, inputs slack.ConnInputs,
 	auditFields["slack_channel_id"] = channelInfo.ID
 	auditFields["slack_channel_name"] = channelInfo.Name
 	return inputs.ChannelID, nil
+}
+
+func (h *Handler) testZendeskConnection(ctx context.Context, cfg *attunev1.ZendeskConnConfig) (string, string, map[string]any, error) {
+	if cfg == nil {
+		return "", "", nil, errors.New("zendesk_config is required")
+	}
+	inputs, validateErr := zendesk.ValidateConnConfig(
+		cfg.GetSubdomain(),
+		cfg.GetAuthMode(),
+		cfg.GetEmail(),
+		cfg.GetApiToken(),
+		cfg.GetOauthAccessToken(),
+		cfg.GetOauthRefreshToken(),
+		cfg.GetOauthClientIdV2(),
+		cfg.GetOauthClientSecretV2(),
+	)
+	if validateErr != nil {
+		return "", "", nil, validateErr
+	}
+	auditFields := map[string]any{
+		"channel":   channelZendesk,
+		"subdomain": inputs.Subdomain,
+		"auth_mode": inputs.AuthMode,
+	}
+	authTest := h.zendeskAuthTest
+	if authTest == nil {
+		switch inputs.AuthMode {
+		case zendesk.AuthModeAPIToken:
+			authTest = func(ctx2 context.Context, _ zendesk.ConnInputs) (zendesk.AccountInfo, error) {
+				return zendesk.AuthTestAPIToken(ctx2, inputs.Subdomain, inputs.Email, inputs.APIToken)
+			}
+		case zendesk.AuthModeOAuth:
+			authTest = func(ctx2 context.Context, _ zendesk.ConnInputs) (zendesk.AccountInfo, error) {
+				return zendesk.AuthTestOAuth(ctx2, inputs.Subdomain, inputs.OAuthAccessToken)
+			}
+		}
+	}
+	acct, err := authTest(ctx, inputs)
+	if err != nil {
+		return inputs.Subdomain, "Tested inbound zendesk connection", auditFields, errors.New(friendlyZendeskError(err, inputs.Subdomain))
+	}
+	auditFields["zendesk_account_id"] = acct.AccountID
+	return inputs.Subdomain, "Tested inbound zendesk connection", auditFields, nil
 }
 
 // testConnInputs — narrower variant of EmailCreateConfig used only by

@@ -4274,7 +4274,7 @@ paths:
             tags:
                 - InboundSourceService
             description: |-
-                POST /fb/v1/console/inbound/sources — create webhook, email, or Slack source.
+                POST /fb/v1/console/inbound/sources — create webhook, email, Slack, or Zendesk source.
                  Webhook responses include a one-time secret reveal (url + secret +
                  example); the raw secret is never returned again.
             operationId: InboundSourceService_CreateInboundSource
@@ -4330,8 +4330,9 @@ paths:
             tags:
                 - InboundSourceService
             description: |-
-                POST /fb/v1/console/inbound/sources/test-connection — email or
-                 Slack only, no state changes. Validates the configured auth path.
+                POST /fb/v1/console/inbound/sources/test-connection — email,
+                 Slack, or Zendesk only, no state changes. Validates the configured
+                 auth path.
             operationId: InboundSourceService_TestInboundConnection
             requestBody:
                 content:
@@ -11137,6 +11138,8 @@ components:
                     $ref: '#/components/schemas/EmailCreateConfig'
                 slackConfig:
                     $ref: '#/components/schemas/SlackConnConfig'
+                zendeskConfig:
+                    $ref: '#/components/schemas/ZendeskConnConfig'
             description: |-
                 CreateInboundSourceRequest — one of webhook_config / email_config is
                  required based on channel. The framework selects the relevant payload;
@@ -14151,6 +14154,13 @@ components:
                     type: string
                 updatedAt:
                     type: string
+                ticketsSynced:
+                    type: string
+                    description: Sync progress stats (populated for poll-mode channels like Zendesk).
+                lastSyncedTicketId:
+                    type: string
+                backfillDone:
+                    type: boolean
             description: InboundSource never carries the secret — it is write-only once stored.
         IngestRequest:
             required:
@@ -17625,6 +17635,8 @@ components:
                     $ref: '#/components/schemas/EmailConnConfig'
                 slackConfig:
                     $ref: '#/components/schemas/SlackConnConfig'
+                zendeskConfig:
+                    $ref: '#/components/schemas/ZendeskConnConfig'
             description: |-
                 TestInboundConnectionRequest validates an IMAP config without
                  persisting it. Returns ok=false + error message rather than 5xx when
@@ -18475,6 +18487,53 @@ components:
                     type: string
                 toStateId:
                     type: string
+        ZendeskConnConfig:
+            required:
+                - subdomain
+                - authMode
+            type: object
+            properties:
+                subdomain:
+                    type: string
+                authMode:
+                    type: string
+                email:
+                    type: string
+                    description: api_token auth fields.
+                apiToken:
+                    type: string
+                startFrom:
+                    type: string
+                oauthAccessToken:
+                    type: string
+                    description: OAuth paste-mode fields (replaces old client-credential fields).
+                oauthRefreshToken:
+                    type: string
+                oauthClientIdV2:
+                    type: string
+                oauthClientSecretV2:
+                    type: string
+                filterTags:
+                    type: array
+                    items:
+                        type: string
+                    description: Advanced config.
+                filterExcludeTags:
+                    type: array
+                    items:
+                        type: string
+                filterStatuses:
+                    type: array
+                    items:
+                        type: string
+                maxCommentFetches:
+                    type: integer
+                    format: int32
+            description: |-
+                ZendeskConnConfig carries the Zendesk connection parameters for create
+                 and test-connection flows. Auth supports "api_token" (email + API
+                 token, sunsetting 2027-04-30) and "oauth" (OAuth 2.0 client
+                 credentials).
         ErrorResponse:
             required:
                 - code
@@ -18544,8 +18603,8 @@ tags:
       description: |-
         InboundSourceService manages a tenant's inbound source rows (#66
          channel-agnostic inbound framework). Sources back the webhook,
-         email IMAP, and Slack adapters; future channels (RSS, scrape, MQ,
-         …) hang off the same shape.
+         email IMAP, Slack, and Zendesk adapters; future channels (RSS,
+         scrape, MQ, …) hang off the same shape.
     - name: JobService
       description: JobService provides status tracking for async batch operations (#30).
     - name: LLMConfigService

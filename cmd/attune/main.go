@@ -34,6 +34,7 @@ import (
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/email"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/webhook"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/zendesk"
 
 	// #34 outbound adapters self-register via init(). Same boundary rule
 	// applies: cmd/attune is the only legal blank-import site per the

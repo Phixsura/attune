@@ -174,7 +174,8 @@ func runBreakglassList(args []string) error {
 		} else if t.IsExpired(now) {
 			status = "expired"
 		}
-		fmt.Printf("%-36s  %-30s  %-20s  %-10s  %-20s\n",
+		fmt.Printf(
+			"%-36s  %-30s  %-20s  %-10s  %-20s\n",
 			t.ID,
 			truncate(t.AdminEmail, 30),
 			t.ExpiresAt.Format(time.RFC3339),

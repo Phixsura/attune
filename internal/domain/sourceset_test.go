@@ -106,6 +106,7 @@ func TestSourceVocabulary_AppendOnly(t *testing.T) {
 		"webhook": "Webhook",
 		"email":   "Email",
 		"slack":   "Slack",
+		"zendesk": "Zendesk",
 		"web":     "Web Widget",
 		"mcp":     "MCP",
 		"other":   "Other",
@@ -113,7 +114,7 @@ func TestSourceVocabulary_AppendOnly(t *testing.T) {
 	}
 	set := DefaultSourceSet()
 
-	wantAll := []string{"api", "email", "mcp", "other", "portal", "slack", "web", "webhook"} // sorted
+	wantAll := []string{"api", "email", "mcp", "other", "portal", "slack", "web", "webhook", "zendesk"} // sorted
 	if got := set.All(); !reflect.DeepEqual(got, wantAll) {
 		t.Fatalf("DefaultSourceSet().All() = %v; want %v (a removal is a breaking change)", got, wantAll)
 	}

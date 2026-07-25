@@ -17,9 +17,11 @@ import (
 	consolefeedback "github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
+	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
 	"github.com/Phixsura/attune/internal/handlers/console/system"
+	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -203,6 +205,7 @@ func buildConsoleRouter(
 	pool *pgxpool.Pool,
 	secrets *secretstore.TinkStore,
 	sourceRepo *inboundsourcerepo.Repo,
+	inboundManager *inbound.Manager,
 	adminRepo *admin.Repo,
 	llm llmclient.LLMClient,
 	enrichRuntime *enrichruntimesvc.Service,
@@ -249,7 +252,7 @@ func buildConsoleRouter(
 		enrichmentRuntimeHandler = console.NewEnrichmentRuntimeHandler(enrichRuntime, cfg.GDPRStepUpTTL)
 	}
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool), sources))
-	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
+	inboundHandler := newInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL, inboundManager)
 	llmConfig := console.NewLLMConfigHandler(llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets))
 	clustersHandler := console.NewClustersHandler(embeddingrepo.NewTaskRepo(pool))
 	digestSub := console.NewDigestSubscriptionHandler(digestsubrepo.New(pool), tenantRepo)
@@ -692,4 +695,20 @@ func evalReportToEnrichconfig(sa evalsvc.SuggestedAttrsReport) *enrichconfig.Sug
 		})
 	}
 	return out
+}
+
+// newInboundHandler creates the Console inbound handler and wires the
+// sync-now trigger if a Manager is available.
+func newInboundHandler(
+	sourceRepo *inboundsourcerepo.Repo,
+	pool *pgxpool.Pool,
+	secrets *secretstore.TinkStore,
+	baseURL string,
+	mgr *inbound.Manager,
+) *consoleinbound.Handler {
+	h := console.NewInboundHandler(sourceRepo, pool, secrets, baseURL)
+	if mgr != nil {
+		h.SetSyncTrigger(mgr.TriggerSync)
+	}
+	return h
 }

@@ -202,7 +202,8 @@ func runEmbedStatus(args []string) error {
 		ClusterID   int64
 		UniqueModel int64
 	}
-	err = pool.QueryRow(ctx, `
+	err = pool.QueryRow(
+		ctx, `
 		SELECT
 			COUNT(*) AS total,
 			COUNT(*) FILTER (WHERE embedding IS NOT NULL) AS embedded,
@@ -218,7 +219,8 @@ func runEmbedStatus(args []string) error {
 
 	var clusteringEnabled bool
 	var threshold float64
-	err = pool.QueryRow(ctx, `
+	err = pool.QueryRow(
+		ctx, `
 		SELECT clustering_enabled, clustering_threshold
 		FROM tenants WHERE id = $1`,
 		tenantID,
