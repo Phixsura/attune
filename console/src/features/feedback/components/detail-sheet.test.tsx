@@ -318,6 +318,34 @@ describe('FeedbackDetailSheet', () => {
       customFields: { z: 1, a: null },
     })
     expect(feedbackDetailSheetTestables.portalSubmissionMeta({ portal_submission: {} })).toBeNull()
+
+    // Support-channel promote candidates: Fin escalation is the strongest
+    // signal, priority second, plain support feedback still qualifies.
+    expect(
+      feedbackDetailSheetTestables.supportChannelCandidate('intercom', {
+        intercom_contact_name: 'Alice Zhang',
+        intercom_company_name: 'Customer Co',
+        intercom_ai_resolution_state: 'escalated',
+      }),
+    ).toMatchObject({ channel: 'intercom', customer: 'Alice Zhang', signal: 'fin_escalated' })
+    expect(
+      feedbackDetailSheetTestables.supportChannelCandidate('intercom', {
+        intercom_priority: 'priority',
+      }),
+    ).toMatchObject({ signal: 'priority' })
+    expect(
+      feedbackDetailSheetTestables.supportChannelCandidate('zendesk', {
+        zendesk_requester_name: 'Carol Wu',
+        zendesk_organization_name: 'Acme Corp',
+      }),
+    ).toMatchObject({
+      channel: 'zendesk',
+      customer: 'Carol Wu',
+      company: 'Acme Corp',
+      signal: 'default',
+    })
+    expect(feedbackDetailSheetTestables.supportChannelCandidate('webhook', {})).toBeNull()
+    expect(feedbackDetailSheetTestables.supportChannelCandidate('intercom', undefined)).toBeNull()
     expect(feedbackDetailSheetTestables.portalSubmissionEntries({ b: 2, a: 1 })).toEqual([
       ['a', 1],
       ['b', 2],

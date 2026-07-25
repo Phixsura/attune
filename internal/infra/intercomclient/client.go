@@ -57,6 +57,9 @@ type Client interface {
 	// GetCompany fetches a company's profile (monthly_spend, plan, size,
 	// industry) — the revenue context behind conversation attribution.
 	GetCompany(ctx context.Context, id string) (Company, error)
+	// ListAdmins returns the workspace's teammates, used to resolve
+	// admin/team assignee IDs to display names.
+	ListAdmins(ctx context.Context) ([]Admin, error)
 	// RateBudget returns the most recent X-RateLimit-Remaining value seen
 	// on any response, or -1 before the first response. Callers use it to
 	// self-throttle before Intercom starts returning 429s — private apps
@@ -298,6 +301,17 @@ func (c *httpClient) SearchContacts(ctx context.Context, ids []string) ([]Contac
 		result = append(result, resp.Data...)
 	}
 	return result, nil
+}
+
+func (c *httpClient) ListAdmins(ctx context.Context) ([]Admin, error) {
+	type adminsResponse struct {
+		Admins []Admin `json:"admins"`
+	}
+	var resp adminsResponse
+	if err := c.getJSON(ctx, "/admins", &resp); err != nil { // ptrext:allow json-decode-out-param
+		return nil, err
+	}
+	return resp.Admins, nil
 }
 
 func (c *httpClient) GetCompany(ctx context.Context, id string) (Company, error) {

@@ -37,6 +37,7 @@ func buildIngestInput(
 	srcID, srcName, workspaceID string,
 	conv conversation,
 	contacts map[string]intercomContact,
+	admins map[int64]intercomAdmin,
 ) domain.IngestInput {
 	cr := buildContent(conv)
 	primary := primaryContact(conv, contacts)
@@ -48,7 +49,7 @@ func buildIngestInput(
 		Type:           inferType(conv),
 		SourceUser:     resolveSourceUser(primary, conv),
 		PageURL:        pageURL,
-		SourceMeta:     buildIntercomSourceMeta(srcID, srcName, workspaceID, conv, primary, cr),
+		SourceMeta:     buildIntercomSourceMeta(srcID, srcName, workspaceID, conv, primary, admins, cr),
 		IdempotencyKey: intercomIdempotencyKey(workspaceID, conv.ID, conv.UpdatedAt),
 	}
 }
@@ -323,6 +324,7 @@ func buildIntercomSourceMeta(
 	srcID, srcName, workspaceID string,
 	conv conversation,
 	primary intercomContact,
+	admins map[int64]intercomAdmin,
 	cr contentResult,
 ) map[string]any {
 	tagNames := make([]string, 0, len(conv.Tags.Tags))
@@ -354,24 +356,37 @@ func buildIntercomSourceMeta(
 		"intercom_created_at":             conv.CreatedAt,
 		"intercom_updated_at":             conv.UpdatedAt,
 	}
-	if conv.Company != nil {
-		m["intercom_company_id"] = conv.Company.ID
-		m["intercom_company_name"] = strings.TrimSpace(conv.Company.Name)
-		// Revenue context (GET /companies/{id}) — feeds automatic account
-		// attribution and the revenue-weighted decision score at promote.
-		if conv.Company.MonthlySpend > 0 {
-			m["intercom_company_monthly_spend"] = conv.Company.MonthlySpend
-		}
-		if plan := strings.TrimSpace(conv.Company.Plan.Name); plan != "" {
-			m["intercom_company_plan"] = plan
-		}
-		if conv.Company.Size > 0 {
-			m["intercom_company_size"] = conv.Company.Size
-		}
-		if industry := strings.TrimSpace(conv.Company.Industry); industry != "" {
-			m["intercom_company_industry"] = industry
-		}
+	addCompanyMeta(m, conv)
+	addOptionalMeta(m, conv, admins)
+	return m
+}
+
+// addCompanyMeta emits the company identity + revenue context
+// (GET /companies/{id}) — feeds automatic account attribution and the
+// revenue-weighted decision score at promote.
+func addCompanyMeta(m map[string]any, conv conversation) {
+	if conv.Company == nil {
+		return
 	}
+	m["intercom_company_id"] = conv.Company.ID
+	m["intercom_company_name"] = strings.TrimSpace(conv.Company.Name)
+	if conv.Company.MonthlySpend > 0 {
+		m["intercom_company_monthly_spend"] = conv.Company.MonthlySpend
+	}
+	if plan := strings.TrimSpace(conv.Company.Plan.Name); plan != "" {
+		m["intercom_company_plan"] = plan
+	}
+	if conv.Company.Size > 0 {
+		m["intercom_company_size"] = conv.Company.Size
+	}
+	if industry := strings.TrimSpace(conv.Company.Industry); industry != "" {
+		m["intercom_company_industry"] = industry
+	}
+}
+
+// addOptionalMeta emits rating, customer-side URL, teammate name, custom
+// attributes, and Fin AI-agent exit telemetry when present.
+func addOptionalMeta(m map[string]any, conv conversation, admins map[int64]intercomAdmin) {
 	if conv.Rating != nil {
 		m["intercom_rating"] = conv.Rating.Rating
 		if remark := strings.TrimSpace(conv.Rating.Remark); remark != "" {
@@ -383,6 +398,13 @@ func buildIntercomSourceMeta(
 	// PageURL stays the operator-side inbox permalink).
 	if u := strings.TrimSpace(conv.Source.URL); u != "" {
 		m["intercom_source_url"] = u
+	}
+	// Teammate resolution: assignee IDs become human-readable names so
+	// operators see who owns the conversation without opening Intercom.
+	if conv.AdminAssigneeID > 0 {
+		if ad, ok := admins[conv.AdminAssigneeID]; ok && strings.TrimSpace(ad.Name) != "" {
+			m["intercom_teammate_name"] = strings.TrimSpace(ad.Name)
+		}
 	}
 	// Operator-defined structured data (order IDs, plan tiers, error
 	// codes) — JSON passthrough, same pattern as zendesk_custom_fields.
@@ -403,7 +425,6 @@ func buildIntercomSourceMeta(
 			m["intercom_ai_last_answer_type"] = lat
 		}
 	}
-	return m
 }
 
 // matchesFilter returns true if the conversation passes the configured

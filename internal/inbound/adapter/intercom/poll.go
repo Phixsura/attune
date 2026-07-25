@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -239,6 +240,9 @@ type pageState struct {
 	totalSynced   int
 	// companyCache dedups GetCompany calls within one poll tick.
 	companyCache map[string]intercomCompany
+	// admins resolves assignee IDs to teammate names; nil until the
+	// first conversation needs it (one ListAdmins call per tick, lazy).
+	admins map[int64]intercomAdmin
 }
 
 // processConversationPage handles one search page. Returns the updated
@@ -277,7 +281,13 @@ func (a *adapter) processConversationPage(
 		}
 		st.detailFetches++
 
-		disabled, ingested := a.fetchAndIngest(ctx, client, src, cfg, summary, st.companyCache, where)
+		// Lazy teammate resolution: one ListAdmins per tick, and only
+		// when a qualifying conversation actually has an assignee.
+		if st.admins == nil && (summary.AdminAssigneeID > 0 || summary.TeamAssigneeID > 0) {
+			st.admins = a.resolveAdmins(ctx, client, where)
+		}
+
+		disabled, ingested := a.fetchAndIngest(ctx, client, src, cfg, summary, st.companyCache, st.admins, where)
 		if disabled {
 			return st, true
 		}
@@ -294,7 +304,7 @@ func (a *adapter) processConversationPage(
 // fetchAndIngest pulls the full thread for one conversation and ingests
 // it. Returns disabled=true when a permanent error on the search-level
 // API disabled the source; per-conversation failures degrade gracefully.
-func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbound.Source, cfg Config, summary conversation, companyCache map[string]intercomCompany, where string) (disabled, ingested bool) {
+func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbound.Source, cfg Config, summary conversation, companyCache map[string]intercomCompany, admins map[int64]intercomAdmin, where string) (disabled, ingested bool) {
 	conv, err := client.GetConversation(ctx, summary.ID)
 	if err != nil {
 		// Per-conversation degradation: a deleted/restricted conversation
@@ -313,7 +323,7 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 
 	contacts := a.resolveContacts(ctx, client, conv, where)
 	conv.Company = a.resolveCompany(ctx, client, conv.Company, companyCache, where)
-	in := buildIngestInput(src.ID, src.Name, cfg.WorkspaceID, conv, contacts)
+	in := buildIngestInput(src.ID, src.Name, cfg.WorkspaceID, conv, contacts, admins)
 	if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
 		if isDuplicateError(err) {
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
@@ -326,6 +336,24 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 	}
 	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
 	return false, true
+}
+
+// resolveAdmins fetches the workspace teammate directory once per tick.
+// Failure returns an empty (non-nil) map so the lazy trigger doesn't
+// re-fire on every conversation.
+func (a *adapter) resolveAdmins(ctx context.Context, client apiClient, where string) map[int64]intercomAdmin {
+	result := map[int64]intercomAdmin{}
+	admins, err := client.ListAdmins(ctx)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] resolve admins failed,err:%+v", where, err.Error())
+		return result
+	}
+	for _, ad := range admins {
+		if id, perr := strconv.ParseInt(ad.ID, 10, 64); perr == nil {
+			result[id] = ad
+		}
+	}
+	return result
 }
 
 // resolveCompany upgrades a conversation's embedded company reference

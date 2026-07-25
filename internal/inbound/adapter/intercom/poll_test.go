@@ -41,10 +41,22 @@ type fakeAPIClient struct {
 	companyErr   error
 	companyCalls int
 
+	adminsResult []intercomAdmin
+	adminsErr    error
+	adminCalls   int
+
 	// rateBudget simulates X-RateLimit-Remaining. The zero value maps to
 	// "unseen" (-1) so test literals that don't care are unaffected by
 	// the proactive throttle.
 	rateBudget int64
+}
+
+func (f *fakeAPIClient) ListAdmins(_ context.Context) ([]intercomAdmin, error) {
+	f.adminCalls++
+	if f.adminsErr != nil {
+		return nil, f.adminsErr
+	}
+	return f.adminsResult, nil
 }
 
 func (f *fakeAPIClient) GetCompany(_ context.Context, id string) (intercomCompany, error) {
@@ -783,6 +795,65 @@ func TestPollSource_CompanyProfileResolvedAndCached(t *testing.T) {
 	}
 	if meta["intercom_company_industry"] != "Software" {
 		t.Errorf("industry = %v", meta["intercom_company_industry"])
+	}
+}
+
+func TestPollSource_TeammateResolvedLazilyOncePerTick(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	// Two assigned conversations → exactly one ListAdmins call.
+	c1 := fullConversation()
+	c1.ID = "101"
+	c1.UpdatedAt = 1700000500
+	c1.AdminAssigneeID = 9
+	c2 := fullConversation()
+	c2.ID = "102"
+	c2.UpdatedAt = 1700000600
+	c2.AdminAssigneeID = 9
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:        []conversationPage{{Conversations: []conversation{c1, c2}}},
+		detailByID:   map[string]conversation{"101": c1, "102": c2},
+		adminsResult: []intercomAdmin{{ID: "9", Name: "Sam Support", Email: "sam@acme.example"}},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 2 {
+		t.Fatalf("expected 2 ingests, got %d", len(ingestFake.Calls))
+	}
+	if fake.adminCalls != 1 {
+		t.Errorf("adminCalls = %d, want 1 (lazy, once per tick)", fake.adminCalls)
+	}
+	meta := ingestFake.Calls[0].In.SourceMeta
+	if meta["intercom_teammate_name"] != "Sam Support" {
+		t.Errorf("teammate_name = %v", meta["intercom_teammate_name"])
+	}
+
+	// Unassigned conversation → ListAdmins never called.
+	sources2, ingest2, _, deps2 := buildDeps(t)
+	c3 := fullConversation()
+	c3.AdminAssigneeID = 0
+	c3.TeamAssigneeID = 0
+	src2 := testSource(t, sources2, deps2.Secrets, cfg, 1700000000)
+	fake2 := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{c3}}},
+		detailByID: map[string]conversation{"101": c3},
+	}
+	a2 := buildTestAdapter(fake2, deps2)
+	a2.pollSource(context.Background(), src2)
+	if fake2.adminCalls != 0 {
+		t.Errorf("adminCalls = %d, want 0 for unassigned conversations", fake2.adminCalls)
+	}
+	if _, ok := ingest2.Calls[0].In.SourceMeta["intercom_teammate_name"]; ok {
+		t.Error("teammate_name should be absent when unassigned")
 	}
 }
 

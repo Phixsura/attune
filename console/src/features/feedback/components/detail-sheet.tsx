@@ -461,6 +461,13 @@ function DetailBody({
             />
           ) : null}
 
+          {supportChannelCandidate(data.source, data.sourceMeta) && canPromoteCustomerRequest ? (
+            <SupportPromoteCard
+              feedbackId={String(data.id)}
+              candidate={supportChannelCandidate(data.source, data.sourceMeta)}
+            />
+          ) : null}
+
           <Section label={t('feedback.detail.source')}>
             <dl className="space-y-3">
               <FactRow label={t('feedback.detail.source')} value={data.source || '—'} mono />
@@ -1943,6 +1950,98 @@ function portalSubmissionMeta(
   }
 }
 
+type SupportCandidate = {
+  channel: string
+  customer: string
+  company: string
+  signal: 'fin_escalated' | 'priority' | 'default'
+}
+
+// supportChannelCandidate decides whether a support-channel feedback row
+// should surface a "promote to customer request" candidate card, and
+// with what urgency signal. Fin escalations and priority conversations
+// are the strongest request-candidate indicators.
+function supportChannelCandidate(
+  source: string,
+  sourceMeta: FeedbackDetail['sourceMeta'],
+): SupportCandidate | null {
+  if (source !== 'intercom' && source !== 'zendesk') return null
+  if (!isPortalRecord(sourceMeta)) return null
+  const prefix = `${source}_`
+  const text = (key: string): string => {
+    const v = sourceMeta[prefix + key]
+    if (typeof v === 'string') return v.trim()
+    if (typeof v === 'number') return String(v)
+    return ''
+  }
+  const customer =
+    text('contact_name') ||
+    text('requester_name') ||
+    text('contact_email') ||
+    text('requester_email')
+  const company = text('company_name') || text('organization_name')
+  let signal: SupportCandidate['signal'] = 'default'
+  if (
+    text('ai_resolution_state') === 'escalated' ||
+    text('ai_resolution_state') === 'negative_feedback'
+  ) {
+    signal = 'fin_escalated'
+  } else if (
+    text('priority') === 'priority' ||
+    text('priority') === 'urgent' ||
+    text('priority') === 'high'
+  ) {
+    signal = 'priority'
+  }
+  return { channel: source, customer, company, signal }
+}
+
+function SupportPromoteCard({
+  feedbackId,
+  candidate,
+}: {
+  feedbackId: string
+  candidate: SupportCandidate | null
+}) {
+  const { t } = useTranslation()
+  if (!candidate || !isPositiveIntString(feedbackId)) return null
+  const signalKey =
+    candidate.signal === 'fin_escalated'
+      ? 'feedback.detail.support_promote_signal_fin'
+      : candidate.signal === 'priority'
+        ? 'feedback.detail.support_promote_signal_priority'
+        : 'feedback.detail.support_promote_signal_default'
+  const who = [candidate.customer, candidate.company].filter(Boolean).join(' · ')
+  return (
+    <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+            {t('feedback.detail.support_promote_title')}
+          </div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            {t(signalKey)}
+            {who ? ` ${t('feedback.detail.support_promote_from', { who })}` : ''}
+          </p>
+        </div>
+        <Button asChild size="sm" className="shrink-0">
+          <Link
+            to="/feedback/customer-requests"
+            search={{
+              request_id: undefined,
+              merge_target_id: undefined,
+              promote_feedback_ids: feedbackId,
+              feedback_id: feedbackId,
+            }}
+          >
+            {t('feedback.detail.support_promote_action')}
+          </Link>
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function PortalSubmissionSection({
   feedbackId,
   canPromoteCustomerRequest,
@@ -2134,6 +2233,7 @@ export const feedbackDetailSheetTestables = {
   relativeTime,
   replyDraftTimelineItems,
   revisionByID,
+  supportChannelCandidate,
   terminalFailureReasonClassLabel,
   terminalFailureSnapshotPresent,
   workbenchModeLabel,

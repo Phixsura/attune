@@ -324,6 +324,17 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/admins') {
+    send(res, 200, {
+      type: 'admin.list',
+      admins: [
+        { type: 'admin', id: '7', name: 'Sam Support', email: 'sam@acme.example' },
+        { type: 'admin', id: '8', name: 'Kim Ops', email: 'kim@acme.example' },
+      ],
+    })
+    return
+  }
+
   if (req.method === 'GET' && url.pathname === '/me') {
     send(res, 200, {
       type: 'admin',

@@ -21,6 +21,7 @@ type (
 	intercomContact  = intercomclient.Contact
 	intercomAccount  = intercomclient.AccountInfo
 	intercomCompany  = intercomclient.Company
+	intercomAdmin    = intercomclient.Admin
 	apiError         = intercomclient.APIError
 	rateLimitError   = intercomclient.RateLimitError
 )

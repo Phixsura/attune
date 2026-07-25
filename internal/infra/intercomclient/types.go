@@ -146,6 +146,13 @@ type CompanyPlan struct {
 	Name string `json:"name"`
 }
 
+// Admin is a workspace teammate (from GET /admins).
+type Admin struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
 // AccountInfo holds the resolved identity of an Intercom connection
 // (from GET /me).
 type AccountInfo struct {
