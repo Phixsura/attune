@@ -364,7 +364,7 @@ export function CreateInboundSourceDialog({
               <Label>{t('inbound_sources.create.channel_label')}</Label>
               <div
                 className="grid grid-cols-2 gap-2 sm:grid-cols-4"
-                role="radiogroup"
+                role="group"
                 aria-label={t('inbound_sources.create.channel_label')}
               >
                 <ChannelOption
@@ -507,11 +507,9 @@ function ChannelOption({
   help: string
 }) {
   return (
-    // biome-ignore lint/a11y/useSemanticElements: styled card radio — native input would lose the card layout
     <button
       type="button"
-      role="radio"
-      aria-checked={selected}
+      aria-pressed={selected}
       onClick={onClick}
       className={cn(
         'flex flex-col items-start gap-1 rounded-md border p-3 text-left text-sm transition-colors',
@@ -827,14 +825,12 @@ function ZendeskFieldset({
         <Label>{t('inbound_sources.create.zendesk.auth_mode')}</Label>
         <div
           className="grid grid-cols-2 gap-2"
-          role="radiogroup"
+          role="group"
           aria-label={t('inbound_sources.create.zendesk.auth_mode')}
         >
-          {/* biome-ignore lint/a11y/useSemanticElements: styled card radio */}
           <button
             type="button"
-            role="radio"
-            aria-checked={values.authMode === 'api_token'}
+            aria-pressed={values.authMode === 'api_token'}
             onClick={() => set('authMode', 'api_token')}
             className={cn(
               'rounded-md border p-2 text-left text-sm transition-colors',
@@ -845,11 +841,9 @@ function ZendeskFieldset({
           >
             {t('inbound_sources.create.zendesk.auth_api_token')}
           </button>
-          {/* biome-ignore lint/a11y/useSemanticElements: styled card radio */}
           <button
             type="button"
-            role="radio"
-            aria-checked={values.authMode === 'oauth'}
+            aria-pressed={values.authMode === 'oauth'}
             onClick={() => set('authMode', 'oauth')}
             className={cn(
               'rounded-md border p-2 text-left text-sm transition-colors',

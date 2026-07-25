@@ -44,7 +44,7 @@ describe('CreateInboundSourceDialog', () => {
       <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /邮箱/ }))
+    await user.click(screen.getByRole('button', { name: /邮箱/ }))
     await user.type(screen.getByLabelText('名称'), 'Support mailbox')
     await user.type(screen.getByLabelText('IMAP 主机'), 'imap.example.com')
     await user.click(screen.getByLabelText(/使用 TLS/))
@@ -97,7 +97,7 @@ describe('CreateInboundSourceDialog', () => {
       />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /邮箱/ }))
+    await user.click(screen.getByRole('button', { name: /邮箱/ }))
     await user.type(screen.getByLabelText('IMAP 主机'), 'imap.example.com')
     await user.type(screen.getByLabelText('用户名'), 'feedback@example.com')
     await user.type(screen.getByLabelText('密码或 App Password'), 'secret')
@@ -120,11 +120,11 @@ describe('CreateInboundSourceDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled()
 
     await user.type(screen.getByLabelText('名称'), 'Incomplete source')
-    await user.click(screen.getByRole('radio', { name: /邮箱/ }))
+    await user.click(screen.getByRole('button', { name: /邮箱/ }))
     fireEvent.submit(form)
     expect(onSubmit).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole('radio', { name: /Slack/ }))
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
     fireEvent.submit(form)
     expect(onSubmit).not.toHaveBeenCalled()
   })
@@ -140,7 +140,7 @@ describe('CreateInboundSourceDialog', () => {
       <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /Slack/ }))
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
     await user.type(screen.getByLabelText('Slack Bot Token'), 'xoxb-test-token')
     await user.click(screen.getByRole('button', { name: '发现频道' }))
 
@@ -172,7 +172,7 @@ describe('CreateInboundSourceDialog', () => {
       />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /Slack/ }))
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
     await user.type(screen.getByLabelText('Slack Bot Token'), 'xoxb-bad-token')
     await user.click(screen.getByRole('button', { name: '发现频道' }))
     expect(await screen.findByText('slack token rejected')).toBeInTheDocument()
@@ -215,7 +215,7 @@ describe('CreateInboundSourceDialog', () => {
       />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /Slack/ }))
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
     await user.type(screen.getByLabelText('Slack Bot Token'), 'xoxb-test-token')
     await user.click(screen.getByRole('button', { name: '发现频道' }))
     await screen.findByText('#feedback')
@@ -270,7 +270,7 @@ describe('CreateInboundSourceDialog', () => {
       <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /Slack/ }))
+    await user.click(screen.getByRole('button', { name: /Slack/ }))
     await user.type(screen.getByLabelText('Slack Bot Token'), 'xoxb-test-token')
     await user.click(screen.getByRole('button', { name: '发现频道' }))
     await screen.findByText('#feedback')
@@ -310,7 +310,7 @@ describe('CreateInboundSourceDialog', () => {
       <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /Zendesk/ }))
+    await user.click(screen.getByRole('button', { name: /Zendesk/ }))
     await user.type(screen.getByLabelText('名称'), 'Support tickets')
     await user.type(screen.getByLabelText('子域名'), 'mycompany')
     await user.type(screen.getByLabelText('管理员邮箱'), 'admin@mycompany.com')
@@ -347,11 +347,11 @@ describe('CreateInboundSourceDialog', () => {
       <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /Zendesk/ }))
+    await user.click(screen.getByRole('button', { name: /Zendesk/ }))
     await user.type(screen.getByLabelText('名称'), 'Zendesk OAuth')
     await user.type(screen.getByLabelText('子域名'), 'myoauth')
     // Switch from default api_token to OAuth.
-    await user.click(screen.getByRole('radio', { name: 'OAuth 2.0' }))
+    await user.click(screen.getByRole('button', { name: 'OAuth 2.0' }))
     await user.type(screen.getByLabelText('Access Token'), 'access-token-abc')
     await user.click(screen.getByRole('button', { name: '测试连接' }))
 
@@ -384,9 +384,9 @@ describe('CreateInboundSourceDialog', () => {
       />,
     )
 
-    await user.click(screen.getByRole('radio', { name: /邮箱/ }))
+    await user.click(screen.getByRole('button', { name: /邮箱/ }))
     expect(screen.getByLabelText('IMAP 主机')).toBeInTheDocument()
-    await user.click(screen.getByRole('radio', { name: /Webhook/ }))
+    await user.click(screen.getByRole('button', { name: /Webhook/ }))
     expect(screen.queryByLabelText('IMAP 主机')).not.toBeInTheDocument()
 
     await user.keyboard('{Escape}')

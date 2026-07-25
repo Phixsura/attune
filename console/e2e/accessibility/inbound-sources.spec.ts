@@ -71,7 +71,7 @@ test.describe('Inbound sources browser behavior', () => {
     await gotoConsoleRoute(page, '/integrations/inbound-sources')
 
     await page.getByRole('button', { name: zh.addButton }).click()
-    await page.getByRole('radio', { name: zh.slack }).click()
+    await page.getByRole('button', { name: zh.slack }).click()
     await page.getByRole('textbox', { name: zh.name }).fill(zh.slackLive)
     await page.getByLabel(zh.token).fill('xoxb-a11y-token')
 
