@@ -115,6 +115,40 @@ workspace name).
   `workspace_name = 4` to `TestInboundConnectionResponse` (additive,
   channel-generic — Zendesk/Slack may fill it later).
 
+## 5a. Automatic customer/account attachment (the profile pipeline)
+
+Issue #230's scope line "Normalize user, **company**, …" and acceptance
+criterion "customer/company context **attaches to profiles** where
+available" demand more than carrying join keys in SourceMeta. The
+benchmark behavior (Canny/Productboard/Enterpret) is that a promoted
+request **already knows** who asked and what they are worth.
+
+The primary-source finding that makes this cheap: Intercom's `company`
+object natively carries `monthly_spend` (revenue), `plan.name`, `size`,
+and `industry` — a 1:1 match for attune's existing
+`AccountProfileInput{RevenueCents, Tier, SizeSegment}`. No new schema.
+
+Three layers:
+
+1. **Client**: `GetCompany(id)` (GET /companies/{id}). The conversation
+   already embeds the company reference.
+2. **Adapter**: resolve the conversation's company once per poll tick
+   (per-tick cache — many conversations share a company) and emit
+   `intercom_company_monthly_spend`, `intercom_company_plan`,
+   `intercom_company_size`, `intercom_company_industry` in SourceMeta.
+3. **Service (channel-agnostic)**: `PromoteFeedback` derives a customer
+   link from the promoted feedback's SourceMeta — subject =
+   `intercom_contact_external_id` (fallback email), display = contact
+   name, account = company id/name, `AccountProfile.RevenueCents =
+   monthly_spend × 100`, `Tier = plan`, `SizeSegment = size` — inside
+   the same transaction. The derivation reads generic
+   `<channel>_contact_*` / `<channel>_company_*` conventions so Zendesk
+   organizations plug into the same path later.
+
+Result: promoting an Intercom conversation produces a CR whose customer
+list, account profile, and revenue-weighted decision score are populated
+on creation — no manual "添加客户" step.
+
 ## 5. Proactive rate self-throttle
 
 The MVP only reacts to 429s. Private apps share a 10k req/min budget

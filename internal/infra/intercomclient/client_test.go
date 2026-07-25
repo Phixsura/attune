@@ -304,6 +304,23 @@ func TestRateLimit_UsesResetHeader(t *testing.T) {
 	}
 }
 
+func TestGetCompany_Profile(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/companies/co-9" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"type":"company","id":"co-9","name":"Customer Co","monthly_spend":1200,"size":85,"industry":"Software","plan":{"type":"plan","id":"p1","name":"Pro"}}`)
+	}))
+
+	company, err := client.GetCompany(context.Background(), "co-9")
+	if err != nil {
+		t.Fatalf("GetCompany: %v", err)
+	}
+	if company.MonthlySpend != 1200 || company.Size != 85 || company.Plan.Name != "Pro" || company.Industry != "Software" {
+		t.Errorf("company = %+v", company)
+	}
+}
+
 func TestRateBudget_TracksRemainingHeader(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-RateLimit-Remaining", "4321")

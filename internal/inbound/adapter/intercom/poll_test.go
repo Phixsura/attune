@@ -37,10 +37,25 @@ type fakeAPIClient struct {
 	contactsResult []intercomContact
 	contactsErr    error
 
+	companyByID  map[string]intercomCompany
+	companyErr   error
+	companyCalls int
+
 	// rateBudget simulates X-RateLimit-Remaining. The zero value maps to
 	// "unseen" (-1) so test literals that don't care are unaffected by
 	// the proactive throttle.
 	rateBudget int64
+}
+
+func (f *fakeAPIClient) GetCompany(_ context.Context, id string) (intercomCompany, error) {
+	f.companyCalls++
+	if f.companyErr != nil {
+		return intercomCompany{}, f.companyErr
+	}
+	if c, ok := f.companyByID[id]; ok {
+		return c, nil
+	}
+	return intercomCompany{}, apiError{Method: "/companies/" + id, Status: 404, Code: "not_found"}
 }
 
 func (f *fakeAPIClient) RateBudget() int64 {
@@ -713,6 +728,95 @@ func TestPollSource_TagFilterSkipsDetailBudget(t *testing.T) {
 	stored, _ := sources.Get(context.Background(), "src-1")
 	if stored.State.LastUID != 1700000500 {
 		t.Errorf("watermark should advance past filtered items, got %d", stored.State.LastUID)
+	}
+}
+
+func TestPollSource_CompanyProfileResolvedAndCached(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	// Two conversations sharing one company → exactly one GetCompany call.
+	c1 := fullConversation()
+	c1.ID = "101"
+	c1.UpdatedAt = 1700000500
+	c1.Company = &intercomclient.Company{ID: "co-9", Name: "Customer Co"} // ptrext:allow test-fixture
+	c2 := fullConversation()
+	c2.ID = "102"
+	c2.UpdatedAt = 1700000600
+	c2.Company = &intercomclient.Company{ID: "co-9", Name: "Customer Co"} // ptrext:allow test-fixture
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{c1, c2}}},
+		detailByID: map[string]conversation{"101": c1, "102": c2},
+		companyByID: map[string]intercomCompany{
+			"co-9": {
+				ID: "co-9", Name: "Customer Co",
+				MonthlySpend: 1200, Size: 85, Industry: "Software",
+				Plan: intercomclient.CompanyPlan{ID: "p1", Name: "Pro"},
+			},
+		},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 2 {
+		t.Fatalf("expected 2 ingests, got %d", len(ingestFake.Calls))
+	}
+	if fake.companyCalls != 1 {
+		t.Errorf("companyCalls = %d, want 1 (per-tick cache)", fake.companyCalls)
+	}
+	meta := ingestFake.Calls[0].In.SourceMeta
+	if meta["intercom_company_monthly_spend"] != 1200 {
+		t.Errorf("monthly_spend = %v", meta["intercom_company_monthly_spend"])
+	}
+	if meta["intercom_company_plan"] != "Pro" {
+		t.Errorf("plan = %v", meta["intercom_company_plan"])
+	}
+	if meta["intercom_company_size"] != 85 {
+		t.Errorf("size = %v", meta["intercom_company_size"])
+	}
+	if meta["intercom_company_industry"] != "Software" {
+		t.Errorf("industry = %v", meta["intercom_company_industry"])
+	}
+}
+
+func TestPollSource_CompanyResolutionFailureDegrades(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	c1 := fullConversation()
+	c1.Company = &intercomclient.Company{ID: "co-gone", Name: "Ghost Co"} // ptrext:allow test-fixture
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{c1}}},
+		detailByID: map[string]conversation{"101": c1},
+		companyErr: apiError{Method: "/companies/co-gone", Status: 404, Code: "not_found"},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	// Ingest proceeds with the embedded reference; no profile keys.
+	if len(ingestFake.Calls) != 1 {
+		t.Fatalf("expected 1 ingest, got %d", len(ingestFake.Calls))
+	}
+	meta := ingestFake.Calls[0].In.SourceMeta
+	if meta["intercom_company_name"] != "Ghost Co" {
+		t.Errorf("company_name = %v", meta["intercom_company_name"])
+	}
+	if _, ok := meta["intercom_company_monthly_spend"]; ok {
+		t.Error("monthly_spend should be absent on resolution failure")
 	}
 }
 

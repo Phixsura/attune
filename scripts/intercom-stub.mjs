@@ -379,6 +379,24 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  const companyMatch = url.pathname.match(/^\/companies\/([\w-]+)$/)
+  if (req.method === 'GET' && companyMatch) {
+    if (companyMatch[1] === 'co-9') {
+      send(res, 200, {
+        type: 'company',
+        id: 'co-9',
+        name: 'Customer Co',
+        monthly_spend: 1200,
+        size: 85,
+        industry: 'Software',
+        plan: { type: 'plan', id: 'p1', name: 'Pro' },
+      })
+      return
+    }
+    send(res, 404, { type: 'error.list', errors: [{ code: 'not_found', message: 'Company not found' }] })
+    return
+  }
+
   if (req.method === 'POST' && url.pathname === '/contacts/search') {
     const body = JSON.parse((await readBody(req)) || '{}')
     const ids = body.query?.value?.[0]?.value ?? []

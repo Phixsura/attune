@@ -54,6 +54,9 @@ type Client interface {
 	GetConversation(ctx context.Context, id string) (Conversation, error)
 	// SearchContacts batch-resolves contact IDs.
 	SearchContacts(ctx context.Context, ids []string) ([]Contact, error)
+	// GetCompany fetches a company's profile (monthly_spend, plan, size,
+	// industry) — the revenue context behind conversation attribution.
+	GetCompany(ctx context.Context, id string) (Company, error)
 	// RateBudget returns the most recent X-RateLimit-Remaining value seen
 	// on any response, or -1 before the first response. Callers use it to
 	// self-throttle before Intercom starts returning 429s — private apps
@@ -295,6 +298,14 @@ func (c *httpClient) SearchContacts(ctx context.Context, ids []string) ([]Contac
 		result = append(result, resp.Data...)
 	}
 	return result, nil
+}
+
+func (c *httpClient) GetCompany(ctx context.Context, id string) (Company, error) {
+	var company Company
+	if err := c.getJSON(ctx, "/companies/"+url.PathEscape(id), &company); err != nil { // ptrext:allow json-decode-out-param
+		return Company{}, err
+	}
+	return company, nil
 }
 
 // ---------------------------------------------------------------------------

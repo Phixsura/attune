@@ -128,8 +128,20 @@ type Contact struct {
 	Name       string `json:"name"`
 }
 
-// Company is the company attached to a conversation.
+// Company is the company attached to a conversation. GetCompany fills
+// the profile fields; conversation embeds carry only id/name.
 type Company struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Profile fields (GET /companies/{id}).
+	MonthlySpend int         `json:"monthly_spend"` // revenue this company generates
+	Size         int         `json:"size"`          // employee count
+	Industry     string      `json:"industry"`
+	Plan         CompanyPlan `json:"plan"`
+}
+
+// CompanyPlan is the subscription plan recorded on a company.
+type CompanyPlan struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }

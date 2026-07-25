@@ -357,6 +357,20 @@ func buildIntercomSourceMeta(
 	if conv.Company != nil {
 		m["intercom_company_id"] = conv.Company.ID
 		m["intercom_company_name"] = strings.TrimSpace(conv.Company.Name)
+		// Revenue context (GET /companies/{id}) — feeds automatic account
+		// attribution and the revenue-weighted decision score at promote.
+		if conv.Company.MonthlySpend > 0 {
+			m["intercom_company_monthly_spend"] = conv.Company.MonthlySpend
+		}
+		if plan := strings.TrimSpace(conv.Company.Plan.Name); plan != "" {
+			m["intercom_company_plan"] = plan
+		}
+		if conv.Company.Size > 0 {
+			m["intercom_company_size"] = conv.Company.Size
+		}
+		if industry := strings.TrimSpace(conv.Company.Industry); industry != "" {
+			m["intercom_company_industry"] = industry
+		}
 	}
 	if conv.Rating != nil {
 		m["intercom_rating"] = conv.Rating.Rating

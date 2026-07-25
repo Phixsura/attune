@@ -1010,6 +1010,28 @@ func (r *Repo) UnlinkFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string,
 	return touchRequestTx(ctx, tx, tenantID, requestID, actorID)
 }
 
+// FeedbackSourceMetaTx returns the source + source_meta of one feedback
+// row, used to derive automatic customer/account attribution at promote
+// time (inbound adapters carry contact/company identity in source_meta).
+func (r *Repo) FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (string, map[string]any, error) {
+	var source string
+	var meta map[string]any
+	err := tx.QueryRow(
+		ctx, `
+		SELECT source, source_meta
+		FROM user_feedback
+		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+		tenantID, feedbackID,
+	).Scan(&source, &meta) // ptrext:allow pgx-scan
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, ErrFeedbackNotFound
+	}
+	if err != nil {
+		return "", nil, fmt.Errorf("feedback source meta: %w", err)
+	}
+	return source, meta, nil
+}
+
 func (r *Repo) LinkCustomerTx(ctx context.Context, tx pgx.Tx, in CustomerLinkInput) (*CustomerLink, error) {
 	if err := upsertAccountProfileTx(ctx, tx, in.TenantID, in.AccountProfile); err != nil {
 		return nil, err

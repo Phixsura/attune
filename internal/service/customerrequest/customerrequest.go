@@ -1062,9 +1062,16 @@ func (s *Service) promoteInTransaction(ctx context.Context, in PromoteInput) (*D
 			return nil, err
 		}
 	}
+	// Auto-attribution: inbound-channel feedback carries contact/company
+	// identity in source_meta — link those customers so the promoted
+	// request already knows who asked and what they are worth.
+	autoLinked := s.autoLinkCustomersTx(ctx, tx, in.TenantID, created.ID, in.FeedbackIDs, in.Actor.ID)
 	after := createAuditMetadata(ptrext.Indirect(created), in.IdempotencyKey)
 	after["feedback_ids"] = in.FeedbackIDs
 	after["feedback_count"] = len(in.FeedbackIDs)
+	if autoLinked > 0 {
+		after["auto_linked_customers"] = autoLinked
+	}
 	if err := s.recordAuditTx(ctx, tx, in.Actor, "customer_request.promote_feedback", ptrext.Indirect(created),
 		"Promoted feedback to customer request", after); err != nil {
 		return nil, err

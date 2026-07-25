@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - Custom attributes (`intercom_custom_attributes` JSON passthrough)
     and the customer-side conversation start URL
     (`intercom_source_url`) captured in SourceMeta.
+  - Company revenue context: `GetCompany` resolves `monthly_spend`,
+    `plan`, `size`, and `industry` (per-tick cached), emitted as
+    `intercom_company_*` SourceMeta keys.
+  - Automatic customer/account attribution at promote: promoting
+    inbound-channel feedback derives customer links and account
+    profiles (revenue, tier, size) from source_meta inside the promote
+    transaction — a promoted Intercom conversation lands with its
+    customer, company, and revenue-weighted decision score already
+    populated. Channel-agnostic: Zendesk requester/organization keys
+    ride the same derivation.
   - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
     rating, last answer type); escalated / negative-feedback Fin
     conversations produce a `complaint` enrichment hint.

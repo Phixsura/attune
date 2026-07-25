@@ -47,6 +47,8 @@ func newFixtureServer(t *testing.T) *httptest.Server {
 				return
 			}
 			w.Write(data) //nolint:errcheck
+		case r.URL.Path == "/companies/co-9":
+			fmt.Fprint(w, `{"type":"company","id":"co-9","name":"Customer Co","monthly_spend":1200,"size":85,"industry":"Software","plan":{"type":"plan","id":"p1","name":"Pro"}}`)
 		case r.URL.Path == "/contacts/search" && r.Method == http.MethodPost:
 			w.Write(loadFixture(t, "contacts_search.json")) //nolint:errcheck
 		default:
@@ -189,6 +191,13 @@ func verifyFixtureMeta501(t *testing.T, meta map[string]any) {
 	}
 	if !strings.Contains(meta["intercom_custom_attributes"].(string), "EXPORT_403") {
 		t.Errorf("custom_attributes = %v", meta["intercom_custom_attributes"])
+	}
+	// Company profile resolved via GET /companies/{id} (revenue context).
+	if meta["intercom_company_monthly_spend"] != 1200 {
+		t.Errorf("company_monthly_spend = %v", meta["intercom_company_monthly_spend"])
+	}
+	if meta["intercom_company_plan"] != "Pro" {
+		t.Errorf("company_plan = %v", meta["intercom_company_plan"])
 	}
 	if meta["intercom_source_url"] != "https://app.customer.com/dashboards/42" {
 		t.Errorf("source_url = %v", meta["intercom_source_url"])

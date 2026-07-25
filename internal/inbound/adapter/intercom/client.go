@@ -20,6 +20,7 @@ type (
 	contactRef       = intercomclient.ContactRef
 	intercomContact  = intercomclient.Contact
 	intercomAccount  = intercomclient.AccountInfo
+	intercomCompany  = intercomclient.Company
 	apiError         = intercomclient.APIError
 	rateLimitError   = intercomclient.RateLimitError
 )

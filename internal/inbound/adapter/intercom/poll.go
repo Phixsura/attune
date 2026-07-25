@@ -182,6 +182,7 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		res:           syncResult{watermark: watermark},
 		baseWatermark: watermark,
 		detailBudget:  effectiveDetailBudget(cfg),
+		companyCache:  map[string]intercomCompany{},
 	}
 	cursor := ""
 
@@ -236,6 +237,8 @@ type pageState struct {
 	detailFetches int
 	detailBudget  int
 	totalSynced   int
+	// companyCache dedups GetCompany calls within one poll tick.
+	companyCache map[string]intercomCompany
 }
 
 // processConversationPage handles one search page. Returns the updated
@@ -274,7 +277,7 @@ func (a *adapter) processConversationPage(
 		}
 		st.detailFetches++
 
-		disabled, ingested := a.fetchAndIngest(ctx, client, src, cfg, summary, where)
+		disabled, ingested := a.fetchAndIngest(ctx, client, src, cfg, summary, st.companyCache, where)
 		if disabled {
 			return st, true
 		}
@@ -291,7 +294,7 @@ func (a *adapter) processConversationPage(
 // fetchAndIngest pulls the full thread for one conversation and ingests
 // it. Returns disabled=true when a permanent error on the search-level
 // API disabled the source; per-conversation failures degrade gracefully.
-func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbound.Source, cfg Config, summary conversation, where string) (disabled, ingested bool) {
+func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbound.Source, cfg Config, summary conversation, companyCache map[string]intercomCompany, where string) (disabled, ingested bool) {
 	conv, err := client.GetConversation(ctx, summary.ID)
 	if err != nil {
 		// Per-conversation degradation: a deleted/restricted conversation
@@ -309,6 +312,7 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 	}
 
 	contacts := a.resolveContacts(ctx, client, conv, where)
+	conv.Company = a.resolveCompany(ctx, client, conv.Company, companyCache, where)
 	in := buildIngestInput(src.ID, src.Name, cfg.WorkspaceID, conv, contacts)
 	if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
 		if isDuplicateError(err) {
@@ -322,6 +326,31 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 	}
 	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
 	return false, true
+}
+
+// resolveCompany upgrades a conversation's embedded company reference
+// (id/name only) to the full profile (monthly_spend, plan, size) — the
+// revenue context behind attribution. Cached per poll tick: many
+// conversations share one company. Resolution failure falls back to the
+// embedded reference — never blocks ingestion.
+func (a *adapter) resolveCompany(ctx context.Context, client apiClient, ref *intercomCompany, cache map[string]intercomCompany, where string) *intercomCompany {
+	if ref == nil || ref.ID == "" {
+		return ref
+	}
+	if cached, ok := cache[ref.ID]; ok {
+		return ptrext.Of(cached)
+	}
+	full, err := client.GetCompany(ctx, ref.ID)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] resolve company failed,company_id:%s,err:%+v", where, ref.ID, err.Error())
+		cache[ref.ID] = ptrext.Indirect(ref) // negative-cache the bare ref for this tick
+		return ref
+	}
+	if full.Name == "" {
+		full.Name = ref.Name
+	}
+	cache[ref.ID] = full
+	return ptrext.Of(full)
 }
 
 // resolveContacts batch-resolves the conversation's contact references.
