@@ -3484,6 +3484,8 @@
       "support_promote_signal_default": "这条支持渠道反馈可以沉淀为客户需求，自动携带客户与收入上下文。",
       "support_promote_from": "来自 {{who}}。",
       "support_promote_action": "转为客户需求",
+      "support_promote_recurring": "该问题已在其他反馈中出现 {{count}} 次：",
+      "support_promote_action_bundle": "打包 {{count}} 条转为客户需求",
       "attachments": "附件",
       "attrs": "AI 分类",
       "ai_state": "AI 状态",

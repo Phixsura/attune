@@ -199,6 +199,7 @@ var expectedOtherRoutes = []string{
 	"POST /feedback/{id}/transition",
 	"POST /feedback/transition/batch",
 	"GET /feedback/{id}/audit",
+	"GET /feedback/{id}/similar",
 	"GET /workflow/states",
 	"POST /workflow/states",
 	"PATCH /workflow/states/{id}",

@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     shows a "客户需求候选" card with a signal-aware prompt (Fin
     escalation / negative feedback strongest, support priority second)
     and a one-click promote that pre-fills the customer-request flow.
+  - Recurring-signal detection: new `GET /feedback/{id}/similar`
+    endpoint surfaces semantically-similar feedback (pgvector, ≥0.78
+    similarity); the candidate card shows "该问题已在其他反馈中出现 N
+    次" with the top neighbors and upgrades the promote action to
+    bundle the whole recurring cluster as evidence in one click.
   - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
     rating, last answer type); escalated / negative-feedback Fin
     conversations produce a `complaint` enrichment hint.

@@ -2586,6 +2586,7 @@ func (r *Router) mountFeedback(m chi.Router) {
 			}),
 		))
 		r.mountFeedbackReplyDraftRoutes(f)
+		f.Get("/{id}/similar", r.feedback.SimilarFeedback)
 		f.Post("/{id}/retry-enrichment", dispatcher.Bind(
 			"console.FeedbackHandler.RetryEnrichment",
 			dispatcher.Path(

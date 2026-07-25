@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package feedback
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/pkg/logext"
+	repofeedback "github.com/Phixsura/attune/internal/repo/feedback"
+)
+
+const (
+	// similarFeedbackLimit bounds the recurrence signal — operators need
+	// "this came up N more times", not an exhaustive listing.
+	similarFeedbackLimit = 5
+	// similarFeedbackMinSimilarity filters to genuinely-the-same-issue
+	// neighbors; matches the embedding worker's clustering threshold band.
+	similarFeedbackMinSimilarity = 0.78
+)
+
+// similarFeedbackFinder is the narrow repo surface for recurrence lookups.
+type similarFeedbackFinder interface {
+	FindSimilarFeedback(ctx context.Context, tenantID string, feedbackID int64, limit int, minSimilarity float64) ([]repofeedback.SemanticSearchHit, error)
+}
+
+// SetSimilarFinder wires the semantic-similarity reader. Nil (no
+// embeddings configured) keeps the endpoint returning empty lists.
+func (h *FeedbackHandler) SetSimilarFinder(f similarFeedbackFinder) { h.similarFinder = f }
+
+// similarFeedbackItem is the wire shape for one recurrence neighbor.
+type similarFeedbackItem struct {
+	ID         int64   `json:"id"`
+	Title      string  `json:"title"`
+	Source     string  `json:"source"`
+	Similarity float64 `json:"similarity"`
+	CreatedAt  string  `json:"created_at"`
+}
+
+// SimilarFeedback handles GET /fb/v1/console/feedback/{id}/similar.
+// Returns semantically-similar feedback — the "recurring signal" behind
+// a request candidate. Uses a raw http.HandlerFunc because the response
+// is a lightweight operational shape, not a proto message (same pattern
+// as inbound's RecentFeedback).
+func (h *FeedbackHandler) SimilarFeedback(w http.ResponseWriter, r *http.Request) {
+	const where = "console.FeedbackHandler.SimilarFeedback"
+	auth := session.FromContext(r.Context())
+	feedbackID, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || feedbackID <= 0 {
+		http.Error(w, "id must be a positive integer", http.StatusBadRequest)
+		return
+	}
+
+	items := []similarFeedbackItem{}
+	if h.similarFinder != nil {
+		hits, ferr := h.similarFinder.FindSimilarFeedback(r.Context(), auth.TenantID, feedbackID, similarFeedbackLimit, similarFeedbackMinSimilarity)
+		if ferr != nil {
+			// No embedding yet (fresh row, embeddings disabled) is the
+			// common case — an empty recurrence signal, not an error.
+			if !isNoEmbeddingError(ferr) {
+				logext.Warnf(r.Context(), "[%s] find similar failed,tenant_id:%s,feedback_id:%d,err:%+v",
+					where, auth.TenantID, feedbackID, ferr.Error())
+			}
+		}
+		for _, hit := range hits {
+			title := hit.Feedback.EnrichedTitle
+			if title == "" {
+				title = firstLine(hit.Feedback.Content)
+			}
+			items = append(items, similarFeedbackItem{
+				ID:         hit.Feedback.ID,
+				Title:      title,
+				Source:     hit.Feedback.Source,
+				Similarity: hit.Similarity,
+				CreatedAt:  hit.Feedback.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+			})
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"items": items}) //nolint:errcheck
+}
+
+// isNoEmbeddingError matches the repo's has-no-embedding failure, which
+// simply means the recurrence signal isn't available yet.
+func isNoEmbeddingError(err error) bool {
+	return strings.Contains(err.Error(), "has no embedding")
+}
+
+// firstLine trims content to its first line, capped for display.
+func firstLine(content string) string {
+	if idx := strings.IndexByte(content, '\n'); idx > 0 {
+		content = content[:idx]
+	}
+	content = strings.TrimSpace(content)
+	if len(content) > 120 {
+		content = content[:120]
+	}
+	return content
+}

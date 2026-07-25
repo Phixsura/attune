@@ -62,6 +62,10 @@ import {
   useUpdateReplyDraft,
 } from '@/features/feedback/api/regenerate-reply-draft'
 import { useRetryEnrichment } from '@/features/feedback/api/retry-enrichment'
+import {
+  type SimilarFeedbackItem,
+  similarFeedbackQuery,
+} from '@/features/feedback/api/similar-feedback'
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { FeedbackTagSection } from '@/features/feedback/components/feedback-tags'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
@@ -1996,6 +2000,13 @@ function supportChannelCandidate(
   return { channel: source, customer, company, signal }
 }
 
+// promoteIDList joins the anchor feedback with its recurrence neighbors
+// so one click promotes the whole recurring signal as evidence.
+function promoteIDList(feedbackId: string, similar: SimilarFeedbackItem[]): string {
+  const ids = [feedbackId, ...similar.map((s) => String(s.id))]
+  return [...new Set(ids)].join(',')
+}
+
 function SupportPromoteCard({
   feedbackId,
   candidate,
@@ -2004,7 +2015,9 @@ function SupportPromoteCard({
   candidate: SupportCandidate | null
 }) {
   const { t } = useTranslation()
-  if (!candidate || !isPositiveIntString(feedbackId)) return null
+  const enabled = !!candidate && isPositiveIntString(feedbackId)
+  const similar = useQuery({ ...similarFeedbackQuery(feedbackId), enabled })
+  if (!candidate || !enabled) return null
   const signalKey =
     candidate.signal === 'fin_escalated'
       ? 'feedback.detail.support_promote_signal_fin'
@@ -2012,6 +2025,8 @@ function SupportPromoteCard({
         ? 'feedback.detail.support_promote_signal_priority'
         : 'feedback.detail.support_promote_signal_default'
   const who = [candidate.customer, candidate.company].filter(Boolean).join(' · ')
+  const neighbors = similar.data?.items ?? []
+  const promoteIDs = promoteIDList(feedbackId, neighbors)
   return (
     <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -2023,6 +2038,23 @@ function SupportPromoteCard({
             {t(signalKey)}
             {who ? ` ${t('feedback.detail.support_promote_from', { who })}` : ''}
           </p>
+          {neighbors.length > 0 ? (
+            <div className="mt-2 space-y-1">
+              <p className="text-xs font-medium text-primary">
+                {t('feedback.detail.support_promote_recurring', { count: neighbors.length })}
+              </p>
+              <ul className="space-y-0.5">
+                {neighbors.slice(0, 3).map((item) => (
+                  <li key={item.id} className="truncate text-xs text-muted-foreground">
+                    #{item.id} · {item.title}
+                    <span className="ml-1 text-[10px] tabular-nums">
+                      {Math.round(item.similarity * 100)}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
         <Button asChild size="sm" className="shrink-0">
           <Link
@@ -2030,11 +2062,15 @@ function SupportPromoteCard({
             search={{
               request_id: undefined,
               merge_target_id: undefined,
-              promote_feedback_ids: feedbackId,
+              promote_feedback_ids: promoteIDs,
               feedback_id: feedbackId,
             }}
           >
-            {t('feedback.detail.support_promote_action')}
+            {neighbors.length > 0
+              ? t('feedback.detail.support_promote_action_bundle', {
+                  count: neighbors.length + 1,
+                })
+              : t('feedback.detail.support_promote_action')}
           </Link>
         </Button>
       </div>
