@@ -14,10 +14,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/stretchr/testify/require"
 
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/adapter/zendesk"
@@ -583,7 +582,7 @@ func TestRecentFeedback_MissingSourceID(t *testing.T) {
 	t.Parallel()
 	h := ptrext.Of(Handler{sources: ptrext.Of(covSourceRepo{})})
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/inbound/sources/not-a-uuid/recent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/inbound/sources/not-a-uuid/recent", nil)
 	req = req.WithContext(session.WithAuthCtx(req.Context(), ptrext.Of(session.AuthCtx{TenantID: "t1"})))
 	h.RecentFeedback(rr, req)
 	require.Equal(t, http.StatusNotFound, rr.Code)
@@ -598,7 +597,7 @@ func TestRecentFeedback_NilPool(t *testing.T) {
 	rr := httptest.NewRecorder()
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", srcID)
-	req := httptest.NewRequest("GET", "/inbound/sources/"+srcID+"/recent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/inbound/sources/"+srcID+"/recent", nil)
 	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
 	ctx = session.WithAuthCtx(ctx, ptrext.Of(session.AuthCtx{TenantID: "t1"}))
 	req = req.WithContext(ctx)
