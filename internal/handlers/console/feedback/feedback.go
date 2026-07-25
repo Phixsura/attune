@@ -62,6 +62,7 @@ type FeedbackHandler struct {
 	workflowStates workflowStateReader
 	audit          auditRecorder // optional writer for retry-enrichment audit trail
 	similarFinder  similarFeedbackFinder
+	requestLinks   requestLinkReader
 }
 
 // Drafter regenerates a reply draft synchronously, sharing the worker's

@@ -63,6 +63,7 @@ import {
 } from '@/features/feedback/api/regenerate-reply-draft'
 import { useRetryEnrichment } from '@/features/feedback/api/retry-enrichment'
 import {
+  type LinkedRequestRef,
   type SimilarFeedbackItem,
   similarFeedbackQuery,
 } from '@/features/feedback/api/similar-feedback'
@@ -2007,6 +2008,17 @@ function promoteIDList(feedbackId: string, similar: SimilarFeedbackItem[]): stri
   return [...new Set(ids)].join(',')
 }
 
+// existingRequestFor picks the customer request already tracking any of
+// the neighbors — the dedup target. Most-recently-updated wins (the
+// backend orders refs that way).
+function existingRequestFor(similar: SimilarFeedbackItem[]): LinkedRequestRef | null {
+  for (const item of similar) {
+    const ref = item.linked_requests?.[0]
+    if (ref) return ref
+  }
+  return null
+}
+
 function SupportPromoteCard({
   feedbackId,
   candidate,
@@ -2017,6 +2029,8 @@ function SupportPromoteCard({
   const { t } = useTranslation()
   const enabled = !!candidate && isPositiveIntString(feedbackId)
   const similar = useQuery({ ...similarFeedbackQuery(feedbackId), enabled })
+  const existingRequest = existingRequestFor(similar.data?.items ?? [])
+  const linkExisting = useLinkCustomerRequestFeedback(existingRequest?.id ?? '')
   if (!candidate || !enabled) return null
   const signalKey =
     candidate.signal === 'fin_escalated'
@@ -2055,24 +2069,64 @@ function SupportPromoteCard({
               </ul>
             </div>
           ) : null}
+          {existingRequest ? (
+            <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-500">
+              {t('feedback.detail.support_promote_existing', {
+                cr: `CR-${existingRequest.cr_no}`,
+                title: existingRequest.title,
+              })}
+            </p>
+          ) : null}
         </div>
-        <Button asChild size="sm" className="shrink-0">
-          <Link
-            to="/feedback/customer-requests"
-            search={{
-              request_id: undefined,
-              merge_target_id: undefined,
-              promote_feedback_ids: promoteIDs,
-              feedback_id: feedbackId,
-            }}
-          >
-            {neighbors.length > 0
-              ? t('feedback.detail.support_promote_action_bundle', {
-                  count: neighbors.length + 1,
-                })
-              : t('feedback.detail.support_promote_action')}
-          </Link>
-        </Button>
+        <div className="flex shrink-0 flex-col items-stretch gap-2">
+          {existingRequest ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={linkExisting.isPending}
+              onClick={() =>
+                linkExisting.mutate(
+                  {
+                    feedbackId,
+                    importance: CustomerRequestImportance.CUSTOMER_REQUEST_IMPORTANCE_NORMAL,
+                  },
+                  {
+                    onSuccess: () =>
+                      toast.success(
+                        t('feedback.detail.support_promote_linked', {
+                          cr: `CR-${existingRequest.cr_no}`,
+                        }),
+                      ),
+                    onError: (err) =>
+                      toast.error(err instanceof Error ? err.message : t('common.error')),
+                  },
+                )
+              }
+            >
+              {linkExisting.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              {t('feedback.detail.support_promote_link_action', {
+                cr: `CR-${existingRequest.cr_no}`,
+              })}
+            </Button>
+          ) : null}
+          <Button asChild size="sm" variant={existingRequest ? 'outline' : 'default'}>
+            <Link
+              to="/feedback/customer-requests"
+              search={{
+                request_id: undefined,
+                merge_target_id: undefined,
+                promote_feedback_ids: promoteIDs,
+                feedback_id: feedbackId,
+              }}
+            >
+              {neighbors.length > 0
+                ? t('feedback.detail.support_promote_action_bundle', {
+                    count: neighbors.length + 1,
+                  })
+                : t('feedback.detail.support_promote_action')}
+            </Link>
+          </Button>
+        </div>
       </div>
     </div>
   )

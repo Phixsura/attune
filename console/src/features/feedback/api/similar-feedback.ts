@@ -1,12 +1,20 @@
 import { queryOptions } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 
+export interface LinkedRequestRef {
+  id: string
+  cr_no: number
+  title: string
+  status: string
+}
+
 export interface SimilarFeedbackItem {
   id: number
   title: string
   source: string
   similarity: number
   created_at: string
+  linked_requests?: LinkedRequestRef[]
 }
 
 interface SimilarFeedbackResponse {

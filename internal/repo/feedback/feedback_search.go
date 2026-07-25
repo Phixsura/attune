@@ -715,6 +715,50 @@ func (r *FeedbackRepo) FindSimilarFeedback(
 	return filtered, nil
 }
 
+// LinkedRequestRef identifies a customer request already tracking a
+// feedback row (via customer_request_feedback_links).
+type LinkedRequestRef struct {
+	ID     string
+	CrNo   int64
+	Title  string
+	Status string
+}
+
+// RequestsLinkedToFeedback resolves which active customer requests
+// reference each of the given feedback rows — the dedup signal behind
+// "link to the existing request instead of creating a duplicate".
+func (r *FeedbackRepo) RequestsLinkedToFeedback(ctx context.Context, tenantID string, feedbackIDs []int64) (map[int64][]LinkedRequestRef, error) {
+	if len(feedbackIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT fl.feedback_id, cr.id, cr.display_number, cr.title, cr.status
+		FROM customer_request_feedback_links fl
+		JOIN customer_requests cr
+		  ON cr.tenant_id = fl.tenant_id AND cr.id = fl.request_id
+		WHERE fl.tenant_id = $1
+		  AND fl.feedback_id = ANY($2)
+		  AND cr.archived_at IS NULL
+		ORDER BY cr.updated_at DESC`,
+		tenantID, feedbackIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("requests linked to feedback: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[int64][]LinkedRequestRef{}
+	for rows.Next() {
+		var feedbackID int64
+		var ref LinkedRequestRef
+		if err := rows.Scan(&feedbackID, &ref.ID, &ref.CrNo, &ref.Title, &ref.Status); err != nil { // ptrext:allow pgx-scan
+			return nil, fmt.Errorf("requests linked to feedback scan: %w", err)
+		}
+		out[feedbackID] = append(out[feedbackID], ref)
+	}
+	return out, rows.Err()
+}
+
 // HasEmbedding checks if a tenant has any embedded feedback.
 // Useful to determine if semantic search is available.
 func (r *FeedbackRepo) HasEmbedding(ctx context.Context, tenantID string) (bool, error) {

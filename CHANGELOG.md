@@ -61,6 +61,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     similarity); the candidate card shows "该问题已在其他反馈中出现 N
     次" with the top neighbors and upgrades the promote action to
     bundle the whole recurring cluster as evidence in one click.
+  - Duplicate-request prevention: similar-feedback neighbors carry the
+    customer requests already tracking them; when the recurring cluster
+    is already being tracked, the candidate card recommends linking to
+    the existing request ("相似反馈已关联到 CR-N") with a one-click
+    link action instead of creating a duplicate.
   - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
     rating, last answer type); escalated / negative-feedback Fin
     conversations produce a `complaint` enrichment hint.

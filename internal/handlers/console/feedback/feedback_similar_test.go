@@ -90,6 +90,51 @@ func TestSimilarFeedback_EmptyOnNoEmbeddingOrNilFinder(t *testing.T) {
 	require.JSONEq(t, `{"items":[]}`, rr2.Body.String())
 }
 
+type stubRequestLinks struct {
+	links map[int64][]repofeedback.LinkedRequestRef
+	err   error
+}
+
+func (s stubRequestLinks) RequestsLinkedToFeedback(_ context.Context, _ string, _ []int64) (map[int64][]repofeedback.LinkedRequestRef, error) {
+	return s.links, s.err
+}
+
+func TestSimilarFeedback_AttachesLinkedRequests(t *testing.T) {
+	t.Parallel()
+	h := ptrext.Of(FeedbackHandler{})
+	h.SetSimilarFinder(stubSimilarFinder{hits: []repofeedback.SemanticSearchHit{
+		{Feedback: ptrext.Of(repofeedback.SearchFeedback{ID: 42, EnrichedTitle: "t", Source: "intercom"}), Similarity: 0.9},
+	}})
+	h.SetRequestLinkReader(stubRequestLinks{links: map[int64][]repofeedback.LinkedRequestRef{
+		42: {{ID: "uuid-1", CrNo: 7, Title: "Existing request", Status: "open"}},
+	}})
+
+	rr := serveSimilar(h, "11")
+	require.Equal(t, http.StatusOK, rr.Code)
+	var out struct {
+		Items []similarFeedbackItem `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out))
+	require.Len(t, out.Items, 1)
+	require.Len(t, out.Items[0].LinkedRequests, 1)
+	require.Equal(t, int64(7), out.Items[0].LinkedRequests[0].CrNo)
+	require.Equal(t, "Existing request", out.Items[0].LinkedRequests[0].Title)
+
+	// Resolver failure degrades to no linked_requests, not an error.
+	h2 := ptrext.Of(FeedbackHandler{})
+	h2.SetSimilarFinder(stubSimilarFinder{hits: []repofeedback.SemanticSearchHit{
+		{Feedback: ptrext.Of(repofeedback.SearchFeedback{ID: 42, EnrichedTitle: "t", Source: "intercom"}), Similarity: 0.9},
+	}})
+	h2.SetRequestLinkReader(stubRequestLinks{err: errors.New("db down")})
+	rr2 := serveSimilar(h2, "11")
+	require.Equal(t, http.StatusOK, rr2.Code)
+	var out2 struct {
+		Items []similarFeedbackItem `json:"items"`
+	}
+	require.NoError(t, json.Unmarshal(rr2.Body.Bytes(), &out2))
+	require.Empty(t, out2.Items[0].LinkedRequests)
+}
+
 func TestSimilarFeedback_BadID(t *testing.T) {
 	t.Parallel()
 	h := ptrext.Of(FeedbackHandler{})

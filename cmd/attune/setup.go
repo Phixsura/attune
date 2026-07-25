@@ -540,6 +540,7 @@ func buildFeedbackHandler(
 	h.SetReplyDraftWorkflow(replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil))
 	h.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
 	h.SetSimilarFinder(feedbackRepo)
+	h.SetRequestLinkReader(feedbackRepo)
 	return h
 }
 

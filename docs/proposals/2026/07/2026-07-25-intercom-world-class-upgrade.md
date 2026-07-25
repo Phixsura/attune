@@ -166,6 +166,22 @@ Airbyte's budget-aware throttling in a poll-loop-appropriate form.
 
 ---
 
+## 6. The recurring-signal loop (added in later passes)
+
+Later re-reads of #230 surfaced the remaining under-delivered words —
+"teammate", "request candidates", "recurring", and "link them to
+customer requests" — all delivered in-scope:
+
+- Teammate resolution (`ListAdmins`, lazy once-per-tick).
+- Candidate surfacing: support-channel feedback detail renders a
+  signal-graded 客户需求候选 card (Fin escalation > priority > default).
+- Recurring detection: `GET /feedback/{id}/similar` over the
+  previously-unconsumed `FindSimilarFeedback` (pgvector); the card
+  shows recurrence counts and bundles the cluster into one promote.
+- Duplicate prevention: neighbors carry their linked customer
+  requests; an already-tracked cluster recommends one-click linking to
+  the existing request instead of creating a duplicate.
+
 ## Verification
 
 1. Unit tests for every new code path (filter matrix, ai_agent hint
