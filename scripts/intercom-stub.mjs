@@ -194,6 +194,14 @@ const contacts = {
 
 let requestCount = 0
 
+// Mutable test-control state (driven via /_stub/* endpoints).
+const control = {
+  tokenRevoked: false,
+  rateLimitNext: 0, // respond 429 to the next N API requests
+  pageSize: 150, // shrink to force multi-page pagination
+  nextID: 9100,
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     let data = ''
@@ -223,12 +231,95 @@ function unauthorized(res) {
   })
 }
 
+// handleControl mutates stub state for E2E scenario testing. Not part
+// of the Intercom API surface; no auth required.
+async function handleControl(req, res, url) {
+  const body = JSON.parse((await readBody(req)) || '{}')
+  switch (url.pathname) {
+    case '/_stub/revoke-token':
+      control.tokenRevoked = true
+      break
+    case '/_stub/restore-token':
+      control.tokenRevoked = false
+      break
+    case '/_stub/rate-limit':
+      control.rateLimitNext = body.count ?? 1
+      break
+    case '/_stub/page-size':
+      control.pageSize = body.size ?? 150
+      break
+    case '/_stub/add-conversation': {
+      const id = String(control.nextID++)
+      const now = Math.floor(Date.now() / 1000)
+      conversations.push({
+        type: 'conversation',
+        id,
+        title: body.title ?? `Generated conversation ${id}`,
+        state: body.state ?? 'open',
+        priority: body.priority ?? '',
+        created_at: now - 60,
+        updated_at: body.updated_at ?? now,
+        admin_assignee_id: 0,
+        team_assignee_id: 0,
+        ai_agent_participated: false,
+        source: {
+          type: 'conversation',
+          subject: '',
+          body: body.body ?? `Auto-generated body for ${id}`,
+          author: { type: 'user', id: 'contact-alice', name: 'Alice Zhang', email: 'alice@customer.example' },
+        },
+        contacts: { type: 'contact.list', contacts: [{ type: 'contact', id: 'contact-alice', external_id: 'cust-70' }] },
+        tags: { type: 'tag.list', tags: (body.tags ?? []).map((t, i) => ({ type: 'tag', id: `gt${i}`, name: t })) },
+        conversation_rating: null,
+        company: null,
+      })
+      partsByConversation[id] = []
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ id }))
+      return
+    }
+    case '/_stub/touch-conversation': {
+      const conv = conversations.find((c) => c.id === String(body.id))
+      if (conv) {
+        conv.updated_at = Math.floor(Date.now() / 1000)
+        conv.source.body += `\n(updated at ${conv.updated_at})`
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ updated_at: conv?.updated_at ?? null }))
+      return
+    }
+    default:
+      res.writeHead(404, { 'Content-Type': 'application/json' })
+      res.end('{}')
+      return
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify({ ok: true, control }))
+}
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${port}`)
   const auth = req.headers.authorization ?? ''
   console.log(`[intercom-stub] ${req.method} ${url.pathname}${url.search}`)
 
-  if (auth !== 'Bearer stub-token') {
+  if (url.pathname.startsWith('/_stub/')) {
+    await handleControl(req, res, url)
+    return
+  }
+
+  if (control.rateLimitNext > 0) {
+    control.rateLimitNext -= 1
+    res.writeHead(429, {
+      'Content-Type': 'application/json',
+      'X-RateLimit-Limit': '10000',
+      'X-RateLimit-Remaining': '0',
+      'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 3),
+    })
+    res.end(JSON.stringify({ type: 'error.list', errors: [{ code: 'rate_limit_exceeded', message: 'Rate limit exceeded' }] }))
+    return
+  }
+
+  if (control.tokenRevoked || auth !== 'Bearer stub-token') {
     unauthorized(res)
     return
   }
@@ -251,11 +342,19 @@ const server = createServer(async (req, res) => {
     const matched = conversations
       .filter((c) => c.updated_at > gt && c.updated_at < lt)
       .sort((a, b) => a.updated_at - b.updated_at)
+    // Cursor pagination: starting_after is an index into the sorted set.
+    const start = Number.parseInt(body.pagination?.starting_after ?? '0', 10) || 0
+    const page = matched.slice(start, start + control.pageSize)
+    const nextStart = start + control.pageSize
+    const pages = { type: 'pages', page: Math.floor(start / control.pageSize) + 1, per_page: control.pageSize, total_pages: Math.ceil(matched.length / control.pageSize) }
+    if (nextStart < matched.length) {
+      pages.next = { page: pages.page + 1, starting_after: String(nextStart) }
+    }
     send(res, 200, {
       type: 'conversation.list',
       total_count: matched.length,
-      pages: { type: 'pages', page: 1, per_page: 150, total_pages: 1 },
-      conversations: matched,
+      pages,
+      conversations: page,
     })
     return
   }
