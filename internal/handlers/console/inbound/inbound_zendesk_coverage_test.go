@@ -8,10 +8,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
@@ -571,4 +575,93 @@ func TestTestConnectionZendesk_ViaHTTP_MissingConfig(t *testing.T) {
 	w := serveTestConnection(h, `{"channel":"zendesk"}`)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), "zendesk_config is required")
+}
+
+// ====================== RecentFeedback =======================================
+
+func TestRecentFeedback_MissingSourceID(t *testing.T) {
+	t.Parallel()
+	h := ptrext.Of(Handler{sources: ptrext.Of(covSourceRepo{})})
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/inbound/sources/not-a-uuid/recent", nil)
+	req = req.WithContext(session.WithAuthCtx(req.Context(), ptrext.Of(session.AuthCtx{TenantID: "t1"})))
+	h.RecentFeedback(rr, req)
+	require.Equal(t, http.StatusNotFound, rr.Code)
+}
+
+func TestRecentFeedback_NilPool(t *testing.T) {
+	t.Parallel()
+	const srcID = "00000000-0000-0000-0000-000000000001"
+	src := inbound.Source{ID: srcID, TenantID: "t1", Channel: "zendesk", Enabled: true}
+	repo := ptrext.Of(covSourceRepo{getSrc: src})
+	h := ptrext.Of(Handler{sources: repo, pool: nil})
+	rr := httptest.NewRecorder()
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", srcID)
+	req := httptest.NewRequest("GET", "/inbound/sources/"+srcID+"/recent", nil)
+	ctx := context.WithValue(req.Context(), chi.RouteCtxKey, rctx)
+	ctx = session.WithAuthCtx(ctx, ptrext.Of(session.AuthCtx{TenantID: "t1"}))
+	req = req.WithContext(ctx)
+	h.RecentFeedback(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.Contains(t, rr.Body.String(), "\"items\"")
+}
+
+// ====================== SyncNow ==============================================
+
+func TestSyncNow_InvalidID(t *testing.T) {
+	t.Parallel()
+	h := ptrext.Of(Handler{sources: ptrext.Of(covSourceRepo{})})
+	dctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{Auth: ptrext.Of(session.AuthCtx{TenantID: "t1"})})
+	_, err := h.SyncNow(dctx, ptrext.Of(attunev1.PauseInboundSourceRequest{Id: "not-a-uuid"}))
+	require.Error(t, err)
+}
+
+func TestSyncNow_WithTrigger(t *testing.T) {
+	t.Parallel()
+	const srcID = "00000000-0000-0000-0000-000000000002"
+	src := inbound.Source{ID: srcID, TenantID: "t1", Channel: "zendesk", Enabled: true}
+	repo := ptrext.Of(covSourceRepo{getSrc: src})
+	var triggered string
+	h := ptrext.Of(Handler{sources: repo})
+	h.SetSyncTrigger(func(id string) { triggered = id })
+	dctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{Auth: ptrext.Of(session.AuthCtx{TenantID: "t1", UserID: "u1"})})
+	result, err := h.SyncNow(dctx, ptrext.Of(attunev1.PauseInboundSourceRequest{Id: srcID}))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.Status)
+	require.Equal(t, srcID, triggered)
+}
+
+func TestSyncNow_Paused(t *testing.T) {
+	t.Parallel()
+	const srcID = "00000000-0000-0000-0000-000000000003"
+	src := inbound.Source{ID: srcID, TenantID: "t1", Channel: "zendesk", Enabled: false}
+	repo := ptrext.Of(covSourceRepo{getSrc: src})
+	h := ptrext.Of(Handler{sources: repo})
+	dctx := ptrext.Of(dispatcher.RequestContext[*session.AuthCtx]{Auth: ptrext.Of(session.AuthCtx{TenantID: "t1"})})
+	_, err := h.SyncNow(dctx, ptrext.Of(attunev1.PauseInboundSourceRequest{Id: srcID}))
+	require.Error(t, err)
+}
+
+// ====================== enrichWithSyncStats ==================================
+
+func TestEnrichWithSyncStats_NilPool(t *testing.T) {
+	t.Parallel()
+	h := ptrext.Of(Handler{pool: nil, secrets: inboundtest.FakeSecrets{}})
+	out := &attunev1.InboundSource{}
+	src := inbound.Source{Config: nil}
+	h.enrichWithSyncStats(src, out)
+	// No panic, no stats set.
+	require.Nil(t, out.TicketsSynced)
+}
+
+func TestEnrichWithSyncStats_EmptyConfig(t *testing.T) {
+	t.Parallel()
+	secrets := inboundtest.FakeSecrets{}
+	emptyEnc, _ := secrets.Encrypt([]byte("{}"))
+	h := ptrext.Of(Handler{pool: nil, secrets: secrets})
+	out := &attunev1.InboundSource{}
+	src := inbound.Source{Config: emptyEnc}
+	h.enrichWithSyncStats(src, out)
+	require.Nil(t, out.TicketsSynced)
 }
