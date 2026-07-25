@@ -3052,14 +3052,21 @@
       "created_at": "创建时间",
       "updated_at": "更新时间",
       "last_error": "最近错误",
-      "no_error": "当前没有已知错误"
+      "no_error": "当前没有已知错误",
+      "sync_now": "立即同步",
+      "recent_title": "最近同步",
+      "tickets_synced": "已同步工单",
+      "backfill_status": "回填状态",
+      "backfill_done": "已完成",
+      "backfill_in_progress": "进行中..."
     },
     "empty_title": "还没有入站源",
     "empty_body": "添加 webhook 让你的应用直接推送反馈，接入 Slack 频道直接拉取消息，或者接一个邮箱定期收取用户邮件。",
     "channel": {
       "webhook": "Webhook",
       "email": "邮箱",
-      "slack": "Slack"
+      "slack": "Slack",
+      "zendesk": "Zendesk"
     },
     "table": {
       "name": "名称",
@@ -3087,9 +3094,11 @@
       "webhook_help": "适合应用内反馈、机器人推送。",
       "email_help": "通过 IMAP 拉取用户邮件反馈。",
       "slack_help": "通过 Slack Bot token 发现并接入频道消息。",
+      "zendesk_help": "从 Zendesk 工单中提取产品信号。",
       "name_field": "名称",
       "name_placeholder": "如：App 反馈、Support 邮箱",
       "name_help": "名称会被规范化成 URL-safe slug，后续不可改。",
+      "fill_required": "请先填写所有必填字段",
       "email": {
         "host": "IMAP 主机",
         "port": "端口",
@@ -3115,6 +3124,36 @@
         "test_ok": "连接成功 · {{ms}} ms",
         "private_channel": "私有",
         "shared_channel": "共享"
+      },
+      "zendesk": {
+        "subdomain": "子域名",
+        "subdomain_placeholder": "mycompany",
+        "subdomain_help": "在浏览器地址栏查看，如 mycompany.zendesk.com 中的 mycompany",
+        "auth_mode": "认证方式",
+        "auth_api_token": "API Token",
+        "auth_oauth": "OAuth 2.0",
+        "email": "管理员邮箱",
+        "api_token": "API Token",
+        "api_token_help": "API Token 将于 2027-04-30 停用，建议使用 OAuth 2.0",
+        "api_token_create_link": "在管理中心创建 →",
+        "oauth_access_token": "Access Token",
+        "oauth_refresh_token": "Refresh Token（可选）",
+        "oauth_client_id": "Client ID（用于刷新）",
+        "oauth_client_secret": "Client Secret（用于刷新）",
+        "oauth_paste_help": "在 Zendesk 管理中心创建 OAuth App，使用授权码流程获取 token，然后粘贴到这里。",
+        "start_from": "起始同步",
+        "start_from_now": "从当前开始",
+        "start_from_full": "完整回填",
+        "advanced_label": "高级选项",
+        "filter_tags": "包含标签",
+        "filter_tags_help": "逗号分隔，只同步含这些标签的工单",
+        "filter_exclude_tags": "排除标签",
+        "filter_exclude_tags_help": "逗号分隔，跳过含这些标签的工单",
+        "filter_statuses": "状态过滤",
+        "max_comment_fetches": "每轮 Comment 预算",
+        "max_comment_fetches_help": "每次同步最多获取多少个工单的评论（默认 50）",
+        "test_button": "测试连接",
+        "test_ok": "连接成功 · {{ms}} ms"
       }
     },
     "reveal": {
@@ -3138,6 +3177,9 @@
     },
     "toast": {
       "created": "已创建",
+      "created_with_name": "已创建「{{name}}」",
+      "sync_requested": "已请求立即同步",
+      "zendesk_connected": "已连接到 {{subdomain}}.zendesk.com",
       "rotated": "已轮换",
       "rotation_in_grace": "上次轮换还在 24 小时宽限期内，请稍后再试",
       "paused": "已暂停",

@@ -123,6 +123,7 @@ func TestBuildRouterMinimalServerSurface(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		domain.DefaultSourceSet(),
 	)
 	if err != nil {

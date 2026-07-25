@@ -343,6 +343,7 @@ func classifyConfigFromRow(row *feedback.EnrichInput) ClassifyConfig {
 		Channel:         row.Source,
 		SourceID:        row.InboundSourceID,
 		SourceTags:      row.SourceTags,
+		TypeHint:        row.Type,
 		Language:        row.Language,
 		DisplayLocale:   displayLocaleForTenantLocale(row.DisplayLocale),
 		PromptTemplate:  row.PromptTemplate,

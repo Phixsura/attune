@@ -228,6 +228,16 @@ async function handleRoute(
     await fulfillJson(route, { items: sortInboundSources(state.inboundSources) })
     return true
   }
+  if (method === 'GET' && path.match(/^\/inbound\/sources\/[^/]+\/recent$/)) {
+    await fulfillJson(route, { items: [] })
+    return true
+  }
+  if (method === 'POST' && path.match(/^\/inbound\/sources\/[^/]+\/sync-now$/)) {
+    const id = path.split('/')[3]
+    const source = state.inboundSources.find((item) => item.id === id)
+    await fulfillJson(route, source ?? {})
+    return true
+  }
   if (method === 'GET' && path.match(/^\/inbound\/sources\/[^/]+$/)) {
     const id = path.split('/')[3]
     const source = state.inboundSources.find((item) => item.id === id)

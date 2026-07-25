@@ -267,6 +267,7 @@ func workflowMutatingRouteCoverage() map[string]string {
 		"POST /inbound/sources/{id}/rotate-secret":           "audited: inbound_source.rotate_secret",
 		"POST /inbound/sources/{id}/pause":                   "audited: inbound_source.pause",
 		"POST /inbound/sources/{id}/resume":                  "audited: inbound_source.resume",
+		"POST /inbound/sources/{id}/sync-now":                "audited: inbound_source.sync_now",
 		"POST /jobs/{job_id}/cancel":                         "audited: feedback_job.cancel",
 		"POST /llm/channels":                                 "audited: llm_channel.create",
 		"PATCH /llm/channels/{id}":                           "audited: llm_channel.update",

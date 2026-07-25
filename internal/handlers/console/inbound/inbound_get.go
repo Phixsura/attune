@@ -4,6 +4,7 @@ package inbound
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/inboundsource"
 )
@@ -24,7 +26,39 @@ func (h *Handler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], req *att
 	if err != nil {
 		return dispatcher.Result[*attunev1.InboundSource]{}, err
 	}
-	return dispatcher.OK(rowToProto(src))
+	out := rowToProto(src)
+	// Best-effort sync stats extraction from encrypted config.
+	h.enrichWithSyncStats(src, out)
+	return dispatcher.OK(out)
+}
+
+// enrichWithSyncStats attempts to decrypt the config blob and populate
+// the proto sync-stats fields. Failures are silently ignored — stats
+// are a non-critical enhancement.
+func (h *Handler) enrichWithSyncStats(src inbound.Source, out *attunev1.InboundSource) {
+	if h.secrets == nil || len(src.Config) == 0 {
+		return
+	}
+	decoded, err := h.secrets.Decrypt(src.Config)
+	if err != nil {
+		return
+	}
+	// Quick JSON extraction — we only need the sync_stats subtree.
+	var wrapper struct {
+		SyncStats struct {
+			TicketsSynced int64 `json:"tickets_synced"`
+			LastTicketID  int64 `json:"last_ticket_id"`
+			BackfillDone  bool  `json:"backfill_done"`
+		} `json:"sync_stats"`
+	}
+	if err := json.Unmarshal(decoded, &wrapper); err != nil { // ptrext:allow json-unmarshal
+		return
+	}
+	if wrapper.SyncStats.TicketsSynced > 0 {
+		out.TicketsSynced = ptrext.Of(wrapper.SyncStats.TicketsSynced)
+		out.LastSyncedTicketId = ptrext.Of(wrapper.SyncStats.LastTicketID)
+		out.BackfillDone = ptrext.Of(wrapper.SyncStats.BackfillDone)
+	}
 }
 
 func (h *Handler) getOwnedSource(ctx context.Context, auth *session.AuthCtx, id, where string) (inbound.Source, error) {

@@ -34,6 +34,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
+	"github.com/Phixsura/attune/internal/infra/zendeskclient"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
@@ -189,7 +190,7 @@ func runServer() error {
 
 	r, err := buildRouter(
 		ctx, cfg, ingestHandler, runtimeDeps.apiKeys, pool, ready, runtimeDeps.llm,
-		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo, runtimeDeps.enrichRuntime,
+		inb.subRouter, inb.secrets, inb.sources, inb.manager, inb.adminRepo, runtimeDeps.enrichRuntime,
 		runtimeDeps.ingestor, runtimeDeps.sources,
 	)
 	if err != nil {
@@ -233,6 +234,7 @@ func applyRuntimeHardening(cfg *config.Config) {
 	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
 	replydraftsvc.SetEgressPolicy(egress)
+	zendeskclient.SetEgressPolicy(egress)
 	// Trusted-proxy hop count for client-IP resolution outside the API-key
 	// middleware (audit actor IP, etc.).
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)

@@ -291,6 +291,88 @@ describe('CreateInboundSourceDialog', () => {
     })
   })
 
+  it('submits a Zendesk API token create payload', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/test-connection', async ({ request }) => {
+        const body = (await request.json()) as {
+          zendeskConfig?: { subdomain?: string; authMode?: string; email?: string }
+        }
+        expect(body.zendeskConfig).toMatchObject({
+          subdomain: 'mycompany',
+          authMode: 'api_token',
+          email: 'admin@mycompany.com',
+        })
+        return HttpResponse.json({ ok: true, latencyMs: 85 })
+      }),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Zendesk/ }))
+    await user.type(screen.getByLabelText('名称'), 'Support tickets')
+    await user.type(screen.getByLabelText('子域名'), 'mycompany')
+    await user.type(screen.getByLabelText('管理员邮箱'), 'admin@mycompany.com')
+    await user.type(screen.getByLabelText('API Token'), 'zd-token-abc')
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+
+    expect(await screen.findByText(/连接成功/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建' }))
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'zendesk',
+          name: 'Support tickets',
+          zendeskConfig: expect.objectContaining({
+            subdomain: 'mycompany',
+            authMode: 'api_token',
+            email: 'admin@mycompany.com',
+            apiToken: 'zd-token-abc',
+          }),
+        }),
+      )
+    })
+  })
+
+  it('submits a Zendesk OAuth create payload', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/test-connection', () =>
+        HttpResponse.json({ ok: true, latencyMs: 90 }),
+      ),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Zendesk/ }))
+    await user.type(screen.getByLabelText('名称'), 'Zendesk OAuth')
+    await user.type(screen.getByLabelText('子域名'), 'myoauth')
+    // Switch from default api_token to OAuth.
+    await user.click(screen.getByRole('button', { name: 'OAuth 2.0' }))
+    await user.type(screen.getByLabelText('Access Token'), 'access-token-abc')
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+
+    expect(await screen.findByText(/连接成功/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建' }))
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'zendesk',
+          name: 'Zendesk OAuth',
+          zendeskConfig: expect.objectContaining({
+            subdomain: 'myoauth',
+            authMode: 'oauth',
+            oauthAccessToken: 'access-token-abc',
+          }),
+        }),
+      )
+    })
+  })
+
   it('resets transient state when switching back to webhook and when the dialog closes', async () => {
     const onOpenChange = vi.fn()
     const { user } = renderWithProviders(

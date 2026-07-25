@@ -3236,6 +3236,18 @@ func (r *Router) mountInbound(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		s.Get("/{id}/recent", r.inbound.RecentFeedback)
+		s.Post("/{id}/sync-now", dispatcher.Bind(
+			"console.inbound.SyncNow",
+			dispatcher.Path(
+				func() *attunev1.PauseInboundSourceRequest { return ptrext.Of(attunev1.PauseInboundSourceRequest{}) },
+				dispatcher.Param("id", func(req *attunev1.PauseInboundSourceRequest, id string) { req.Id = id }),
+			),
+			r.inbound.SyncNow,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PauseInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 	})
 }
 

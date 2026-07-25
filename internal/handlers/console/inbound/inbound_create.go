@@ -42,8 +42,10 @@ func (h *Handler) Create(ctx *dispatcher.RequestContext[*session.AuthCtx], req *
 		return h.createEmail(ctx, auth, req, name, slug)
 	case channelSlack:
 		return h.createSlack(ctx, auth, req, name, slug)
+	case channelZendesk:
+		return h.createZendesk(ctx, auth, req, name, slug)
 	default:
-		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "channel must be webhook, email, or slack")
+		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "channel must be webhook, email, slack, or zendesk")
 	}
 }
 

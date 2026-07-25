@@ -97,6 +97,7 @@ var validActions = map[string]struct{}{
 	"inbound_source.pause":                            {},
 	"inbound_source.resume":                           {},
 	"inbound_source.rotate_secret":                    {},
+	"inbound_source.sync_now":                         {},
 	"inbound_source.test_connection":                  {},
 	"llm_ability.delete":                              {},
 	"llm_ability.upsert":                              {},

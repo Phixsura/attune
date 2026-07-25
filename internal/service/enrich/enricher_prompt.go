@@ -94,6 +94,7 @@ type ClassifyConfig struct {
 	SourceID        string
 	SourceTags      []string
 	Purpose         string
+	TypeHint        string
 	Language        string
 	DisplayLocale   string
 	PromptTemplate  *string
@@ -139,13 +140,18 @@ func renderPrompt(cfg ClassifyConfig, content string) string {
 		"tone":                   policy.PolicyConfig.Tone,
 		"domain_guidance":        renderDomainGuidance(policy.PolicyConfig.DomainGuidance),
 	}
-	return promptVarPattern.ReplaceAllStringFunc(policy.template, func(token string) string {
+	prompt := promptVarPattern.ReplaceAllStringFunc(policy.template, func(token string) string {
 		name := promptVariableName(token)
 		if v, ok := values[name]; ok {
 			return v
 		}
 		return token
 	})
+	if cfg.TypeHint != "" {
+		prompt += "\n\nThe submitter has pre-classified this as: " + cfg.TypeHint +
+			". Consider this hint but override if the content clearly indicates otherwise."
+	}
+	return prompt
 }
 
 func renderOutputLanguagePolicy(policy domain.EnrichPromptPolicyConfig, displayLanguageName string) string {

@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Added Zendesk inbound adapter (#229): polls Zendesk's incremental ticket
+  export API to extract product signals from support tickets.
+  - Shared `internal/infra/zendeskclient/` HTTP client (reusable by #31).
+  - Customer-vs-agent `[customer]`/`[agent]` role tagging.
+  - Ticket metadata → enrichment type hint via `IngestInput.Type`; enricher
+    now appends the hint to the LLM prompt.
+  - Custom field extraction as JSON passthrough in SourceMeta.
+  - Multi-page continuous pagination (10x backfill speed).
+  - 429 Retry-After compliance with exponential backoff.
+  - OAuth 2.0 paste-mode (access + refresh + client credentials) with
+    automatic token refresh and 3-param refresh grant.
+  - SSRF-hardened via `nethardening.Policy`, wired in `applyRuntimeHardening`.
+  - Ticket filtering by tags, exclude-tags, and statuses (Console advanced UI).
+  - Sync progress tracking (SyncStats persisted + Console display).
+  - Sync-now trigger (adapter → framework → handler → Console button).
+  - Recent sync preview (GET /{id}/recent + Console rendering).
+  - Smart comment fetching: 2-page strategy (first asc + last desc).
+  - Structural content truncation: first 3 + last 2 customer messages.
+  - Idempotency key includes `GeneratedTimestamp` to capture ticket updates.
+  - Comment auth failure degrades gracefully (skip ticket, not disable source).
+  - User-friendly error messages via `friendlyZendeskError`.
+
 - Added `make dev-stack`, a disposable source-tree launcher that builds the
   Console bundle, starts temporary local PostgreSQL, boots the current Go
   server with generated runtime secrets, seeds demo data, and prints the exact

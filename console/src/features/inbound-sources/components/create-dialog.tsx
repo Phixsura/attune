@@ -1,4 +1,12 @@
-import { CheckCircle2, Loader2, Mail, MessageSquare, Webhook, XCircle } from 'lucide-react'
+import {
+  CheckCircle2,
+  Headphones,
+  Loader2,
+  Mail,
+  MessageSquare,
+  Webhook,
+  XCircle,
+} from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -30,7 +38,7 @@ import {
 import { cn } from '@/lib/utils'
 import type { SlackChannel } from '@/proto/attune/v1/inbound_source'
 
-type Channel = 'webhook' | 'email' | 'slack'
+type Channel = 'webhook' | 'email' | 'slack' | 'zendesk'
 
 interface EmailFields {
   host: string
@@ -60,11 +68,43 @@ const defaultSlack: SlackFields = {
   channelId: '',
 }
 
-// CreateInboundSourceDialog — three-channel wizard. The user picks
-// webhook, email, or slack at the top; the form body swaps between
-// the channel-specific field sets. Email and Slack branches both expose
-// a "Test connection" action, and Slack also supports channel discovery
-// before create.
+interface ZendeskFields {
+  subdomain: string
+  authMode: 'api_token' | 'oauth'
+  email: string
+  apiToken: string
+  oauthAccessToken: string
+  oauthRefreshToken: string
+  oauthClientId: string
+  oauthClientSecret: string
+  startFrom: string
+  filterTags: string
+  filterExcludeTags: string
+  filterStatuses: string[]
+  maxCommentFetches: number
+}
+
+const defaultZendesk: ZendeskFields = {
+  subdomain: '',
+  authMode: 'api_token',
+  email: '',
+  apiToken: '',
+  oauthAccessToken: '',
+  oauthRefreshToken: '',
+  oauthClientId: '',
+  oauthClientSecret: '',
+  startFrom: 'now',
+  filterTags: '',
+  filterExcludeTags: '',
+  filterStatuses: ['open', 'pending', 'solved', 'closed'],
+  maxCommentFetches: 50,
+}
+
+// CreateInboundSourceDialog — four-channel wizard. The user picks
+// webhook, email, slack, or zendesk at the top; the form body swaps
+// between the channel-specific field sets. Email, Slack, and Zendesk
+// branches expose a "Test connection" action, and Slack also supports
+// channel discovery before create.
 export function CreateInboundSourceDialog({
   open,
   onOpenChange,
@@ -85,6 +125,7 @@ export function CreateInboundSourceDialog({
   const [slack, setSlack] = useState<SlackFields>(defaultSlack)
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([])
   const [slackDiscoverNote, setSlackDiscoverNote] = useState<string | null>(null)
+  const [zd, setZd] = useState<ZendeskFields>(defaultZendesk)
   const [testResult, setTestResult] = useState<TestInboundConnectionResult | null>(null)
 
   const reset = () => {
@@ -92,6 +133,7 @@ export function CreateInboundSourceDialog({
     setName('')
     setEmail(defaultEmail)
     setSlack(defaultSlack)
+    setZd(defaultZendesk)
     setSlackChannels([])
     setSlackDiscoverNote(null)
     setTestResult(null)
@@ -115,6 +157,33 @@ export function CreateInboundSourceDialog({
         },
       }
     }
+    if (channel === 'zendesk') {
+      return {
+        channel: 'zendesk',
+        name: name.trim(),
+        zendeskConfig: {
+          subdomain: zd.subdomain.trim().toLowerCase(),
+          authMode: zd.authMode,
+          email: zd.email.trim(),
+          apiToken: zd.apiToken.trim(),
+          oauthAccessToken: zd.oauthAccessToken.trim(),
+          oauthRefreshToken: zd.oauthRefreshToken.trim(),
+          oauthClientIdV2: zd.oauthClientId.trim(),
+          oauthClientSecretV2: zd.oauthClientSecret.trim(),
+          startFrom: zd.startFrom,
+          filterTags: zd.filterTags
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+          filterExcludeTags: zd.filterExcludeTags
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+          filterStatuses: zd.filterStatuses,
+          maxCommentFetches: zd.maxCommentFetches,
+        },
+      }
+    }
     return {
       channel: 'email',
       name: name.trim(),
@@ -131,23 +200,32 @@ export function CreateInboundSourceDialog({
     }
   }
 
+  const isFormComplete = (): boolean => {
+    if (!name.trim()) return false
+    if (channel === 'email') {
+      return !!(
+        email.host.trim() &&
+        email.username.trim() &&
+        email.password &&
+        email.port >= 1 &&
+        email.port <= 65535
+      )
+    }
+    if (channel === 'slack') {
+      return !!(slack.botToken.trim() && slack.channelId.trim())
+    }
+    if (channel === 'zendesk') {
+      if (!zd.subdomain.trim()) return false
+      if (zd.authMode === 'api_token') return !!(zd.email.trim() && zd.apiToken.trim())
+      if (zd.authMode === 'oauth') return !!zd.oauthAccessToken.trim()
+      return false
+    }
+    return true // webhook: name only
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!name.trim()) return
-    if (channel === 'email') {
-      if (
-        !email.host.trim() ||
-        !email.username.trim() ||
-        !email.password ||
-        email.port < 1 ||
-        email.port > 65535
-      ) {
-        return
-      }
-    }
-    if (channel === 'slack' && (!slack.botToken.trim() || !slack.channelId.trim())) {
-      return
-    }
+    if (!isFormComplete()) return
     void onSubmit(buildBody())
       .then(() => reset())
       .catch(() => {
@@ -188,6 +266,34 @@ export function CreateInboundSourceDialog({
           slackConfig: {
             botToken: slack.botToken.trim(),
             channelId: slack.channelId.trim(),
+          },
+        },
+        {
+          onSuccess: (res) => setTestResult(res),
+          onError: (err) =>
+            setTestResult({
+              ok: false,
+              error: err instanceof Error ? err.message : t('common.error'),
+            }),
+        },
+      )
+    }
+    if (channel === 'zendesk') {
+      test.mutate(
+        {
+          channel: 'zendesk',
+          zendeskConfig: {
+            subdomain: zd.subdomain.trim().toLowerCase(),
+            authMode: zd.authMode,
+            email: zd.email.trim(),
+            apiToken: zd.apiToken.trim(),
+            oauthAccessToken: zd.oauthAccessToken.trim(),
+            oauthRefreshToken: zd.oauthRefreshToken.trim(),
+            oauthClientIdV2: zd.oauthClientId.trim(),
+            oauthClientSecretV2: zd.oauthClientSecret.trim(),
+            filterTags: [] as string[],
+            filterExcludeTags: [] as string[],
+            filterStatuses: [] as string[],
           },
         },
         {
@@ -256,7 +362,7 @@ export function CreateInboundSourceDialog({
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>{t('inbound_sources.create.channel_label')}</Label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <ChannelOption
                   selected={channel === 'webhook'}
                   onClick={() => {
@@ -288,6 +394,16 @@ export function CreateInboundSourceDialog({
                   icon={<MessageSquare className="h-4 w-4" />}
                   label={t('inbound_sources.channel.slack')}
                   help={t('inbound_sources.create.slack_help')}
+                />
+                <ChannelOption
+                  selected={channel === 'zendesk'}
+                  onClick={() => {
+                    setChannel('zendesk')
+                    setTestResult(null)
+                  }}
+                  icon={<Headphones className="h-4 w-4" />}
+                  label={t('inbound_sources.channel.zendesk')}
+                  help={t('inbound_sources.create.zendesk_help')}
                 />
               </div>
             </div>
@@ -333,6 +449,20 @@ export function CreateInboundSourceDialog({
                 testResult={testResult}
               />
             )}
+
+            {channel === 'zendesk' && (
+              <ZendeskFieldset
+                values={zd}
+                onChange={(next) => {
+                  setZd(next)
+                  setTestResult(null)
+                }}
+                pending={pending}
+                onTest={handleTest}
+                testing={test.isPending}
+                testResult={testResult}
+              />
+            )}
           </div>
 
           <DialogFooter>
@@ -344,7 +474,11 @@ export function CreateInboundSourceDialog({
             >
               {t('common.cancel')}
             </Button>
-            <Button type="submit" disabled={pending || !name.trim()}>
+            <Button
+              type="submit"
+              disabled={pending || !isFormComplete()}
+              title={!isFormComplete() ? t('inbound_sources.create.fill_required') : undefined}
+            >
               {pending && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
               {t('common.create')}
             </Button>
@@ -371,6 +505,7 @@ function ChannelOption({
   return (
     <button
       type="button"
+      aria-pressed={selected}
       onClick={onClick}
       className={cn(
         'flex flex-col items-start gap-1 rounded-md border p-3 text-left text-sm transition-colors',
@@ -632,6 +767,311 @@ function SlackFieldset({
               <>
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 {t('inbound_sources.create.slack.test_ok', { ms: testResult.latencyMs ?? '?' })}
+              </>
+            ) : (
+              <>
+                <XCircle className="h-3.5 w-3.5" />
+                {testResult.error || t('common.error')}
+              </>
+            )}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ZendeskFieldset({
+  values,
+  onChange,
+  pending,
+  onTest,
+  testing,
+  testResult,
+}: {
+  values: ZendeskFields
+  onChange: (next: ZendeskFields) => void
+  pending: boolean
+  onTest: () => void
+  testing: boolean
+  testResult: TestInboundConnectionResult | null
+}) {
+  const { t } = useTranslation()
+  const set = <K extends keyof ZendeskFields>(k: K, v: ZendeskFields[K]) =>
+    onChange({ ...values, [k]: v })
+  return (
+    <div className="space-y-3 rounded-md border border-border p-3">
+      <div className="space-y-2">
+        <Label htmlFor="is-zd-subdomain">{t('inbound_sources.create.zendesk.subdomain')}</Label>
+        <Input
+          id="is-zd-subdomain"
+          aria-describedby="is-zd-subdomain-help"
+          value={values.subdomain}
+          onChange={(e) => set('subdomain', e.target.value)}
+          placeholder={t('inbound_sources.create.zendesk.subdomain_placeholder')}
+          disabled={pending}
+          required
+        />
+        <p id="is-zd-subdomain-help" className="text-xs text-muted-foreground">
+          {t('inbound_sources.create.zendesk.subdomain_help')}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label>{t('inbound_sources.create.zendesk.auth_mode')}</Label>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            aria-pressed={values.authMode === 'api_token'}
+            onClick={() => set('authMode', 'api_token')}
+            className={cn(
+              'rounded-md border p-2 text-left text-sm transition-colors',
+              values.authMode === 'api_token'
+                ? 'border-primary bg-primary/5 ring-1 ring-primary/40'
+                : 'border-border hover:bg-muted/40',
+            )}
+          >
+            {t('inbound_sources.create.zendesk.auth_api_token')}
+          </button>
+          <button
+            type="button"
+            aria-pressed={values.authMode === 'oauth'}
+            onClick={() => set('authMode', 'oauth')}
+            className={cn(
+              'rounded-md border p-2 text-left text-sm transition-colors',
+              values.authMode === 'oauth'
+                ? 'border-primary bg-primary/5 ring-1 ring-primary/40'
+                : 'border-border hover:bg-muted/40',
+            )}
+          >
+            {t('inbound_sources.create.zendesk.auth_oauth')}
+          </button>
+        </div>
+      </div>
+
+      {values.authMode === 'api_token' && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-email">{t('inbound_sources.create.zendesk.email')}</Label>
+            <Input
+              id="is-zd-email"
+              type="email"
+              value={values.email}
+              onChange={(e) => set('email', e.target.value)}
+              placeholder="admin@example.com"
+              disabled={pending}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-token">{t('inbound_sources.create.zendesk.api_token')}</Label>
+            <Input
+              id="is-zd-token"
+              aria-describedby="is-zd-token-help"
+              type="password"
+              autoComplete="off"
+              value={values.apiToken}
+              onChange={(e) => set('apiToken', e.target.value)}
+              disabled={pending}
+              required
+            />
+            <p id="is-zd-token-help" className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.zendesk.api_token_help')}{' '}
+              <a
+                href="https://support.zendesk.com/hc/en-us/articles/4408889192858"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-foreground"
+              >
+                {t('inbound_sources.create.zendesk.api_token_create_link')}
+              </a>
+            </p>
+          </div>
+        </>
+      )}
+
+      {values.authMode === 'oauth' && (
+        <>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-access-token">
+              {t('inbound_sources.create.zendesk.oauth_access_token')}
+            </Label>
+            <Input
+              id="is-zd-access-token"
+              type="password"
+              autoComplete="off"
+              value={values.oauthAccessToken}
+              onChange={(e) => set('oauthAccessToken', e.target.value)}
+              disabled={pending}
+              required
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-refresh-token">
+              {t('inbound_sources.create.zendesk.oauth_refresh_token')}
+            </Label>
+            <Input
+              id="is-zd-refresh-token"
+              type="password"
+              autoComplete="off"
+              value={values.oauthRefreshToken}
+              onChange={(e) => set('oauthRefreshToken', e.target.value)}
+              disabled={pending}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-client-id">
+              {t('inbound_sources.create.zendesk.oauth_client_id')}
+            </Label>
+            <Input
+              id="is-zd-client-id"
+              value={values.oauthClientId}
+              onChange={(e) => set('oauthClientId', e.target.value)}
+              disabled={pending}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-client-secret">
+              {t('inbound_sources.create.zendesk.oauth_client_secret')}
+            </Label>
+            <Input
+              id="is-zd-client-secret"
+              type="password"
+              autoComplete="off"
+              value={values.oauthClientSecret}
+              onChange={(e) => set('oauthClientSecret', e.target.value)}
+              disabled={pending}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.zendesk.oauth_paste_help')}
+            </p>
+          </div>
+        </>
+      )}
+
+      <div className="space-y-2">
+        <Label htmlFor="is-zd-start-from">{t('inbound_sources.create.zendesk.start_from')}</Label>
+        <Select value={values.startFrom} onValueChange={(v) => set('startFrom', v)}>
+          <SelectTrigger id="is-zd-start-from" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="now">
+              {t('inbound_sources.create.zendesk.start_from_now')}
+            </SelectItem>
+            <SelectItem value="full">
+              {t('inbound_sources.create.zendesk.start_from_full')}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <details className="space-y-3">
+        <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+          {t('inbound_sources.create.zendesk.advanced_label')}
+        </summary>
+        <div className="space-y-3 pt-2">
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-filter-tags">
+              {t('inbound_sources.create.zendesk.filter_tags')}
+            </Label>
+            <Input
+              id="is-zd-filter-tags"
+              value={values.filterTags}
+              onChange={(e) => set('filterTags', e.target.value)}
+              disabled={pending}
+              placeholder="feature-request, billing"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.zendesk.filter_tags_help')}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-exclude-tags">
+              {t('inbound_sources.create.zendesk.filter_exclude_tags')}
+            </Label>
+            <Input
+              id="is-zd-exclude-tags"
+              value={values.filterExcludeTags}
+              onChange={(e) => set('filterExcludeTags', e.target.value)}
+              disabled={pending}
+              placeholder="spam, test"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.zendesk.filter_exclude_tags_help')}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>{t('inbound_sources.create.zendesk.filter_statuses')}</Label>
+            <div className="flex flex-wrap gap-3">
+              {['open', 'pending', 'solved', 'closed'].map((s) => (
+                <label key={s} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={values.filterStatuses.includes(s)}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                        ? [...values.filterStatuses, s]
+                        : values.filterStatuses.filter((v) => v !== s)
+                      set('filterStatuses', next)
+                    }}
+                    disabled={pending}
+                  />
+                  {s}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-zd-comment-budget">
+              {t('inbound_sources.create.zendesk.max_comment_fetches')}
+            </Label>
+            <Input
+              id="is-zd-comment-budget"
+              type="number"
+              min={1}
+              max={200}
+              value={values.maxCommentFetches}
+              onChange={(e) => set('maxCommentFetches', Number(e.target.value) || 50)}
+              disabled={pending}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.zendesk.max_comment_fetches_help')}
+            </p>
+          </div>
+        </div>
+      </details>
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onTest}
+          disabled={
+            testing ||
+            pending ||
+            !values.subdomain.trim() ||
+            (values.authMode === 'api_token' &&
+              (!values.email.trim() || !values.apiToken.trim())) ||
+            (values.authMode === 'oauth' && !values.oauthAccessToken.trim())
+          }
+        >
+          {testing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+          {t('inbound_sources.create.zendesk.test_button')}
+        </Button>
+        {testResult && (
+          <span
+            role="alert"
+            className={cn(
+              'inline-flex items-center gap-1 text-xs',
+              testResult.ok ? 'text-green-700 dark:text-green-500' : 'text-destructive',
+            )}
+          >
+            {testResult.ok ? (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {t('inbound_sources.create.zendesk.test_ok', { ms: testResult.latencyMs ?? '?' })}
               </>
             ) : (
               <>
