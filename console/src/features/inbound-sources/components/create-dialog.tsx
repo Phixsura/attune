@@ -362,11 +362,7 @@ export function CreateInboundSourceDialog({
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>{t('inbound_sources.create.channel_label')}</Label>
-              <div
-                className="grid grid-cols-2 gap-2 sm:grid-cols-4"
-                role="group"
-                aria-label={t('inbound_sources.create.channel_label')}
-              >
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <ChannelOption
                   selected={channel === 'webhook'}
                   onClick={() => {
@@ -823,11 +819,7 @@ function ZendeskFieldset({
 
       <div className="space-y-2">
         <Label>{t('inbound_sources.create.zendesk.auth_mode')}</Label>
-        <div
-          className="grid grid-cols-2 gap-2"
-          role="group"
-          aria-label={t('inbound_sources.create.zendesk.auth_mode')}
-        >
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             aria-pressed={values.authMode === 'api_token'}
