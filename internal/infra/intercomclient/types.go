@@ -40,7 +40,9 @@ type Conversation struct {
 	Tags                TagList              `json:"tags"`
 	Rating              *ConversationRating  `json:"conversation_rating"`
 	Parts               ConversationParts    `json:"conversation_parts"`
+	CustomAttributes    map[string]any       `json:"custom_attributes"`
 	AIAgentParticipated bool                 `json:"ai_agent_participated"`
+	AIAgent             *AIAgent             `json:"ai_agent"`
 }
 
 // ConversationSource is the seed message that started the conversation.
@@ -49,6 +51,20 @@ type ConversationSource struct {
 	Subject string     `json:"subject"`
 	Body    string     `json:"body"`
 	Author  PartAuthor `json:"author"`
+	// URL is the page the customer started the conversation from
+	// (Messenger conversations only; blank for email/Twitter/bots).
+	URL string `json:"url"`
+}
+
+// AIAgent records how Intercom's AI agent (Fin) left the conversation.
+// An escalated or negative-feedback resolution is a strong product-pain
+// signal; a confirmed resolution is routine support noise.
+type AIAgent struct {
+	SourceType      string `json:"source_type"`
+	ResolutionState string `json:"resolution_state"` // assumed_resolution | confirmed_resolution | escalated | negative_feedback | procedure_handoff
+	LastAnswerType  string `json:"last_answer_type"` // ai_answer | custom_answer
+	Rating          int    `json:"rating"`           // 1-5, 0 = unrated
+	RatingRemark    string `json:"rating_remark"`
 }
 
 // ConversationContacts wraps the contact references on a conversation.

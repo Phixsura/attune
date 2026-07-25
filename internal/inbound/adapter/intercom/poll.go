@@ -33,6 +33,12 @@ const (
 	// search timestamps are date-indexed, so sub-day filter precision is
 	// unreliable (the same defense Airbyte's production connector uses).
 	daySeconds = 86400
+
+	// rateBudgetFloor is the X-RateLimit-Remaining threshold below which
+	// a tick stops early. Private apps share one 10k req/min budget per
+	// app across the workspace; attune must not starve other consumers
+	// during backfill. ~1% of the default budget.
+	rateBudgetFloor = 100
 )
 
 // nowFn is overrideable in tests; production uses time.Now.
@@ -205,6 +211,13 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 				where, src.ID, pageNum+1, st.totalSynced)
 			return st.res
 		}
+		// Proactive self-throttle: stop the tick before Intercom starts
+		// returning 429s. The watermark holds only processed items, so
+		// the remainder is re-covered next tick.
+		if budget := client.RateBudget(); budget >= 0 && budget < rateBudgetFloor {
+			logext.Infof(ctx, "[%s] rate budget low,stopping tick,source_id:%s,remaining:%d", where, src.ID, budget)
+			break
+		}
 		cursor = page.StartingAfter
 		logext.Infof(ctx, "[%s] progress,source_id:%s,page:%d,conversations_synced:%d,end_of_results:false",
 			where, src.ID, pageNum+1, st.totalSynced)
@@ -246,7 +259,7 @@ func (a *adapter) processConversationPage(
 		if summary.UpdatedAt <= st.baseWatermark {
 			continue
 		}
-		if !matchesStateFilter(summary, cfg.FilterStates) {
+		if !matchesFilter(summary, cfg) {
 			// Filtered out — still advance the watermark past it.
 			if summary.UpdatedAt > st.res.watermark {
 				st.res.watermark = summary.UpdatedAt

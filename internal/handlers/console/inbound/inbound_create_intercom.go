@@ -31,6 +31,8 @@ func (h *Handler) createIntercom(ctx context.Context, auth *session.AuthCtx, req
 		cfg.GetAccessToken(),
 		cfg.GetStartFrom(),
 		cfg.GetFilterStates(),
+		cfg.GetFilterTags(),
+		cfg.GetFilterExcludeTags(),
 		int(cfg.GetMaxDetailFetches()),
 	)
 	if err != nil {
@@ -105,6 +107,8 @@ func (h *Handler) encryptIntercomConfig(inputs intercom.ConnInputs, workspaceID 
 		WorkspaceID:          workspaceID,
 		StartFrom:            inputs.StartFrom,
 		FilterStates:         inputs.FilterStates,
+		FilterTags:           inputs.FilterTags,
+		FilterExcludeTags:    inputs.FilterExcludeTags,
 		MaxDetailFetches:     inputs.MaxDetailFetches,
 	}
 	raw, err := jsonMarshal(inner)

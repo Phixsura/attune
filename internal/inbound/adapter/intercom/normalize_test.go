@@ -258,6 +258,107 @@ func TestMatchesStateFilter(t *testing.T) {
 	}
 }
 
+func TestMatchesFilter_Tags(t *testing.T) {
+	conv := convWithParts(nil)
+	conv.Tags = intercomclient.TagList{Tags: []intercomclient.Tag{
+		{ID: "t1", Name: "Feature-Request"},
+		{ID: "t2", Name: "billing"},
+	}}
+
+	if !matchesFilter(conv, Config{}) {
+		t.Error("empty config must match")
+	}
+	// Include: ALL listed tags required, case-insensitive.
+	if !matchesFilter(conv, Config{FilterTags: []string{"feature-request", "BILLING"}}) {
+		t.Error("both tags present should match")
+	}
+	if matchesFilter(conv, Config{FilterTags: []string{"feature-request", "urgent"}}) {
+		t.Error("missing required tag should not match")
+	}
+	// Exclude wins: ANY listed tag skips.
+	if matchesFilter(conv, Config{FilterExcludeTags: []string{"BILLING"}}) {
+		t.Error("excluded tag present should not match")
+	}
+	// Exclude beats include when both hit.
+	if matchesFilter(conv, Config{
+		FilterTags:        []string{"feature-request"},
+		FilterExcludeTags: []string{"billing"},
+	}) {
+		t.Error("exclude must win over include")
+	}
+	// State + tag compose.
+	if matchesFilter(conv, Config{FilterStates: []string{"closed"}, FilterTags: []string{"billing"}}) {
+		t.Error("state mismatch should fail even with matching tags")
+	}
+}
+
+func TestInferType_AIAgentSignal(t *testing.T) {
+	base := convWithParts(nil)
+
+	escalated := base
+	escalated.AIAgent = &intercomclient.AIAgent{ResolutionState: "escalated"} // ptrext:allow test-fixture
+	if got := inferType(escalated); got != "complaint" {
+		t.Errorf("escalated → %q, want complaint", got)
+	}
+
+	negative := base
+	negative.AIAgent = &intercomclient.AIAgent{ResolutionState: "negative_feedback"} // ptrext:allow test-fixture
+	if got := inferType(negative); got != "complaint" {
+		t.Errorf("negative_feedback → %q, want complaint", got)
+	}
+
+	resolved := base
+	resolved.AIAgent = &intercomclient.AIAgent{ResolutionState: "confirmed_resolution"} // ptrext:allow test-fixture
+	if got := inferType(resolved); got != "" {
+		t.Errorf("confirmed_resolution → %q, want empty", got)
+	}
+
+	// Priority stays the stronger signal.
+	urgent := base
+	urgent.Priority = "priority"
+	urgent.AIAgent = &intercomclient.AIAgent{ResolutionState: "escalated"} // ptrext:allow test-fixture
+	if got := inferType(urgent); got != "bug_report" {
+		t.Errorf("priority + escalated → %q, want bug_report", got)
+	}
+}
+
+func TestBuildIngestInput_CustomAttributesAndAIMeta(t *testing.T) {
+	conv := convWithParts(nil)
+	conv.CustomAttributes = map[string]any{"plan": "team", "order_id": float64(42)}
+	conv.Source.URL = "https://app.customer.com/dashboard"
+	conv.AIAgent = &intercomclient.AIAgent{ // ptrext:allow test-fixture
+		ResolutionState: "escalated",
+		LastAnswerType:  "ai_answer",
+		Rating:          2,
+	}
+
+	in := buildIngestInput("src-1", "Src", "ws1", conv, nil)
+	m := in.SourceMeta
+	if !strings.Contains(m["intercom_custom_attributes"].(string), `"plan":"team"`) {
+		t.Errorf("custom_attributes = %v", m["intercom_custom_attributes"])
+	}
+	if m["intercom_source_url"] != "https://app.customer.com/dashboard" {
+		t.Errorf("source_url = %v", m["intercom_source_url"])
+	}
+	if m["intercom_ai_resolution_state"] != "escalated" {
+		t.Errorf("ai_resolution_state = %v", m["intercom_ai_resolution_state"])
+	}
+	if m["intercom_ai_rating"] != 2 {
+		t.Errorf("ai_rating = %v", m["intercom_ai_rating"])
+	}
+	if m["intercom_ai_last_answer_type"] != "ai_answer" {
+		t.Errorf("ai_last_answer_type = %v", m["intercom_ai_last_answer_type"])
+	}
+
+	// Absent optional data → keys absent (not empty values).
+	bare := buildIngestInput("src-1", "Src", "ws1", convWithParts(nil), nil)
+	for _, key := range []string{"intercom_custom_attributes", "intercom_source_url", "intercom_ai_resolution_state"} {
+		if _, ok := bare.SourceMeta[key]; ok {
+			t.Errorf("%s should be absent when source data is missing", key)
+		}
+	}
+}
+
 func TestSanitizeKeyPart(t *testing.T) {
 	cases := map[string]string{
 		"ws42":        "ws42",

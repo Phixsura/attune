@@ -257,7 +257,9 @@ func buildFull(header string, entries []tagged) string {
 }
 
 // inferType maps Intercom conversation metadata to an IngestInput.Type
-// hint for the enrichment LLM.
+// hint for the enrichment LLM. Priority is the strongest signal, then
+// human CSAT, then the Fin AI agent's exit state: a conversation Fin
+// escalated or that got negative feedback is a product-pain signal.
 func inferType(conv conversation) string {
 	// Urgent priority → bug report signal.
 	if conv.Priority == "priority" || conv.Priority == "urgent" || conv.Priority == "high" {
@@ -266,6 +268,13 @@ func inferType(conv conversation) string {
 	// A low CSAT rating (1-2 of 5) → complaint.
 	if conv.Rating != nil && conv.Rating.Rating > 0 && conv.Rating.Rating <= 2 {
 		return "complaint"
+	}
+	// Fin resolution telemetry: escalation / negative feedback → complaint.
+	if conv.AIAgent != nil {
+		switch conv.AIAgent.ResolutionState {
+		case "escalated", "negative_feedback":
+			return "complaint"
+		}
 	}
 	return "" // let the LLM decide
 }
@@ -355,7 +364,64 @@ func buildIntercomSourceMeta(
 			m["intercom_rating_remark"] = remark
 		}
 	}
+	// The page the customer started the conversation from (Messenger
+	// conversations carry the in-app URL — the customer-side context;
+	// PageURL stays the operator-side inbox permalink).
+	if u := strings.TrimSpace(conv.Source.URL); u != "" {
+		m["intercom_source_url"] = u
+	}
+	// Operator-defined structured data (order IDs, plan tiers, error
+	// codes) — JSON passthrough, same pattern as zendesk_custom_fields.
+	if len(conv.CustomAttributes) > 0 {
+		attrsJSON, _ := json.Marshal(conv.CustomAttributes) // ptrext:allow json-marshal
+		m["intercom_custom_attributes"] = string(attrsJSON)
+	}
+	// Fin AI-agent exit telemetry — an escalated / negative-feedback
+	// resolution routes very differently from a confirmed resolution.
+	if conv.AIAgent != nil {
+		if rs := conv.AIAgent.ResolutionState; rs != "" {
+			m["intercom_ai_resolution_state"] = rs
+		}
+		if conv.AIAgent.Rating > 0 {
+			m["intercom_ai_rating"] = conv.AIAgent.Rating
+		}
+		if lat := conv.AIAgent.LastAnswerType; lat != "" {
+			m["intercom_ai_last_answer_type"] = lat
+		}
+	}
 	return m
+}
+
+// matchesFilter returns true if the conversation passes the configured
+// state + tag filters. Empty filters match everything. Filtering runs on
+// search-result data only (states and tags are present on summaries), so
+// filtered conversations never consume detail-fetch budget.
+func matchesFilter(conv conversation, cfg Config) bool {
+	if !matchesStateFilter(conv, cfg.FilterStates) {
+		return false
+	}
+	// Exclude tags: if the conversation has ANY excluded tag, skip.
+	for _, et := range cfg.FilterExcludeTags {
+		for _, tag := range conv.Tags.Tags {
+			if strings.EqualFold(tag.Name, et) {
+				return false
+			}
+		}
+	}
+	// Required tags: conversation must have ALL required tags.
+	for _, rt := range cfg.FilterTags {
+		found := false
+		for _, tag := range conv.Tags.Tags {
+			if strings.EqualFold(tag.Name, rt) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // matchesStateFilter returns true if the conversation passes the

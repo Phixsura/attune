@@ -9,6 +9,13 @@
   "admin_assignee_id": 0,
   "team_assignee_id": 0,
   "ai_agent_participated": true,
+  "ai_agent": {
+    "source_type": "workflow",
+    "resolution_state": "escalated",
+    "last_answer_type": "ai_answer",
+    "rating": 2,
+    "rating_remark": "did not solve it"
+  },
   "source": {
     "type": "email",
     "subject": "Feature request: dark mode",

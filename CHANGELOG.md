@@ -31,9 +31,21 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - 429 handling via `X-RateLimit-Reset`; per-conversation detail
     failures degrade gracefully (skip, never disable the source);
     exponential backoff on consecutive failures.
-  - Conversation state filtering (open/closed/snoozed) and per-tick
-    detail budget (Console advanced UI); sync-now, sync stats, and
-    recent-preview reuse the existing machinery.
+  - Conversation state filtering (open/closed/snoozed), tag
+    include/exclude filtering (filtered conversations never consume
+    detail budget), and per-tick detail budget (Console advanced UI);
+    sync-now, sync stats, and recent-preview reuse the existing
+    machinery.
+  - Custom attributes (`intercom_custom_attributes` JSON passthrough)
+    and the customer-side conversation start URL
+    (`intercom_source_url`) captured in SourceMeta.
+  - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
+    rating, last answer type); escalated / negative-feedback Fin
+    conversations produce a `complaint` enrichment hint.
+  - Proactive rate self-throttling: tracks `X-RateLimit-Remaining` and
+    gracefully stops a tick before Intercom starts returning 429s.
+  - Test-connection returns the connected workspace name
+    (`TestInboundConnectionResponse.workspace_name`, channel-generic).
   - SSRF-hardened via `nethardening.Policy`, wired in
     `applyRuntimeHardening`.
 

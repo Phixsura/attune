@@ -3170,12 +3170,17 @@
         "start_from_now": "从当前开始",
         "start_from_full": "完整回填",
         "advanced_label": "高级选项",
+        "filter_tags": "包含标签",
+        "filter_tags_help": "逗号分隔，只同步含全部这些标签的会话",
+        "filter_exclude_tags": "排除标签",
+        "filter_exclude_tags_help": "逗号分隔，跳过含任一这些标签的会话",
         "filter_states": "会话状态过滤",
         "filter_states_help": "不勾选表示同步全部状态的会话",
         "max_detail_fetches": "每轮会话详情预算",
         "max_detail_fetches_help": "每次同步最多拉取多少个会话的完整线程（默认 50）",
         "test_button": "测试连接",
-        "test_ok": "连接成功 · {{ms}} ms"
+        "test_ok": "连接成功 · {{ms}} ms",
+        "test_ok_workspace": "已连接到 {{workspace}} · {{ms}} ms"
       }
     },
     "reveal": {

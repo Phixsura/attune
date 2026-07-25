@@ -35,6 +35,12 @@ type Config struct {
 	// (open/closed/snoozed). Empty = all states.
 	FilterStates []string `json:"filter_states,omitempty"`
 
+	// FilterTags requires conversations to carry ALL listed tags.
+	FilterTags []string `json:"filter_tags,omitempty"`
+
+	// FilterExcludeTags skips conversations carrying ANY listed tag.
+	FilterExcludeTags []string `json:"filter_exclude_tags,omitempty"`
+
 	// MaxDetailFetches caps per-tick conversation detail API calls.
 	MaxDetailFetches int `json:"max_detail_fetches,omitempty"`
 
@@ -53,11 +59,13 @@ const ConfigVersion = 1
 
 // intercomConnInputs captures the validated Console create / test payload.
 type intercomConnInputs struct {
-	Region           string
-	AccessToken      string
-	StartFrom        string
-	FilterStates     []string
-	MaxDetailFetches int
+	Region            string
+	AccessToken       string
+	StartFrom         string
+	FilterStates      []string
+	FilterTags        []string
+	FilterExcludeTags []string
+	MaxDetailFetches  int
 }
 
 // parseConfig decrypts the outer config envelope, unmarshals the Config,

@@ -14224,6 +14224,14 @@ components:
                 maxDetailFetches:
                     type: integer
                     format: int32
+                filterTags:
+                    type: array
+                    items:
+                        type: string
+                filterExcludeTags:
+                    type: array
+                    items:
+                        type: string
             description: |-
                 IntercomConnConfig carries the Intercom connection parameters for
                  create and test-connection flows. Auth is a private-app Access Token
@@ -17678,6 +17686,11 @@ components:
                     type: string
                 latencyMs:
                     type: string
+                workspaceName:
+                    type: string
+                    description: |-
+                        Human-readable identity of the connected upstream (Intercom
+                         workspace name; other channels may fill it later).
         TestLLMChannelRequest:
             type: object
             properties:

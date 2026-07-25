@@ -106,6 +106,8 @@ interface IntercomFields {
   accessToken: string
   startFrom: string
   filterStates: string[]
+  filterTags: string
+  filterExcludeTags: string
   maxDetailFetches: number
 }
 
@@ -114,8 +116,16 @@ const defaultIntercom: IntercomFields = {
   accessToken: '',
   startFrom: 'now',
   filterStates: [],
+  filterTags: '',
+  filterExcludeTags: '',
   maxDetailFetches: 50,
 }
+
+const splitTagList = (raw: string): string[] =>
+  raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
 
 // CreateInboundSourceDialog — five-channel wizard. The user picks
 // webhook, email, slack, zendesk, or intercom at the top; the form body
@@ -212,6 +222,8 @@ export function CreateInboundSourceDialog({
           accessToken: ic.accessToken.trim(),
           startFrom: ic.startFrom,
           filterStates: ic.filterStates,
+          filterTags: splitTagList(ic.filterTags),
+          filterExcludeTags: splitTagList(ic.filterExcludeTags),
           maxDetailFetches: ic.maxDetailFetches,
         },
       }
@@ -349,6 +361,8 @@ export function CreateInboundSourceDialog({
             region: ic.region,
             accessToken: ic.accessToken.trim(),
             filterStates: [] as string[],
+            filterTags: [] as string[],
+            filterExcludeTags: [] as string[],
           },
         },
         {
@@ -1253,6 +1267,36 @@ function IntercomFieldset({
         </summary>
         <div className="space-y-3 pt-2">
           <div className="space-y-2">
+            <Label htmlFor="is-ic-filter-tags">
+              {t('inbound_sources.create.intercom.filter_tags')}
+            </Label>
+            <Input
+              id="is-ic-filter-tags"
+              value={values.filterTags}
+              onChange={(e) => set('filterTags', e.target.value)}
+              disabled={pending}
+              placeholder="feature-request, billing"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.intercom.filter_tags_help')}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-ic-exclude-tags">
+              {t('inbound_sources.create.intercom.filter_exclude_tags')}
+            </Label>
+            <Input
+              id="is-ic-exclude-tags"
+              value={values.filterExcludeTags}
+              onChange={(e) => set('filterExcludeTags', e.target.value)}
+              disabled={pending}
+              placeholder="spam, test"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.intercom.filter_exclude_tags_help')}
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label>{t('inbound_sources.create.intercom.filter_states')}</Label>
             <div className="flex flex-wrap gap-3">
               {['open', 'closed', 'snoozed'].map((s) => (
@@ -1318,9 +1362,14 @@ function IntercomFieldset({
             {testResult.ok ? (
               <>
                 <CheckCircle2 className="h-3.5 w-3.5" />
-                {t('inbound_sources.create.intercom.test_ok', {
-                  ms: testResult.latencyMs ?? '?',
-                })}
+                {testResult.workspaceName
+                  ? t('inbound_sources.create.intercom.test_ok_workspace', {
+                      workspace: testResult.workspaceName,
+                      ms: testResult.latencyMs ?? '?',
+                    })
+                  : t('inbound_sources.create.intercom.test_ok', {
+                      ms: testResult.latencyMs ?? '?',
+                    })}
               </>
             ) : (
               <>

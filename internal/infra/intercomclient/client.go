@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -53,6 +54,11 @@ type Client interface {
 	GetConversation(ctx context.Context, id string) (Conversation, error)
 	// SearchContacts batch-resolves contact IDs.
 	SearchContacts(ctx context.Context, ids []string) ([]Contact, error)
+	// RateBudget returns the most recent X-RateLimit-Remaining value seen
+	// on any response, or -1 before the first response. Callers use it to
+	// self-throttle before Intercom starts returning 429s — private apps
+	// share one 10k req/min budget per app across the whole workspace.
+	RateBudget() int64
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +92,7 @@ func New(region, accessToken string) Client {
 	if override := currentTestOverride(); override != "" {
 		base = override
 	}
-	return ptrext.Of(httpClient{
+	c := ptrext.Of(httpClient{
 		base:   base,
 		token:  accessToken,
 		region: normalizeRegion(region),
@@ -95,6 +101,8 @@ func New(region, accessToken string) Client {
 			Timeout:   30 * time.Second,
 		}),
 	})
+	c.rateBudget.Store(-1)
+	return c
 }
 
 // BaseURL returns the Intercom API base URL for a region token.
@@ -149,7 +157,12 @@ type httpClient struct {
 	token  string
 	region string
 	http   *http.Client
+	// rateBudget is the last-seen X-RateLimit-Remaining (-1 = unseen).
+	rateBudget atomic.Int64
 }
+
+// RateBudget reports the most recent X-RateLimit-Remaining seen.
+func (c *httpClient) RateBudget() int64 { return c.rateBudget.Load() }
 
 func (c *httpClient) AuthTest(ctx context.Context) (AccountInfo, error) {
 	type meResponse struct {
@@ -321,6 +334,11 @@ func (c *httpClient) doJSON(ctx context.Context, method, path string, body []byt
 		return err
 	}
 	defer resp.Body.Close()
+	if v := resp.Header.Get("X-RateLimit-Remaining"); v != "" {
+		if remaining, perr := strconv.ParseInt(v, 10, 64); perr == nil {
+			c.rateBudget.Store(remaining)
+		}
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
 		return err

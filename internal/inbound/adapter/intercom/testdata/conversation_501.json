@@ -13,6 +13,7 @@
     "type": "conversation",
     "subject": "",
     "body": "The PDF export button is greyed out on the Team plan.",
+    "url": "https://app.customer.com/dashboards/42",
     "author": {
       "type": "user",
       "id": "contact-alice",
@@ -35,6 +36,7 @@
   },
   "conversation_rating": null,
   "company": { "type": "company", "id": "co-9", "name": "Customer Co" },
+  "custom_attributes": { "plan_tier": "team", "error_code": "EXPORT_403" },
   "conversation_parts": {
     "type": "conversation_part.list",
     "conversation_parts": [

@@ -92,7 +92,7 @@ func TestNormalizeFilterStates(t *testing.T) {
 }
 
 func TestValidateConnConfig(t *testing.T) {
-	in, err := ValidateConnConfig(" US ", " tok ", "", []string{"OPEN"}, 25)
+	in, err := ValidateConnConfig(" US ", " tok ", "", []string{"OPEN"}, nil, nil, 25)
 	if err != nil {
 		t.Fatalf("ValidateConnConfig: %v", err)
 	}
@@ -106,24 +106,39 @@ func TestValidateConnConfig(t *testing.T) {
 		t.Errorf("MaxDetailFetches = %d", in.MaxDetailFetches)
 	}
 
-	if _, err := ValidateConnConfig("mars", "tok", "", nil, 0); err == nil {
+	if _, err := ValidateConnConfig("mars", "tok", "", nil, nil, nil, 0); err == nil {
 		t.Error("bad region accepted")
 	}
-	if _, err := ValidateConnConfig("us", "", "", nil, 0); err == nil {
+	if _, err := ValidateConnConfig("us", "", "", nil, nil, nil, 0); err == nil {
 		t.Error("empty token accepted")
 	}
-	if _, err := ValidateConnConfig("us", "tok", "sometime", nil, 0); err == nil {
+	if _, err := ValidateConnConfig("us", "tok", "sometime", nil, nil, nil, 0); err == nil {
 		t.Error("bad start_from accepted")
 	}
-	if _, err := ValidateConnConfig("us", "tok", "full", nil, -1); err == nil {
+	if _, err := ValidateConnConfig("us", "tok", "full", nil, nil, nil, -1); err == nil {
 		t.Error("negative budget accepted")
 	}
-	if _, err := ValidateConnConfig("us", "tok", "", []string{"weird"}, 0); err == nil {
+	if _, err := ValidateConnConfig("us", "tok", "", []string{"weird"}, nil, nil, 0); err == nil {
 		t.Error("bad filter state accepted")
 	}
 
-	full, err := ValidateConnConfig("au", "tok", "full", nil, 0)
+	full, err := ValidateConnConfig("au", "tok", "full", nil, nil, nil, 0)
 	if err != nil || full.StartFrom != "full" {
 		t.Errorf("full = %+v, %v", full, err)
+	}
+}
+
+func TestValidateConnConfig_TagFilters(t *testing.T) {
+	in, err := ValidateConnConfig("us", "tok", "", nil,
+		[]string{" feature-request ", "Billing", "feature-request", ""},
+		[]string{"spam", " SPAM "}, 0)
+	if err != nil {
+		t.Fatalf("ValidateConnConfig: %v", err)
+	}
+	if len(in.FilterTags) != 2 || in.FilterTags[0] != "feature-request" || in.FilterTags[1] != "Billing" {
+		t.Errorf("FilterTags = %v", in.FilterTags)
+	}
+	if len(in.FilterExcludeTags) != 1 || in.FilterExcludeTags[0] != "spam" {
+		t.Errorf("FilterExcludeTags = %v", in.FilterExcludeTags)
 	}
 }

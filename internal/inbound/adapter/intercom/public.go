@@ -18,7 +18,7 @@ type (
 )
 
 // ValidateConnConfig normalizes the Intercom connection payload.
-func ValidateConnConfig(region, accessToken, startFrom string, filterStates []string, maxDetailFetches int) (ConnInputs, error) {
+func ValidateConnConfig(region, accessToken, startFrom string, filterStates, filterTags, filterExcludeTags []string, maxDetailFetches int) (ConnInputs, error) {
 	region = strings.ToLower(strings.TrimSpace(region))
 	if !intercomclient.ValidRegion(region) {
 		return ConnInputs{}, errMissing("region must be 'us', 'eu', or 'au'")
@@ -43,12 +43,34 @@ func ValidateConnConfig(region, accessToken, startFrom string, filterStates []st
 		return ConnInputs{}, errMissing("max_detail_fetches must not be negative")
 	}
 	return ConnInputs{
-		Region:           region,
-		AccessToken:      accessToken,
-		StartFrom:        startFrom,
-		FilterStates:     states,
-		MaxDetailFetches: maxDetailFetches,
+		Region:            region,
+		AccessToken:       accessToken,
+		StartFrom:         startFrom,
+		FilterStates:      states,
+		FilterTags:        normalizeTagList(filterTags),
+		FilterExcludeTags: normalizeTagList(filterExcludeTags),
+		MaxDetailFetches:  maxDetailFetches,
 	}, nil
+}
+
+// normalizeTagList trims and dedups tag filters (case-preserving; the
+// match itself is case-insensitive).
+func normalizeTagList(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		key := strings.ToLower(tag)
+		if tag == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, tag)
+	}
+	return out
 }
 
 // AuthTest checks an access token against Intercom's /me endpoint.

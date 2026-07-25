@@ -152,7 +152,14 @@ export interface TestInboundConnectionRequest {
 export interface TestInboundConnectionResponse {
   ok: boolean;
   error?: string | undefined;
-  latencyMs?: string | undefined;
+  latencyMs?:
+    | string
+    | undefined;
+  /**
+   * Human-readable identity of the connected upstream (Intercom
+   * workspace name; other channels may fill it later).
+   */
+  workspaceName?: string | undefined;
 }
 
 export interface EmailConnConfig {
@@ -239,7 +246,13 @@ export interface IntercomConnConfig {
     | undefined;
   /** open/closed/snoozed; empty = all */
   filterStates: string[];
-  maxDetailFetches?: number | undefined;
+  maxDetailFetches?:
+    | number
+    | undefined;
+  /** conversation must carry ALL */
+  filterTags: string[];
+  /** skip if it carries ANY */
+  filterExcludeTags: string[];
 }
 
 /**

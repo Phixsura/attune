@@ -94,10 +94,17 @@ func (h *Handler) TestConnection(ctx *dispatcher.RequestContext[*session.AuthCtx
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,target_id:%s,latency_ms:%d",
 		where, auth.TenantID, targetID, latency)
-	return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
+	resp := ptrext.Of(attunev1.TestInboundConnectionResponse{
 		Ok:        true,
 		LatencyMs: ptrext.Of(latency),
-	}))
+	})
+	// Surface the connected upstream's human-readable identity when the
+	// probe resolved one (Intercom workspace name today; other channels
+	// may fill the same audit key later).
+	if name, ok := auditFields["intercom_workspace_name"].(string); ok && name != "" {
+		resp.WorkspaceName = ptrext.Of(name)
+	}
+	return dispatcher.OK(resp)
 }
 
 func (h *Handler) resolveTestConnection(ctx context.Context, req *attunev1.TestInboundConnectionRequest, channel string) (string, string, map[string]any, error) {
@@ -238,6 +245,8 @@ func (h *Handler) testIntercomConnection(ctx context.Context, cfg *attunev1.Inte
 		cfg.GetAccessToken(),
 		cfg.GetStartFrom(),
 		cfg.GetFilterStates(),
+		cfg.GetFilterTags(),
+		cfg.GetFilterExcludeTags(),
 		int(cfg.GetMaxDetailFetches()),
 	)
 	if validateErr != nil {

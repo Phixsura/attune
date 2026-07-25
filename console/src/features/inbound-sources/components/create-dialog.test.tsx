@@ -415,6 +415,60 @@ describe('CreateInboundSourceDialog', () => {
     })
   })
 
+  it('shows the connected workspace name after a successful Intercom test', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/test-connection', () =>
+        HttpResponse.json({ ok: true, latencyMs: 12, workspaceName: 'Acme Workspace' }),
+      ),
+    )
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        pending={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Intercom/ }))
+    await user.type(screen.getByLabelText('Access Token'), 'tok')
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+
+    expect(await screen.findByText(/已连接到 Acme Workspace/)).toBeInTheDocument()
+  })
+
+  it('submits Intercom tag filters from the advanced section', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/test-connection', () =>
+        HttpResponse.json({ ok: true, latencyMs: 10 }),
+      ),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Intercom/ }))
+    await user.type(screen.getByLabelText('名称'), 'Filtered Intercom')
+    await user.type(screen.getByLabelText('Access Token'), 'tok')
+    await user.click(screen.getByText('高级选项'))
+    await user.type(screen.getByLabelText('包含标签'), 'feature-request, billing')
+    await user.type(screen.getByLabelText('排除标签'), 'spam')
+    await user.click(screen.getByRole('button', { name: '新建' }))
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'intercom',
+          intercomConfig: expect.objectContaining({
+            filterTags: ['feature-request', 'billing'],
+            filterExcludeTags: ['spam'],
+          }),
+        }),
+      )
+    })
+  })
+
   it('keeps the Intercom create button disabled without an access token', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined)
     const { user } = renderWithProviders(

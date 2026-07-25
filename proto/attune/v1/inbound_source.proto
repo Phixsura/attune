@@ -197,6 +197,9 @@ message TestInboundConnectionResponse {
   bool ok = 1;
   optional string error = 2;
   optional int64 latency_ms = 3;
+  // Human-readable identity of the connected upstream (Intercom
+  // workspace name; other channels may fill it later).
+  optional string workspace_name = 4;
 }
 
 message EmailConnConfig {
@@ -266,4 +269,6 @@ message IntercomConnConfig {
   optional string start_from = 3;      // "now" (default) | "full"
   repeated string filter_states = 4;   // open/closed/snoozed; empty = all
   optional int32 max_detail_fetches = 5;
+  repeated string filter_tags = 6;         // conversation must carry ALL
+  repeated string filter_exclude_tags = 7; // skip if it carries ANY
 }

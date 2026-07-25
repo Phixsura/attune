@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound"
@@ -230,6 +231,53 @@ func TestTestIntercomConnection_Success(t *testing.T) {
 	require.Equal(t, "Acme", fields["intercom_workspace_name"])
 }
 
+func TestCreateIntercom_TagFiltersPersisted(t *testing.T) {
+	repo := ptrext.Of(covSourceRepo{})
+	repo.getHook = func(id string) {
+		repo.getSrc = inbound.Source{
+			ID: id, TenantID: "tenant-1", Channel: channelIntercom,
+			Name: "Filtered", Slug: "filtered", Enabled: true,
+			CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+		}
+	}
+	tx := ptrext.Of(covSlackTx{})
+	h := ptrext.Of(Handler{
+		sources: repo,
+		secrets: inboundtest.FakeSecrets{},
+		intercomWithTx: func(ctx context.Context, _ *pgxpool.Pool, _ bool, fn func(context.Context, secretlock.Tx) error) error {
+			return fn(ctx, tx)
+		},
+		intercomAuthTest: stubIntercomAuth(intercom.AccountInfo{WorkspaceID: "ws1"}, nil),
+	})
+
+	result, err := h.createIntercom(
+		context.Background(),
+		ptrext.Of(session.AuthCtx{TenantID: "tenant-1", UserID: "user-1"}),
+		ptrext.Of(attunev1.CreateInboundSourceRequest{
+			Channel: "intercom",
+			Name:    "Filtered",
+			IntercomConfig: ptrext.Of(attunev1.IntercomConnConfig{
+				Region:            "us",
+				AccessToken:       "tok",
+				FilterTags:        []string{"feature-request"},
+				FilterExcludeTags: []string{"spam"},
+			}),
+		}),
+		"Filtered",
+		"filtered",
+	)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusCreated, result.Status)
+	// The encrypted envelope (6th INSERT arg) carries the tag filters.
+	require.Len(t, tx.lastArgs, 6)
+	envelope, ok := tx.lastArgs[5].([]byte)
+	require.True(t, ok, "config arg should be []byte")
+	decoded, derr := (inboundtest.FakeSecrets{}).Decrypt(envelope)
+	require.NoError(t, derr)
+	require.Contains(t, string(decoded), `"filter_tags":["feature-request"]`)
+	require.Contains(t, string(decoded), `"filter_exclude_tags":["spam"]`)
+}
+
 func TestTestIntercomConnection_AuthFailure(t *testing.T) {
 	t.Parallel()
 	h := ptrext.Of(Handler{
@@ -244,6 +292,24 @@ func TestTestIntercomConnection_AuthFailure(t *testing.T) {
 	require.Equal(t, "intercom-auth", targetID)
 	require.NotNil(t, fields)
 	require.Contains(t, err.Error(), "plan does not allow API access")
+}
+
+// =============== TestConnection wire response: workspace_name ==============
+
+func TestTestConnection_IntercomWorkspaceNameOnWire(t *testing.T) {
+	repo := ptrext.Of(fakeSourceRepo{})
+	h := newTestHandler(repo, nil)
+	h.intercomAuthTest = stubIntercomAuth(intercom.AccountInfo{
+		WorkspaceID: "ws42", WorkspaceName: "Acme Workspace",
+	}, nil)
+
+	body := `{"channel":"intercom","intercomConfig":{"region":"us","accessToken":"tok"}}`
+	w := serveTestConnection(h, body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var out attunev1.TestInboundConnectionResponse
+	require.NoError(t, protojson.Unmarshal(w.Body.Bytes(), &out))
+	require.True(t, out.GetOk())
+	require.Equal(t, "Acme Workspace", out.GetWorkspaceName())
 }
 
 // ======================= friendlyIntercomError ==============================

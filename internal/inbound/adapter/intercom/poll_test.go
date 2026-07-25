@@ -36,6 +36,18 @@ type fakeAPIClient struct {
 
 	contactsResult []intercomContact
 	contactsErr    error
+
+	// rateBudget simulates X-RateLimit-Remaining. The zero value maps to
+	// "unseen" (-1) so test literals that don't care are unaffected by
+	// the proactive throttle.
+	rateBudget int64
+}
+
+func (f *fakeAPIClient) RateBudget() int64 {
+	if f.rateBudget == 0 {
+		return -1
+	}
+	return f.rateBudget
 }
 
 func (f *fakeAPIClient) AuthTest(_ context.Context) (intercomAccount, error) {
@@ -625,6 +637,82 @@ func TestPollSource_MultiPagePagination(t *testing.T) {
 	stored, _ := sources.Get(context.Background(), "src-1")
 	if stored.State.LastUID != 1700000600 {
 		t.Errorf("LastUID = %d, want 1700000600", stored.State.LastUID)
+	}
+}
+
+func TestPollSource_RateBudgetFloorStopsTick(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	c1 := fullConversation()
+	c1.ID = "101"
+	c1.UpdatedAt = 1700000500
+	c2 := fullConversation()
+	c2.ID = "102"
+	c2.UpdatedAt = 1700000600
+
+	// Two pages available, but budget below floor after page 1 → the
+	// tick must stop before requesting page 2.
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages: []conversationPage{
+			{Conversations: []conversation{c1}, StartingAfter: "next"},
+			{Conversations: []conversation{c2}},
+		},
+		detailByID: map[string]conversation{"101": c1, "102": c2},
+		rateBudget: rateBudgetFloor - 1,
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if fake.pageCalls != 1 {
+		t.Errorf("pageCalls = %d, want 1 (stopped by budget floor)", fake.pageCalls)
+	}
+	if len(ingestFake.Calls) != 1 {
+		t.Errorf("ingests = %d, want 1", len(ingestFake.Calls))
+	}
+	// Watermark advanced only past processed items; c2 re-covered next tick.
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000500 {
+		t.Errorf("LastUID = %d, want 1700000500", stored.State.LastUID)
+	}
+	// Source stays enabled and healthy — this is throttling, not an error.
+	if !stored.Enabled {
+		t.Error("budget floor must not disable the source")
+	}
+}
+
+func TestPollSource_TagFilterSkipsDetailBudget(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+		FilterExcludeTags:    []string{"bug"}, // fullConversation carries tag "bug"
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages: []conversationPage{{Conversations: []conversation{fullConversation()}}},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 0 {
+		t.Fatalf("expected 0 ingests, got %d", len(ingestFake.Calls))
+	}
+	if fake.detailCalls != 0 {
+		t.Errorf("tag-filtered conversation should not consume detail budget")
+	}
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000500 {
+		t.Errorf("watermark should advance past filtered items, got %d", stored.State.LastUID)
 	}
 }
 

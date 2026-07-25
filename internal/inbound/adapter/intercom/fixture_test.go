@@ -187,6 +187,12 @@ func verifyFixtureMeta501(t *testing.T, meta map[string]any) {
 	if !strings.Contains(meta["intercom_tags"].(string), "export") {
 		t.Errorf("tags = %v", meta["intercom_tags"])
 	}
+	if !strings.Contains(meta["intercom_custom_attributes"].(string), "EXPORT_403") {
+		t.Errorf("custom_attributes = %v", meta["intercom_custom_attributes"])
+	}
+	if meta["intercom_source_url"] != "https://app.customer.com/dashboards/42" {
+		t.Errorf("source_url = %v", meta["intercom_source_url"])
+	}
 }
 
 // verifyFixtureConversation502: subject fallback, Fin bot tagged, AI flag.
@@ -200,6 +206,16 @@ func verifyFixtureConversation502(t *testing.T, second domain.IngestInput) {
 	}
 	if second.SourceMeta["intercom_ai_agent_participated"] != true {
 		t.Errorf("ai_agent_participated = %v", second.SourceMeta["intercom_ai_agent_participated"])
+	}
+	if second.SourceMeta["intercom_ai_resolution_state"] != "escalated" {
+		t.Errorf("ai_resolution_state = %v", second.SourceMeta["intercom_ai_resolution_state"])
+	}
+	if second.SourceMeta["intercom_ai_rating"] != 2 {
+		t.Errorf("ai_rating = %v", second.SourceMeta["intercom_ai_rating"])
+	}
+	// Fin escalated → complaint hint.
+	if second.Type != "complaint" {
+		t.Errorf("Type = %q, want complaint (Fin escalated)", second.Type)
 	}
 }
 

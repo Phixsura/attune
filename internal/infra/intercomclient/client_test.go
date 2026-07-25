@@ -304,6 +304,23 @@ func TestRateLimit_UsesResetHeader(t *testing.T) {
 	}
 }
 
+func TestRateBudget_TracksRemainingHeader(t *testing.T) {
+	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "4321")
+		fmt.Fprint(w, `{"type":"admin","email":"a@b.c","app":{"id_code":"ws","name":"W","region":"US"}}`)
+	}))
+
+	if got := client.RateBudget(); got != -1 {
+		t.Errorf("RateBudget before first response = %d, want -1", got)
+	}
+	if _, err := client.AuthTest(context.Background()); err != nil {
+		t.Fatalf("AuthTest: %v", err)
+	}
+	if got := client.RateBudget(); got != 4321 {
+		t.Errorf("RateBudget = %d, want 4321", got)
+	}
+}
+
 func TestRateLimit_FallbackWithoutHeader(t *testing.T) {
 	client := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
