@@ -46,8 +46,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     gracefully stops a tick before Intercom starts returning 429s.
   - Test-connection returns the connected workspace name
     (`TestInboundConnectionResponse.workspace_name`, channel-generic).
+  - `intercom.api_base_url` config knob points the adapter at a mock
+    API for local stacks (Slack `api_base_url` parity);
+    `make dev-stack --intercom-stub <url>` wires it plus loopback
+    egress, and `scripts/intercom-stub.mjs` ships a deterministic
+    Intercom API stub for full-pipeline E2E.
   - SSRF-hardened via `nethardening.Policy`, wired in
     `applyRuntimeHardening`.
+
+### Fixed
+
+- Fixed the inbound recent-preview endpoint returning 500 on live
+  PostgreSQL: `created_at` (timestamptz) was scanned into a string; it
+  now scans into `time.Time` and serializes RFC3339. The preview also
+  surfaces `intercom_conversation_id`/`intercom_state` metadata.
 
 - Added Zendesk inbound adapter (#229): polls Zendesk's incremental ticket
   export API to extract product signals from support tickets.

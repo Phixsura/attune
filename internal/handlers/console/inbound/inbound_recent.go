@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -66,12 +67,18 @@ func (h *Handler) queryRecentFeedback(ctx context.Context, sourceID string) ([]r
 	for rows.Next() {
 		var item recentFeedbackItem
 		var meta map[string]any
-		if err := rows.Scan(&item.ID, &item.ContentPreview, &item.Source, &meta, &item.CreatedAt); err != nil { // ptrext:allow pgx-scan
+		var createdAt time.Time
+		if err := rows.Scan(&item.ID, &item.ContentPreview, &item.Source, &meta, &createdAt); err != nil { // ptrext:allow pgx-scan
 			return nil, err
 		}
+		item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 		if meta != nil {
 			item.SourceMeta = map[string]any{}
-			for _, k := range []string{"zendesk_ticket_id", "zendesk_status", "zendesk_priority", "slack_channel_name"} {
+			for _, k := range []string{
+				"zendesk_ticket_id", "zendesk_status", "zendesk_priority",
+				"slack_channel_name",
+				"intercom_conversation_id", "intercom_state",
+			} {
 				if v, ok := meta[k]; ok {
 					item.SourceMeta[k] = v
 				}

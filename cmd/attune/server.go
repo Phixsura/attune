@@ -231,6 +231,7 @@ func applyRuntimeHardening(cfg *config.Config) {
 	// link-local); config relaxes loopback/private for dev / on-prem.
 	egress := cfg.EgressPolicy()
 	slackadapter.SetAPIBaseURL(cfg.SlackAPIBaseURL)
+	intercomclient.SetTestBaseURL(cfg.IntercomAPIBaseURL)
 	notify.SetEgressPolicy(egress)
 	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
