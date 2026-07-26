@@ -378,7 +378,10 @@ func TestPollSource_ClientSideWatermarkFilter(t *testing.T) {
 
 	older := fullConversation()
 	older.ID = "100"
-	older.UpdatedAt = 1700000300 // <= watermark, must be skipped
+	// <= watermark - lookback, must be skipped. Items inside the
+	// lookback window below the watermark are deliberately re-fetched
+	// (late index arrivals) and dedup by idempotency key instead.
+	older.UpdatedAt = 1700000400 - searchLookbackSeconds
 	newer := fullConversation()
 	newer.UpdatedAt = 1700000500
 
@@ -459,11 +462,12 @@ func TestPollSource_DetailBudgetStopsWatermark(t *testing.T) {
 		t.Fatalf("expected 1 ingest under budget=1, got %d", len(ingestFake.Calls))
 	}
 	stored, _ := sources.Get(context.Background(), "src-1")
-	// Watermark stops one second before c1 so any unprocessed
-	// conversation sharing c1's updated_at second (and c2) is re-covered
-	// next tick; c1's own re-fetch dedups by idempotency key.
-	if stored.State.LastUID != 1700000499 {
-		t.Errorf("LastUID = %d, want 1700000499 (budget boundary - 1s)", stored.State.LastUID)
+	// Watermark stops at c1: c2 (beyond it) is re-covered next tick, and
+	// the lookback window re-covers everything within
+	// searchLookbackSeconds below c1 — strictly more than the former
+	// one-second step-back; re-covers dedup by idempotency key.
+	if stored.State.LastUID != 1700000500 {
+		t.Errorf("LastUID = %d, want 1700000500 (last processed item)", stored.State.LastUID)
 	}
 }
 
@@ -720,11 +724,11 @@ func TestPollSource_RateBudgetFloorStopsTick(t *testing.T) {
 	if len(ingestFake.Calls) != 1 {
 		t.Errorf("ingests = %d, want 1", len(ingestFake.Calls))
 	}
-	// Early stop mid-window: watermark steps back one second so the
-	// boundary second is fully re-covered next tick.
+	// Early stop mid-window: the watermark holds at the last processed
+	// item; the lookback window re-covers the boundary next tick.
 	stored, _ := sources.Get(context.Background(), "src-1")
-	if stored.State.LastUID != 1700000499 {
-		t.Errorf("LastUID = %d, want 1700000499", stored.State.LastUID)
+	if stored.State.LastUID != 1700000500 {
+		t.Errorf("LastUID = %d, want 1700000500", stored.State.LastUID)
 	}
 	// Source stays enabled and healthy — this is throttling, not an error.
 	if !stored.Enabled {
@@ -1470,5 +1474,100 @@ func TestPollSource_DeferredItemsNotStrandedBehindCursor(t *testing.T) {
 	stored, _ := sources.Get(context.Background(), "src-1")
 	if stored.State.LastUID != qualifying.UpdatedAt {
 		t.Errorf("LastUID = %d, want %d (drained window keeps the full watermark)", stored.State.LastUID, qualifying.UpdatedAt)
+	}
+}
+
+// TestPollSource_LookbackRecoversLateIndexArrival: conversations/search
+// is eventually consistent — a conversation updated at T can enter the
+// index AFTER a later-updated conversation already advanced the
+// watermark past T. The lookback window must re-fetch it instead of
+// skipping it forever.
+func TestPollSource_LookbackRecoversLateIndexArrival(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	// Tick 1: only the later-updated conversation is in the index.
+	late := fullConversation()
+	late.ID = "102"
+	late.UpdatedAt = 1700000600
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{late}}},
+		detailByID: map[string]conversation{"102": late},
+	}
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+	if len(ingestFake.Calls) != 1 {
+		t.Fatalf("tick 1: expected 1 ingest, got %d", len(ingestFake.Calls))
+	}
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000600 {
+		t.Fatalf("tick 1: watermark = %d, want 1700000600", stored.State.LastUID)
+	}
+
+	// Tick 2: the index catches up — an EARLIER-updated conversation
+	// (within the lookback window below the watermark) appears.
+	early := fullConversation()
+	early.ID = "101"
+	early.UpdatedAt = 1700000600 - searchLookbackSeconds + 1
+	fake.pages = []conversationPage{{Conversations: []conversation{early, late}}}
+	fake.detailByID["101"] = early
+	fake.pageCalls = 0
+
+	src2, _ := sources.Get(context.Background(), "src-1")
+	a.pollSource(context.Background(), src2)
+
+	if len(ingestFake.Calls) != 2 {
+		t.Fatalf("tick 2: late index arrival must be ingested (total 2), got %d", len(ingestFake.Calls))
+	}
+	if got := ingestFake.Calls[1].In.SourceMeta["intercom_conversation_id"]; got != "101" {
+		t.Errorf("tick 2: ingested %v, want the late-arriving 101", got)
+	}
+	// The already-processed later conversation re-covers for free.
+	stored2, _ := sources.Get(context.Background(), "src-1")
+	if stored2.State.LastUID != 1700000600 {
+		t.Errorf("tick 2: watermark = %d, want unchanged 1700000600", stored2.State.LastUID)
+	}
+}
+
+// TestPollSource_LookbackReplayDedupsForFree: re-covered already-
+// processed snapshots inside the lookback window must not consume detail
+// budget or produce duplicate ingests.
+func TestPollSource_LookbackReplayDedupsForFree(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	c1 := fullConversation()
+	c1.ID = "101"
+	c1.UpdatedAt = 1700000500
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{c1}}},
+		detailByID: map[string]conversation{"101": c1},
+	}
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+	if len(ingestFake.Calls) != 1 {
+		t.Fatalf("tick 1: expected 1 ingest, got %d", len(ingestFake.Calls))
+	}
+
+	// Tick 2 re-lists the same snapshot (now inside the lookback window
+	// below the watermark) — the processed-set skips it for free.
+	src2, _ := sources.Get(context.Background(), "src-1")
+	fake.detailCalls = 0
+	a.pollSource(context.Background(), src2)
+	if len(ingestFake.Calls) != 1 {
+		t.Errorf("tick 2: replay must not re-ingest, got %d ingests", len(ingestFake.Calls))
+	}
+	if fake.detailCalls != 0 {
+		t.Errorf("tick 2: replay must not consume detail budget, detailCalls = %d", fake.detailCalls)
 	}
 }

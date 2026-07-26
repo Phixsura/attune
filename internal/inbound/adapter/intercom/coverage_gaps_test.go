@@ -9,6 +9,7 @@ package intercom
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -471,15 +472,26 @@ func TestResolveCompany_FetchFailureNegativeCaches(t *testing.T) {
 	}
 }
 
-// TestResolveContacts_SearchFailureReturnsNil covers the SearchContacts
-// error leg.
-func TestResolveContacts_SearchFailureReturnsNil(t *testing.T) {
+// TestResolveContacts_FailureLegs covers both SearchContacts error
+// modes: transient failures propagate (retry the conversation next tick
+// instead of ingesting under a drifted identity); permanent failures
+// degrade to the seed-author fallback.
+func TestResolveContacts_FailureLegs(t *testing.T) {
 	_, _, _, deps := buildDeps(t)
-	fake := ptrext.Of(fakeAPIClient{contactsErr: errors.New("contacts boom")})
-	a := buildTestAdapter(fake, deps)
 	conv := fullConversation()
-	if got := a.resolveContacts(context.Background(), fake, conv, "test"); got != nil {
-		t.Errorf("resolveContacts = %v, want nil on failure", got)
+
+	// Transient (network) → error propagates.
+	fakeTransient := ptrext.Of(fakeAPIClient{contactsErr: errors.New("dial tcp: timeout")})
+	a := buildTestAdapter(fakeTransient, deps)
+	if got, err := a.resolveContacts(context.Background(), fakeTransient, conv, "test"); err == nil || got != nil {
+		t.Errorf("transient failure = (%v, %v), want (nil, error)", got, err)
+	}
+
+	// Permanent (plan-gated 403) → degrade to nil map, no error.
+	fakePermanent := ptrext.Of(fakeAPIClient{contactsErr: apiError{Method: "/contacts/search", Status: 403, Code: "api_plan_restricted"}})
+	a2 := buildTestAdapter(fakePermanent, deps)
+	if got, err := a2.resolveContacts(context.Background(), fakePermanent, conv, "test"); err != nil || got != nil {
+		t.Errorf("permanent failure = (%v, %v), want (nil, nil)", got, err)
 	}
 }
 
@@ -516,5 +528,80 @@ func TestAPIErrorStatus(t *testing.T) {
 	status, code, ok = APIErrorStatus(errors.New("plain"))
 	if ok || status != 0 || code != "" {
 		t.Errorf("APIErrorStatus(plain) = (%d, %q, %t), want zero values", status, code, ok)
+	}
+}
+
+// TestTruncateStructurally_KeepsAgentRepliesInKeptRanges: agent messages
+// between kept customer messages must survive structural truncation, and
+// the omission marker counts every dropped message.
+func TestTruncateStructurally_KeepsAgentRepliesInKeptRanges(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", 700)
+	var parts []part
+	// 8 customer messages, each followed by an agent reply.
+	for i := 0; i < 8; i++ {
+		parts = append(parts,
+			customerPart(fmt.Sprintf("c%d", i), fmt.Sprintf("question %d %s", i, long)),
+			agentPart(fmt.Sprintf("a%d", i), fmt.Sprintf("answer %d", i)),
+		)
+	}
+	conv := convWithParts(parts)
+	cr := buildContent(conv)
+
+	// Head range: customers 0-2 AND the agent replies between them.
+	for _, want := range []string{"question 0", "answer 0", "question 1", "answer 1", "question 2"} {
+		if !strings.Contains(cr.text, want) {
+			t.Errorf("kept head range missing %q", want)
+		}
+	}
+	// Tail range: customers 6-7 with the agent reply between them.
+	for _, want := range []string{"question 6", "answer 6", "question 7"} {
+		if !strings.Contains(cr.text, want) {
+			t.Errorf("kept tail range missing %q", want)
+		}
+	}
+	// Omitted middle: customers 3-5 and their agent replies = the
+	// marker counts messages, not customer messages.
+	if strings.Contains(cr.text, "question 4") {
+		t.Error("omitted middle leaked into the transcript")
+	}
+	if !strings.Contains(cr.text, "[... 7 messages omitted ...]") {
+		t.Errorf("omission marker must count all dropped messages, text tail: %q",
+			cr.text[max(0, len(cr.text)-200):])
+	}
+}
+
+// TestStripHTMLTags_EntitiesWithoutTags: entity unescaping must not
+// depend on the body containing a tag.
+func TestStripHTMLTags_EntitiesWithoutTags(t *testing.T) {
+	t.Parallel()
+	if got := stripHTMLTags("Tom &amp; Jerry &gt; others"); got != "Tom & Jerry > others" {
+		t.Errorf("stripHTMLTags = %q, want entities unescaped without tags", got)
+	}
+	if got := stripHTMLTags("no entities here"); got != "no entities here" {
+		t.Errorf("plain text changed: %q", got)
+	}
+}
+
+// TestTruncateStructurally_AllCustomersKeptFallsBack: agent-heavy
+// threads whose customer messages all fit in the keep budget fall back
+// to byte truncation (nothing structural to omit).
+func TestTruncateStructurally_AllCustomersKeptFallsBack(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("w", 900)
+	parts := []part{
+		agentPart("a0", "intro "+long),
+		agentPart("a1", "more "+long),
+	}
+	for i := 0; i < 5; i++ {
+		parts = append(parts, customerPart(fmt.Sprintf("c%d", i), fmt.Sprintf("q%d %s", i, long)))
+	}
+	conv := convWithParts(parts)
+	cr := buildContent(conv)
+	if !strings.HasSuffix(cr.text, " [truncated]") {
+		t.Errorf("expected byte-truncation fallback, tail: %q", cr.text[len(cr.text)-30:])
+	}
+	if strings.Contains(cr.text, "omitted") {
+		t.Errorf("no omission marker expected when every customer message is kept")
 	}
 }

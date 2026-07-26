@@ -264,3 +264,42 @@ func (c cursorRejectingClient) GetCompany(ctx context.Context, id string) (inter
 }
 
 func (c cursorRejectingClient) RateBudget() int64 { return c.inner.RateBudget() }
+
+// TestPollSource_TransientContactFailureRetries: a transient contacts
+// failure must stop the tick (outcomeRetry) instead of ingesting the
+// conversation under the seed-author fallback identity.
+func TestPollSource_TransientContactFailureRetries(t *testing.T) {
+	sources, ingestFake, metrics, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"), WorkspaceID: "ws-1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 0)
+
+	conv := fullConversation()
+	fake := ptrext.Of(fakeAPIClient{
+		pages:       []conversationPage{{Conversations: []conversation{conv}}},
+		detailByID:  map[string]conversation{conv.ID: conv},
+		contactsErr: errors.New("dial tcp: timeout"),
+	})
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 0 {
+		t.Fatalf("transient contact failure must not ingest, got %d", len(ingestFake.Calls))
+	}
+	// Watermark must not advance past the unprocessed conversation.
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 0 {
+		t.Errorf("LastUID = %d, want 0 (held)", stored.State.LastUID)
+	}
+	found := false
+	for _, m := range metrics.Totals {
+		if strings.HasSuffix(m, "|transient_err") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected transient_err metric, got %v", metrics.Totals)
+	}
+}

@@ -68,7 +68,11 @@ type ExportData struct {
 	ReplyDraftRevisionRows   []json.RawMessage
 	ReplyDraftEventRows      []json.RawMessage
 	ReplyDeliveryAttemptRows []json.RawMessage
-	Counts                   Counts
+	// Customer-request rows carrying the subject's identity — the same
+	// rows the delete path anonymizes (Art. 15 must cover Art. 17's scope).
+	CustomerLinkRows []json.RawMessage
+	VoteRows         []json.RawMessage
+	Counts           Counts
 }
 
 type DeleteResult struct {
@@ -101,6 +105,8 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 		ReplyDraftRevisionRows:   rows.replyDraftRevisions,
 		ReplyDraftEventRows:      rows.replyDraftEvents,
 		ReplyDeliveryAttemptRows: rows.replyDeliveryAttempts,
+		CustomerLinkRows:         rows.customerLinks,
+		VoteRows:                 rows.votes,
 		Counts:                   rows.counts(),
 	}), nil
 }
@@ -114,6 +120,8 @@ type subjectExportRows struct {
 	replyDraftRevisions   []json.RawMessage
 	replyDraftEvents      []json.RawMessage
 	replyDeliveryAttempts []json.RawMessage
+	customerLinks         []json.RawMessage
+	votes                 []json.RawMessage
 }
 
 func (rows subjectExportRows) counts() Counts {
@@ -126,6 +134,8 @@ func (rows subjectExportRows) counts() Counts {
 		ReplyDraftRevisionCount:   len(rows.replyDraftRevisions),
 		ReplyDraftEventCount:      len(rows.replyDraftEvents),
 		ReplyDeliveryAttemptCount: len(rows.replyDeliveryAttempts),
+		CustomerLinkCount:         len(rows.customerLinks),
+		VoteCount:                 len(rows.votes),
 	}
 }
 
@@ -152,6 +162,12 @@ func (r *Repo) exportSubjectRows(ctx context.Context, tenantID, subjectKey strin
 	}
 	if rows.replyDraftEvents, err = r.exportReplyDraftEventRows(ctx, tenantID, subjectKey); err != nil {
 		return subjectExportRows{}, err
+	}
+	if rows.customerLinks, err = r.exportCustomerRequestSubjectRows(ctx, tenantID, subjectKey, "customer_request_customer_links"); err != nil {
+		return rows, err
+	}
+	if rows.votes, err = r.exportCustomerRequestSubjectRows(ctx, tenantID, subjectKey, "customer_request_votes"); err != nil {
+		return rows, err
 	}
 	if rows.replyDeliveryAttempts, err = r.exportReplyDeliveryAttemptRows(ctx, tenantID, subjectKey); err != nil {
 		return subjectExportRows{}, err
@@ -180,6 +196,29 @@ func (r *Repo) exportFeedbackRows(ctx context.Context, tenantID, subjectKey stri
 		return nil, fmt.Errorf("query feedback export rows: %w", err)
 	}
 	return feedbackRows, nil
+}
+
+// exportCustomerRequestSubjectRows exports the subject's identity rows
+// from one customer-request table (links or votes) — the same rows the
+// delete path anonymizes. Matches by subject_key, or by the tenant-scoped
+// subject_hash for rows already anonymized in a previous erasure. `table`
+// is a compile-time constant at every call site, never user input.
+func (r *Repo) exportCustomerRequestSubjectRows(ctx context.Context, tenantID, subjectKey, table string) ([]json.RawMessage, error) {
+	subjectHash := subjectkey.Hash(tenantID, subjectKey)
+	rows, err := r.queryJSONLines(ctx, `
+		SELECT row_to_json(t)
+		FROM (
+			SELECT x.*, cr.display_id AS request_display_id, cr.title AS request_title
+			FROM `+table+` x
+			JOIN customer_requests cr ON cr.tenant_id = x.tenant_id AND cr.id = x.request_id
+			WHERE x.tenant_id = $1
+			  AND (x.subject_key = $2 OR (x.subject_key = '' AND x.subject_hash = $3))
+			ORDER BY x.created_at, x.id
+		) t`, tenantID, subjectKey, subjectHash)
+	if err != nil {
+		return nil, fmt.Errorf("query %s export rows: %w", table, err)
+	}
+	return rows, nil
 }
 
 func (r *Repo) exportFeedbackTagRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {

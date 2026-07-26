@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Phixsura/attune/internal/domain"
 )
@@ -115,8 +116,11 @@ func buildContent(t ticket, comments []comment) contentResult {
 
 // assembleComments builds the final content string. If the full
 // conversation fits within maxContentLen, all comments are included.
-// Otherwise, it keeps the first keepFirstCustomer + last keepLastCustomer
-// customer messages with an omission marker.
+// Otherwise, it keeps the head through the keepFirstCustomer-th customer
+// message and the tail from the keepLastCustomer-th-from-last customer
+// message onward — agent replies inside the kept ranges stay, so the
+// transcript keeps its conversational shape — with an omission marker
+// counting every dropped message in between.
 func assembleComments(header string, entries []tagged) string {
 	// Try full content first.
 	full := buildFull(header, entries)
@@ -124,53 +128,61 @@ func assembleComments(header string, entries []tagged) string {
 		return full
 	}
 
-	// Structural truncation: keep first N + last M customer messages.
+	// Structural truncation: keep the first-N / last-M customer ranges.
 	var custIdx []int
 	for i, e := range entries {
 		if e.isCustomer {
 			custIdx = append(custIdx, i)
 		}
 	}
-	keepFirst := keepFirstCustomer
-	keepLast := keepLastCustomer
-	if keepFirst+keepLast >= len(custIdx) {
-		// Not enough customer messages to split — fall back to byte truncation.
-		if len(full) > maxContentLen {
-			return full[:maxContentLen] + " [truncated]"
-		}
-		return full
+	if keepFirstCustomer+keepLastCustomer >= len(custIdx) {
+		// Not enough customer messages to split — fall back to byte
+		// truncation. Rune-safe: a mid-rune cut would produce invalid
+		// UTF-8 that PostgreSQL rejects with an error outside the
+		// deterministic-reject list, wedging the export cursor forever.
+		return truncateBytesRuneSafe(full, maxContentLen) + " [truncated]"
 	}
-	firstSet := make(map[int]bool)
-	for _, idx := range custIdx[:keepFirst] {
-		firstSet[idx] = true
+	headEnd := custIdx[keepFirstCustomer-1]
+	tailStart := custIdx[len(custIdx)-keepLastCustomer]
+	omitted := tailStart - headEnd - 1
+	if omitted <= 0 {
+		return truncateBytesRuneSafe(full, maxContentLen) + " [truncated]"
 	}
-	lastSet := make(map[int]bool)
-	for _, idx := range custIdx[len(custIdx)-keepLast:] {
-		lastSet[idx] = true
-	}
-	omitted := len(custIdx) - keepFirst - keepLast
 
 	var b strings.Builder
 	b.WriteString(header)
-	pastFirst := false
-	for i, e := range entries {
-		if firstSet[i] || lastSet[i] {
-			if !pastFirst && lastSet[i] && !firstSet[i] {
-				b.WriteString(commentSeparator)
-				fmt.Fprintf(&b, "[... %d messages omitted ...]", omitted) // ptrext:allow fmt-writer
-				pastFirst = true
-			}
-			b.WriteString(commentSeparator)
-			b.WriteString(e.tag)
-			b.WriteString(" ")
-			b.WriteString(e.body)
-		}
+	for i := 0; i <= headEnd; i++ {
+		b.WriteString(commentSeparator)
+		b.WriteString(entries[i].tag)
+		b.WriteString(" ")
+		b.WriteString(entries[i].body)
+	}
+	b.WriteString(commentSeparator)
+	fmt.Fprintf(&b, "[... %d messages omitted ...]", omitted) // ptrext:allow fmt-writer
+	for i := tailStart; i < len(entries); i++ {
+		b.WriteString(commentSeparator)
+		b.WriteString(entries[i].tag)
+		b.WriteString(" ")
+		b.WriteString(entries[i].body)
 	}
 	result := b.String()
 	if len(result) > maxContentLen {
-		result = result[:maxContentLen] + " [truncated]"
+		result = truncateBytesRuneSafe(result, maxContentLen) + " [truncated]"
 	}
 	return result
+}
+
+// truncateBytesRuneSafe cuts s to at most maxBytes without splitting a
+// UTF-8 rune (same helper as the Intercom adapter).
+func truncateBytesRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 func buildFull(header string, entries []tagged) string {

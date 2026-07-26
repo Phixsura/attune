@@ -186,10 +186,15 @@ var htmlBlockBreaks = strings.NewReplacer("</p>", "\n", "</P>", "\n", "<br>", "\
 var htmlEntities = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'", "&nbsp;", " ")
 
 // stripHTMLTags removes markup from Intercom HTML bodies, turning block
-// boundaries into newlines. Plain-text input passes through unchanged
-// (no '<' → no work).
+// boundaries into newlines. Tag-free input skips the tag scan but still
+// unescapes entities — Intercom HTML-encodes text content regardless of
+// whether the body happens to contain markup, and "&amp;" must not read
+// differently depending on a sibling tag.
 func stripHTMLTags(s string) string {
 	if !strings.ContainsRune(s, '<') {
+		if strings.ContainsRune(s, '&') {
+			return htmlEntities.Replace(s)
+		}
 		return s
 	}
 	s = htmlBlockBreaks.Replace(s)
@@ -232,10 +237,13 @@ func assembleParts(header string, entries []tagged) string {
 	return truncateStructurally(header, humans, full)
 }
 
-// truncateStructurally keeps the first keepFirstCustomer + last
-// keepLastCustomer customer messages with an omission marker in between.
-// Falls back to byte truncation when there are too few customer messages
-// to split.
+// truncateStructurally keeps the head through the keepFirstCustomer-th
+// customer message and the tail from the keepLastCustomer-th-from-last
+// customer message onward — agent replies inside the kept ranges stay,
+// so the transcript keeps its conversational shape. The omission marker
+// counts every dropped message (customer AND agent), not just customer
+// ones. Falls back to byte truncation when there are too few customer
+// messages to split.
 func truncateStructurally(header string, humans []tagged, full string) string {
 	var custIdx []int
 	for i, e := range humans {
@@ -246,32 +254,28 @@ func truncateStructurally(header string, humans []tagged, full string) string {
 	if keepFirstCustomer+keepLastCustomer >= len(custIdx) {
 		return truncateBytesRuneSafe(full, maxContentLen) + " [truncated]"
 	}
-	firstSet := make(map[int]bool)
-	for _, idx := range custIdx[:keepFirstCustomer] {
-		firstSet[idx] = true
-	}
-	lastSet := make(map[int]bool)
-	for _, idx := range custIdx[len(custIdx)-keepLastCustomer:] {
-		lastSet[idx] = true
-	}
-	omitted := len(custIdx) - keepFirstCustomer - keepLastCustomer
+	headEnd := custIdx[keepFirstCustomer-1]
+	tailStart := custIdx[len(custIdx)-keepLastCustomer]
+	// custIdx is strictly increasing and (guard above) has at least
+	// keepFirst+keepLast+1 entries, so tailStart ≥ headEnd+2: at least
+	// one message is always omitted between the kept ranges.
+	omitted := tailStart - headEnd - 1
 
 	var b strings.Builder
 	b.WriteString(header)
-	pastFirst := false
-	for i, e := range humans {
-		if !firstSet[i] && !lastSet[i] {
-			continue
-		}
-		if !pastFirst && lastSet[i] && !firstSet[i] {
-			b.WriteString(partSeparator)
-			fmt.Fprintf(&b, "[... %d messages omitted ...]", omitted) // ptrext:allow fmt-writer
-			pastFirst = true
-		}
+	for i := 0; i <= headEnd; i++ {
 		b.WriteString(partSeparator)
-		b.WriteString(e.tag)
+		b.WriteString(humans[i].tag)
 		b.WriteString(" ")
-		b.WriteString(e.body)
+		b.WriteString(humans[i].body)
+	}
+	b.WriteString(partSeparator)
+	fmt.Fprintf(&b, "[... %d messages omitted ...]", omitted) // ptrext:allow fmt-writer
+	for i := tailStart; i < len(humans); i++ {
+		b.WriteString(partSeparator)
+		b.WriteString(humans[i].tag)
+		b.WriteString(" ")
+		b.WriteString(humans[i].body)
 	}
 	result := b.String()
 	if len(result) > maxContentLen {

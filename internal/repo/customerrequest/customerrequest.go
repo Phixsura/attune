@@ -1016,11 +1016,19 @@ func (r *Repo) UnlinkFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string,
 func (r *Repo) FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (string, map[string]any, error) {
 	var source string
 	var meta map[string]any
+	// FOR SHARE serializes this identity read against GDPR erasure's
+	// FOR UPDATE row locks: a concurrent erasure either commits first
+	// (this read then sees the row gone and the link is skipped) or
+	// waits for the promote to commit its link — which the erasure's
+	// own anonymize pass then scrubs. Without the lock, a promote
+	// racing an erasure could copy the subject's identity into a link
+	// row AFTER the anonymize pass already ran.
 	err := tx.QueryRow(
 		ctx, `
 		SELECT source, source_meta
 		FROM user_feedback
-		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
+		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+		FOR SHARE`,
 		tenantID, feedbackID,
 	).Scan(&source, &meta) // ptrext:allow pgx-scan
 	if errors.Is(err, pgx.ErrNoRows) {

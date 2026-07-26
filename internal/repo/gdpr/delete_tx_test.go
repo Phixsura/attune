@@ -242,3 +242,82 @@ func TestExecuteDeleteRequest_Flow(t *testing.T) {
 		}
 	})
 }
+
+// exportPool scripts pool.Query for the export path: the first
+// len(queries) calls answer in order; the rest return empty row sets.
+type exportPool struct {
+	gdprPool
+	queries  []pgx.Rows
+	queryIdx int
+	captured []string
+}
+
+func (p *exportPool) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	p.captured = append(p.captured, sql)
+	idx := p.queryIdx
+	p.queryIdx++
+	if idx < len(p.queries) {
+		return p.queries[idx], nil
+	}
+	return &fakeRows{}, nil
+}
+
+// TestExportCustomerRequestSubjectRows covers the Art. 15 export of the
+// customer-request identity rows the delete path anonymizes: subject_key
+// match, the anonymized subject_hash fallback in the SQL, and count
+// wiring.
+func TestExportCustomerRequestSubjectRows(t *testing.T) {
+	t.Parallel()
+	linkRow := []byte(`{"id":"l1","subject_key":"alice@customer.example","request_display_id":"CR-1"}`)
+	p := &exportPool{queries: []pgx.Rows{
+		&fakeRows{rows: [][]any{{linkRow}}},
+	}}
+	r := &Repo{pool: p}
+
+	rows, err := r.exportCustomerRequestSubjectRows(context.Background(), "tenant-1", "alice@customer.example", "customer_request_customer_links")
+	if err != nil {
+		t.Fatalf("exportCustomerRequestSubjectRows() error = %v", err)
+	}
+	if len(rows) != 1 || !strings.Contains(string(rows[0]), "CR-1") {
+		t.Errorf("rows = %v", rows)
+	}
+	if len(p.captured) != 1 ||
+		!strings.Contains(p.captured[0], "customer_request_customer_links") ||
+		!strings.Contains(p.captured[0], "subject_hash = $3") {
+		t.Errorf("query must target the table and match anonymized rows by hash: %s", p.captured[0])
+	}
+}
+
+// TestExport_IncludesCustomerRequestIdentityRows drives the full Export
+// read: the two customer-request sections land in ExportData and the
+// counts, symmetric with the delete path's anonymization scope.
+func TestExport_IncludesCustomerRequestIdentityRows(t *testing.T) {
+	t.Parallel()
+	linkRow := []byte(`{"id":"l1"}`)
+	voteRow := []byte(`{"id":"v1"}`)
+	p := &exportPool{queries: []pgx.Rows{
+		// subjectInfo listing (id + display).
+		&fakeRows{rows: [][]any{{int64(11), "Alice"}}},
+		// exportSubjectRows call order: feedback, tags, feedbackAudit,
+		// llmAudit, replyDrafts, replyDraftRevisions, replyDraftEvents,
+		// customer links, votes, replyDeliveryAttempts.
+		&fakeRows{}, &fakeRows{}, &fakeRows{}, &fakeRows{},
+		&fakeRows{}, &fakeRows{}, &fakeRows{},
+		&fakeRows{rows: [][]any{{linkRow}}},
+		&fakeRows{rows: [][]any{{voteRow}}},
+		&fakeRows{},
+	}}
+	r := &Repo{pool: p}
+
+	data, err := r.Export(context.Background(), "tenant-1", "alice@customer.example")
+	if err != nil {
+		t.Fatalf("Export() error = %v", err)
+	}
+	if len(data.CustomerLinkRows) != 1 || len(data.VoteRows) != 1 {
+		t.Fatalf("customer-request rows = (%d links, %d votes), want (1, 1)",
+			len(data.CustomerLinkRows), len(data.VoteRows))
+	}
+	if data.Counts.CustomerLinkCount != 1 || data.Counts.VoteCount != 1 {
+		t.Errorf("counts = %+v", data.Counts)
+	}
+}

@@ -329,14 +329,16 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 		"generated_at":    data.GeneratedAt.UTC().Format(time.RFC3339),
 		"schema_version":  "gdpr-export-v1",
 		"counts": map[string]int{
-			"feedback":                data.Counts.FeedbackCount,
-			"feedback_tags":           data.Counts.TagAssignmentCount,
-			"feedback_audit_log":      data.Counts.FeedbackAuditCount,
-			"llm_audit":               data.Counts.LLMAuditCount,
-			"reply_drafts":            data.Counts.ReplyDraftCount,
-			"reply_draft_revisions":   data.Counts.ReplyDraftRevisionCount,
-			"reply_draft_events":      data.Counts.ReplyDraftEventCount,
-			"reply_delivery_attempts": data.Counts.ReplyDeliveryAttemptCount,
+			"feedback":                        data.Counts.FeedbackCount,
+			"feedback_tags":                   data.Counts.TagAssignmentCount,
+			"feedback_audit_log":              data.Counts.FeedbackAuditCount,
+			"llm_audit":                       data.Counts.LLMAuditCount,
+			"reply_drafts":                    data.Counts.ReplyDraftCount,
+			"reply_draft_revisions":           data.Counts.ReplyDraftRevisionCount,
+			"reply_draft_events":              data.Counts.ReplyDraftEventCount,
+			"reply_delivery_attempts":         data.Counts.ReplyDeliveryAttemptCount,
+			"customer_request_customer_links": data.Counts.CustomerLinkCount,
+			"customer_request_votes":          data.Counts.VoteCount,
 		},
 	}
 	if err := writeJSONFile(zw, "manifest.json", manifest); err != nil {
@@ -364,6 +366,12 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 		return nil, err
 	}
 	if err := writeJSONLinesFile(zw, "reply_delivery_attempts.jsonl", data.ReplyDeliveryAttemptRows); err != nil {
+		return nil, err
+	}
+	if err := writeJSONLinesFile(zw, "customer_request_customer_links.jsonl", data.CustomerLinkRows); err != nil {
+		return nil, err
+	}
+	if err := writeJSONLinesFile(zw, "customer_request_votes.jsonl", data.VoteRows); err != nil {
 		return nil, err
 	}
 	if err := zw.Close(); err != nil {

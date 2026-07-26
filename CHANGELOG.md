@@ -201,6 +201,50 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Fixed the Intercom watermark permanently skipping conversations whose
+  search-index entry appeared late: `conversations/search` is eventually
+  consistent with no index-order guarantee, so a conversation updated at
+  T could enter the index after a later-updated conversation had already
+  advanced the watermark past T. The client-side skip boundary now sits
+  a 120s lookback below the watermark (the same defense as Airbyte's
+  `lookback_window`); re-covered snapshots dedup for free via the
+  per-source processed-set and the ingest idempotency key, and the
+  former one-second watermark step-back is superseded.
+
+- GDPR subject export (Art. 15) now includes the customer-request
+  identity rows the delete path anonymizes: the export bundle gains
+  `customer_request_customer_links.jsonl` and
+  `customer_request_votes.jsonl` (matched by subject key, or by the
+  tenant-scoped subject hash for rows a previous erasure anonymized),
+  with counts in the manifest — export and erasure now cover the same
+  identity scope.
+
+- Closed a promote/erasure race that could resurrect an erased subject's
+  identity: the promote-time attribution read now takes `FOR SHARE` on
+  the feedback row, serializing against GDPR erasure's `FOR UPDATE`
+  locks so a concurrent promote either sees the row deleted or commits
+  its link before the erasure's anonymize pass scrubs it.
+
+- Transient contact-resolution failures during Intercom ingestion now
+  retry the conversation next tick instead of ingesting under the
+  seed-author fallback identity — snapshot subject keys no longer drift
+  between email and contact-ID forms when the contacts API hiccups
+  (identity drift would make an email-keyed GDPR request miss rows).
+  Permanent failures (plan-gated contacts API) still degrade gracefully.
+
+- Structural transcript truncation (Intercom and Zendesk) now keeps the
+  agent replies inside the kept conversation ranges (head through the
+  3rd customer message, tail from the 2nd-from-last onward) instead of
+  dropping every agent message, and the `[... N messages omitted ...]`
+  marker counts all omitted messages rather than only customer ones.
+  Zendesk's byte-truncation fallback is now rune-safe — a mid-rune cut
+  produced invalid UTF-8 that PostgreSQL rejects with an error outside
+  the deterministic-reject list, wedging the export cursor.
+
+- Intercom HTML entity unescaping no longer depends on the body carrying
+  a tag: tag-free bodies with `&amp;`-style entities now read the same
+  as marked-up ones.
+
 - Fixed the inbound recent-preview endpoint returning 500 on live
   PostgreSQL: `created_at` (timestamptz) was scanned into a string; it
   now scans into `time.Time` and serializes RFC3339. The preview also

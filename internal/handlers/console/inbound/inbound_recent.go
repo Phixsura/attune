@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -49,6 +50,12 @@ type recentFeedbackItem struct {
 	CreatedAt      string         `json:"created_at"`
 }
 
+// recentQuery is a test seam over pool.Query — the scan loop is testable
+// with fake rows, but the success hand-off needs an injectable query.
+var recentQuery = func(ctx context.Context, pool *pgxpool.Pool, sql string, args ...any) (pgx.Rows, error) {
+	return pool.Query(ctx, sql, args...)
+}
+
 func (h *Handler) queryRecentFeedback(ctx context.Context, sourceID string) ([]recentFeedbackItem, error) {
 	if h.pool == nil {
 		return nil, nil
@@ -58,7 +65,7 @@ func (h *Handler) queryRecentFeedback(ctx context.Context, sourceID string) ([]r
 	           WHERE inbound_source_id = $1
 	           ORDER BY created_at DESC
 	           LIMIT 5`
-	rows, err := h.pool.Query(ctx, q, sourceID)
+	rows, err := recentQuery(ctx, h.pool, q, sourceID)
 	if err != nil {
 		return nil, err
 	}

@@ -40,6 +40,16 @@ const (
 	// app across the workspace; attune must not starve other consumers
 	// during backfill. ~1% of the default budget.
 	rateBudgetFloor = 100
+
+	// searchLookbackSeconds re-covers the trailing edge of every tick.
+	// conversations/search is eventually consistent with no index-order
+	// guarantee: a conversation updated at T can enter the index AFTER a
+	// later-updated conversation already advanced the watermark past T,
+	// which would skip it forever. Filtering at watermark-lookback keeps
+	// late index arrivals reachable (Airbyte's connector exposes the
+	// same knob as lookback_window); re-covered snapshots dedup for free
+	// via the processed-set and the ingest idempotency key.
+	searchLookbackSeconds = 120
 )
 
 // nowFn is overrideable in tests; production uses time.Now.
@@ -197,25 +207,32 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		watermark = a.seedWatermark(cfg)
 	}
 	tickStart := nowFn().Unix()
+	// filterFloor re-covers the lookback window below the watermark:
+	// late index arrivals (see searchLookbackSeconds) land between
+	// floor and watermark and must not be skipped as "covered".
+	filterFloor := watermark - searchLookbackSeconds
+	if filterFloor < 0 {
+		filterFloor = 0
+	}
 	// Day-floor the query start and day-pad the query end (the same
 	// defense Airbyte's production connector uses on both bounds):
 	// Intercom search timestamp comparisons are date-indexed, so a
 	// second-precise "now" upper bound could exclude everything updated
-	// today. The real window [watermark+1, tickStart) is enforced by
+	// today. The real window (filterFloor, tickStart) is enforced by
 	// the client-side second-precision filters below.
-	queryStart := (watermark / daySeconds) * daySeconds
+	queryStart := (filterFloor / daySeconds) * daySeconds
 	queryEnd := (tickStart/daySeconds + 2) * daySeconds
 
 	st := pageState{
 		res:           syncResult{watermark: watermark},
 		baseWatermark: watermark,
+		filterFloor:   filterFloor,
 		tickStart:     tickStart,
 		detailBudget:  effectiveDetailBudget(cfg),
 		companyCache:  map[string]intercomCompany{},
 	}
 	cursor := resumeCursor(cfg, queryStart, queryEnd)
 	endOfResults := false
-	windowDrained := false
 
 	for pageNum := 0; pageNum < maxPagesPerTick && !endOfResults; pageNum++ {
 		if ctx.Err() != nil {
@@ -236,7 +253,7 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		var stop pageStop
 		st, stop = a.processConversationPage(ctx, client, src, cfg, page, st, where)
 		if stop != pageContinue {
-			windowDrained = cfg.applyPageStop(stop, fetchCursor, queryStart, queryEnd)
+			cfg.applyPageStop(stop, fetchCursor, queryStart, queryEnd)
 			break
 		}
 
@@ -262,11 +279,11 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		}
 		cursor = page.StartingAfter
 	}
-	if !endOfResults && !windowDrained && st.res.watermark > st.baseWatermark {
-		// Early stop mid-window: re-cover the boundary second (see the
-		// function comment) at the cost of one deduped re-fetch.
-		st.res.watermark--
-	}
+	// No boundary-second step-back here: the lookback window already
+	// re-covers everything within searchLookbackSeconds of the persisted
+	// watermark, strictly more than the former one-second step-back —
+	// and a stable watermark keeps the day-floored queryStart (and with
+	// it resumeCursor's window match) stable across ticks.
 	// Persist cursor + stats on every exit, including failed ticks:
 	// items ingested before a mid-tick failure were genuinely synced,
 	// and their next-tick re-cover dedups as duplicates (not counted) —
@@ -308,8 +325,11 @@ func resumeCursor(cfg Config, queryStart, queryEnd int64) string {
 type pageState struct {
 	res syncResult
 	// baseWatermark is the effective watermark at tick start (seeded on
-	// first sync) — the client-side second-precision filter boundary.
+	// first sync).
 	baseWatermark int64
+	// filterFloor is the client-side skip boundary: baseWatermark minus
+	// the lookback window, so late index arrivals stay reachable.
+	filterFloor int64
 	// tickStart is the exclusive client-side upper bound: items updated
 	// at or after it land next tick (the API window is day-padded).
 	tickStart     int64
@@ -433,7 +453,10 @@ const (
 // filters, and the processed-set to one search summary.
 func (a *adapter) classifyConversation(sourceID string, summary conversation, cfg Config, st pageState) convAction {
 	// Client-side second-precision window over the day-padded API query.
-	if summary.UpdatedAt <= st.baseWatermark {
+	// The skip boundary sits a lookback below the watermark so a
+	// conversation whose index entry appeared late is still fetched; the
+	// processed-set and the ingest idempotency key absorb the re-covers.
+	if summary.UpdatedAt <= st.filterFloor {
 		return convSkip
 	}
 	if summary.UpdatedAt >= st.tickStart {
@@ -491,13 +514,15 @@ func (a *adapter) rememberProcessed(sourceID string, summary conversation) {
 }
 
 // pruneProcessedKeys drops remembered snapshots at or below the
-// persisted watermark — the `<= baseWatermark` filter covers those, so
-// the memory set only ever holds the boundary second.
+// persisted watermark minus the lookback window — the `<= filterFloor`
+// skip covers those, so the memory set only ever holds the re-coverable
+// tail (lookback + boundary second).
 func (a *adapter) pruneProcessedKeys(sourceID string, watermark int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	floor := watermark - searchLookbackSeconds
 	for key, updatedAt := range a.processedKeys[sourceID] {
-		if updatedAt <= watermark {
+		if updatedAt <= floor {
 			delete(a.processedKeys[sourceID], key)
 		}
 	}
@@ -552,7 +577,13 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 		conv = summary
 	}
 
-	contacts := a.resolveContacts(ctx, client, conv, where)
+	contacts, err := a.resolveContacts(ctx, client, conv, where)
+	if err != nil {
+		// Transient contact-resolution failure: retry the conversation
+		// next tick rather than ingesting under a drifted identity.
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
+		return outcomeRetry
+	}
 	conv.Company = a.resolveCompany(ctx, client, conv.Company, companyCache, where)
 	in := buildIngestInput(src.ID, src.Name, cfg.WorkspaceID, cfg.Region, conv, contacts, admins)
 	if in.Content == "" {
@@ -672,11 +703,16 @@ func (a *adapter) resolveCompany(ctx context.Context, client apiClient, ref *int
 }
 
 // resolveContacts batch-resolves the conversation's contact references.
-// On failure, returns an empty map — normalization falls back to the
-// author identity inline in the thread.
-func (a *adapter) resolveContacts(ctx context.Context, client apiClient, conv conversation, where string) map[string]intercomContact {
+// A transient failure propagates so the caller retries the whole
+// conversation next tick: ingesting with the seed-author fallback
+// identity would permanently record this snapshot under a DIFFERENT
+// subject_key than its sibling snapshots (identity drift — a GDPR
+// request by email would miss the drifted rows). Permanent failures
+// (plan-gated contacts API) degrade to the fallback — retrying cannot
+// change them, and blocking the source on them would wedge it.
+func (a *adapter) resolveContacts(ctx context.Context, client apiClient, conv conversation, where string) (map[string]intercomContact, error) {
 	if len(conv.Contacts.Contacts) == 0 {
-		return nil
+		return nil, nil
 	}
 	ids := make([]string, 0, len(conv.Contacts.Contacts))
 	for _, ref := range conv.Contacts.Contacts {
@@ -687,13 +723,16 @@ func (a *adapter) resolveContacts(ctx context.Context, client apiClient, conv co
 	resolved, err := client.SearchContacts(ctx, ids)
 	if err != nil {
 		logext.Warnf(ctx, "[%s] resolve contacts failed,err:%+v", where, err.Error())
-		return nil
+		if isTransientDetailError(err) {
+			return nil, err
+		}
+		return nil, nil
 	}
 	result := make(map[string]intercomContact, len(resolved))
 	for _, c := range resolved {
 		result[c.ID] = c
 	}
-	return result
+	return result, nil
 }
 
 // seedWatermark determines the first-sync starting point.

@@ -4,12 +4,14 @@
 package inbound
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/inbound"
@@ -98,5 +100,52 @@ func TestScanRecentItems(t *testing.T) {
 		rows:    [][]any{{int64(1), "x", "web", map[string]any(nil), created}},
 		scanErr: errors.New("scan boom"),
 	})
+	require.Error(t, err)
+}
+
+// TestQueryRecentFeedback_SuccessHandOff drives the pool→scan hand-off
+// through the recentQuery seam.
+func TestQueryRecentFeedback_SuccessHandOff(t *testing.T) {
+	created := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
+	origQuery := recentQuery
+	recentQuery = func(_ context.Context, _ *pgxpool.Pool, _ string, args ...any) (pgx.Rows, error) {
+		require.Equal(t, []any{"src-1"}, args)
+		return &fakeRecentRows{rows: [][]any{ // ptrext:allow test-fixture
+			{int64(29), "preview", "intercom", map[string]any(nil), created},
+		}}, nil
+	}
+	t.Cleanup(func() { recentQuery = origQuery })
+
+	// Non-nil pool object; the seam intercepts before any dial.
+	cfg, err := pgxpool.ParseConfig("postgres://attune@127.0.0.1:1/attune?sslmode=disable")
+	require.NoError(t, err)
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	h := ptrext.Of(Handler{pool: pool})
+	items, err := h.queryRecentFeedback(context.Background(), "src-1")
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, int64(29), items[0].ID)
+}
+
+// TestQueryRecentFeedback_QueryError covers the query-failure leg via
+// the recentQuery seam.
+func TestQueryRecentFeedback_QueryError(t *testing.T) {
+	origQuery := recentQuery
+	recentQuery = func(context.Context, *pgxpool.Pool, string, ...any) (pgx.Rows, error) {
+		return nil, errors.New("query boom")
+	}
+	t.Cleanup(func() { recentQuery = origQuery })
+
+	cfg, err := pgxpool.ParseConfig("postgres://attune@127.0.0.1:1/attune?sslmode=disable")
+	require.NoError(t, err)
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	h := ptrext.Of(Handler{pool: pool})
+	_, err = h.queryRecentFeedback(context.Background(), "src-1")
 	require.Error(t, err)
 }

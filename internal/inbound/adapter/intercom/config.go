@@ -74,24 +74,20 @@ func (c *Config) setSyncCursor(cursor string, windowStart, windowEnd int64) {
 	c.SyncWindowEnd = windowEnd
 }
 
-// applyPageStop records the continuation state for an early page stop
-// and reports whether the covered window was fully drained.
-func (c *Config) applyPageStop(stop pageStop, fetchCursor string, queryStart, queryEnd int64) (windowDrained bool) {
+// applyPageStop records the continuation state for an early page stop.
+func (c *Config) applyPageStop(stop pageStop, fetchCursor string, queryStart, queryEnd int64) {
 	switch stop {
 	case pageStopRetry:
 		// Keep the cursor that fetched THIS page so the next tick
 		// re-fetches it (processed head dedups for free).
 		c.setSyncCursor(fetchCursor, queryStart, queryEnd)
-		return false
 	case pageStopDrained:
 		// Everything below tickStart is covered; the remainder
 		// (deferred items) belongs to the next tick's fresh window — a
 		// cursor past deferred items would strand them.
 		c.setSyncCursor("", 0, 0)
-		return true
 	default: // pageStopAbort
 		c.setSyncCursor("", 0, 0)
-		return false
 	}
 }
 
