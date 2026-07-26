@@ -206,6 +206,33 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   now scans into `time.Time` and serializes RFC3339. The preview also
   surfaces `intercom_conversation_id`/`intercom_state` metadata.
 
+- GDPR erasure now covers customer-request attribution: deleting a data
+  subject anonymizes their `customer_request_customer_links` and
+  `customer_request_votes` rows in place (email/name/note scrubbed, the
+  per-tenant subject hash keeps request aggregates like vote and
+  customer counts intact). These tables carry the subject's identity via
+  manual linking and promote-time auto-attribution but have no FK to
+  `user_feedback`, so the feedback purge never reached them. Delete
+  audits report the anonymized row counts.
+
+- Fixed three Zendesk adapter defects (parity with the Intercom
+  hardening):
+  - Transient ingest failures (DB down) no longer advance the export
+    cursor past the failed ticket — the incremental export never
+    re-lists a passed snapshot, so the previous skip-and-continue lost
+    those tickets forever. Deterministic validation rejects still skip.
+  - Tickets beyond the per-tick comment budget are no longer ingested
+    comment-less (which locked the degraded snapshot in under its
+    idempotency key) — the page stops at the budget boundary and the
+    remainder lands next tick with full comments; a per-source
+    processed-set makes the re-fetched head free. Transient comment
+    failures likewise retry next tick instead of degrading.
+  - Backoff now measures from the last attempt (was: last success,
+    which never engaged for never-succeeded sources and self-disabled
+    after one interval), counts degraded ticks as failures, and keys
+    all in-memory poll state by source ID instead of tenant-scoped
+    slug; the poll-lag gauge keeps its value on degraded ticks.
+
 - OIDC Console login now syncs the authenticated IdP user into
   `tenant_members` before issuing the session, and tenant membership lookups
   normalize the `oidc` session alias to `oidc_user`, preventing successful SSO

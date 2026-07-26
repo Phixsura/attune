@@ -383,6 +383,9 @@ func auditCounts(counts gdprrepo.Counts) map[string]int {
 		"reply_draft_revisions":   counts.ReplyDraftRevisionCount,
 		"reply_draft_events":      counts.ReplyDraftEventCount,
 		"reply_delivery_attempts": counts.ReplyDeliveryAttemptCount,
+		// Anonymized in place (identity scrubbed, aggregates kept).
+		"customer_request_customer_links": counts.CustomerLinkCount,
+		"customer_request_votes":          counts.VoteCount,
 	}
 }
 

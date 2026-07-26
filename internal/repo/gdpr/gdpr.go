@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/pkg/subjectkey"
 )
 
 var ErrSubjectNotFound = errors.New("gdpr subject not found")
@@ -37,6 +38,11 @@ type Counts struct {
 	ReplyDraftRevisionCount   int
 	ReplyDraftEventCount      int
 	ReplyDeliveryAttemptCount int
+	// CustomerLinkCount / VoteCount are customer-request rows carrying
+	// the subject's identity (email/name); erasure anonymizes them
+	// in place instead of deleting so request aggregates survive.
+	CustomerLinkCount int
+	VoteCount         int
 }
 
 type ExportData struct {
@@ -318,7 +324,7 @@ func (r *Repo) Delete(ctx context.Context, tenantID, subjectKey string) (*Delete
 		return nil, err
 	}
 
-	counts, err := deleteLockedSubject(ctx, tx, tenantID, info.feedbackIDs)
+	counts, err := deleteLockedSubject(ctx, tx, tenantID, subjectKey, info.feedbackIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +364,7 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 	if err != nil {
 		return nil, err
 	}
-	counts, err := deleteLockedSubject(ctx, tx, tenantID, info.feedbackIDs)
+	counts, err := deleteLockedSubject(ctx, tx, tenantID, subjectKey, info.feedbackIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +379,7 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 	}), nil
 }
 
-func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, feedbackIDs []int64) (Counts, error) {
+func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectKey string, feedbackIDs []int64) (Counts, error) {
 	var counts Counts
 	if err := tx.QueryRow(
 		ctx, `
@@ -418,7 +424,71 @@ func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, feedba
 	if _, err := tx.Exec(ctx, `DELETE FROM user_feedback WHERE tenant_id = $1 AND id = ANY($2)`, tenantID, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete user_feedback rows: %w", err)
 	}
+	linkCount, voteCount, err := anonymizeCustomerRequestSubject(ctx, tx, tenantID, subjectKey)
+	if err != nil {
+		return Counts{}, err
+	}
+	counts.CustomerLinkCount = linkCount
+	counts.VoteCount = voteCount
 	return counts, nil
+}
+
+// anonymizeCustomerRequestSubject scrubs the subject's identity from
+// customer-request links and votes. These tables carry the subject's
+// email (subject_key) and name (subject_display) — copied there by
+// manual linking and by the promote-time auto-attribution — but have no
+// FK to user_feedback, so the feedback purge never reaches them.
+// Anonymize in place: the per-tenant subject_hash keeps rows unique and
+// keeps request aggregates (vote counts, customer counts) intact
+// without retaining the raw identity.
+func anonymizeCustomerRequestSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectKey string) (linkCount, voteCount int, err error) {
+	subjectHash := subjectkey.Hash(tenantID, subjectKey)
+	for _, table := range []string{"customer_request_customer_links", "customer_request_votes"} {
+		count, tableErr := anonymizeSubjectRowsInTable(ctx, tx, table, tenantID, subjectKey, subjectHash)
+		if tableErr != nil {
+			return 0, 0, tableErr
+		}
+		if table == "customer_request_customer_links" {
+			linkCount = count
+		} else {
+			voteCount = count
+		}
+	}
+	return linkCount, voteCount, nil
+}
+
+// anonymizeSubjectRowsInTable scrubs one table's rows for the subject.
+// All the subject's rows on one request+account collapse to a single
+// anonymized tuple — the unique constraint requires keeping exactly one
+// per group before scrubbing.
+func anonymizeSubjectRowsInTable(ctx context.Context, tx pgx.Tx, table, tenantID, subjectKey, subjectHash string) (int, error) {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM `+table+`
+		WHERE tenant_id = $1
+		  AND (subject_key = $2 OR (subject_key = '' AND subject_hash = $3))
+		  AND id NOT IN (
+			SELECT (array_agg(id ORDER BY created_at, id))[1]
+			FROM `+table+`
+			WHERE tenant_id = $1
+			  AND (subject_key = $2 OR (subject_key = '' AND subject_hash = $3))
+			GROUP BY request_id, account_key
+		  )`,
+		tenantID, subjectKey, subjectHash,
+	); err != nil {
+		return 0, fmt.Errorf("dedup %s rows: %w", table, err)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE `+table+`
+		SET subject_key = '', subject_display = '', note = '',
+		    subject_hash = $3
+		WHERE tenant_id = $1
+		  AND subject_key = $2`,
+		tenantID, subjectKey, subjectHash,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("anonymize %s rows: %w", table, err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 type subjectMetadata struct {

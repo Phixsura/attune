@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -79,9 +80,12 @@ func (a *adapter) pollAllSources(ctx context.Context) {
 		if !src.Enabled {
 			continue
 		}
-		if a.shouldSkipBackoff(src.Slug) {
+		// In-memory state is keyed by source ID — slugs are only unique
+		// per tenant and this list spans all tenants.
+		if a.shouldSkipBackoff(src.ID) {
 			continue
 		}
+		a.markPollAttempt(src.ID, nowFn())
 		srcCtx, cancel := context.WithTimeout(ctx, pollSourceTimeout)
 		a.pollSource(srcCtx, src)
 		cancel()
@@ -107,7 +111,7 @@ func (a *adapter) pollSingleSource(ctx context.Context, sourceID string) {
 func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 	const where = "inbound.zendesk.pollSource"
 	start := nowFn()
-	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, a.pollLagSeconds(src.Slug, start))
+	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, a.pollLagSeconds(src.ID, start))
 	defer func() {
 		a.deps.Metrics.Latency(channelName, src.TenantID, src.Slug, time.Since(start).Seconds())
 	}()
@@ -144,8 +148,16 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		newUID = sr.maxGenTS
 	}
 	a.persistPollResult(ctx, src, newUID, nowFn(), sr.pollError)
-	a.markPollSuccess(src.Slug, nowFn())
-	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
+	if sr.pollError != "" {
+		// Per-item transient failures count toward backoff — a
+		// poison-pill ticket retried at full tick rate forever is worse
+		// than a slower cadence. The lag gauge deliberately keeps its
+		// value: a degraded source must not report zero lag.
+		a.markPollFailure(src.ID)
+	} else {
+		a.markPollSuccess(src.ID, nowFn())
+		a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
+	}
 	a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", true)
 }
 
@@ -182,15 +194,25 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		if result.disabled {
 			return res
 		}
-		if result.lastGenTS > res.maxGenTS {
-			res.maxGenTS = result.lastGenTS
-		}
 		if result.pollError != "" {
 			res.pollError = result.pollError
 		}
+		if !result.completed {
+			// Mid-page stop (comment budget, transient comment/ingest
+			// failure): the export cursor must NOT advance past
+			// unprocessed tickets — this page is re-fetched next tick
+			// and the processed head skips for free. Advancing the
+			// cursor here would permanently lose the remainder (the
+			// incremental export never re-lists a passed snapshot).
+			break
+		}
+		if result.lastGenTS > res.maxGenTS {
+			res.maxGenTS = result.lastGenTS
+		}
 		totalSynced += len(page.Tickets)
 
-		// 3.2: Update sync stats.
+		// 3.2: Update sync stats — only for completed pages, so a
+		// re-fetched partial page is never double-counted.
 		cfg.SyncStats.TicketsSynced += int64(len(page.Tickets))
 		if result.lastTicketID > 0 {
 			cfg.SyncStats.LastTicketID = result.lastTicketID
@@ -200,6 +222,9 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 			cfg.SyncCursor = page.AfterCursor
 			cursor = page.AfterCursor
 			startTime = 0
+			// The cursor moved past this page — its snapshots are never
+			// re-listed, so the memory set can drop them.
+			a.clearProcessedTickets(src.ID)
 		}
 		if page.EndOfStream {
 			cfg.SyncStats.BackfillDone = true
@@ -236,9 +261,16 @@ type pageResult struct {
 	lastTicketID int64
 	pollError    string
 	disabled     bool
+	// completed is true when every qualifying ticket on the page was
+	// handled — the export cursor may advance. A mid-page stop (comment
+	// budget, transient failure) leaves it false so the page is
+	// re-fetched next tick.
+	completed bool
 }
 
 // processTicketPage resolves metadata and ingests each non-deleted ticket.
+// Stops (completed=false) at the first ticket it cannot fully handle
+// this tick, so the cursor never advances past unprocessed tickets.
 func (a *adapter) processTicketPage(ctx context.Context, client apiClient, src inbound.Source, cfg Config, page ticketPage, where string) pageResult {
 	// Collect unique user/org IDs for batch resolution.
 	userIDs := make(map[int64]struct{})
@@ -263,7 +295,7 @@ func (a *adapter) processTicketPage(ctx context.Context, client apiClient, src i
 	var commentFetches int
 	for _, t := range page.Tickets {
 		if ctx.Err() != nil {
-			break
+			return res
 		}
 		if t.Status == "deleted" {
 			continue
@@ -272,42 +304,82 @@ func (a *adapter) processTicketPage(ctx context.Context, client apiClient, src i
 		if !matchesFilter(t, cfg.Filter) {
 			continue
 		}
+		if a.alreadyProcessedTicket(src.ID, t) {
+			// Re-fetched partial page: this snapshot was fully handled
+			// on an earlier pass — skip for free.
+			if t.GeneratedTimestamp > res.lastGenTS {
+				res.lastGenTS = t.GeneratedTimestamp
+			}
+			continue
+		}
+		if commentFetches >= commentBudget {
+			// Budget exhausted: stop WITHOUT advancing the cursor so the
+			// remainder of this page (with full comments) lands next
+			// tick — an incomplete comment-less snapshot would be locked
+			// in forever under its idempotency key.
+			logext.Infof(ctx, "[%s] comment budget exhausted,source_id:%s,budget:%d", where, src.ID, commentBudget)
+			return res
+		}
+		commentFetches++
+		comments, ok := a.fetchComments(ctx, client, src, t.ID, where)
+		if !ok {
+			// Transient comment failure: retry this ticket next tick
+			// instead of permanently ingesting a comment-less snapshot.
+			res.pollError = "comments: transient"
+			return res
+		}
+
+		in := buildIngestInput(src.ID, src.Name, cfg.Subdomain, t, comments, users, orgs)
+		if !a.ingestTicket(ctx, src, t.ID, in, where) {
+			// Transient infra failure (DB down): stop WITHOUT advancing
+			// the cursor — continuing would let the persisted cursor
+			// pass this ticket and lose it forever.
+			res.pollError = "ticket sync: transient"
+			return res
+		}
+		a.rememberProcessedTicket(src.ID, t)
 		if t.GeneratedTimestamp > res.lastGenTS {
 			res.lastGenTS = t.GeneratedTimestamp
 		}
 		res.lastTicketID = t.ID
-
-		var comments []comment
-		if commentFetches < commentBudget {
-			commentFetches++
-			comments, res = a.fetchComments(ctx, client, src, t.ID, res, where)
-			if res.disabled {
-				return res
-			}
-		}
-
-		in := buildIngestInput(src.ID, src.Name, cfg.Subdomain, t, comments, users, orgs)
-		if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
-			if isDuplicateError(err) {
-				a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
-			} else {
-				logext.Warnf(ctx, "[%s] ingest failed,source_id:%s,ticket_id:%d,err:%+v",
-					where, src.ID, t.ID, err.Error())
-				a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
-			}
-			continue
-		}
-		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
 	}
+	res.completed = true
 	return res
 }
 
-// fetchComments retrieves public comments for a single ticket.
-// Returns updated pageResult; caller checks res.disabled for early exit.
-func (a *adapter) fetchComments(ctx context.Context, client apiClient, src inbound.Source, ticketID int64, res pageResult, where string) ([]comment, pageResult) {
+// ingestTicket submits one ticket. ok=false only for transient infra
+// failures — duplicates and deterministic validation rejects count as
+// handled (retrying them can never change the outcome).
+func (a *adapter) ingestTicket(ctx context.Context, src inbound.Source, ticketID int64, in domain.IngestInput, where string) bool {
+	if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
+		switch {
+		case isDuplicateError(err):
+			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+		case isDeterministicIngestError(err):
+			// Validation rejects reproduce identically on every retry —
+			// skip the ticket instead of wedging the cursor.
+			logext.Warnf(ctx, "[%s] ingest rejected,skipping,source_id:%s,ticket_id:%d,err:%+v",
+				where, src.ID, ticketID, err.Error())
+			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+		default:
+			logext.Warnf(ctx, "[%s] ingest failed,will retry next tick,source_id:%s,ticket_id:%d,err:%+v",
+				where, src.ID, ticketID, err.Error())
+			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
+			return false
+		}
+		return true
+	}
+	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "ok")
+	return true
+}
+
+// fetchComments retrieves public comments for a single ticket. ok=false
+// signals a transient failure (retry next tick); permanent per-ticket
+// conditions degrade to a comment-less ingest (retrying cannot succeed).
+func (a *adapter) fetchComments(ctx context.Context, client apiClient, src inbound.Source, ticketID int64, where string) ([]comment, bool) {
 	comments, cerr := client.TicketComments(ctx, ticketID)
 	if cerr == nil {
-		return comments, res
+		return comments, true
 	}
 	if isPermanentZendeskError(cerr) {
 		// Degrade gracefully: skip this ticket's comments but don't disable
@@ -316,14 +388,72 @@ func (a *adapter) fetchComments(ctx context.Context, client apiClient, src inbou
 		logext.Warnf(ctx, "[%s] comments auth failed,skipping ticket,source_id:%s,ticket_id:%d,err:%s",
 			where, src.ID, ticketID, cerr.Error())
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "comment_auth_err")
-		return nil, res
+		return nil, true
 	}
-	logext.Warnf(ctx, "[%s] comments fetch failed,source_id:%s,ticket_id:%d,err:%+v",
+	logext.Warnf(ctx, "[%s] comments fetch failed,will retry next tick,source_id:%s,ticket_id:%d,err:%+v",
 		where, src.ID, ticketID, cerr.Error())
-	if res.pollError == "" {
-		res.pollError = "comments: transient"
+	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
+	return nil, false
+}
+
+// isDeterministicIngestError matches ingest rejections that reproduce
+// identically on every attempt — validation failures, never infra
+// errors. These must skip the ticket, not wedge the cursor.
+func isDeterministicIngestError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"content is required",
+		"content too long",
+		"content contains a null byte",
+		"invalid source",
+		"invalid idempotency key",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
 	}
-	return nil, res
+	return false
+}
+
+// ticketSnapshotKey identifies one ticket snapshot in the per-source
+// processed-set.
+func ticketSnapshotKey(t ticket) string {
+	return fmt.Sprintf("%d@%d", t.ID, t.GeneratedTimestamp)
+}
+
+// alreadyProcessedTicket reports whether this exact ticket snapshot was
+// fully handled on an earlier pass of a re-fetched page.
+func (a *adapter) alreadyProcessedTicket(sourceID string, t ticket) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	seen, ok := a.processedTickets[sourceID]
+	if !ok {
+		return false
+	}
+	_, done := seen[ticketSnapshotKey(t)]
+	return done
+}
+
+// rememberProcessedTicket marks a snapshot as fully handled so a
+// re-fetched partial page skips it without spending comment budget.
+func (a *adapter) rememberProcessedTicket(sourceID string, t ticket) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.processedTickets == nil {
+		a.processedTickets = map[string]map[string]struct{}{}
+	}
+	if a.processedTickets[sourceID] == nil {
+		a.processedTickets[sourceID] = map[string]struct{}{}
+	}
+	a.processedTickets[sourceID][ticketSnapshotKey(t)] = struct{}{}
+}
+
+// clearProcessedTickets drops the memory set once the cursor advances —
+// the export stream never re-lists snapshots behind the cursor.
+func (a *adapter) clearProcessedTickets(sourceID string) {
+	a.mu.Lock()
+	delete(a.processedTickets, sourceID)
+	a.mu.Unlock()
 }
 
 // tryOAuthRefresh attempts to refresh an expired OAuth access token.
@@ -505,9 +635,9 @@ func (a *adapter) persistPollResult(ctx context.Context, src inbound.Source, las
 	})
 }
 
-func (a *adapter) pollLagSeconds(slug string, now time.Time) float64 {
+func (a *adapter) pollLagSeconds(sourceID string, now time.Time) float64 {
 	a.mu.Lock()
-	last, ok := a.lastSuccessAt[slug]
+	last, ok := a.lastSuccessAt[sourceID]
 	a.mu.Unlock()
 	if !ok {
 		return 0
@@ -515,16 +645,40 @@ func (a *adapter) pollLagSeconds(slug string, now time.Time) float64 {
 	return now.Sub(last).Seconds()
 }
 
-func (a *adapter) markPollSuccess(slug string, t time.Time) {
+func (a *adapter) markPollSuccess(sourceID string, t time.Time) {
 	a.mu.Lock()
 	if a.lastSuccessAt == nil {
 		a.lastSuccessAt = map[string]time.Time{}
 	}
-	a.lastSuccessAt[slug] = t
+	a.lastSuccessAt[sourceID] = t
 	// Reset backoff on success.
 	if a.failureCount != nil {
-		delete(a.failureCount, slug)
+		delete(a.failureCount, sourceID)
 	}
+	a.mu.Unlock()
+}
+
+// markPollAttempt records the attempt time — the backoff reference point
+// (measuring from last success would disable backoff after one interval
+// and never engage it for never-succeeded sources).
+func (a *adapter) markPollAttempt(sourceID string, t time.Time) {
+	a.mu.Lock()
+	if a.lastAttemptAt == nil {
+		a.lastAttemptAt = map[string]time.Time{}
+	}
+	a.lastAttemptAt[sourceID] = t
+	a.mu.Unlock()
+}
+
+// markPollFailure bumps the consecutive-failure counter without touching
+// source state (used for per-item transient degradation, where the tick
+// itself persisted normally).
+func (a *adapter) markPollFailure(sourceID string) {
+	a.mu.Lock()
+	if a.failureCount == nil {
+		a.failureCount = map[string]int{}
+	}
+	a.failureCount[sourceID]++
 	a.mu.Unlock()
 }
 
@@ -535,25 +689,19 @@ func (a *adapter) transientError(ctx context.Context, src inbound.Source, reason
 		LastError:   reason,
 	})
 	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
-	// Increment backoff counter.
-	a.mu.Lock()
-	if a.failureCount == nil {
-		a.failureCount = map[string]int{}
-	}
-	a.failureCount[src.Slug]++
-	a.mu.Unlock()
+	a.markPollFailure(src.ID)
 }
 
 // shouldSkipBackoff returns true if the source has consecutive failures
 // and the backoff interval hasn't elapsed since the last attempt.
-// Backoff schedule: 0-2 failures → no skip (60s tick is enough),
-// 3+ → skip every other tick, doubling: effectively 120s, 240s, ... max 900s.
-func (a *adapter) shouldSkipBackoff(slug string) bool {
+// Backoff schedule: 0-2 failures → no skip (60s tick is enough), 3+ →
+// doubling: 120s, 240s, ... capped at 900s.
+func (a *adapter) shouldSkipBackoff(sourceID string) bool {
 	a.mu.Lock()
-	failures := a.failureCount[slug]
-	last, hasLast := a.lastSuccessAt[slug]
+	failures := a.failureCount[sourceID]
+	last, hasLast := a.lastAttemptAt[sourceID]
 	a.mu.Unlock()
-	if failures < 3 {
+	if failures < 3 || !hasLast {
 		return false
 	}
 	// Exponential interval: 60 * 2^(failures-2), capped at 900s.
@@ -563,9 +711,6 @@ func (a *adapter) shouldSkipBackoff(slug string) bool {
 	}
 	if interval > 15*time.Minute {
 		interval = 15 * time.Minute
-	}
-	if !hasLast {
-		return false
 	}
 	return nowFn().Sub(last) < interval
 }

@@ -151,6 +151,123 @@ func TestPG_GDPRDeleteSubjectIsolationAndNotFound(t *testing.T) {
 	}
 }
 
+// TestPG_GDPRDeleteAnonymizesCustomerRequestIdentity: customer-request
+// links and votes carry the subject's email/name (via manual linking
+// and promote-time auto-attribution) but have no FK to user_feedback —
+// erasure must scrub them in place while keeping request aggregates.
+func TestPG_GDPRDeleteAnonymizesCustomerRequestIdentity(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+	tenantID := createTenant(t, ctx, pool, "gdpr-crlinks", "GDPR CR Links")
+	svc := newImmediateService(pool)
+
+	subjectKey := "carol@example.com"
+	insertFeedback(t, ctx, pool, tenantID, "ext_api:carol@example.com", subjectKey, "Carol", "hash-carol", "Broken export")
+
+	requestID := insertCustomerRequest(t, ctx, pool, tenantID, "Export failures")
+	otherRequestID := insertCustomerRequest(t, ctx, pool, tenantID, "Unrelated request")
+	// Subject's link + vote on one request; a second raw link on the
+	// same request/account exercises the pre-scrub dedup collapse.
+	insertCustomerLink(t, ctx, pool, tenantID, requestID, subjectKey, "Carol", "acme")
+	insertCustomerLink(t, ctx, pool, tenantID, otherRequestID, subjectKey, "Carol", "acme")
+	insertCustomerVote(t, ctx, pool, tenantID, requestID, subjectKey, "Carol")
+	// Another subject's rows must be untouched.
+	insertCustomerLink(t, ctx, pool, tenantID, requestID, "dave@example.com", "Dave", "globex")
+
+	result, err := svc.Delete(ctx, tenantID, subjectKey, actor())
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if result.Counts.CustomerLinkCount != 2 {
+		t.Errorf("CustomerLinkCount = %d, want 2", result.Counts.CustomerLinkCount)
+	}
+	if result.Counts.VoteCount != 1 {
+		t.Errorf("VoteCount = %d, want 1", result.Counts.VoteCount)
+	}
+
+	// The subject's identity is gone from both tables...
+	assertTableCount(t, ctx, pool,
+		`SELECT COUNT(*) FROM customer_request_customer_links WHERE tenant_id = $1 AND subject_key = $2`,
+		0, tenantID, subjectKey)
+	assertTableCount(t, ctx, pool,
+		`SELECT COUNT(*) FROM customer_request_votes WHERE tenant_id = $1 AND subject_key = $2`,
+		0, tenantID, subjectKey)
+	var display string
+	if err := pool.QueryRow(ctx,
+		`SELECT COALESCE(string_agg(subject_display, ','), '') FROM customer_request_customer_links
+		 WHERE tenant_id = $1 AND subject_display <> '' AND subject_display <> 'Dave'`,
+		tenantID).Scan(&display); err != nil {
+		t.Fatalf("query displays: %v", err)
+	}
+	if display != "" {
+		t.Errorf("subject_display not scrubbed: %q", display)
+	}
+	// ...but the aggregates survive: the request keeps its anonymized
+	// customer rows and the vote row.
+	assertTableCount(t, ctx, pool,
+		`SELECT COUNT(*) FROM customer_request_customer_links WHERE tenant_id = $1 AND request_id = $2`,
+		2, tenantID, requestID)
+	assertTableCount(t, ctx, pool,
+		`SELECT COUNT(*) FROM customer_request_votes WHERE tenant_id = $1 AND request_id = $2`,
+		1, tenantID, requestID)
+	// The untouched subject stays raw.
+	assertTableCount(t, ctx, pool,
+		`SELECT COUNT(*) FROM customer_request_customer_links WHERE tenant_id = $1 AND subject_key = 'dave@example.com'`,
+		1, tenantID)
+
+	// Idempotent: a second subject with the SAME anonymized shape on the
+	// same request/account must collapse instead of violating the
+	// unique constraint.
+	insertFeedback(t, ctx, pool, tenantID, "ext_api:erin@example.com", "erin@example.com", "Erin", "hash-erin", "More exports")
+	insertCustomerLink(t, ctx, pool, tenantID, requestID, "erin@example.com", "Erin", "acme")
+	if _, err := svc.Delete(ctx, tenantID, "erin@example.com", actor()); err != nil {
+		t.Fatalf("Delete second subject: %v", err)
+	}
+	assertTableCount(t, ctx, pool,
+		`SELECT COUNT(*) FROM customer_request_customer_links WHERE tenant_id = $1 AND subject_key = 'erin@example.com'`,
+		0, tenantID)
+}
+
+func insertCustomerRequest(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID, title string) string {
+	t.Helper()
+	var id string
+	if err := pool.QueryRow(ctx, `
+		WITH next AS (
+			SELECT COALESCE(MAX(display_number), 0) + 1 AS n
+			FROM customer_requests WHERE tenant_id = $1
+		)
+		INSERT INTO customer_requests (tenant_id, display_number, display_id, title, created_by, updated_by)
+		SELECT $1, n, 'CR-' || n, $2, 'admin-1', 'admin-1' FROM next
+		RETURNING id`,
+		tenantID, title,
+	).Scan(&id); err != nil {
+		t.Fatalf("insert customer request: %v", err)
+	}
+	return id
+}
+
+func insertCustomerLink(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID, requestID, subjectKey, subjectDisplay, accountKey string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO customer_request_customer_links (tenant_id, request_id, subject_key, subject_display, account_key, created_by)
+		VALUES ($1, $2, $3, $4, $5, 'admin-1')`,
+		tenantID, requestID, subjectKey, subjectDisplay, accountKey,
+	); err != nil {
+		t.Fatalf("insert customer link: %v", err)
+	}
+}
+
+func insertCustomerVote(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID, requestID, subjectKey, subjectDisplay string) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO customer_request_votes (tenant_id, request_id, subject_key, subject_display, created_by)
+		VALUES ($1, $2, $3, $4, 'admin-1')`,
+		tenantID, requestID, subjectKey, subjectDisplay,
+	); err != nil {
+		t.Fatalf("insert customer vote: %v", err)
+	}
+}
+
 func TestPG_GDPRDeleteRequestLifecycle(t *testing.T) {
 	pool := testdb.NewPool(t)
 	ctx := context.Background()
