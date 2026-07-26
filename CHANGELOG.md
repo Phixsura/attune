@@ -23,14 +23,21 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     boundary-second conversations are never lost; a per-source
     processed-set makes the boundary re-cover free; the persisted
     cursor lets days with more covered conversations than one tick can
-    list drain instead of relisting from the day floor forever.
+    list drain instead of relisting from the day floor forever. Items
+    updated at/after tick start drain the window and drop the cursor —
+    a continuation is never persisted past a deferred item — and a
+    rejected continuation cursor falls back to a fresh window scan in
+    the same tick (cross-tick cursor lifetime is undocumented).
   - Failure taxonomy that cannot wedge the source: transient detail /
     ingest failures (5xx, network, DB down) retry next tick without
     advancing the watermark; deterministic conditions (empty
     conversations, validation rejects, oversized/undecodable responses)
     skip or degrade to the summary shape and advance — a poison-pill
     item slows the source down (transient ticks now count toward
-    backoff, measured from last attempt) but never stalls it.
+    backoff, measured from last attempt) but never stalls it. Adapter
+    poll state (backoff, processed-set, lag) is keyed by source ID
+    (slugs are only unique per tenant), and the poll-lag gauge keeps
+    its value on degraded ticks instead of reporting zero.
   - Out-of-order search results (the ascending sort is undocumented in
     the 2.16 schema, though production-proven) stop the tick without
     advancing the watermark instead of silently skipping older items.

@@ -88,10 +88,12 @@ func (a *adapter) pollAllSources(ctx context.Context) {
 		if !src.Enabled {
 			continue
 		}
-		if a.shouldSkipBackoff(src.Slug) {
+		// In-memory state is keyed by source ID — slugs are only unique
+		// per tenant and this list spans all tenants.
+		if a.shouldSkipBackoff(src.ID) {
 			continue
 		}
-		a.markPollAttempt(src.Slug, nowFn())
+		a.markPollAttempt(src.ID, nowFn())
 		srcCtx, cancel := context.WithTimeout(ctx, pollSourceTimeout)
 		a.pollSource(srcCtx, src)
 		cancel()
@@ -117,7 +119,7 @@ func (a *adapter) pollSingleSource(ctx context.Context, sourceID string) {
 func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 	const where = "inbound.intercom.pollSource"
 	start := nowFn()
-	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, a.pollLagSeconds(src.Slug, start))
+	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, a.pollLagSeconds(src.ID, start))
 	defer func() {
 		a.deps.Metrics.Latency(channelName, src.TenantID, src.Slug, time.Since(start).Seconds())
 	}()
@@ -155,16 +157,17 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		newUID = sr.watermark
 	}
 	a.persistPollResult(ctx, src, newUID, nowFn(), sr.pollError)
-	a.pruneProcessedKeys(src.Slug, newUID)
+	a.pruneProcessedKeys(src.ID, newUID)
 	if sr.pollError != "" {
 		// Per-item transient failures count toward backoff — a
 		// poison-pill item retried at full tick rate forever is worse
-		// than a slower cadence.
-		a.markPollFailure(src.Slug)
+		// than a slower cadence. The lag gauge deliberately keeps its
+		// value: a degraded source must not report zero lag.
+		a.markPollFailure(src.ID)
 	} else {
-		a.markPollSuccess(src.Slug, nowFn())
+		a.markPollSuccess(src.ID, nowFn())
+		a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
 	}
-	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
 	a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", true)
 }
 
@@ -212,31 +215,28 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 	}
 	cursor := resumeCursor(cfg, queryStart, queryEnd)
 	endOfResults := false
+	windowDrained := false
 
 	for pageNum := 0; pageNum < maxPagesPerTick && !endOfResults; pageNum++ {
 		if ctx.Err() != nil {
 			break
 		}
 		fetchCursor := cursor
-		page, err := client.SearchConversations(ctx, queryStart, queryEnd, fetchCursor)
+		page, cursorDropped, err := a.fetchSearchPage(ctx, client, queryStart, queryEnd, fetchCursor, src.ID, where)
+		if cursorDropped {
+			fetchCursor = ""
+			cfg.setSyncCursor("", 0, 0)
+		}
 		if err != nil {
-			if fetchCursor != "" {
-				// A stale/rejected continuation cursor must not wedge the
-				// source — drop it so the next tick starts a fresh window.
-				cfg.setSyncCursor("", 0, 0)
-				a.persistSyncStats(ctx, src.ID, cfg, where)
-			}
 			a.handleSearchFailure(ctx, src, where, err)
 			st.res.failed = true
-			return st.res
+			break
 		}
 
-		var stop bool
+		var stop pageStop
 		st, stop = a.processConversationPage(ctx, client, src, cfg, page, st, where)
-		if stop {
-			// Mid-page stop: keep the cursor that fetched THIS page so
-			// the next tick re-fetches it (processed head dedups).
-			cfg.setSyncCursor(fetchCursor, queryStart, queryEnd)
+		if stop != pageContinue {
+			windowDrained = cfg.applyPageStop(stop, fetchCursor, queryStart, queryEnd)
 			break
 		}
 
@@ -262,18 +262,36 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		}
 		cursor = page.StartingAfter
 	}
-	if !endOfResults && st.res.watermark > st.baseWatermark {
+	if !endOfResults && !windowDrained && st.res.watermark > st.baseWatermark {
 		// Early stop mid-window: re-cover the boundary second (see the
 		// function comment) at the cost of one deduped re-fetch.
 		st.res.watermark--
 	}
-	// Persist cursor + stats on every non-failed exit — budget-exhausted
-	// stops are the common case during backfill and must not drop their
-	// counts. Failed ticks don't persist the watermark, so persisting
-	// their counts would double-count the re-covered items next tick.
+	// Persist cursor + stats on every exit, including failed ticks:
+	// items ingested before a mid-tick failure were genuinely synced,
+	// and their next-tick re-cover dedups as duplicates (not counted) —
+	// so counting them here cannot double-count.
 	cfg.SyncStats.ConversationsSynced += int64(st.totalSynced)
 	a.persistSyncStats(ctx, src.ID, cfg, where)
 	return st.res
+}
+
+// fetchSearchPage fetches one search page, treating a rejected
+// continuation cursor as recoverable: cross-tick cursor lifetime is not
+// a documented Intercom guarantee, so a non-transient failure on a
+// cursor-bearing request falls back to a fresh window scan in the SAME
+// tick instead of failing the poll (worst case is the pre-cursor
+// re-listing behavior, never worse). Transient failures (429/5xx/
+// network) keep the cursor — it is the server that hiccuped.
+// cursorDropped=true tells the caller to clear the persisted cursor.
+func (a *adapter) fetchSearchPage(ctx context.Context, client apiClient, queryStart, queryEnd int64, fetchCursor, sourceID, where string) (conversationPage, bool, error) {
+	page, err := client.SearchConversations(ctx, queryStart, queryEnd, fetchCursor)
+	if err == nil || fetchCursor == "" || isTransientDetailError(err) {
+		return page, false, err
+	}
+	logext.Warnf(ctx, "[%s] continuation cursor rejected,restarting window,source_id:%s,err:%s", where, sourceID, err.Error())
+	page, err = client.SearchConversations(ctx, queryStart, queryEnd, "")
+	return page, true, err
 }
 
 // resumeCursor returns the persisted continuation cursor when it was
@@ -305,10 +323,25 @@ type pageState struct {
 	admins map[int64]intercomAdmin
 }
 
+// pageStop tells syncPages how a page-processing pass ended.
+type pageStop int
+
+const (
+	// pageContinue — page fully covered; keep paginating.
+	pageContinue pageStop = iota
+	// pageStopRetry — stopped mid-page (budget, transient failure,
+	// ctx): re-fetch this page next tick via the persisted cursor.
+	pageStopRetry
+	// pageStopDrained — reached items deferred to the next tick: the
+	// covered window is drained; drop the cursor.
+	pageStopDrained
+	// pageStopAbort — inconsistent results (out-of-order); drop the
+	// cursor and hold the watermark.
+	pageStopAbort
+)
+
 // processConversationPage handles one search page. Returns the updated
-// state and stop=true when the caller should stop paginating (budget
-// exhausted or a transient per-conversation failure that must be
-// retried next tick).
+// state and how the pass ended.
 func (a *adapter) processConversationPage(
 	ctx context.Context,
 	client apiClient,
@@ -317,11 +350,11 @@ func (a *adapter) processConversationPage(
 	page conversationPage,
 	st pageState,
 	where string,
-) (pageState, bool) {
+) (pageState, pageStop) {
 	prevUpdatedAt := int64(0)
 	for i := range page.Conversations {
 		if ctx.Err() != nil {
-			return st, true
+			return st, pageStopRetry
 		}
 		summary := page.Conversations[i]
 		// Defense for the undocumented ascending sort (see the client's
@@ -333,20 +366,24 @@ func (a *adapter) processConversationPage(
 				where, src.ID, summary.ID, summary.UpdatedAt, prevUpdatedAt)
 			st.res.watermark = st.baseWatermark
 			st.res.pollError = "conversation search: unexpected result order"
-			return st, true
+			return st, pageStopAbort
 		}
 		prevUpdatedAt = summary.UpdatedAt
-		if action := a.classifyConversation(src.Slug, summary, cfg, st); action == convSkip {
+		switch a.classifyConversation(src.ID, summary, cfg, st) {
+		case convSkip:
 			continue
-		} else if action == convAdvance {
+		case convAdvance:
 			st.advanceWatermark(summary.UpdatedAt)
 			continue
+		case convDeferred:
+			// Ascending order ⇒ every remaining item is deferred too.
+			return st, pageStopDrained
 		}
 		if st.detailFetches >= st.detailBudget {
 			// Budget exhausted: stop here; watermark stays at the last
 			// processed item so this conversation is re-covered next tick.
 			logext.Infof(ctx, "[%s] detail budget exhausted,source_id:%s,budget:%d", where, src.ID, st.detailBudget)
-			return st, true
+			return st, pageStopRetry
 		}
 		st.detailFetches++
 
@@ -362,15 +399,15 @@ func (a *adapter) processConversationPage(
 			// watermark past this conversation so it is re-covered next
 			// tick, and surface the degradation on the source state.
 			st.res.pollError = "conversation sync: transient"
-			return st, true
+			return st, pageStopRetry
 		}
 		if outcome == outcomeIngested {
 			st.totalSynced++
 		}
-		a.rememberProcessed(src.Slug, summary)
+		a.rememberProcessed(src.ID, summary)
 		st.advanceWatermark(summary.UpdatedAt)
 	}
-	return st, false
+	return st, pageContinue
 }
 
 // convAction classifies a search summary before the detail fetch.
@@ -379,26 +416,33 @@ type convAction int
 const (
 	// convFetch — qualifying conversation: fetch details and ingest.
 	convFetch convAction = iota
-	// convSkip — outside the client-side window: no watermark movement.
+	// convSkip — at or below the watermark: covered, no movement.
 	convSkip
 	// convAdvance — covered without work (filtered out, or an
 	// already-processed boundary replay): advance the watermark for free.
 	convAdvance
+	// convDeferred — updated at/after tick start: this and (results
+	// being ascending) everything after it belongs to the NEXT tick.
+	// The tick must end here WITHOUT persisting a cursor past it — a
+	// continuation pointing beyond deferred items would strand them
+	// behind the cursor and lose them once the watermark catches up.
+	convDeferred
 )
 
 // classifyConversation applies the client-side window, the configured
 // filters, and the processed-set to one search summary.
-func (a *adapter) classifyConversation(slug string, summary conversation, cfg Config, st pageState) convAction {
-	// Client-side second-precision window: skip items at or below the
-	// watermark and items updated at/after tick start (they land next
-	// tick — the day-padded API window over-fetches by design).
-	if summary.UpdatedAt <= st.baseWatermark || summary.UpdatedAt >= st.tickStart {
+func (a *adapter) classifyConversation(sourceID string, summary conversation, cfg Config, st pageState) convAction {
+	// Client-side second-precision window over the day-padded API query.
+	if summary.UpdatedAt <= st.baseWatermark {
 		return convSkip
+	}
+	if summary.UpdatedAt >= st.tickStart {
+		return convDeferred
 	}
 	if !matchesFilter(summary, cfg) {
 		return convAdvance
 	}
-	if a.alreadyProcessed(slug, summary) {
+	if a.alreadyProcessed(sourceID, summary) {
 		// Boundary-second replay of an already-processed snapshot —
 		// no detail fetch, no budget, no counters.
 		return convAdvance
@@ -421,10 +465,10 @@ func snapshotKey(summary conversation) string {
 
 // alreadyProcessed reports whether this exact conversation snapshot was
 // fully handled in an earlier tick (boundary-second re-cover).
-func (a *adapter) alreadyProcessed(slug string, summary conversation) bool {
+func (a *adapter) alreadyProcessed(sourceID string, summary conversation) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	seen, ok := a.processedKeys[slug]
+	seen, ok := a.processedKeys[sourceID]
 	if !ok {
 		return false
 	}
@@ -434,27 +478,27 @@ func (a *adapter) alreadyProcessed(slug string, summary conversation) bool {
 
 // rememberProcessed marks a snapshot as fully handled so boundary-second
 // re-covers skip it without spending API budget.
-func (a *adapter) rememberProcessed(slug string, summary conversation) {
+func (a *adapter) rememberProcessed(sourceID string, summary conversation) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.processedKeys == nil {
 		a.processedKeys = map[string]map[string]int64{}
 	}
-	if a.processedKeys[slug] == nil {
-		a.processedKeys[slug] = map[string]int64{}
+	if a.processedKeys[sourceID] == nil {
+		a.processedKeys[sourceID] = map[string]int64{}
 	}
-	a.processedKeys[slug][snapshotKey(summary)] = summary.UpdatedAt
+	a.processedKeys[sourceID][snapshotKey(summary)] = summary.UpdatedAt
 }
 
 // pruneProcessedKeys drops remembered snapshots at or below the
 // persisted watermark — the `<= baseWatermark` filter covers those, so
 // the memory set only ever holds the boundary second.
-func (a *adapter) pruneProcessedKeys(slug string, watermark int64) {
+func (a *adapter) pruneProcessedKeys(sourceID string, watermark int64) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	for key, updatedAt := range a.processedKeys[slug] {
+	for key, updatedAt := range a.processedKeys[sourceID] {
 		if updatedAt <= watermark {
-			delete(a.processedKeys[slug], key)
+			delete(a.processedKeys[sourceID], key)
 		}
 	}
 }
@@ -729,9 +773,9 @@ func (a *adapter) persistPollResult(ctx context.Context, src inbound.Source, las
 	})
 }
 
-func (a *adapter) pollLagSeconds(slug string, now time.Time) float64 {
+func (a *adapter) pollLagSeconds(sourceID string, now time.Time) float64 {
 	a.mu.Lock()
-	last, ok := a.lastSuccessAt[slug]
+	last, ok := a.lastSuccessAt[sourceID]
 	a.mu.Unlock()
 	if !ok {
 		return 0
@@ -739,14 +783,14 @@ func (a *adapter) pollLagSeconds(slug string, now time.Time) float64 {
 	return now.Sub(last).Seconds()
 }
 
-func (a *adapter) markPollSuccess(slug string, t time.Time) {
+func (a *adapter) markPollSuccess(sourceID string, t time.Time) {
 	a.mu.Lock()
 	if a.lastSuccessAt == nil {
 		a.lastSuccessAt = map[string]time.Time{}
 	}
-	a.lastSuccessAt[slug] = t
+	a.lastSuccessAt[sourceID] = t
 	if a.failureCount != nil {
-		delete(a.failureCount, slug)
+		delete(a.failureCount, sourceID)
 	}
 	a.mu.Unlock()
 }
@@ -754,24 +798,24 @@ func (a *adapter) markPollSuccess(slug string, t time.Time) {
 // markPollAttempt records the attempt time — the backoff reference point
 // (measuring from last success would disable backoff after one interval
 // and never engage it for never-succeeded sources).
-func (a *adapter) markPollAttempt(slug string, t time.Time) {
+func (a *adapter) markPollAttempt(sourceID string, t time.Time) {
 	a.mu.Lock()
 	if a.lastAttemptAt == nil {
 		a.lastAttemptAt = map[string]time.Time{}
 	}
-	a.lastAttemptAt[slug] = t
+	a.lastAttemptAt[sourceID] = t
 	a.mu.Unlock()
 }
 
 // markPollFailure bumps the consecutive-failure counter without touching
 // source state (used for per-item transient degradation, where the tick
 // itself persisted normally).
-func (a *adapter) markPollFailure(slug string) {
+func (a *adapter) markPollFailure(sourceID string) {
 	a.mu.Lock()
 	if a.failureCount == nil {
 		a.failureCount = map[string]int{}
 	}
-	a.failureCount[slug]++
+	a.failureCount[sourceID]++
 	a.mu.Unlock()
 }
 
@@ -782,22 +826,17 @@ func (a *adapter) transientError(ctx context.Context, src inbound.Source, reason
 		LastError:   reason,
 	})
 	a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "transient_err")
-	a.mu.Lock()
-	if a.failureCount == nil {
-		a.failureCount = map[string]int{}
-	}
-	a.failureCount[src.Slug]++
-	a.mu.Unlock()
+	a.markPollFailure(src.ID)
 }
 
 // shouldSkipBackoff returns true if the source has consecutive failures
 // and the backoff interval hasn't elapsed since the last attempt.
 // Backoff schedule: 0-2 failures → no skip (60s tick is enough), 3+ →
 // doubling: 120s, 240s, ... capped at 900s.
-func (a *adapter) shouldSkipBackoff(slug string) bool {
+func (a *adapter) shouldSkipBackoff(sourceID string) bool {
 	a.mu.Lock()
-	failures := a.failureCount[slug]
-	last, hasLast := a.lastAttemptAt[slug]
+	failures := a.failureCount[sourceID]
+	last, hasLast := a.lastAttemptAt[sourceID]
 	a.mu.Unlock()
 	if failures < 3 || !hasLast {
 		return false

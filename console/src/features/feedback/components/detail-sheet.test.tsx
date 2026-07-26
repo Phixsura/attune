@@ -346,6 +346,59 @@ describe('FeedbackDetailSheet', () => {
     })
     expect(feedbackDetailSheetTestables.supportChannelCandidate('webhook', {})).toBeNull()
     expect(feedbackDetailSheetTestables.supportChannelCandidate('intercom', undefined)).toBeNull()
+
+    // Recurrence bundle: already-tracked neighbors are excluded so a new
+    // promote never double-tracks them; ids dedup.
+    expect(
+      feedbackDetailSheetTestables.promoteIDList('11', [
+        { id: 42, title: 'a', source: 'intercom', similarity: 0.9, created_at: '' },
+        {
+          id: 43,
+          title: 'b',
+          source: 'intercom',
+          similarity: 0.85,
+          created_at: '',
+          linked_requests: [{ id: 'u1', cr_no: 7, title: 'CR', status: 'open' }],
+        },
+        { id: 11, title: 'self', source: 'intercom', similarity: 1, created_at: '' },
+      ]),
+    ).toBe('11,42')
+
+    // Dedup target: the anchor's own links win over neighbor links.
+    const anchorRef = { id: 'u-a', cr_no: 9, title: 'Anchor CR', status: 'open' }
+    const neighborRef = { id: 'u-n', cr_no: 7, title: 'Neighbor CR', status: 'open' }
+    expect(
+      feedbackDetailSheetTestables.existingRequestFor(
+        [anchorRef],
+        [
+          {
+            id: 42,
+            title: 'a',
+            source: 'intercom',
+            similarity: 0.9,
+            created_at: '',
+            linked_requests: [neighborRef],
+          },
+        ],
+      ),
+    ).toBe(anchorRef)
+    expect(
+      feedbackDetailSheetTestables.existingRequestFor(
+        [],
+        [
+          { id: 41, title: 'x', source: 'intercom', similarity: 0.95, created_at: '' },
+          {
+            id: 42,
+            title: 'a',
+            source: 'intercom',
+            similarity: 0.9,
+            created_at: '',
+            linked_requests: [neighborRef],
+          },
+        ],
+      ),
+    ).toBe(neighborRef)
+    expect(feedbackDetailSheetTestables.existingRequestFor([], [])).toBeNull()
     expect(feedbackDetailSheetTestables.portalSubmissionEntries({ b: 2, a: 1 })).toEqual([
       ['a', 1],
       ['b', 2],

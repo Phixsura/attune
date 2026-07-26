@@ -247,7 +247,12 @@ export function useUnlinkCustomerRequestFeedback(id: string) {
         `${BASE}/${encodeURIComponent(id)}/feedback/${encodeURIComponent(feedbackId)}`,
         { method: 'DELETE' },
       ),
-    onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+    onSuccess: (detail) => {
+      updateCustomerRequestCache(qc, detail)
+      // Symmetric with link/promote: unlinking frees the anchor, so the
+      // recurrence card must flip back out of its terminal state.
+      void qc.invalidateQueries({ queryKey: ['console', 'feedback', 'similar'] })
+    },
   })
 }
 

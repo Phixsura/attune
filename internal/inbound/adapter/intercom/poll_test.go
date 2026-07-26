@@ -1065,8 +1065,9 @@ func TestPollSource_TransientDetailErrorStopsAndRetries(t *testing.T) {
 	if !foundTransient {
 		t.Errorf("no transient_err metric in %v", metrics.Totals)
 	}
-	// Per-item transient failures count toward backoff.
-	if a.failureCount[src.Slug] == 0 {
+	// Per-item transient failures count toward backoff (keyed by
+	// source ID — slugs are only unique per tenant).
+	if a.failureCount[src.ID] == 0 {
 		t.Error("transient tick must bump the failure counter for backoff")
 	}
 }
@@ -1211,6 +1212,14 @@ func TestPollSource_DecodeErrorDegradesToSummary(t *testing.T) {
 // already-covered items, the persisted cursor must let the next tick
 // resume from page 2 instead of re-listing page 1 forever.
 func TestPollSource_CursorResumesSaturatedWindow(t *testing.T) {
+	// Freeze time: the cursor window is pinned to the query bounds, and
+	// a real UTC-midnight rollover between the two ticks would
+	// legitimately drop the cursor.
+	fixedTime := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	origNow := nowFn
+	nowFn = func() time.Time { return fixedTime }
+	t.Cleanup(func() { nowFn = origNow })
+
 	sources, ingestFake, _, deps := buildDeps(t)
 	cfg := Config{
 		Version: ConfigVersion, Region: "us",
@@ -1393,5 +1402,69 @@ func TestSyncPages_QueryEndDayPadded(t *testing.T) {
 	}
 	if len(ingestFake.Calls) != 0 {
 		t.Fatalf("item updated after tick start must wait for next tick, got %d ingests", len(ingestFake.Calls))
+	}
+}
+
+// TestPollSource_DeferredItemsNotStrandedBehindCursor: items updated
+// at/after tick start are deferred to the next tick — a persisted
+// continuation cursor pointing past them would strand them (the next
+// tick would resume beyond them, advance the watermark, and the fresh
+// window would then skip them forever).
+func TestPollSource_DeferredItemsNotStrandedBehindCursor(t *testing.T) {
+	fixedTime := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	origNow := nowFn
+	nowFn = func() time.Time { return fixedTime }
+	t.Cleanup(func() { nowFn = origNow })
+
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, fixedTime.Unix()-3600)
+
+	qualifying := fullConversation()
+	qualifying.ID = "501"
+	qualifying.UpdatedAt = fixedTime.Unix() - 600
+	deferred := fullConversation()
+	deferred.ID = "502"
+	deferred.UpdatedAt = fixedTime.Unix() + 5 // >= tickStart → next tick
+
+	// The page continues (StartingAfter set) — without the drain guard
+	// the cursor pointing PAST the deferred item would be persisted.
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages: []conversationPage{
+			{Conversations: []conversation{qualifying, deferred}, StartingAfter: "past-deferred"},
+		},
+		detailByID: map[string]conversation{"501": qualifying, "502": deferred},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 1 {
+		t.Fatalf("expected only the qualifying conversation ingested, got %d", len(ingestFake.Calls))
+	}
+	blob, ok := sources.configUpdates["src-1"]
+	if !ok {
+		t.Fatal("expected persisted config")
+	}
+	decoded, err := deps.Secrets.Decrypt(blob)
+	if err != nil {
+		t.Fatalf("decrypt persisted config: %v", err)
+	}
+	var persisted Config
+	if err := json.Unmarshal(decoded, &persisted); err != nil { // ptrext:allow json-unmarshal
+		t.Fatalf("unmarshal persisted config: %v", err)
+	}
+	if persisted.SyncCursor != "" {
+		t.Errorf("cursor %q persisted past a deferred item — it would be stranded", persisted.SyncCursor)
+	}
+	// The deferred item itself must remain re-coverable: watermark must
+	// not have stepped past or below the processed item.
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != qualifying.UpdatedAt {
+		t.Errorf("LastUID = %d, want %d (drained window keeps the full watermark)", stored.State.LastUID, qualifying.UpdatedAt)
 	}
 }

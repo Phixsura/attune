@@ -49,6 +49,13 @@ func (h *Handler) createIntercom(ctx context.Context, auth *session.AuthCtx, req
 	if err != nil {
 		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, friendlyIntercomError(err))
 	}
+	if strings.TrimSpace(acct.WorkspaceID) == "" {
+		// The workspace id_code scopes idempotency keys, permalinks, and
+		// thread identity — an empty one would merge distinct workspaces.
+		logext.Warnf(ctx, "[%s] intercom /me returned empty workspace id_code,tenant_id:%s", where, auth.TenantID)
+		return dispatcher.Fail[*attunev1.CreateInboundSourceResponse](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION,
+			"Intercom did not report a workspace ID for this token. Check the app in your Developer Hub.")
+	}
 
 	id := uuid.NewString()
 	withTx := h.intercomWithTx

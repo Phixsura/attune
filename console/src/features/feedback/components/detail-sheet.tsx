@@ -2056,6 +2056,23 @@ function SupportPromoteCard({
   const neighbors = similar.data?.items ?? []
   const promoteIDs = promoteIDList(feedbackId, neighbors)
 
+  // Hold the card until the dedup data arrives — rendering the promote
+  // action during the pending window would flash past the terminal
+  // state for an already-tracked anchor.
+  if (similar.isPending) {
+    return (
+      <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-4">
+        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+          {t('feedback.detail.support_promote_title')}
+        </div>
+        <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          {t('common.loading')}
+        </div>
+      </div>
+    )
+  }
+
   // Terminal state: this feedback is already tracked by a customer
   // request — the card's job (get the signal tracked) is done. Offering
   // any promote here would create the duplicate the card exists to
@@ -2343,11 +2360,13 @@ export const feedbackDetailSheetTestables = {
   customerRequestStatusLabel,
   detailSummaryState,
   detailWorkbenchCue,
+  existingRequestFor,
   isCompleteReplyDraftWorkflow,
   isPortalRecord,
   isPositiveIntString,
   isReplyDraftHardBlocker,
   latestRevisionByOrigin,
+  promoteIDList,
   portalSubmissionContactFieldLabel,
   portalSubmissionEntries,
   portalSubmissionKindLabel,
