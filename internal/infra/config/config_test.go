@@ -124,6 +124,16 @@ func TestLoadPathRejectsIntercomAPIBaseURLWithoutHost(t *testing.T) {
 	require.Contains(t, err.Error(), "config: intercom.api_base_url must include a host")
 }
 
+func TestLoadPathRejectsIntercomAPIBaseURLInProduction(t *testing.T) {
+	// The override bypasses the client's *.intercom.io host allowlist —
+	// production must refuse it outright.
+	raw := "profile: production\n" + validConfigYAML(t, validTinkKeyset(t)) +
+		"\nintercom:\n  api_base_url: \"https://mock.example.com\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: intercom.api_base_url must not be set with profile: production")
+}
+
 func TestLoadPathRejectsMalformedSlackAPIBaseURL(t *testing.T) {
 	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nslack:\n  api_base_url: \"://bad\"\n"
 	_, err := LoadPath(writeConfig(t, raw))

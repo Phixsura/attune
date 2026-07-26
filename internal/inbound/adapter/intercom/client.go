@@ -24,6 +24,7 @@ type (
 	intercomAdmin    = intercomclient.Admin
 	apiError         = intercomclient.APIError
 	rateLimitError   = intercomclient.RateLimitError
+	decodeError      = intercomclient.DecodeError
 )
 
 type clientFactory func(region, accessToken string) intercomclient.Client

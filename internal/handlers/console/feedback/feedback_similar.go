@@ -82,7 +82,6 @@ func (h *FeedbackHandler) SimilarFeedback(w http.ResponseWriter, r *http.Request
 	}
 
 	items := []similarFeedbackItem{}
-	anchorLinks := []linkedRequestRef{}
 	if h.similarFinder != nil {
 		hits, ferr := h.similarFinder.FindSimilarFeedback(r.Context(), auth.TenantID, feedbackID, similarFeedbackLimit, similarFeedbackMinSimilarity)
 		if ferr != nil {
@@ -106,8 +105,11 @@ func (h *FeedbackHandler) SimilarFeedback(w http.ResponseWriter, r *http.Request
 				CreatedAt:  hit.Feedback.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
 			})
 		}
-		anchorLinks = h.attachLinkedRequests(r.Context(), auth.TenantID, feedbackID, items, where)
 	}
+	// The anchor's own links resolve regardless of embeddings — the
+	// dedup guard must not silently vanish when similarity search is
+	// unavailable.
+	anchorLinks := h.attachLinkedRequests(r.Context(), auth.TenantID, feedbackID, items, where)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck

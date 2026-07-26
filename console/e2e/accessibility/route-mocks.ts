@@ -232,6 +232,10 @@ async function handleRoute(
     await fulfillJson(route, { items: [] })
     return true
   }
+  if (method === 'GET' && path.match(/^\/feedback\/\d+\/similar$/)) {
+    await fulfillJson(route, { items: [], anchor_linked_requests: [] })
+    return true
+  }
   if (method === 'POST' && path.match(/^\/inbound\/sources\/[^/]+\/sync-now$/)) {
     const id = path.split('/')[3]
     const source = state.inboundSources.find((item) => item.id === id)

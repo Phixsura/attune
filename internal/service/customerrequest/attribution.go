@@ -5,6 +5,7 @@ package customerrequest
 import (
 	"context"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 
@@ -53,11 +54,31 @@ func deriveAttribution(source string, meta map[string]any) (derivedAttribution, 
 		return derivedAttribution{}, false
 	}
 
+	// Workspace scope: conversation-level contact/company IDs are only
+	// unique within one Intercom workspace / Zendesk subdomain — a
+	// tenant with two sources of the same channel must not merge
+	// identities (or revenue) across them. Emails stay raw: they are
+	// globally unique and the GDPR subject matcher keys on them.
+	scope := firstMetaString(meta, prefix+"workspace_id", prefix+"subdomain")
+	scoped := func(id string) string {
+		if id == "" {
+			return ""
+		}
+		if scope == "" {
+			return source + ":" + id
+		}
+		return source + ":" + scope + ":" + id
+	}
+
+	subjectKey := firstMetaString(meta, prefix+"contact_email", prefix+"requester_email")
+	if subjectKey == "" {
+		subjectKey = scoped(firstMetaString(meta, prefix+"contact_external_id"))
+	}
 	out := derivedAttribution{
-		SubjectKey:     firstMetaString(meta, prefix+"contact_external_id", prefix+"contact_email", prefix+"requester_email"),
-		SubjectDisplay: firstMetaString(meta, prefix+"contact_name", prefix+"requester_name", prefix+"contact_email", prefix+"requester_email"),
-		AccountKey:     firstMetaString(meta, prefix+"company_id", prefix+"organization_id"),
-		AccountDisplay: firstMetaString(meta, prefix+"company_name", prefix+"organization_name"),
+		SubjectKey:     clampLen(subjectKey, 512),
+		SubjectDisplay: clampLen(firstMetaString(meta, prefix+"contact_name", prefix+"requester_name", prefix+"contact_email", prefix+"requester_email"), 500),
+		AccountKey:     clampLen(scoped(firstMetaString(meta, prefix+"company_id", prefix+"organization_id")), 512),
+		AccountDisplay: clampLen(firstMetaString(meta, prefix+"company_name", prefix+"organization_name"), 500),
 	}
 	if out.SubjectKey == "" && out.AccountKey == "" {
 		return derivedAttribution{}, false
@@ -67,8 +88,8 @@ func deriveAttribution(source string, meta map[string]any) (derivedAttribution, 
 		out.Profile = repo.AccountProfileInput{
 			AccountKey:     out.AccountKey,
 			AccountDisplay: out.AccountDisplay,
-			Tier:           firstMetaString(meta, prefix+"company_plan"),
-			SizeSegment:    firstMetaString(meta, prefix+"company_size"),
+			Tier:           clampLen(firstMetaString(meta, prefix+"company_plan"), 120),
+			SizeSegment:    clampLen(firstMetaString(meta, prefix+"company_size"), 120),
 			CRMProvider:    source,
 			CRMExternalID:  out.AccountKey,
 			// "integration" is the profile-source enum for connector-derived
@@ -79,11 +100,21 @@ func deriveAttribution(source string, meta map[string]any) (derivedAttribution, 
 		// Intercom company.monthly_spend is whole currency units with no
 		// currency attached; USD matches the repo-wide COALESCE default.
 		if spend := metaNumber(meta, prefix+"company_monthly_spend"); spend > 0 {
-			out.Profile.RevenueCents = int64(spend * 100)
+			out.Profile.RevenueCents = int64(math.Round(spend * 100))
 			out.Profile.RevenueCurrency = "USD"
 		}
 	}
 	return out, true
+}
+
+// clampLen truncates s to at most maxRunes characters — the DB CHECK
+// constraints are hard limits, and a constraint violation would silently
+// drop the whole link inside its savepoint.
+func clampLen(s string, maxRunes int) string {
+	if runes := []rune(s); len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return s
 }
 
 // autoLinkCustomersTx derives attribution from every promoted feedback
@@ -135,7 +166,6 @@ func (s *Service) linkOneCustomerTx(ctx context.Context, sp pgx.Tx, tenantID str
 	if seen[dedupeKey] {
 		return false, nil
 	}
-	seen[dedupeKey] = true
 	attr.Profile.ActorID = actorID
 	if _, err := s.repo.LinkCustomerTx(ctx, sp, repo.CustomerLinkInput{
 		TenantID:       tenantID,
@@ -151,6 +181,9 @@ func (s *Service) linkOneCustomerTx(ctx context.Context, sp pgx.Tx, tenantID str
 		logext.Warnf(ctx, "[service.customerrequest.autoLink] link failed,feedback_id:%d,err:%+v", feedbackID, err.Error())
 		return false, err
 	}
+	// Mark seen only after the insert succeeds — a failed row must not
+	// block a later row carrying the same identity.
+	seen[dedupeKey] = true
 	return true, nil
 }
 

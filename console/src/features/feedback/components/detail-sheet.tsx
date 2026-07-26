@@ -2001,10 +2001,15 @@ function supportChannelCandidate(
   return { channel: source, customer, company, signal }
 }
 
-// promoteIDList joins the anchor feedback with its recurrence neighbors
-// so one click promotes the whole recurring signal as evidence.
+// promoteIDList joins the anchor feedback with its UNTRACKED recurrence
+// neighbors so one click promotes the whole recurring signal as
+// evidence. Neighbors already linked to a customer request are excluded
+// — bundling them into a new request would double-track them.
 function promoteIDList(feedbackId: string, similar: SimilarFeedbackItem[]): string {
-  const ids = [feedbackId, ...similar.map((s) => String(s.id))]
+  const ids = [
+    feedbackId,
+    ...similar.filter((s) => !s.linked_requests?.length).map((s) => String(s.id)),
+  ]
   return [...new Set(ids)].join(',')
 }
 
@@ -2037,8 +2042,8 @@ function SupportPromoteCard({
   const enabled = !!candidate && isPositiveIntString(feedbackId)
   const similar = useQuery({ ...similarFeedbackQuery(feedbackId), enabled })
   const anchorLinks = similar.data?.anchor_linked_requests ?? []
+  const anchorAlreadyLinked = anchorLinks.length > 0
   const existingRequest = existingRequestFor(anchorLinks, similar.data?.items ?? [])
-  const anchorAlreadyLinked = anchorLinks.some((ref) => ref.id === existingRequest?.id)
   const linkExisting = useLinkCustomerRequestFeedback(existingRequest?.id ?? '')
   if (!candidate || !enabled) return null
   const signalKey =
@@ -2050,6 +2055,26 @@ function SupportPromoteCard({
   const who = [candidate.customer, candidate.company].filter(Boolean).join(' · ')
   const neighbors = similar.data?.items ?? []
   const promoteIDs = promoteIDList(feedbackId, neighbors)
+
+  // Terminal state: this feedback is already tracked by a customer
+  // request — the card's job (get the signal tracked) is done. Offering
+  // any promote here would create the duplicate the card exists to
+  // prevent; the linked-requests section above shows the tracking CR.
+  if (anchorAlreadyLinked) {
+    return (
+      <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          {t('feedback.detail.support_promote_title')}
+        </div>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          {t('feedback.detail.support_promote_already_tracked', {
+            cr: `CR-${anchorLinks[0].cr_no}`,
+            title: anchorLinks[0].title,
+          })}
+        </p>
+      </div>
+    )
+  }
   return (
     <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -2088,7 +2113,7 @@ function SupportPromoteCard({
           ) : null}
         </div>
         <div className="flex shrink-0 flex-col items-stretch gap-2">
-          {existingRequest && !anchorAlreadyLinked ? (
+          {existingRequest ? (
             <Button
               size="sm"
               variant="secondary"
@@ -2128,9 +2153,9 @@ function SupportPromoteCard({
                 feedback_id: feedbackId,
               }}
             >
-              {neighbors.length > 0
+              {promoteIDs.includes(',')
                 ? t('feedback.detail.support_promote_action_bundle', {
-                    count: neighbors.length + 1,
+                    count: promoteIDs.split(',').length,
                   })
                 : t('feedback.detail.support_promote_action')}
             </Link>

@@ -3056,6 +3056,7 @@
       "sync_now": "立即同步",
       "recent_title": "最近同步",
       "tickets_synced": "已同步工单",
+      "conversations_synced": "已同步会话",
       "backfill_status": "回填状态",
       "backfill_done": "已完成",
       "backfill_in_progress": "进行中..."
@@ -3489,6 +3490,7 @@
       "support_promote_existing": "相似反馈已关联到 {{cr}}「{{title}}」，建议直接关联而不是新建重复需求。",
       "support_promote_link_action": "关联到 {{cr}}",
       "support_promote_linked": "已关联到 {{cr}}",
+      "support_promote_already_tracked": "该反馈已被 {{cr}}「{{title}}」跟踪，无需重复转化。",
       "attachments": "附件",
       "attrs": "AI 分类",
       "ai_state": "AI 状态",

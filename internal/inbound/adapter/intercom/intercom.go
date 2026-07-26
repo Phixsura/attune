@@ -33,8 +33,17 @@ type adapter struct {
 	deps          inbound.Deps
 	newClient     clientFactory
 	lastSuccessAt map[string]time.Time
+	lastAttemptAt map[string]time.Time
 	failureCount  map[string]int // per-source consecutive failure counter
-	syncNow       chan string    // receives source ID for immediate sync
+	// processedKeys remembers idempotency keys of conversations already
+	// processed but still above the persisted watermark (the re-covered
+	// boundary second). Skipping them next tick keeps boundary replays
+	// free — no detail fetch, no budget, no counter inflation — which is
+	// what lets a same-second burst larger than the detail budget drain
+	// instead of livelocking. Memory-only: a restart just costs one
+	// round of idempotency-deduped re-fetches.
+	processedKeys map[string]map[string]int64 // slug → key → updated_at
+	syncNow       chan string                 // receives source ID for immediate sync
 }
 
 // NewAdapter returns a fresh Intercom adapter instance.
@@ -42,7 +51,9 @@ func NewAdapter() inbound.Adapter {
 	return &adapter{ // ptrext:allow inbound-adapter-mutex-identity
 		newClient:     newAPIClient,
 		lastSuccessAt: map[string]time.Time{},
+		lastAttemptAt: map[string]time.Time{},
 		failureCount:  map[string]int{},
+		processedKeys: map[string]map[string]int64{},
 		syncNow:       make(chan string, 1),
 	}
 }

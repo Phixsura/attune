@@ -207,7 +207,7 @@ func TestBuildIngestInput_MetaAndKey(t *testing.T) {
 	contacts := map[string]intercomContact{
 		"c9": {ID: "c9", ExternalID: "u-9", Email: "zoe@example.com", Name: "Zoe", Role: "user"},
 	}
-	in := buildIngestInput("src-1", "My Source", "ws42", conv, contacts, nil)
+	in := buildIngestInput("src-1", "My Source", "ws42", "us", conv, contacts, nil)
 
 	if in.Source != "intercom" {
 		t.Errorf("Source = %q", in.Source)
@@ -332,7 +332,7 @@ func TestBuildIngestInput_CustomAttributesAndAIMeta(t *testing.T) {
 		Rating:          2,
 	}
 
-	in := buildIngestInput("src-1", "Src", "ws1", conv, nil, nil)
+	in := buildIngestInput("src-1", "Src", "ws1", "us", conv, nil, nil)
 	m := in.SourceMeta
 	if !strings.Contains(m["intercom_custom_attributes"].(string), `"plan":"team"`) {
 		t.Errorf("custom_attributes = %v", m["intercom_custom_attributes"])
@@ -351,7 +351,7 @@ func TestBuildIngestInput_CustomAttributesAndAIMeta(t *testing.T) {
 	}
 
 	// Absent optional data → keys absent (not empty values).
-	bare := buildIngestInput("src-1", "Src", "ws1", convWithParts(nil), nil, nil)
+	bare := buildIngestInput("src-1", "Src", "ws1", "us", convWithParts(nil), nil, nil)
 	for _, key := range []string{"intercom_custom_attributes", "intercom_source_url", "intercom_ai_resolution_state"} {
 		if _, ok := bare.SourceMeta[key]; ok {
 			t.Errorf("%s should be absent when source data is missing", key)

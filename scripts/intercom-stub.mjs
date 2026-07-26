@@ -350,9 +350,14 @@ const server = createServer(async (req, res) => {
     const gt = filters.find((f) => f.field === 'updated_at' && f.operator === '>')?.value ?? 0
     const lt =
       filters.find((f) => f.field === 'updated_at' && f.operator === '<')?.value ?? Infinity
+    // Honor the requested sort. Real Intercom defaults to DESCENDING
+    // when sort is omitted — mirroring that keeps E2E able to catch a
+    // client regression that drops the ascending sort (the adapter's
+    // watermark logic depends on it).
+    const ascending = body.sort?.field === 'updated_at' && body.sort?.order === 'ascending'
     const matched = conversations
       .filter((c) => c.updated_at > gt && c.updated_at < lt)
-      .sort((a, b) => a.updated_at - b.updated_at)
+      .sort((a, b) => (ascending ? a.updated_at - b.updated_at : b.updated_at - a.updated_at))
     // Cursor pagination: starting_after is an index into the sorted set.
     const start = Number.parseInt(body.pagination?.starting_after ?? '0', 10) || 0
     const page = matched.slice(start, start + control.pageSize)

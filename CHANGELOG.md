@@ -15,18 +15,32 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - Shared `internal/infra/intercomclient/` HTTP client (reusable by #32
     bidirectional sync), pinned to Intercom API version 2.16.
   - US / EU / AU regional host selection with per-region host allowlist.
-  - Watermark-based incremental sync in `LastUID` (no opaque cursor):
-    UTC-day-floored search windows + client-side second-precision
-    filtering (Intercom search timestamps are date-indexed). Early
-    stops (budget, rate floor, transient failure) step the watermark
-    back one second so boundary-second conversations are never lost;
-    transient detail/ingest failures retry next tick instead of
-    permanently degrading the snapshot.
+  - Watermark-based incremental sync in `LastUID` with a mid-window
+    continuation cursor: UTC-day-floored/padded search windows (both
+    bounds — Intercom search timestamps are date-indexed) + client-side
+    second-precision filtering. Early stops (budget, rate floor,
+    transient failure) step the watermark back one second so
+    boundary-second conversations are never lost; a per-source
+    processed-set makes the boundary re-cover free; the persisted
+    cursor lets days with more covered conversations than one tick can
+    list drain instead of relisting from the day floor forever.
+  - Failure taxonomy that cannot wedge the source: transient detail /
+    ingest failures (5xx, network, DB down) retry next tick without
+    advancing the watermark; deterministic conditions (empty
+    conversations, validation rejects, oversized/undecodable responses)
+    skip or degrade to the summary shape and advance — a poison-pill
+    item slows the source down (transient ticks now count toward
+    backoff, measured from last attempt) but never stalls it.
+  - Out-of-order search results (the ascending sort is undocumented in
+    the 2.16 schema, though production-proven) stop the tick without
+    advancing the watermark instead of silently skipping older items.
   - Full-thread extraction via one `display_as=plaintext` detail call per
     conversation; `[customer]`/`[agent]`/`[bot]` role tagging; internal
     notes and redacted parts excluded; bot parts dropped first under the
-    4,500-char budget, then structural truncation (first 3 + last 2
-    customer messages).
+    4,500-byte budget, then structural truncation (first 3 + last 2
+    customer messages, rune-safe cuts). Seed bodies are HTML-stripped
+    (search results carry HTML even when parts are plaintext); operator
+    permalinks use the regional app host (EU/AU workspaces).
   - Contact identity (`intercom_contact_external_id`, email, name) and
     company metadata carried in SourceMeta as customer-profile join keys;
     Intercom inbox permalink as the operator backlink.
@@ -52,7 +66,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     transaction — a promoted Intercom conversation lands with its
     customer, company, and revenue-weighted decision score already
     populated. Channel-agnostic: Zendesk requester/organization keys
-    ride the same derivation.
+    ride the same derivation. Account/contact identities are
+    workspace-scoped (two workspaces' "company 5" never merge), values
+    are clamped to the DB limits, and fractional revenue rounds to
+    cents.
   - Teammate resolution: assignee IDs resolve to display names via
     `ListAdmins` (lazy, one call per poll tick, only when a qualifying
     conversation is assigned) → `intercom_teammate_name` SourceMeta.
@@ -62,16 +79,18 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     and a one-click promote that pre-fills the customer-request flow.
   - Recurring-signal detection: new `GET /feedback/{id}/similar`
     endpoint surfaces semantically-similar feedback (pgvector, ≥0.78
-    similarity); snapshots of the same conversation/ticket collapse to
-    one neighbor so evolution capture never inflates the recurrence
-    count. The candidate card shows "该问题已在其他反馈中出现 N 次"
+    similarity); snapshots of the same workspace-scoped conversation/
+    ticket collapse to one neighbor so evolution capture never inflates
+    the recurrence count, and cancelled requests never surface as dedup
+    targets. The candidate card shows "该问题已在其他反馈中出现 N 次"
     with the top neighbors and upgrades the promote action to bundle
-    the whole recurring cluster as evidence in one click.
+    the untracked cluster as evidence in one click.
   - Duplicate-request prevention: the endpoint returns the anchor's own
-    linked requests plus each neighbor's; when the anchor or its
-    recurring cluster is already tracked, the candidate card recommends
-    linking to the existing request ("相似反馈已关联到 CR-N") instead
-    of creating a duplicate.
+    linked requests (resolved even when embeddings are unavailable)
+    plus each neighbor's; an already-tracked anchor renders a terminal
+    "已被 CR-N 跟踪" state with no promote action, already-tracked
+    neighbors are excluded from the bundle, and link/promote mutations
+    invalidate the recurrence query so the card state stays live.
   - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
     rating, last answer type); escalated / negative-feedback Fin
     conversations produce a `complaint` enrichment hint.

@@ -744,15 +744,16 @@ func (r *FeedbackRepo) FindSimilarFeedback(
 }
 
 // feedbackThreadKeys resolves each feedback row to its source-thread
-// identity (channel-prefixed conversation/ticket ID) when the row came
-// from an inbound support channel. Rows without a thread identity map to
-// "" and are never deduped against each other.
+// identity when the row came from an inbound support channel. The key
+// includes the workspace/subdomain scope: conversation/ticket IDs are
+// only unique within one workspace, and a tenant can connect several.
+// Rows without a thread identity map to "" and are never deduped
+// against each other.
 func (r *FeedbackRepo) feedbackThreadKeys(ctx context.Context, tenantID string, feedbackIDs []int64) (map[int64]string, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, source, COALESCE(
-			source_meta->>'intercom_conversation_id',
-			source_meta->>'zendesk_ticket_id',
-			'')
+		SELECT id, source,
+			COALESCE(source_meta->>'intercom_workspace_id', source_meta->>'zendesk_subdomain', ''),
+			COALESCE(source_meta->>'intercom_conversation_id', source_meta->>'zendesk_ticket_id', '')
 		FROM user_feedback
 		WHERE tenant_id = $1 AND id = ANY($2)`,
 		tenantID, feedbackIDs,
@@ -765,12 +766,12 @@ func (r *FeedbackRepo) feedbackThreadKeys(ctx context.Context, tenantID string, 
 	out := map[int64]string{}
 	for rows.Next() {
 		var id int64
-		var source, threadID string
-		if err := rows.Scan(&id, &source, &threadID); err != nil { // ptrext:allow pgx-scan
+		var source, scope, threadID string
+		if err := rows.Scan(&id, &source, &scope, &threadID); err != nil { // ptrext:allow pgx-scan
 			return nil, fmt.Errorf("feedback thread keys scan: %w", err)
 		}
 		if threadID != "" {
-			out[id] = source + ":" + threadID
+			out[id] = source + ":" + scope + ":" + threadID
 		}
 	}
 	return out, rows.Err()
@@ -800,6 +801,7 @@ func (r *FeedbackRepo) RequestsLinkedToFeedback(ctx context.Context, tenantID st
 		WHERE fl.tenant_id = $1
 		  AND fl.feedback_id = ANY($2)
 		  AND cr.archived_at IS NULL
+		  AND cr.status <> 'cancelled'
 		ORDER BY cr.updated_at DESC`,
 		tenantID, feedbackIDs,
 	)

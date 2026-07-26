@@ -249,6 +249,11 @@ func (c *httpClient) SearchConversations(ctx context.Context, startTime, endTime
 			PerPage:       searchPageSize,
 			StartingAfter: startingAfter,
 		}),
+		// Ascending sort on conversations/search is absent from the 2.16
+		// OpenAPI schema but honored in production — Airbyte's supported
+		// connector has shipped this exact body for years. The adapter's
+		// watermark logic depends on it (and defends with a client-side
+		// per-page monotonicity re-check).
 		Sort: ptrext.Of(searchSort{Field: "updated_at", Order: "ascending"}),
 	}
 	type searchResponse struct {
@@ -380,7 +385,9 @@ func (c *httpClient) doJSON(ctx context.Context, method, path string, body []byt
 		return APIError{Method: path, Status: resp.StatusCode, Code: extractErrorCode(raw)}
 	}
 	if err := json.Unmarshal(raw, target); err != nil { // ptrext:allow json-unmarshal
-		return fmt.Errorf("intercom %s decode: %w", path, err)
+		// Deterministic for a given response (including bodies truncated
+		// at maxResponseBytes) — callers must NOT retry-loop on this.
+		return DecodeError{Method: path, Truncated: int64(len(raw)) == maxResponseBytes, Err: err}
 	}
 	return nil
 }

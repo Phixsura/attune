@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,10 @@ type fakeAPIClient struct {
 
 	// capturedStarts records the startTime passed to each search call.
 	capturedStarts []int64
+	// capturedCursors records the startingAfter passed to each search call.
+	capturedCursors []string
+	// capturedEnds records the endTime passed to each search call.
+	capturedEnds []int64
 
 	detailByID  map[string]conversation
 	detailErr   error
@@ -81,8 +86,10 @@ func (f *fakeAPIClient) AuthTest(_ context.Context) (intercomAccount, error) {
 	return f.authTestResult, f.authTestErr
 }
 
-func (f *fakeAPIClient) SearchConversations(_ context.Context, startTime, _ int64, _ string) (conversationPage, error) {
+func (f *fakeAPIClient) SearchConversations(_ context.Context, startTime, endTime int64, startingAfter string) (conversationPage, error) {
 	f.capturedStarts = append(f.capturedStarts, startTime)
+	f.capturedEnds = append(f.capturedEnds, endTime)
+	f.capturedCursors = append(f.capturedCursors, startingAfter)
 	if f.searchErr != nil {
 		return conversationPage{}, f.searchErr
 	}
@@ -151,7 +158,9 @@ func buildTestAdapter(fake *fakeAPIClient, deps inbound.Deps) *adapter {
 			return fake
 		},
 		lastSuccessAt: map[string]time.Time{},
+		lastAttemptAt: map[string]time.Time{},
 		failureCount:  map[string]int{},
+		processedKeys: map[string]map[string]int64{},
 		syncNow:       make(chan string, 1),
 	})
 	a.deps = deps
@@ -590,8 +599,10 @@ func TestPollSource_DecryptFailure(t *testing.T) {
 	a.pollSource(context.Background(), src)
 
 	stored, _ := sources.Get(context.Background(), "src-bad")
-	if stored.State.LastError != "decrypt config" {
-		t.Errorf("LastError = %q", stored.State.LastError)
+	// The parse error is surfaced so operators can tell decrypt /
+	// version / region failures apart.
+	if !strings.HasPrefix(stored.State.LastError, "config: ") {
+		t.Errorf("LastError = %q, want config: prefix", stored.State.LastError)
 	}
 	foundInternal := false
 	for _, m := range metrics.Totals {
@@ -921,19 +932,25 @@ func TestShouldSkipBackoff(t *testing.T) {
 	a := buildTestAdapter(&fakeAPIClient{}, inboundtest.DepsFor(nil, nil, nil)) // ptrext:allow test-fixture
 	// Below threshold — never skips.
 	a.failureCount["s"] = 2
-	a.lastSuccessAt["s"] = fixedTime.Add(-time.Second)
+	a.lastAttemptAt["s"] = fixedTime.Add(-time.Second)
 	if a.shouldSkipBackoff("s") {
 		t.Error("2 failures should not back off")
 	}
-	// 3 failures → 120s interval; 1s since success → skip.
+	// 3 failures → 120s interval; 1s since last attempt → skip.
 	a.failureCount["s"] = 3
 	if !a.shouldSkipBackoff("s") {
-		t.Error("3 failures 1s after success should skip")
+		t.Error("3 failures 1s after attempt should skip")
 	}
-	// Interval elapsed → no skip.
-	a.lastSuccessAt["s"] = fixedTime.Add(-3 * time.Minute)
+	// Interval elapsed since last attempt → no skip (retry due).
+	a.lastAttemptAt["s"] = fixedTime.Add(-3 * time.Minute)
 	if a.shouldSkipBackoff("s") {
 		t.Error("elapsed interval should not skip")
+	}
+	// Never-succeeded sources still back off (poison-token case).
+	a.failureCount["never"] = 5
+	a.lastAttemptAt["never"] = fixedTime.Add(-time.Second)
+	if !a.shouldSkipBackoff("never") {
+		t.Error("never-succeeded source with failures must back off")
 	}
 	// Success resets.
 	a.markPollSuccess("s", fixedTime)
@@ -1004,5 +1021,377 @@ func TestTriggerSync_NonBlocking(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("TriggerSync blocked with full buffer")
+	}
+}
+
+// --- Second-review regression coverage -------------------------------
+
+// TestPollSource_TransientDetailErrorStopsAndRetries: a 5xx detail
+// failure must stop the tick BEFORE the failed conversation (no
+// watermark advance, no summary-only ingest) and record last_error.
+func TestPollSource_TransientDetailErrorStopsAndRetries(t *testing.T) {
+	sources, ingestFake, metrics, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:     []conversationPage{{Conversations: []conversation{fullConversation()}}},
+		detailErr: apiError{Method: "/conversations/101", Status: 502, Code: "server_error"},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 0 {
+		t.Fatalf("transient detail failure must not ingest a degraded snapshot, got %d ingests", len(ingestFake.Calls))
+	}
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000000 {
+		t.Errorf("watermark must not advance past the failed conversation, got %d", stored.State.LastUID)
+	}
+	if stored.State.LastError == "" {
+		t.Error("transient degradation must surface in LastError")
+	}
+	foundTransient := false
+	for _, m := range metrics.Totals {
+		if strings.HasSuffix(m, "|transient_err") {
+			foundTransient = true
+		}
+	}
+	if !foundTransient {
+		t.Errorf("no transient_err metric in %v", metrics.Totals)
+	}
+	// Per-item transient failures count toward backoff.
+	if a.failureCount[src.Slug] == 0 {
+		t.Error("transient tick must bump the failure counter for backoff")
+	}
+}
+
+// TestPollSource_TransientIngestErrorStopsAndRetries: DB-down style
+// ingest failure must hold the watermark and stop the tick.
+func TestPollSource_TransientIngestErrorStopsAndRetries(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	full := fullConversation()
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{full}}},
+		detailByID: map[string]conversation{"101": full},
+	}
+
+	ingestFake.NextErr = errors.New("db down")
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000000 {
+		t.Errorf("watermark must not advance past the failed ingest, got %d", stored.State.LastUID)
+	}
+	if stored.State.LastError == "" {
+		t.Error("transient ingest failure must surface in LastError")
+	}
+}
+
+// TestPollSource_DeterministicIngestErrorSkips: validation rejects
+// reproduce forever — they must skip the conversation and advance,
+// never wedge the source.
+func TestPollSource_DeterministicIngestErrorSkips(t *testing.T) {
+	sources, ingestFake, metrics, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	full := fullConversation()
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{full}}},
+		detailByID: map[string]conversation{"101": full},
+	}
+
+	ingestFake.NextErr = errors.New("content is required")
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000500 {
+		t.Errorf("deterministic reject must advance the watermark, got %d", stored.State.LastUID)
+	}
+	foundValidate := false
+	for _, m := range metrics.Totals {
+		if strings.HasSuffix(m, "|validate_err") {
+			foundValidate = true
+		}
+	}
+	if !foundValidate {
+		t.Errorf("no validate_err metric in %v", metrics.Totals)
+	}
+}
+
+// TestPollSource_EmptyConversationSkips: a conversation with no
+// ingestable text is skipped and the watermark advances.
+func TestPollSource_EmptyConversationSkips(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	empty := conversation{
+		ID: "301", State: "open", UpdatedAt: 1700000700,
+		Source: intercomclient.ConversationSource{
+			Type:   "conversation",
+			Author: partAuthor{Type: "user", ID: "c1"},
+		},
+		Parts: intercomclient.ConversationParts{Parts: []part{
+			{ID: "n1", PartType: "note", Body: "internal only", Author: partAuthor{Type: "admin"}},
+		}},
+	}
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{empty}}},
+		detailByID: map[string]conversation{"301": empty},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 0 {
+		t.Fatalf("empty conversation must not be ingested, got %d calls", len(ingestFake.Calls))
+	}
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000700 {
+		t.Errorf("empty conversation must advance the watermark, got %d", stored.State.LastUID)
+	}
+}
+
+// TestPollSource_DecodeErrorDegradesToSummary: an oversized/undecodable
+// detail response is deterministic — it must degrade to the summary
+// shape instead of retrying forever.
+func TestPollSource_DecodeErrorDegradesToSummary(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	summary := fullConversation()
+	summary.Parts = intercomclient.ConversationParts{}
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:     []conversationPage{{Conversations: []conversation{summary}}},
+		detailErr: decodeError{Method: "/conversations/101", Truncated: true, Err: errors.New("unexpected EOF")},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingestFake.Calls) != 1 {
+		t.Fatalf("decode failure must degrade to summary ingest, got %d calls", len(ingestFake.Calls))
+	}
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000500 {
+		t.Errorf("degraded conversation must advance the watermark, got %d", stored.State.LastUID)
+	}
+}
+
+// TestPollSource_CursorResumesSaturatedWindow: when a page contains only
+// already-covered items, the persisted cursor must let the next tick
+// resume from page 2 instead of re-listing page 1 forever.
+func TestPollSource_CursorResumesSaturatedWindow(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	// Watermark far past every item on page 1 (all already covered).
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000900)
+
+	covered := fullConversation()
+	covered.ID = "old-1"
+	covered.UpdatedAt = 1700000100 // <= watermark → skipped client-side
+
+	pages := make([]conversationPage, 0, maxPagesPerTick+1)
+	for i := 0; i < maxPagesPerTick; i++ {
+		pages = append(pages, conversationPage{
+			Conversations: []conversation{covered},
+			StartingAfter: fmt.Sprintf("cursor-%d", i+1),
+		})
+	}
+	fake := &fakeAPIClient{pages: pages} // ptrext:allow test-fixture
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	// Tick 1 exhausted maxPagesPerTick without reaching the tail; the
+	// continuation cursor must be persisted.
+	blob, ok := sources.configUpdates["src-1"]
+	if !ok {
+		t.Fatal("expected persisted config with continuation cursor")
+	}
+	decoded, err := deps.Secrets.Decrypt(blob)
+	if err != nil {
+		t.Fatalf("decrypt persisted config: %v", err)
+	}
+	var persisted Config
+	if err := json.Unmarshal(decoded, &persisted); err != nil { // ptrext:allow json-unmarshal
+		t.Fatalf("unmarshal persisted config: %v", err)
+	}
+	if persisted.SyncCursor != fmt.Sprintf("cursor-%d", maxPagesPerTick) {
+		t.Errorf("SyncCursor = %q, want cursor-%d", persisted.SyncCursor, maxPagesPerTick)
+	}
+	if persisted.SyncWindowStart == 0 || persisted.SyncWindowEnd == 0 {
+		t.Error("cursor window bounds must be persisted alongside the cursor")
+	}
+
+	// Tick 2 with the persisted config must resume FROM the cursor, not
+	// from a fresh window.
+	src2, _ := sources.Get(context.Background(), "src-1")
+	src2.Config = blob
+	fake.capturedCursors = nil
+	fake.pageCalls = 0
+	a.pollSource(context.Background(), src2)
+	if len(fake.capturedCursors) == 0 || fake.capturedCursors[0] != fmt.Sprintf("cursor-%d", maxPagesPerTick) {
+		t.Errorf("tick 2 first cursor = %v, want resume from cursor-%d", fake.capturedCursors, maxPagesPerTick)
+	}
+	if len(ingestFake.Calls) != 0 {
+		t.Fatalf("covered items must not be re-ingested, got %d", len(ingestFake.Calls))
+	}
+}
+
+// TestPollSource_ProcessedKeysSkipBoundaryReplay: after an early stop,
+// the re-covered boundary-second items that were already processed must
+// not consume detail budget again.
+func TestPollSource_ProcessedKeysSkipBoundaryReplay(t *testing.T) {
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+		MaxDetailFetches:     1,
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	// Two conversations sharing one updated_at second: budget=1 → tick 1
+	// processes c1, steps back to T-1; tick 2 must skip c1 for free and
+	// process c2.
+	c1 := fullConversation()
+	c1.ID = "101"
+	c1.UpdatedAt = 1700000500
+	c2 := fullConversation()
+	c2.ID = "102"
+	c2.UpdatedAt = 1700000500
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{c1, c2}}},
+		detailByID: map[string]conversation{"101": c1, "102": c2},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+	if len(ingestFake.Calls) != 1 {
+		t.Fatalf("tick 1: expected 1 ingest under budget=1, got %d", len(ingestFake.Calls))
+	}
+
+	// Tick 2 from the stepped-back watermark.
+	src2, _ := sources.Get(context.Background(), "src-1")
+	fake.detailCalls = 0
+	a.pollSource(context.Background(), src2)
+	if len(ingestFake.Calls) != 2 {
+		t.Fatalf("tick 2: expected c2 ingested (total 2), got %d", len(ingestFake.Calls))
+	}
+	if fake.detailCalls != 1 {
+		t.Errorf("tick 2: already-processed c1 must not consume a detail fetch, detailCalls = %d", fake.detailCalls)
+	}
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000500 {
+		t.Errorf("tick 2: watermark = %d, want 1700000500 (both processed)", stored.State.LastUID)
+	}
+}
+
+// TestPollSource_OutOfOrderResultsStopTick: if the API stops honoring
+// ascending sort, the tick must stop without advancing the watermark.
+func TestPollSource_OutOfOrderResultsStopTick(t *testing.T) {
+	sources, _, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, 1700000000)
+
+	newer := fullConversation()
+	newer.ID = "201"
+	newer.UpdatedAt = 1700000600
+	older := fullConversation()
+	older.ID = "202"
+	older.UpdatedAt = 1700000300 // out of order
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{newer, older}}},
+		detailByID: map[string]conversation{"201": newer, "202": older},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	stored, _ := sources.Get(context.Background(), "src-1")
+	if stored.State.LastUID != 1700000000 {
+		t.Errorf("out-of-order results must not advance the watermark, got %d", stored.State.LastUID)
+	}
+	if stored.State.LastError == "" {
+		t.Error("out-of-order stop must surface in LastError")
+	}
+}
+
+// TestSyncPages_QueryEndDayPadded: the API upper bound is day-padded
+// (date-indexed search), with the real bound enforced client-side.
+func TestSyncPages_QueryEndDayPadded(t *testing.T) {
+	fixedTime := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	origNow := nowFn
+	nowFn = func() time.Time { return fixedTime }
+	t.Cleanup(func() { nowFn = origNow })
+
+	sources, ingestFake, _, deps := buildDeps(t)
+	cfg := Config{
+		Version: ConfigVersion, Region: "us",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		WorkspaceID:          "ws1",
+	}
+	src := testSource(t, sources, deps.Secrets, cfg, fixedTime.Unix()-3600)
+
+	// One conversation updated after tick start: listed by the padded
+	// window, but the client-side filter must defer it to next tick.
+	future := fullConversation()
+	future.ID = "401"
+	future.UpdatedAt = fixedTime.Unix() + 30
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		pages:      []conversationPage{{Conversations: []conversation{future}}},
+		detailByID: map[string]conversation{"401": future},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	wantEnd := (fixedTime.Unix()/daySeconds + 2) * daySeconds
+	if len(fake.capturedEnds) == 0 || fake.capturedEnds[0] != wantEnd {
+		t.Errorf("query end = %v, want day-padded %d", fake.capturedEnds, wantEnd)
+	}
+	if len(ingestFake.Calls) != 0 {
+		t.Fatalf("item updated after tick start must wait for next tick, got %d ingests", len(ingestFake.Calls))
 	}
 }

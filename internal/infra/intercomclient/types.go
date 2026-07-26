@@ -192,6 +192,27 @@ func (e APIError) Permanent() bool {
 	}
 }
 
+// DecodeError is returned when a 2xx response body fails to unmarshal —
+// including bodies truncated at the response-size cap. It is
+// deterministic for the same response, so callers must treat it as a
+// permanent per-item condition, never a retryable transient.
+type DecodeError struct {
+	Method    string
+	Truncated bool
+	Err       error
+}
+
+// Error implements the error interface.
+func (e DecodeError) Error() string {
+	if e.Truncated {
+		return fmt.Sprintf("intercom %s decode: response truncated at size cap: %v", e.Method, e.Err)
+	}
+	return fmt.Sprintf("intercom %s decode: %v", e.Method, e.Err)
+}
+
+// Unwrap exposes the underlying unmarshal error.
+func (e DecodeError) Unwrap() error { return e.Err }
+
 // RateLimitError is returned on 429 responses. RetryAfter is derived
 // from X-RateLimit-Reset (Intercom does not send Retry-After).
 type RateLimitError struct {

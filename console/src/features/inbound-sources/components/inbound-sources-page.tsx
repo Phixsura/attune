@@ -440,7 +440,13 @@ function SourceDetailCard({
                 ...(source.ticketsSynced
                   ? [
                       {
-                        label: t('inbound_sources.detail.tickets_synced'),
+                        // Channel-aware label: Zendesk counts tickets,
+                        // Intercom counts conversations.
+                        label: t(
+                          source.channel === 'intercom'
+                            ? 'inbound_sources.detail.conversations_synced'
+                            : 'inbound_sources.detail.tickets_synced',
+                        ),
                         value: String(source.ticketsSynced),
                       },
                       {

@@ -4,6 +4,7 @@ package intercom
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/Phixsura/attune/internal/infra/intercomclient"
@@ -83,6 +84,16 @@ func AuthTest(ctx context.Context, region, accessToken string) (AccountInfo, err
 // the source instead of being retried.
 func IsPermanentError(err error) bool {
 	return isPermanentIntercomError(err)
+}
+
+// APIErrorStatus extracts the HTTP status and Intercom error code from
+// an API-level failure. ok=false for non-API errors (network, decode).
+func APIErrorStatus(err error) (status int, code string, ok bool) {
+	var ae apiError
+	if errors.As(err, &ae) {
+		return ae.Status, ae.Code, true
+	}
+	return 0, "", false
 }
 
 type missingFieldError struct{ msg string }

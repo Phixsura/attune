@@ -91,6 +91,7 @@ func (a *adapter) pollAllSources(ctx context.Context) {
 		if a.shouldSkipBackoff(src.Slug) {
 			continue
 		}
+		a.markPollAttempt(src.Slug, nowFn())
 		srcCtx, cancel := context.WithTimeout(ctx, pollSourceTimeout)
 		a.pollSource(srcCtx, src)
 		cancel()
@@ -123,11 +124,13 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 
 	cfg, token, err := parseConfig(src.Config, a.deps.Secrets)
 	if err != nil {
-		logext.Warnf(ctx, "[%s] decrypt config failed,source_id:%s,err:%+v", where, src.ID, err.Error())
+		logext.Warnf(ctx, "[%s] parse config failed,source_id:%s,err:%+v", where, src.ID, err.Error())
 		_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 			LastEventAt: src.State.LastEventAt,
 			LastUID:     src.State.LastUID,
-			LastError:   "decrypt config",
+			// The parse error distinguishes decrypt / version / region
+			// failures — don't collapse them for the operator.
+			LastError: "config: " + err.Error(),
 		})
 		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "internal_err")
 		return
@@ -152,7 +155,15 @@ func (a *adapter) pollSource(ctx context.Context, src inbound.Source) {
 		newUID = sr.watermark
 	}
 	a.persistPollResult(ctx, src, newUID, nowFn(), sr.pollError)
-	a.markPollSuccess(src.Slug, nowFn())
+	a.pruneProcessedKeys(src.Slug, newUID)
+	if sr.pollError != "" {
+		// Per-item transient failures count toward backoff — a
+		// poison-pill item retried at full tick rate forever is worse
+		// than a slower cadence.
+		a.markPollFailure(src.Slug)
+	} else {
+		a.markPollSuccess(src.Slug, nowFn())
+	}
 	a.deps.Metrics.SetPollLag(channelName, src.TenantID, src.Slug, 0)
 	a.deps.Metrics.SetSourceState(channelName, src.TenantID, src.Slug, "enabled", true)
 }
@@ -166,47 +177,66 @@ type syncResult struct {
 
 // syncPages walks the updated_at-ascending search results and processes
 // each qualifying conversation. The watermark only advances past
-// conversations that were actually processed (ingested or filtered);
-// any early stop (budget, rate floor, transient failure, ctx) also steps
-// the watermark back one second so unprocessed conversations sharing the
-// boundary second are re-covered next tick (updated_at is
-// second-precision; the re-covered snapshot dedups by idempotency key).
+// conversations that were actually processed (ingested, skipped as
+// invalid, or filtered); any early stop (budget, rate floor, transient
+// failure, ctx) also steps the watermark back one second so unprocessed
+// conversations sharing the boundary second are re-covered next tick
+// (updated_at is second-precision; re-covered snapshots dedup by
+// idempotency key).
+//
+// Pagination resumes across ticks via cfg.SyncCursor: without it, a UTC
+// day whose already-covered conversations fill maxPagesPerTick pages
+// would be re-listed from the day floor every tick and the unprocessed
+// tail would be unreachable forever.
 func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config, client apiClient, where string) syncResult {
 	watermark := src.State.LastUID
 	if watermark == 0 {
 		watermark = a.seedWatermark(cfg)
 	}
-	// Day-floor the query start (date-indexed search); re-filter
-	// client-side at second precision below.
+	tickStart := nowFn().Unix()
+	// Day-floor the query start and day-pad the query end (the same
+	// defense Airbyte's production connector uses on both bounds):
+	// Intercom search timestamp comparisons are date-indexed, so a
+	// second-precise "now" upper bound could exclude everything updated
+	// today. The real window [watermark+1, tickStart) is enforced by
+	// the client-side second-precision filters below.
 	queryStart := (watermark / daySeconds) * daySeconds
-	// Exclusive upper bound (the API filter is updated_at < end): items
-	// updated at exactly "now" land next tick, so an update racing the
-	// fetch inside the current second is never half-captured.
-	queryEnd := nowFn().Unix()
+	queryEnd := (tickStart/daySeconds + 2) * daySeconds
 
 	st := pageState{
 		res:           syncResult{watermark: watermark},
 		baseWatermark: watermark,
+		tickStart:     tickStart,
 		detailBudget:  effectiveDetailBudget(cfg),
 		companyCache:  map[string]intercomCompany{},
 	}
-	cursor := ""
+	cursor := resumeCursor(cfg, queryStart, queryEnd)
 	endOfResults := false
 
 	for pageNum := 0; pageNum < maxPagesPerTick && !endOfResults; pageNum++ {
 		if ctx.Err() != nil {
 			break
 		}
-		page, err := client.SearchConversations(ctx, queryStart, queryEnd, cursor)
+		fetchCursor := cursor
+		page, err := client.SearchConversations(ctx, queryStart, queryEnd, fetchCursor)
 		if err != nil {
+			if fetchCursor != "" {
+				// A stale/rejected continuation cursor must not wedge the
+				// source — drop it so the next tick starts a fresh window.
+				cfg.setSyncCursor("", 0, 0)
+				a.persistSyncStats(ctx, src.ID, cfg, where)
+			}
 			a.handleSearchFailure(ctx, src, where, err)
 			st.res.failed = true
-			break
+			return st.res
 		}
 
 		var stop bool
 		st, stop = a.processConversationPage(ctx, client, src, cfg, page, st, where)
 		if stop {
+			// Mid-page stop: keep the cursor that fetched THIS page so
+			// the next tick re-fetches it (processed head dedups).
+			cfg.setSyncCursor(fetchCursor, queryStart, queryEnd)
 			break
 		}
 
@@ -214,12 +244,18 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 			// End of results — backfill complete for this window.
 			cfg.SyncStats.BackfillDone = true
 			endOfResults = true
+			cfg.setSyncCursor("", 0, 0)
+		} else {
+			// Page fully processed — the continuation point advances even
+			// when the watermark cannot (a page full of already-covered
+			// items), so a saturated day drains at 10 pages per tick.
+			cfg.setSyncCursor(page.StartingAfter, queryStart, queryEnd)
 		}
 		logext.Infof(ctx, "[%s] progress,source_id:%s,page:%d,conversations_synced:%d,end_of_results:%t",
 			where, src.ID, pageNum+1, st.totalSynced, endOfResults)
 		// Proactive self-throttle: stop the tick before Intercom starts
-		// returning 429s. The watermark holds only processed items, so
-		// the remainder is re-covered next tick.
+		// returning 429s. The cursor + watermark cover the remainder next
+		// tick.
 		if budget := client.RateBudget(); !endOfResults && budget >= 0 && budget < rateBudgetFloor {
 			logext.Infof(ctx, "[%s] rate budget low,stopping tick,source_id:%s,remaining:%d", where, src.ID, budget)
 			break
@@ -231,13 +267,23 @@ func (a *adapter) syncPages(ctx context.Context, src inbound.Source, cfg Config,
 		// function comment) at the cost of one deduped re-fetch.
 		st.res.watermark--
 	}
-	// Accumulate stats on every exit path — budget-exhausted stops are
-	// the common case during backfill and must not drop their counts.
-	if st.totalSynced > 0 || endOfResults {
-		cfg.SyncStats.ConversationsSynced += int64(st.totalSynced)
-		a.persistSyncStats(ctx, src.ID, cfg, where)
-	}
+	// Persist cursor + stats on every non-failed exit — budget-exhausted
+	// stops are the common case during backfill and must not drop their
+	// counts. Failed ticks don't persist the watermark, so persisting
+	// their counts would double-count the re-covered items next tick.
+	cfg.SyncStats.ConversationsSynced += int64(st.totalSynced)
+	a.persistSyncStats(ctx, src.ID, cfg, where)
 	return st.res
+}
+
+// resumeCursor returns the persisted continuation cursor when it was
+// minted against this exact search window — a cursor is only valid for
+// the query that produced it.
+func resumeCursor(cfg Config, queryStart, queryEnd int64) string {
+	if cfg.SyncCursor != "" && cfg.SyncWindowStart == queryStart && cfg.SyncWindowEnd == queryEnd {
+		return cfg.SyncCursor
+	}
+	return ""
 }
 
 // pageState threads mutable sync progress through page processing.
@@ -246,6 +292,9 @@ type pageState struct {
 	// baseWatermark is the effective watermark at tick start (seeded on
 	// first sync) — the client-side second-precision filter boundary.
 	baseWatermark int64
+	// tickStart is the exclusive client-side upper bound: items updated
+	// at or after it land next tick (the API window is day-padded).
+	tickStart     int64
 	detailFetches int
 	detailBudget  int
 	totalSynced   int
@@ -269,20 +318,28 @@ func (a *adapter) processConversationPage(
 	st pageState,
 	where string,
 ) (pageState, bool) {
+	prevUpdatedAt := int64(0)
 	for i := range page.Conversations {
 		if ctx.Err() != nil {
 			return st, true
 		}
 		summary := page.Conversations[i]
-		// Client-side second-precision filter over the day-floored window.
-		if summary.UpdatedAt <= st.baseWatermark {
-			continue
+		// Defense for the undocumented ascending sort (see the client's
+		// SearchConversations): if the API ever stops honoring it, an
+		// early stop would persist a too-high watermark and silently skip
+		// everything older. A visible stall beats silent data loss.
+		if summary.UpdatedAt < prevUpdatedAt {
+			logext.Errorf(ctx, "[%s] search results out of order,stopping tick,source_id:%s,conversation_id:%s,updated_at:%d,prev:%d",
+				where, src.ID, summary.ID, summary.UpdatedAt, prevUpdatedAt)
+			st.res.watermark = st.baseWatermark
+			st.res.pollError = "conversation search: unexpected result order"
+			return st, true
 		}
-		if !matchesFilter(summary, cfg) {
-			// Filtered out — still advance the watermark past it.
-			if summary.UpdatedAt > st.res.watermark {
-				st.res.watermark = summary.UpdatedAt
-			}
+		prevUpdatedAt = summary.UpdatedAt
+		if action := a.classifyConversation(src.Slug, summary, cfg, st); action == convSkip {
+			continue
+		} else if action == convAdvance {
+			st.advanceWatermark(summary.UpdatedAt)
 			continue
 		}
 		if st.detailFetches >= st.detailBudget {
@@ -310,11 +367,96 @@ func (a *adapter) processConversationPage(
 		if outcome == outcomeIngested {
 			st.totalSynced++
 		}
-		if summary.UpdatedAt > st.res.watermark {
-			st.res.watermark = summary.UpdatedAt
-		}
+		a.rememberProcessed(src.Slug, summary)
+		st.advanceWatermark(summary.UpdatedAt)
 	}
 	return st, false
+}
+
+// convAction classifies a search summary before the detail fetch.
+type convAction int
+
+const (
+	// convFetch — qualifying conversation: fetch details and ingest.
+	convFetch convAction = iota
+	// convSkip — outside the client-side window: no watermark movement.
+	convSkip
+	// convAdvance — covered without work (filtered out, or an
+	// already-processed boundary replay): advance the watermark for free.
+	convAdvance
+)
+
+// classifyConversation applies the client-side window, the configured
+// filters, and the processed-set to one search summary.
+func (a *adapter) classifyConversation(slug string, summary conversation, cfg Config, st pageState) convAction {
+	// Client-side second-precision window: skip items at or below the
+	// watermark and items updated at/after tick start (they land next
+	// tick — the day-padded API window over-fetches by design).
+	if summary.UpdatedAt <= st.baseWatermark || summary.UpdatedAt >= st.tickStart {
+		return convSkip
+	}
+	if !matchesFilter(summary, cfg) {
+		return convAdvance
+	}
+	if a.alreadyProcessed(slug, summary) {
+		// Boundary-second replay of an already-processed snapshot —
+		// no detail fetch, no budget, no counters.
+		return convAdvance
+	}
+	return convFetch
+}
+
+// advanceWatermark moves the tick watermark past a covered conversation.
+func (st *pageState) advanceWatermark(updatedAt int64) {
+	if updatedAt > st.res.watermark {
+		st.res.watermark = updatedAt
+	}
+}
+
+// snapshotKey identifies one conversation snapshot in the per-source
+// processed-set (memory only, not the ingest idempotency key).
+func snapshotKey(summary conversation) string {
+	return summary.ID + "@" + strconv.FormatInt(summary.UpdatedAt, 10)
+}
+
+// alreadyProcessed reports whether this exact conversation snapshot was
+// fully handled in an earlier tick (boundary-second re-cover).
+func (a *adapter) alreadyProcessed(slug string, summary conversation) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	seen, ok := a.processedKeys[slug]
+	if !ok {
+		return false
+	}
+	_, done := seen[snapshotKey(summary)]
+	return done
+}
+
+// rememberProcessed marks a snapshot as fully handled so boundary-second
+// re-covers skip it without spending API budget.
+func (a *adapter) rememberProcessed(slug string, summary conversation) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.processedKeys == nil {
+		a.processedKeys = map[string]map[string]int64{}
+	}
+	if a.processedKeys[slug] == nil {
+		a.processedKeys[slug] = map[string]int64{}
+	}
+	a.processedKeys[slug][snapshotKey(summary)] = summary.UpdatedAt
+}
+
+// pruneProcessedKeys drops remembered snapshots at or below the
+// persisted watermark — the `<= baseWatermark` filter covers those, so
+// the memory set only ever holds the boundary second.
+func (a *adapter) pruneProcessedKeys(slug string, watermark int64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for key, updatedAt := range a.processedKeys[slug] {
+		if updatedAt <= watermark {
+			delete(a.processedKeys[slug], key)
+		}
+	}
 }
 
 // ingestOutcome classifies one conversation's processing result.
@@ -326,6 +468,11 @@ const (
 	// outcomeDuplicate — replay of an already-ingested snapshot; the
 	// conversation counts as processed but not as newly synced.
 	outcomeDuplicate
+	// outcomeSkipped — deterministic per-conversation condition (empty
+	// content, validation reject): retrying can never succeed, so the
+	// watermark advances past it. NEVER map a deterministic failure to
+	// outcomeRetry — that wedges the source on a poison-pill item.
+	outcomeSkipped
 	// outcomeRetry — transient failure; the tick must stop before this
 	// conversation so the watermark never advances past an item that
 	// was neither ingested nor filtered.
@@ -333,11 +480,12 @@ const (
 )
 
 // fetchAndIngest pulls the full thread for one conversation and ingests
-// it. Permanent per-conversation conditions (deleted/restricted — the
-// zendesk #229 lesson §4b) degrade to the summary shape so they never
-// block the sync; transient failures return outcomeRetry so the full
-// thread is re-fetched next tick instead of permanently ingesting a
-// degraded snapshot under its idempotency key.
+// it. Permanent per-conversation conditions (deleted/restricted/oversized
+// — the zendesk #229 lesson §4b) degrade to the summary shape so they
+// never block the sync; deterministic ingest rejects (validation) skip
+// the conversation; only genuinely transient failures return
+// outcomeRetry so the full thread is re-fetched next tick instead of
+// permanently ingesting a degraded snapshot under its idempotency key.
 func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbound.Source, cfg Config, summary conversation, companyCache map[string]intercomCompany, admins map[int64]intercomAdmin, where string) ingestOutcome {
 	conv, err := client.GetConversation(ctx, summary.ID)
 	if err != nil {
@@ -362,11 +510,27 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 
 	contacts := a.resolveContacts(ctx, client, conv, where)
 	conv.Company = a.resolveCompany(ctx, client, conv.Company, companyCache, where)
-	in := buildIngestInput(src.ID, src.Name, cfg.WorkspaceID, conv, contacts, admins)
+	in := buildIngestInput(src.ID, src.Name, cfg.WorkspaceID, cfg.Region, conv, contacts, admins)
+	if in.Content == "" {
+		// A conversation can legitimately carry no ingestable text (empty
+		// seed + only internal notes/state changes). Deterministic — skip
+		// and advance; retrying would wedge the source forever.
+		logext.Infof(ctx, "[%s] empty conversation,skipping,source_id:%s,conversation_id:%s", where, src.ID, conv.ID)
+		a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+		return outcomeSkipped
+	}
 	if _, err := a.deps.Ingest.Ingest(ctx, src.TenantID, uuid.Nil, in); err != nil {
 		if isDuplicateError(err) {
 			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
 			return outcomeDuplicate
+		}
+		if isDeterministicIngestError(err) {
+			// Validation rejects reproduce identically on every retry —
+			// skip the conversation instead of wedging the watermark.
+			logext.Warnf(ctx, "[%s] ingest rejected,skipping,source_id:%s,conversation_id:%s,err:%+v",
+				where, src.ID, conv.ID, err.Error())
+			a.deps.Metrics.Total(channelName, src.TenantID, src.Slug, "validate_err")
+			return outcomeSkipped
 		}
 		logext.Warnf(ctx, "[%s] ingest failed,will retry next tick,source_id:%s,conversation_id:%s,err:%+v",
 			where, src.ID, conv.ID, err.Error())
@@ -380,11 +544,18 @@ func (a *adapter) fetchAndIngest(ctx context.Context, client apiClient, src inbo
 // isTransientDetailError reports whether a GetConversation failure is
 // worth retrying next tick (rate limit, server error, network) as
 // opposed to a permanent per-conversation condition (deleted,
-// restricted, plan-gated) that degrades to the summary shape.
+// restricted, plan-gated, oversized/undecodable response) that degrades
+// to the summary shape.
 func isTransientDetailError(err error) bool {
 	var rle rateLimitError
 	if errors.As(err, &rle) {
 		return true
+	}
+	var de decodeError
+	if errors.As(err, &de) {
+		// Deterministic for the same response (incl. size-cap
+		// truncation) — retrying can never succeed.
+		return false
 	}
 	var ae apiError
 	if errors.As(err, &ae) {
@@ -392,6 +563,25 @@ func isTransientDetailError(err error) bool {
 	}
 	// Non-API errors (network, timeout) are transient by nature.
 	return true
+}
+
+// isDeterministicIngestError matches ingest rejections that reproduce
+// identically on every attempt — validation failures, never infra
+// errors. These must skip the conversation, not wedge the watermark.
+func isDeterministicIngestError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"content is required",
+		"content too long",
+		"content contains a null byte",
+		"invalid source",
+		"invalid idempotency key",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveAdmins fetches the workspace teammate directory once per tick.
@@ -561,6 +751,30 @@ func (a *adapter) markPollSuccess(slug string, t time.Time) {
 	a.mu.Unlock()
 }
 
+// markPollAttempt records the attempt time — the backoff reference point
+// (measuring from last success would disable backoff after one interval
+// and never engage it for never-succeeded sources).
+func (a *adapter) markPollAttempt(slug string, t time.Time) {
+	a.mu.Lock()
+	if a.lastAttemptAt == nil {
+		a.lastAttemptAt = map[string]time.Time{}
+	}
+	a.lastAttemptAt[slug] = t
+	a.mu.Unlock()
+}
+
+// markPollFailure bumps the consecutive-failure counter without touching
+// source state (used for per-item transient degradation, where the tick
+// itself persisted normally).
+func (a *adapter) markPollFailure(slug string) {
+	a.mu.Lock()
+	if a.failureCount == nil {
+		a.failureCount = map[string]int{}
+	}
+	a.failureCount[slug]++
+	a.mu.Unlock()
+}
+
 func (a *adapter) transientError(ctx context.Context, src inbound.Source, reason string) {
 	_ = a.deps.Sources.UpdateState(ctx, src.ID, inbound.SourceState{
 		LastEventAt: src.State.LastEventAt,
@@ -577,16 +791,15 @@ func (a *adapter) transientError(ctx context.Context, src inbound.Source, reason
 }
 
 // shouldSkipBackoff returns true if the source has consecutive failures
-// and the backoff interval hasn't elapsed since the last successful
-// poll (never-succeeded sources keep the base 60s cadence). Backoff
-// schedule: 0-2 failures → no skip (60s tick is enough), 3+ →
-// doubling, capped at 900s. Same shape as the zendesk adapter.
+// and the backoff interval hasn't elapsed since the last attempt.
+// Backoff schedule: 0-2 failures → no skip (60s tick is enough), 3+ →
+// doubling: 120s, 240s, ... capped at 900s.
 func (a *adapter) shouldSkipBackoff(slug string) bool {
 	a.mu.Lock()
 	failures := a.failureCount[slug]
-	last, hasLast := a.lastSuccessAt[slug]
+	last, hasLast := a.lastAttemptAt[slug]
 	a.mu.Unlock()
-	if failures < 3 {
+	if failures < 3 || !hasLast {
 		return false
 	}
 	interval := defaultPollInterval
@@ -595,9 +808,6 @@ func (a *adapter) shouldSkipBackoff(slug string) bool {
 	}
 	if interval > 15*time.Minute {
 		interval = 15 * time.Minute
-	}
-	if !hasLast {
-		return false
 	}
 	return nowFn().Sub(last) < interval
 }

@@ -121,6 +121,20 @@ func (h *Handler) encryptIntercomConfig(inputs intercom.ConnInputs, workspaceID 
 // friendlyIntercomError maps Intercom API failures to operator-facing
 // messages. Never echoes the token.
 func friendlyIntercomError(err error) string {
+	// Status-code mapping first: a 401 with an empty error body carries
+	// no "unauthorized" substring, and a 403 code like "forbidden" has
+	// no dedicated case.
+	if status, code, ok := intercom.APIErrorStatus(err); ok {
+		switch status {
+		case http.StatusUnauthorized:
+			return "Intercom rejected the access token. Check the token in your Developer Hub app (Configure > Authentication)."
+		case http.StatusForbidden:
+			if code == "api_plan_restricted" {
+				return "This Intercom workspace's plan does not allow API access."
+			}
+			return "Intercom denied access for this token. Check the app's permissions in your Developer Hub."
+		}
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "unauthorized") || strings.Contains(msg, "token_revoked") || strings.Contains(msg, "token_expired"):
@@ -132,6 +146,8 @@ func friendlyIntercomError(err error) string {
 	case strings.Contains(msg, "no such host") || strings.Contains(msg, "dial tcp") || strings.Contains(msg, "context deadline"):
 		return "Could not reach the Intercom API. Check the region and your network egress rules."
 	default:
-		return "Intercom connection failed: " + err.Error()
+		// Never echo raw upstream body content (the API error code path
+		// truncates arbitrary response bodies into the message).
+		return "Intercom connection failed. Check the region, token, and network egress rules."
 	}
 }

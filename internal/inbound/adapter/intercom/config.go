@@ -44,6 +44,19 @@ type Config struct {
 	// MaxDetailFetches caps per-tick conversation detail API calls.
 	MaxDetailFetches int `json:"max_detail_fetches,omitempty"`
 
+	// SyncCursor resumes mid-window search pagination across ticks
+	// (page-boundary granularity). Without it, a UTC day holding more
+	// already-processed conversations than maxPagesPerTick can list
+	// would be re-listed from the day floor every tick and the sync
+	// could never reach the unprocessed tail. Empty = no continuation.
+	SyncCursor string `json:"sync_cursor,omitempty"`
+
+	// SyncWindowStart / SyncWindowEnd pin the exact search window the
+	// cursor belongs to — a cursor is only valid against the query that
+	// produced it.
+	SyncWindowStart int64 `json:"sync_window_start,omitempty"`
+	SyncWindowEnd   int64 `json:"sync_window_end,omitempty"`
+
 	// SyncStats tracks backfill progress.
 	SyncStats SyncStats `json:"sync_stats,omitempty"`
 }
@@ -52,6 +65,13 @@ type Config struct {
 type SyncStats struct {
 	ConversationsSynced int64 `json:"conversations_synced"`
 	BackfillDone        bool  `json:"backfill_done"`
+}
+
+// setSyncCursor updates the mid-window continuation state as one unit.
+func (c *Config) setSyncCursor(cursor string, windowStart, windowEnd int64) {
+	c.SyncCursor = cursor
+	c.SyncWindowStart = windowStart
+	c.SyncWindowEnd = windowEnd
 }
 
 // ConfigVersion is the only supported on-disk schema version.

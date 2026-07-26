@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Phixsura/attune/internal/domain"
 )
@@ -34,14 +35,14 @@ const (
 // buildIngestInput assembles a domain.IngestInput from a conversation
 // with its thread parts and resolved contact metadata.
 func buildIngestInput(
-	srcID, srcName, workspaceID string,
+	srcID, srcName, workspaceID, region string,
 	conv conversation,
 	contacts map[string]intercomContact,
 	admins map[int64]intercomAdmin,
 ) domain.IngestInput {
 	cr := buildContent(conv)
 	primary := primaryContact(conv, contacts)
-	pageURL := conversationURL(workspaceID, conv.ID)
+	pageURL := conversationURL(region, workspaceID, conv.ID)
 
 	return domain.IngestInput{
 		Source:         channelName,
@@ -49,7 +50,7 @@ func buildIngestInput(
 		Type:           inferType(conv),
 		SourceUser:     resolveSourceUser(primary, conv),
 		PageURL:        pageURL,
-		SourceMeta:     buildIntercomSourceMeta(srcID, srcName, workspaceID, conv, primary, admins, cr),
+		SourceMeta:     buildIntercomSourceMeta(srcID, srcName, workspaceID, region, conv, primary, admins, cr),
 		IdempotencyKey: intercomIdempotencyKey(workspaceID, conv.ID, conv.UpdatedAt),
 	}
 }
@@ -98,9 +99,9 @@ func buildContent(conv conversation) contentResult {
 	var customerMsgs, agentMsgs, botMsgs int
 
 	// Seed message counts as the first customer message when authored by
-	// a contact (the overwhelmingly common case).
-	seedTag := classifyAuthor(conv.Source.Author)
-	if seedTag == tagCustomer {
+	// a contact (the overwhelmingly common case) and actually has text.
+	if classifyAuthor(conv.Source.Author) == tagCustomer &&
+		strings.TrimSpace(stripHTMLTags(conv.Source.Body)) != "" {
 		customerMsgs++
 	}
 
@@ -155,23 +156,57 @@ func includePart(p part) bool {
 }
 
 // buildHeader renders the always-kept head: title/subject + seed body.
+// The seed body is HTML-stripped: search results (and hence the
+// degraded summary-fallback path) carry source.body as HTML —
+// display_as=plaintext only applies to the detail endpoint's parts.
 func buildHeader(conv conversation) string {
 	var b strings.Builder
-	title := strings.TrimSpace(conv.Title)
+	title := strings.TrimSpace(stripHTMLTags(conv.Title))
 	if title == "" {
-		title = strings.TrimSpace(conv.Source.Subject)
+		title = strings.TrimSpace(stripHTMLTags(conv.Source.Subject))
 	}
 	if title != "" {
 		b.WriteString(title)
 		b.WriteString("\n\n")
 	}
-	seed := strings.TrimSpace(conv.Source.Body)
+	seed := strings.TrimSpace(stripHTMLTags(conv.Source.Body))
 	if seed != "" {
 		b.WriteString(classifyAuthor(conv.Source.Author))
 		b.WriteString(" ")
 		b.WriteString(seed)
 	}
 	return b.String()
+}
+
+// htmlBlockBreaks maps the block/line-break tags Intercom's serializer
+// emits to newlines before tag stripping.
+var htmlBlockBreaks = strings.NewReplacer("</p>", "\n", "</P>", "\n", "<br>", "\n", "<br/>", "\n", "<br />", "\n")
+
+// htmlEntities unescapes the entities Intercom's serializer emits.
+var htmlEntities = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`, "&#39;", "'", "&nbsp;", " ")
+
+// stripHTMLTags removes markup from Intercom HTML bodies, turning block
+// boundaries into newlines. Plain-text input passes through unchanged
+// (no '<' → no work).
+func stripHTMLTags(s string) string {
+	if !strings.ContainsRune(s, '<') {
+		return s
+	}
+	s = htmlBlockBreaks.Replace(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	inTag := false
+	for _, r := range s {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(htmlEntities.Replace(b.String()))
 }
 
 // assembleParts builds the final transcript. Full content when it fits;
@@ -209,7 +244,7 @@ func truncateStructurally(header string, humans []tagged, full string) string {
 		}
 	}
 	if keepFirstCustomer+keepLastCustomer >= len(custIdx) {
-		return full[:maxContentLen] + " [truncated]"
+		return truncateBytesRuneSafe(full, maxContentLen) + " [truncated]"
 	}
 	firstSet := make(map[int]bool)
 	for _, idx := range custIdx[:keepFirstCustomer] {
@@ -240,9 +275,23 @@ func truncateStructurally(header string, humans []tagged, full string) string {
 	}
 	result := b.String()
 	if len(result) > maxContentLen {
-		result = result[:maxContentLen] + " [truncated]"
+		result = truncateBytesRuneSafe(result, maxContentLen) + " [truncated]"
 	}
 	return result
+}
+
+// truncateBytesRuneSafe cuts s to at most maxBytes without splitting a
+// UTF-8 rune (a mid-rune cut would produce invalid UTF-8 that
+// PostgreSQL rejects, permanently failing the ingest).
+func truncateBytesRuneSafe(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 func buildFull(header string, entries []tagged) string {
@@ -315,13 +364,22 @@ func resolveSourceUser(c intercomContact, conv conversation) string {
 }
 
 // conversationURL builds the Intercom inbox permalink for operators.
-func conversationURL(workspaceID, conversationID string) string {
-	return fmt.Sprintf("https://app.intercom.com/a/inbox/%s/inbox/conversation/%s", workspaceID, conversationID)
+// The app host is regional: EU/AU workspaces live on app.eu/.au
+// subdomains — a US-host link would 404 for them.
+func conversationURL(region, workspaceID, conversationID string) string {
+	host := "app.intercom.com"
+	switch strings.ToLower(strings.TrimSpace(region)) {
+	case "eu":
+		host = "app.eu.intercom.com"
+	case "au":
+		host = "app.au.intercom.com"
+	}
+	return fmt.Sprintf("https://%s/a/inbox/%s/inbox/conversation/%s", host, workspaceID, conversationID)
 }
 
 // buildIntercomSourceMeta assembles the source metadata map.
 func buildIntercomSourceMeta(
-	srcID, srcName, workspaceID string,
+	srcID, srcName, workspaceID, region string,
 	conv conversation,
 	primary intercomContact,
 	admins map[int64]intercomAdmin,
@@ -338,7 +396,7 @@ func buildIntercomSourceMeta(
 		inboundSourceNameKey:              srcName,
 		"intercom_workspace_id":           workspaceID,
 		"intercom_conversation_id":        conv.ID,
-		"intercom_conversation_url":       conversationURL(workspaceID, conv.ID),
+		"intercom_conversation_url":       conversationURL(region, workspaceID, conv.ID),
 		"intercom_state":                  conv.State,
 		"intercom_priority":               conv.Priority,
 		"intercom_source_type":            conv.Source.Type,
