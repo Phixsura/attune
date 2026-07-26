@@ -144,6 +144,17 @@ func TestSimilarFeedback_AttachesLinkedRequests(t *testing.T) {
 	require.Empty(t, out2.Items[0].LinkedRequests)
 }
 
+func TestSimilarFeedback_GenericFinderErrorLogsAndDegrades(t *testing.T) {
+	t.Parallel()
+	// A non-embedding failure (DB down) is logged but still degrades to
+	// an empty recurrence signal — the endpoint never 500s over it.
+	h := ptrext.Of(FeedbackHandler{})
+	h.SetSimilarFinder(stubSimilarFinder{err: errors.New("connection refused")})
+	rr := serveSimilar(h, "11")
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.JSONEq(t, `{"items":[],"anchor_linked_requests":[]}`, rr.Body.String())
+}
+
 func TestSimilarFeedback_BadID(t *testing.T) {
 	t.Parallel()
 	h := ptrext.Of(FeedbackHandler{})

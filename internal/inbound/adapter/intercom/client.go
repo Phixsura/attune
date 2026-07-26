@@ -41,4 +41,7 @@ func SetEgressPolicy(p nethardening.Policy) { intercomclient.SetEgressPolicy(p) 
 func baseURL(region string) string { return intercomclient.BaseURL(region) }
 
 // validateHost ensures the target host is *.intercom.io in production.
-func validateHost(base string) error { return intercomclient.ValidateHost(base) }
+// Variable for the same reason as newAPIClient: defense-in-depth paths
+// (a region token that maps to a non-Intercom host) are unreachable
+// through the real implementation and need a test seam.
+var validateHost = intercomclient.ValidateHost

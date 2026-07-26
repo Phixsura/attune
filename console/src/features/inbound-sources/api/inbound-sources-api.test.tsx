@@ -11,6 +11,7 @@ import { inboundSourcesQuery } from '@/features/inbound-sources/api/list-inbound
 import { usePauseInboundSource } from '@/features/inbound-sources/api/pause-inbound-source'
 import { useResumeInboundSource } from '@/features/inbound-sources/api/resume-inbound-source'
 import { useRotateInboundSource } from '@/features/inbound-sources/api/rotate-inbound-source'
+import { useSyncNow } from '@/features/inbound-sources/api/sync-now'
 import { useTestInboundSourceConnection } from '@/features/inbound-sources/api/test-connection'
 import { setCsrfToken } from '@/lib/api-client'
 import { server } from '@/testing/mocks/server'
@@ -135,6 +136,25 @@ describe('inbound source API hooks', () => {
       true,
     )
     expect(remove.queryClient.getQueryState(['console', 'inbound-sources'])?.isInvalidated).toBe(
+      true,
+    )
+  })
+
+  it('sync-now POSTs by source id and invalidates the source list', async () => {
+    setCsrfToken('csrf-token')
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/src-1/sync-now', ({ request }) => {
+        expect(request.headers.get('x-csrf-token')).toBe('csrf-token')
+        return HttpResponse.json({ id: 'src-1' })
+      }),
+    )
+    const syncNow = renderMutation(() => useSyncNow())
+
+    syncNow.result.current.mutate('src-1')
+    await waitFor(() => expect(syncNow.result.current.isSuccess).toBe(true))
+
+    expect(syncNow.result.current.data).toEqual({ id: 'src-1' })
+    expect(syncNow.queryClient.getQueryState(['console', 'inbound-sources'])?.isInvalidated).toBe(
       true,
     )
   })

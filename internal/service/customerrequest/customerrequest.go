@@ -55,11 +55,40 @@ type Detail struct {
 }
 
 type Service struct {
-	repo          *repo.Repo
+	repo          requestRepo
 	idempotency   idempotency.Store
 	audit         *auditlogsvc.Service
 	notifications notificationSink
 	issueCreates  issueCreateRunStore
+}
+
+// requestRepo is the repo surface the service consumes — an interface so
+// unit tests can drive multi-step transactions (promote + attribution)
+// against fakes; *repo.Repo satisfies it unchanged (PR #122 pattern).
+type requestRepo interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	List(ctx context.Context, filter repo.ListFilter) (repo.ListResult, error)
+	GetDetail(ctx context.Context, tenantID string, id uuid.UUID, evidenceLimit int) (*repo.Detail, error)
+	GetDetailTx(ctx context.Context, tx pgx.Tx, tenantID string, id uuid.UUID, evidenceLimit int) (*repo.Detail, error)
+	GetOwner(ctx context.Context, tenantID string, ownerID uuid.UUID) (*repo.Owner, error)
+	GetScoringSettings(ctx context.Context, tenantID string) (repo.ScoringSettings, error)
+	UpsertScoringSettingsTx(ctx context.Context, tx pgx.Tx, in repo.ScoringSettingsInput) (repo.ScoringSettings, error)
+	CreateTx(ctx context.Context, tx pgx.Tx, in repo.CreateInput) (*repo.Summary, error)
+	UpdateTx(ctx context.Context, tx pgx.Tx, in repo.UpdateInput) (*repo.Summary, *repo.Summary, error)
+	MergeTx(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (repo.MergeResult, error)
+	LinkFeedbackTx(ctx context.Context, tx pgx.Tx, in repo.LinkFeedbackInput) error
+	UnlinkFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID, feedbackID int64, actorID string) error
+	FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (string, map[string]any, error)
+	LinkCustomerTx(ctx context.Context, tx pgx.Tx, in repo.CustomerLinkInput) (*repo.CustomerLink, error)
+	UnlinkCustomerTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID, linkID uuid.UUID, actorID string) (*repo.CustomerLink, error)
+	AddVoteTx(ctx context.Context, tx pgx.Tx, in repo.VoteInput) (*repo.Vote, error)
+	RemoveVoteTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID, voteID uuid.UUID, actorID string) (*repo.Vote, error)
+	AddNoteTx(ctx context.Context, tx pgx.Tx, in repo.NoteInput) (*repo.Note, error)
+	DeleteNoteTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID, noteID uuid.UUID, actorID string) (*repo.Note, error)
+	LinkIssueTx(ctx context.Context, tx pgx.Tx, in repo.IssueLinkInput) (*repo.IssueLink, error)
+	UnlinkIssueTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID, issueLinkID uuid.UUID, actorID string) (*repo.IssueLink, error)
+	RecordIssueSyncTx(ctx context.Context, tx pgx.Tx, in repo.IssueSyncInput) (*repo.IssueLink, error)
+	BindIssueExternalObjectLinkTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID, issueLinkID, externalObjectLinkID uuid.UUID) (*repo.IssueLink, error)
 }
 
 func New(r *repo.Repo, idem idempotency.Store, audit *auditlogsvc.Service) *Service {

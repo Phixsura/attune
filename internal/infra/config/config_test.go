@@ -117,6 +117,13 @@ func TestLoadPathRejectsInvalidIntercomAPIBaseURL(t *testing.T) {
 	require.Contains(t, err.Error(), "config: intercom.api_base_url must use http or https")
 }
 
+func TestLoadPathRejectsMalformedIntercomAPIBaseURL(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nintercom:\n  api_base_url: \"://bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: intercom.api_base_url must be a valid URL")
+}
+
 func TestLoadPathRejectsIntercomAPIBaseURLWithoutHost(t *testing.T) {
 	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nintercom:\n  api_base_url: \"https:///api\"\n"
 	_, err := LoadPath(writeConfig(t, raw))

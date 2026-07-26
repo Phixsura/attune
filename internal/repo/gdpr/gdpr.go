@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -21,7 +22,17 @@ import (
 var ErrSubjectNotFound = errors.New("gdpr subject not found")
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool dbPool
+}
+
+// dbPool is the slice of *pgxpool.Pool the repo actually uses — an
+// interface so unit tests can drive the erasure transaction against a
+// scripted Tx (PR #122 pattern; the real flow needs a live database).
+type dbPool interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 func New(pool *pgxpool.Pool) *Repo {

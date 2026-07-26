@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -62,7 +63,13 @@ func (h *Handler) queryRecentFeedback(ctx context.Context, sourceID string) ([]r
 		return nil, err
 	}
 	defer rows.Close()
+	return scanRecentItems(rows)
+}
 
+// scanRecentItems materializes the preview rows, projecting source_meta
+// through a channel-key allow-list (operator preview needs thread
+// identity, not the whole metadata blob).
+func scanRecentItems(rows pgx.Rows) ([]recentFeedbackItem, error) {
 	var items []recentFeedbackItem
 	for rows.Next() {
 		var item recentFeedbackItem

@@ -123,6 +123,7 @@ func (f *fakeAPIClient) SearchContacts(_ context.Context, _ []string) ([]interco
 type fakeSourcesWithConfig struct {
 	*inboundtest.FakeSources
 	configUpdates map[string][]byte
+	updateErr     error
 }
 
 func newFakeSourcesWithConfig() *fakeSourcesWithConfig {
@@ -133,6 +134,9 @@ func newFakeSourcesWithConfig() *fakeSourcesWithConfig {
 }
 
 func (f *fakeSourcesWithConfig) UpdateConfig(_ context.Context, id string, config []byte) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
 	f.configUpdates[id] = config
 	return nil
 }
