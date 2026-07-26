@@ -1013,9 +1013,16 @@ func (r *Repo) UnlinkFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string,
 // FeedbackSourceMetaTx returns the source + source_meta of one feedback
 // row, used to derive automatic customer/account attribution at promote
 // time (inbound adapters carry contact/company identity in source_meta).
-func (r *Repo) FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (string, map[string]any, error) {
-	var source string
-	var meta map[string]any
+// FeedbackSourceMeta is the promote-time attribution read: the row's
+// channel, metadata, and its GDPR subject identity.
+type FeedbackSourceMeta struct {
+	Source     string
+	Meta       map[string]any
+	SubjectKey string
+}
+
+func (r *Repo) FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (FeedbackSourceMeta, error) {
+	var out FeedbackSourceMeta
 	// FOR SHARE serializes this identity read against GDPR erasure's
 	// FOR UPDATE row locks: a concurrent erasure either commits first
 	// (this read then sees the row gone and the link is skipped) or
@@ -1025,19 +1032,19 @@ func (r *Repo) FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID str
 	// row AFTER the anonymize pass already ran.
 	err := tx.QueryRow(
 		ctx, `
-		SELECT source, source_meta
+		SELECT source, source_meta, subject_key
 		FROM user_feedback
 		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 		FOR SHARE`,
 		tenantID, feedbackID,
-	).Scan(&source, &meta) // ptrext:allow pgx-scan
+	).Scan(&out.Source, &out.Meta, &out.SubjectKey) // ptrext:allow pgx-scan
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil, ErrFeedbackNotFound
+		return FeedbackSourceMeta{}, ErrFeedbackNotFound
 	}
 	if err != nil {
-		return "", nil, fmt.Errorf("feedback source meta: %w", err)
+		return FeedbackSourceMeta{}, fmt.Errorf("feedback source meta: %w", err)
 	}
-	return source, meta, nil
+	return out, nil
 }
 
 func (r *Repo) LinkCustomerTx(ctx context.Context, tx pgx.Tx, in CustomerLinkInput) (*CustomerLink, error) {

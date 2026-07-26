@@ -7,6 +7,7 @@ package zendesk
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,5 +91,42 @@ func TestProcessTicketPage_ContextCancelStops(t *testing.T) {
 	}
 	if len(ingestFake.Calls) != 0 {
 		t.Errorf("no tickets should ingest after cancel, got %d", len(ingestFake.Calls))
+	}
+}
+
+// TestTruncateBytesRuneSafe_Zendesk covers the rune-safe byte cut and
+// the adjacent-range fallback in assembleComments.
+func TestTruncateBytesRuneSafe_Zendesk(t *testing.T) {
+	t.Parallel()
+	if got := truncateBytesRuneSafe("short", 100); got != "short" {
+		t.Errorf("under-limit input changed: %q", got)
+	}
+	if got := truncateBytesRuneSafe("世界", 4); got != "世" {
+		t.Errorf("truncateBytesRuneSafe(世界, 4) = %q, want 世", got)
+	}
+}
+
+// TestAssembleComments_AllCustomersKeptFallsBack: agent-heavy threads
+// whose customer comments all fit in the keep budget fall back to
+// rune-safe byte truncation.
+func TestAssembleComments_AllCustomersKeptFallsBack(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("汉", 500)
+	entries := []tagged{
+		{body: "agent " + long, tag: "[agent]"},
+		{body: "agent " + long, tag: "[agent]"},
+	}
+	for i := 0; i < 5; i++ {
+		entries = append(entries, tagged{body: "customer " + long, tag: "[customer]", isCustomer: true})
+	}
+	got := assembleComments("Ticket header", entries)
+	if !strings.HasSuffix(got, " [truncated]") {
+		t.Errorf("expected byte-truncation fallback, tail: %q", got[len(got)-30:])
+	}
+	if strings.Contains(got, "omitted") {
+		t.Error("no omission marker expected when every customer comment is kept")
+	}
+	if len(got) > maxContentLen+len(" [truncated]") {
+		t.Errorf("content too long: %d", len(got))
 	}
 }

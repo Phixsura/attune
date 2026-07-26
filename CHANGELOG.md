@@ -232,6 +232,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   (identity drift would make an email-keyed GDPR request miss rows).
   Permanent failures (plan-gated contacts API) still degrade gracefully.
 
+- Promote-time auto-attribution now copies the feedback row's own GDPR
+  subject key into the customer link verbatim instead of re-deriving one
+  from metadata: for email-less contacts the derived key
+  (`intercom:<ws>:<external-id>`) diverged from the row's
+  (`contact:<id>`), so an erasure keyed on the feedback subject would
+  never reach the attribution rows. Metadata derivation remains the
+  fallback for rows without a subject key.
+
 - Structural transcript truncation (Intercom and Zendesk) now keeps the
   agent replies inside the kept conversation ranges (head through the
   3rd customer message, tail from the 2nd-from-last onward) instead of

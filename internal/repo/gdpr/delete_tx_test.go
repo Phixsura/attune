@@ -247,15 +247,19 @@ func TestExecuteDeleteRequest_Flow(t *testing.T) {
 // len(queries) calls answer in order; the rest return empty row sets.
 type exportPool struct {
 	gdprPool
-	queries  []pgx.Rows
-	queryIdx int
-	captured []string
+	queries     []pgx.Rows
+	queryErrsAt []error
+	queryIdx    int
+	captured    []string
 }
 
 func (p *exportPool) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	p.captured = append(p.captured, sql)
 	idx := p.queryIdx
 	p.queryIdx++
+	if idx < len(p.queryErrsAt) && p.queryErrsAt[idx] != nil {
+		return nil, p.queryErrsAt[idx]
+	}
 	if idx < len(p.queries) {
 		return p.queries[idx], nil
 	}
@@ -319,5 +323,24 @@ func TestExport_IncludesCustomerRequestIdentityRows(t *testing.T) {
 	}
 	if data.Counts.CustomerLinkCount != 1 || data.Counts.VoteCount != 1 {
 		t.Errorf("counts = %+v", data.Counts)
+	}
+}
+
+// TestExportSubjectRows_CustomerRequestQueryError covers the error legs
+// of the two new customer-request export sections.
+func TestExportSubjectRows_CustomerRequestQueryError(t *testing.T) {
+	t.Parallel()
+	// Query call order inside exportSubjectRows: feedback, tags,
+	// feedbackAudit, llmAudit, replyDrafts, replyDraftRevisions,
+	// replyDraftEvents, customer links (8th), votes (9th).
+	for _, failAt := range []int{8, 9} {
+		errs := make([]error, failAt)
+		errs[failAt-1] = errors.New("export boom")
+		p := &exportPool{}
+		p.queryErrsAt = errs
+		r := &Repo{pool: p}
+		if _, err := r.exportSubjectRows(context.Background(), "tenant-1", "a@b.c"); err == nil {
+			t.Errorf("failAt=%d: expected export error", failAt)
+		}
 	}
 }

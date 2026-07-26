@@ -78,7 +78,7 @@ type requestRepo interface {
 	MergeTx(ctx context.Context, tx pgx.Tx, tenantID string, sourceID, targetID uuid.UUID, actorID string) (repo.MergeResult, error)
 	LinkFeedbackTx(ctx context.Context, tx pgx.Tx, in repo.LinkFeedbackInput) error
 	UnlinkFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID, feedbackID int64, actorID string) error
-	FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (string, map[string]any, error)
+	FeedbackSourceMetaTx(ctx context.Context, tx pgx.Tx, tenantID string, feedbackID int64) (repo.FeedbackSourceMeta, error)
 	LinkCustomerTx(ctx context.Context, tx pgx.Tx, in repo.CustomerLinkInput) (*repo.CustomerLink, error)
 	UnlinkCustomerTx(ctx context.Context, tx pgx.Tx, tenantID string, requestID, linkID uuid.UUID, actorID string) (*repo.CustomerLink, error)
 	AddVoteTx(ctx context.Context, tx pgx.Tx, in repo.VoteInput) (*repo.Vote, error)

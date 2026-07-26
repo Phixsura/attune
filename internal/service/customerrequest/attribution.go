@@ -39,7 +39,12 @@ var metaChannels = []string{"intercom", "zendesk"}
 // deriveAttribution extracts attribution from one feedback row's
 // source_meta. Returns ok=false when the row carries no usable identity
 // (API/webhook rows, portal rows with their own linkage, …).
-func deriveAttribution(source string, meta map[string]any) (derivedAttribution, bool) {
+// rowSubjectKey is the feedback row's own GDPR subject identity: when
+// present it IS the link's subject key, so an erasure keyed on the
+// feedback subject always reaches the attribution rows too — a derived
+// key (email vs scoped contact-id) could diverge from the row's and
+// leave orphaned identity behind.
+func deriveAttribution(source, rowSubjectKey string, meta map[string]any) (derivedAttribution, bool) {
 	if len(meta) == 0 {
 		return derivedAttribution{}, false
 	}
@@ -70,9 +75,14 @@ func deriveAttribution(source string, meta map[string]any) (derivedAttribution, 
 		return source + ":" + scope + ":" + id
 	}
 
-	subjectKey := firstMetaString(meta, prefix+"contact_email", prefix+"requester_email")
+	subjectKey := strings.TrimSpace(rowSubjectKey)
 	if subjectKey == "" {
-		subjectKey = scoped(firstMetaString(meta, prefix+"contact_external_id"))
+		// Row carries no subject identity (pre-subject-key legacy rows):
+		// fall back to metadata-derived identity.
+		subjectKey = firstMetaString(meta, prefix+"contact_email", prefix+"requester_email")
+		if subjectKey == "" {
+			subjectKey = scoped(firstMetaString(meta, prefix+"contact_external_id"))
+		}
 	}
 	out := derivedAttribution{
 		SubjectKey:     clampLen(subjectKey, 512),
@@ -151,14 +161,15 @@ func (s *Service) autoLinkCustomersTx(ctx context.Context, tx pgx.Tx, tenantID s
 // inside its savepoint. Returns ok=false (no error) when the row simply
 // carries no linkable identity or duplicates an already-linked one.
 func (s *Service) linkOneCustomerTx(ctx context.Context, sp pgx.Tx, tenantID string, requestID uuid.UUID, feedbackID int64, actorID string, seen map[string]bool) (bool, error) {
-	source, meta, err := s.repo.FeedbackSourceMetaTx(ctx, sp, tenantID, feedbackID)
+	row, err := s.repo.FeedbackSourceMetaTx(ctx, sp, tenantID, feedbackID)
 	if err != nil {
 		if !errors.Is(err, repo.ErrFeedbackNotFound) {
 			logext.Warnf(ctx, "[service.customerrequest.autoLink] read source_meta failed,feedback_id:%d,err:%+v", feedbackID, err.Error())
 		}
 		return false, err
 	}
-	attr, ok := deriveAttribution(source, meta)
+	source, meta := row.Source, row.Meta
+	attr, ok := deriveAttribution(source, row.SubjectKey, meta)
 	if !ok {
 		return false, nil
 	}

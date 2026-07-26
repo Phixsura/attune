@@ -23,7 +23,7 @@ func TestDeriveAttribution_IntercomFullProfile(t *testing.T) {
 		"intercom_company_industry":      "Software",
 		"intercom_conversation_id":       "9001",
 	}
-	attr, ok := deriveAttribution("intercom", meta)
+	attr, ok := deriveAttribution("intercom", "", meta)
 	require.True(t, ok)
 	// Email wins over external_id — globally unique and what the GDPR
 	// subject matcher keys on.
@@ -49,7 +49,7 @@ func TestDeriveAttribution_ExternalIDFallbackIsScoped(t *testing.T) {
 		"intercom_workspace_id":        "ws42",
 		"intercom_contact_external_id": "cust-70",
 	}
-	attr, ok := deriveAttribution("intercom", meta)
+	attr, ok := deriveAttribution("intercom", "", meta)
 	require.True(t, ok)
 	require.Equal(t, "intercom:ws42:cust-70", attr.SubjectKey)
 }
@@ -65,7 +65,7 @@ func TestDeriveAttribution_ClampsOverlongFields(t *testing.T) {
 		"intercom_company_name": string(long),
 		"intercom_company_plan": string(long),
 	}
-	attr, ok := deriveAttribution("intercom", meta)
+	attr, ok := deriveAttribution("intercom", "", meta)
 	require.True(t, ok)
 	// DB CHECKs are hard limits — over-long values must be clamped, not
 	// allowed to abort the link inside its savepoint.
@@ -79,7 +79,7 @@ func TestDeriveAttribution_RoundsFractionalSpend(t *testing.T) {
 		"intercom_company_id":            "co-9",
 		"intercom_company_monthly_spend": 99.99,
 	}
-	attr, ok := deriveAttribution("intercom", meta)
+	attr, ok := deriveAttribution("intercom", "", meta)
 	require.True(t, ok)
 	require.Equal(t, int64(9999), attr.Profile.RevenueCents)
 }
@@ -89,7 +89,7 @@ func TestDeriveAttribution_EmailFallback(t *testing.T) {
 	meta := map[string]any{
 		"intercom_contact_email": "bob@lead.example",
 	}
-	attr, ok := deriveAttribution("intercom", meta)
+	attr, ok := deriveAttribution("intercom", "", meta)
 	require.True(t, ok)
 	require.Equal(t, "bob@lead.example", attr.SubjectKey)
 	require.Equal(t, "bob@lead.example", attr.SubjectDisplay)
@@ -105,7 +105,7 @@ func TestDeriveAttribution_ZendeskConvention(t *testing.T) {
 		"zendesk_organization_id":   float64(200),
 		"zendesk_organization_name": "Acme Corp",
 	}
-	attr, ok := deriveAttribution("zendesk", meta)
+	attr, ok := deriveAttribution("zendesk", "", meta)
 	require.True(t, ok)
 	require.Equal(t, "carol@acme.example", attr.SubjectKey)
 	require.Equal(t, "Carol Wu", attr.SubjectDisplay)
@@ -120,7 +120,7 @@ func TestDeriveAttribution_ZendeskSubdomainScope(t *testing.T) {
 		"zendesk_subdomain":       "acme",
 		"zendesk_organization_id": float64(200),
 	}
-	attr, ok := deriveAttribution("zendesk", meta)
+	attr, ok := deriveAttribution("zendesk", "", meta)
 	require.True(t, ok)
 	require.Equal(t, "zendesk:acme:200", attr.AccountKey)
 }
@@ -128,13 +128,13 @@ func TestDeriveAttribution_ZendeskSubdomainScope(t *testing.T) {
 func TestDeriveAttribution_Negative(t *testing.T) {
 	t.Parallel()
 	// Unlisted channel → no derivation even with matching keys.
-	_, ok := deriveAttribution("webhook", map[string]any{"webhook_contact_email": "x@y.z"})
+	_, ok := deriveAttribution("webhook", "", map[string]any{"webhook_contact_email": "x@y.z"})
 	require.False(t, ok)
 	// Listed channel without identity keys → no derivation.
-	_, ok = deriveAttribution("intercom", map[string]any{"intercom_conversation_id": "1"})
+	_, ok = deriveAttribution("intercom", "", map[string]any{"intercom_conversation_id": "1"})
 	require.False(t, ok)
 	// Empty meta.
-	_, ok = deriveAttribution("intercom", nil)
+	_, ok = deriveAttribution("intercom", "", nil)
 	require.False(t, ok)
 }
 
@@ -151,4 +151,25 @@ func TestFirstMetaStringAndNumber(t *testing.T) {
 	require.Equal(t, "", firstMetaString(meta, "a", "z", "missing"))
 	require.Equal(t, float64(42), metaNumber(meta, "n"))
 	require.Equal(t, float64(0), metaNumber(meta, "b"))
+}
+
+func TestDeriveAttribution_RowSubjectKeyWins(t *testing.T) {
+	t.Parallel()
+	// The feedback row's own GDPR subject identity must become the link
+	// subject verbatim: a metadata-derived key (email vs scoped
+	// contact-id) could diverge from the row's, leaving link rows an
+	// erasure keyed on the feedback subject would never reach.
+	meta := map[string]any{
+		"intercom_workspace_id":        "ws42",
+		"intercom_contact_external_id": "cust-70",
+		"intercom_contact_email":       "alice@customer.example",
+	}
+	attr, ok := deriveAttribution("intercom", "contact:abc123", meta)
+	require.True(t, ok)
+	require.Equal(t, "contact:abc123", attr.SubjectKey)
+
+	// Blank row subject falls back to the metadata chain.
+	attr, ok = deriveAttribution("intercom", "  ", meta)
+	require.True(t, ok)
+	require.Equal(t, "alice@customer.example", attr.SubjectKey)
 }

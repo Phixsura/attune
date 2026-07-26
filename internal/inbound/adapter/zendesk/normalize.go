@@ -144,10 +144,10 @@ func assembleComments(header string, entries []tagged) string {
 	}
 	headEnd := custIdx[keepFirstCustomer-1]
 	tailStart := custIdx[len(custIdx)-keepLastCustomer]
+	// custIdx is strictly increasing and (guard above) has at least
+	// keepFirst+keepLast+1 entries, so tailStart ≥ headEnd+2: at least
+	// one comment is always omitted between the kept ranges.
 	omitted := tailStart - headEnd - 1
-	if omitted <= 0 {
-		return truncateBytesRuneSafe(full, maxContentLen) + " [truncated]"
-	}
 
 	var b strings.Builder
 	b.WriteString(header)

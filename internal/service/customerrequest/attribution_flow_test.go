@@ -115,15 +115,17 @@ func (f *fakeRequestRepo) LinkFeedbackTx(context.Context, pgx.Tx, repo.LinkFeedb
 	return f.linkFbErr
 }
 
-func (f *fakeRequestRepo) FeedbackSourceMetaTx(_ context.Context, _ pgx.Tx, _ string, feedbackID int64) (string, map[string]any, error) {
+func (f *fakeRequestRepo) FeedbackSourceMetaTx(_ context.Context, _ pgx.Tx, _ string, feedbackID int64) (repo.FeedbackSourceMeta, error) {
 	if err := f.sourceMetaErr[feedbackID]; err != nil {
-		return "", nil, err
+		return repo.FeedbackSourceMeta{}, err
 	}
 	entry, ok := f.sourceMetaByID[feedbackID]
 	if !ok {
-		return "", nil, repo.ErrFeedbackNotFound
+		return repo.FeedbackSourceMeta{}, repo.ErrFeedbackNotFound
 	}
-	return entry.source, entry.meta, nil
+	// Row subject identity mirrors ingest: email when present.
+	subject, _ := entry.meta["intercom_contact_email"].(string)
+	return repo.FeedbackSourceMeta{Source: entry.source, Meta: entry.meta, SubjectKey: subject}, nil
 }
 
 func (f *fakeRequestRepo) LinkCustomerTx(_ context.Context, _ pgx.Tx, in repo.CustomerLinkInput) (*repo.CustomerLink, error) {

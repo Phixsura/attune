@@ -149,3 +149,20 @@ func TestQueryRecentFeedback_QueryError(t *testing.T) {
 	_, err = h.queryRecentFeedback(context.Background(), "src-1")
 	require.Error(t, err)
 }
+
+// TestQueryRecentFeedback_RealQueryClosure drives the production
+// recentQuery closure against an unreachable pool: the closure body runs
+// and surfaces the dial error.
+func TestQueryRecentFeedback_RealQueryClosure(t *testing.T) {
+	cfg, err := pgxpool.ParseConfig("postgres://attune@127.0.0.1:1/attune?sslmode=disable")
+	require.NoError(t, err)
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	h := ptrext.Of(Handler{pool: pool})
+	_, err = h.queryRecentFeedback(ctx, "src-1")
+	require.Error(t, err)
+}

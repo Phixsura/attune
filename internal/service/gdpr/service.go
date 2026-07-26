@@ -344,35 +344,25 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 	if err := writeJSONFile(zw, "manifest.json", manifest); err != nil {
 		return nil, err
 	}
-	if err := writeJSONLinesFile(zw, "feedback.jsonl", data.FeedbackRows); err != nil {
-		return nil, err
+	sections := []struct {
+		name string
+		rows []json.RawMessage
+	}{
+		{"feedback.jsonl", data.FeedbackRows},
+		{"feedback_tags.jsonl", data.FeedbackTagRows},
+		{"feedback_audit_log.jsonl", data.FeedbackAuditRows},
+		{"llm_audit.jsonl", data.LLMAuditRows},
+		{"reply_drafts.jsonl", data.ReplyDraftRows},
+		{"reply_draft_revisions.jsonl", data.ReplyDraftRevisionRows},
+		{"reply_draft_events.jsonl", data.ReplyDraftEventRows},
+		{"reply_delivery_attempts.jsonl", data.ReplyDeliveryAttemptRows},
+		{"customer_request_customer_links.jsonl", data.CustomerLinkRows},
+		{"customer_request_votes.jsonl", data.VoteRows},
 	}
-	if err := writeJSONLinesFile(zw, "feedback_tags.jsonl", data.FeedbackTagRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "feedback_audit_log.jsonl", data.FeedbackAuditRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "llm_audit.jsonl", data.LLMAuditRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_drafts.jsonl", data.ReplyDraftRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_draft_revisions.jsonl", data.ReplyDraftRevisionRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_draft_events.jsonl", data.ReplyDraftEventRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_delivery_attempts.jsonl", data.ReplyDeliveryAttemptRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "customer_request_customer_links.jsonl", data.CustomerLinkRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "customer_request_votes.jsonl", data.VoteRows); err != nil {
-		return nil, err
+	for _, sec := range sections {
+		if err := writeJSONLinesFile(zw, sec.name, sec.rows); err != nil {
+			return nil, err
+		}
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err

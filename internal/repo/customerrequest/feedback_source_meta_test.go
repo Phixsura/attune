@@ -19,19 +19,20 @@ func TestFeedbackSourceMetaTx(t *testing.T) {
 	ctx := context.Background()
 	repo := Repo{}
 
-	source, meta, err := repo.FeedbackSourceMetaTx(ctx, &fakeRepoTx{
-		rows: []fakeRepoRow{{values: []any{"intercom", map[string]any{"intercom_contact_email": "a@b.c"}}}},
+	row, err := repo.FeedbackSourceMetaTx(ctx, &fakeRepoTx{
+		rows: []fakeRepoRow{{values: []any{"intercom", map[string]any{"intercom_contact_email": "a@b.c"}, "a@b.c"}}},
 	}, "tenant-a", 42)
 	require.NoError(t, err)
-	require.Equal(t, "intercom", source)
-	require.Equal(t, "a@b.c", meta["intercom_contact_email"])
+	require.Equal(t, "intercom", row.Source)
+	require.Equal(t, "a@b.c", row.Meta["intercom_contact_email"])
+	require.Equal(t, "a@b.c", row.SubjectKey)
 
-	_, _, err = repo.FeedbackSourceMetaTx(ctx, &fakeRepoTx{
+	_, err = repo.FeedbackSourceMetaTx(ctx, &fakeRepoTx{
 		rows: []fakeRepoRow{{err: pgx.ErrNoRows}},
 	}, "tenant-a", 42)
 	require.ErrorIs(t, err, ErrFeedbackNotFound)
 
-	_, _, err = repo.FeedbackSourceMetaTx(ctx, &fakeRepoTx{
+	_, err = repo.FeedbackSourceMetaTx(ctx, &fakeRepoTx{
 		rows: []fakeRepoRow{{err: errors.New("db boom")}},
 	}, "tenant-a", 42)
 	require.Error(t, err)
