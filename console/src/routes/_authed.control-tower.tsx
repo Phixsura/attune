@@ -10,5 +10,6 @@ export const Route = createFileRoute('/_authed/control-tower')({
       context.queryClient.ensureQueryData(controlTowerQueries[0]),
       context.queryClient.ensureQueryData(controlTowerQueries[1]),
       context.queryClient.ensureQueryData(controlTowerQueries[2]),
+      context.queryClient.ensureQueryData(controlTowerQueries[3]),
     ]),
 })

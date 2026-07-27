@@ -38,6 +38,7 @@ import {
   type SearchQuality,
   searchQualityQuery,
 } from '@/features/search-quality/api/get-search-quality'
+import { api } from '@/lib/api-client'
 import { cn } from '@/lib/utils'
 
 type SignalSeverity = 'alert' | 'watch' | 'normal' | 'insufficient_data'
@@ -61,10 +62,29 @@ type ControlTowerLane = {
   severity: SignalSeverity
 }
 
+const cohortSyncHealthQuery = {
+  queryKey: ['cohort-sync', 'health'],
+  queryFn: () =>
+    api<{
+      sourceCount: number
+      activeSources: number
+      errorSources: number
+      cohortCount: number
+      totalActiveMembers: number
+    }>('/fb/v1/console/cohort-sync/health').catch(() => ({
+      sourceCount: 0,
+      activeSources: 0,
+      errorSources: 0,
+      cohortCount: 0,
+      totalActiveMembers: 0,
+    })),
+}
+
 export const controlTowerQueries = [
   classificationQualityQuery(defaultClassificationQualityFilters),
   searchQualityQuery(defaultSearchQualityFilters),
   qualityActionsQuery({ status: 'all', limit: 100 }),
+  cohortSyncHealthQuery,
 ] as const
 
 export function ControlTowerPage() {
@@ -72,6 +92,7 @@ export function ControlTowerPage() {
   const classification = useQuery(controlTowerQueries[0])
   const search = useQuery(controlTowerQueries[1])
   const qualityActions = useQuery(controlTowerQueries[2])
+  const cohortHealth = useQuery(controlTowerQueries[3])
 
   const model = useMemo(
     () => buildControlTowerModel(classification.data, search.data, qualityActions.data),
@@ -107,6 +128,13 @@ export function ControlTowerPage() {
               value={formatRate(model.searchCoverage)}
               tone={model.searchCoverage < 0.95 ? 'active' : 'default'}
             />
+            {cohortHealth.data && cohortHealth.data.sourceCount > 0 && (
+              <PageHeroMetric
+                label="Cohort Sync"
+                value={`${cohortHealth.data.activeSources}/${cohortHealth.data.sourceCount}`}
+                tone={cohortHealth.data.errorSources > 0 ? 'urgent' : 'default'}
+              />
+            )}
           </>
         }
       />
