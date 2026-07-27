@@ -55,6 +55,7 @@ export interface CustomerRequestFilters {
   sort?: CustomerRequestSort
   direction?: SortDirection
   feedbackId?: string
+  cohortId?: string
 }
 
 export const customerRequestKeys = {
@@ -503,5 +504,6 @@ function buildListParams(filters: CustomerRequestFilters) {
   if (filters.sort) params.set('sort', filters.sort)
   if (filters.direction) params.set('direction', filters.direction)
   if (filters.feedbackId) params.set('feedback_id', filters.feedbackId)
+  if (filters.cohortId) params.set('cohort_id', filters.cohortId)
   return params
 }
