@@ -171,8 +171,8 @@ func runServer() error {
 	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, runtimeDeps.tenantRepo, runtimeDeps.notifyTargetRepo); err != nil {
 		return fmt.Errorf("sync custom webhooks: %w", err)
 	}
-	batchJobWorker := startRuntimeWorkers(ctx, pool, cfg, runtimeDeps, secrets)
-	defer batchJobWorker.Stop()
+	workers := startRuntimeWorkers(ctx, pool, cfg, runtimeDeps, secrets)
+	defer workers.batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor, runtimeDeps.sources)
 
@@ -193,7 +193,7 @@ func runServer() error {
 	r, err := buildRouter(
 		ctx, cfg, ingestHandler, runtimeDeps.apiKeys, pool, ready, runtimeDeps.llm,
 		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo, runtimeDeps.enrichRuntime,
-		runtimeDeps.ingestor, runtimeDeps.sources,
+		runtimeDeps.ingestor, runtimeDeps.sources, workers.cohortSyncService,
 	)
 	if err != nil {
 		return err
@@ -242,13 +242,18 @@ func applyRuntimeHardening(cfg *config.Config) {
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
 }
 
+type runtimeWorkerResult struct {
+	batchJobWorker    *batchjob.Worker
+	cohortSyncService *cohortsyncservice.Service
+}
+
 func startRuntimeWorkers(
 	ctx context.Context,
 	pool *pgxpool.Pool,
 	cfg *config.Config,
 	runtimeDeps runtimeServices,
 	secrets *secretstore.TinkStore,
-) *batchjob.Worker {
+) runtimeWorkerResult {
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as MarkDone
 	// (at-least-once); a background worker drains them.
 	runtimeDeps.enricher.SetOutbox(runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo)
@@ -275,8 +280,9 @@ func startRuntimeWorkers(
 		runMCPPruner(ctx, pool, mcpPruneInterval, mcpSessionIdleLimit)
 	})
 
-	return startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets,
+	bjw := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets,
 		cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
+	return runtimeWorkerResult{batchJobWorker: bjw, cohortSyncService: cohortSyncService}
 }
 
 func setupRuntimeServices(

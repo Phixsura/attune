@@ -124,6 +124,7 @@ func TestBuildRouterMinimalServerSurface(t *testing.T) {
 		nil,
 		nil,
 		domain.DefaultSourceSet(),
+		nil, // cohortSyncSvc
 	)
 	if err != nil {
 		t.Fatalf("buildRouter: %v", err)

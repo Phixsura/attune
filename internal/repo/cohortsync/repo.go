@@ -447,6 +447,30 @@ func (r *Repo) InsertRun(ctx context.Context, run SyncRun) (*SyncRun, error) {
 	return ptrext.Of(row), nil
 }
 
+// InsertExclusiveRun atomically inserts a run only if no running run exists
+// for the same cohort. Returns ErrConflict if a running run already exists.
+// This eliminates the TOCTOU race between HasRunningRun + InsertRun.
+func (r *Repo) InsertExclusiveRun(ctx context.Context, run SyncRun) (*SyncRun, error) {
+	row := run
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO cohort_sync_runs (id, tenant_id, cohort_id, trigger, status)
+		SELECT $1, $2, $3, $4, $5
+		 WHERE NOT EXISTS (
+		   SELECT 1 FROM cohort_sync_runs
+		    WHERE tenant_id = $2 AND cohort_id = $3 AND status = 'running'
+		 )
+		RETURNING started_at, created_at`,
+		row.ID, row.TenantID, row.CohortID, row.Trigger, row.Status,
+	).Scan(&row.StartedAt, &row.CreatedAt) // ptrext:allow scan-out-param
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrConflict
+	}
+	if err != nil {
+		return nil, fmt.Errorf("insert exclusive cohort sync run: %w", err)
+	}
+	return ptrext.Of(row), nil
+}
+
 // FinishRun marks a run as completed (succeeded, failed, or skipped).
 func (r *Repo) FinishRun(ctx context.Context, id uuid.UUID, status string, added, removed, total int, errorMessage string) error {
 	tag, err := r.pool.Exec(ctx, `

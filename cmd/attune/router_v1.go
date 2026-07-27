@@ -23,7 +23,6 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
-	cohortsyncrepo "github.com/Phixsura/attune/internal/repo/cohortsync"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
@@ -38,6 +37,7 @@ func mountV1Routes(
 	apiKeys *apikeysvc.APIKeys,
 	inboundMux chi.Router,
 	inboundSecrets *secretstore.TinkStore,
+	cohortSyncSvc *cohortsyncservice.Service,
 	versionMW func(http.Handler) http.Handler,
 	rateLimiter *ratelimit.Limiter,
 	perKeyRateLimiter *ratelimit.PerKeyLimiter,
@@ -47,21 +47,21 @@ func mountV1Routes(
 	adminRepo *admin.Repo,
 ) {
 	r.Route("/v1", func(r chi.Router) {
-		mountV1AdapterRoutes(r, pool, inboundMux, inboundSecrets)
+		mountV1AdapterRoutes(r, pool, inboundMux, inboundSecrets, cohortSyncSvc)
 		mountV1PortalRoutes(r, portalHandler, versionMW, portalLimiter, portalWriteLimiter)
 		mountV1ApiKeyRoutes(r, cfg, pool, ingestHandler, apiKeys, versionMW, rateLimiter, perKeyRateLimiter, adminRepo)
 	})
 }
 
-func mountV1AdapterRoutes(r chi.Router, pool *pgxpool.Pool, inboundMux chi.Router, inboundSecrets *secretstore.TinkStore) {
+func mountV1AdapterRoutes(r chi.Router, pool *pgxpool.Pool, inboundMux chi.Router, inboundSecrets *secretstore.TinkStore, cohortSyncSvc *cohortsyncservice.Service) {
 	if inboundMux != nil {
 		r.Mount("/inbound", inboundMux)
 	}
 	if inboundSecrets != nil {
 		webhooks := externalsyncwebhook.NewHandler(externalsyncsvc.New(externalsyncrepo.New(pool), inboundSecrets))
 		r.Mount("/external-sync/webhooks", webhooks.Routes())
-
-		cohortSyncSvc := cohortsyncservice.New(cohortsyncrepo.New(pool), inboundSecrets)
+	}
+	if cohortSyncSvc != nil {
 		cohortWebhooks := cohortsyncwebhook.NewHandler(cohortSyncSvc)
 		r.Mount("/cohort-sync", cohortWebhooks.Routes())
 	}

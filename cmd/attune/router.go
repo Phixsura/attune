@@ -52,6 +52,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	portalsvc "github.com/Phixsura/attune/internal/service/portal"
@@ -82,6 +83,7 @@ func buildRouter(
 	enrichRuntime *enrichruntimesvc.Service,
 	ingestor *ingest.Ingestor,
 	sources domain.SourceSet,
+	cohortSyncSvc *cohortsyncservice.Service,
 ) (chi.Router, error) {
 	const where = "main.buildRouter"
 	r := chi.NewRouter()
@@ -142,6 +144,7 @@ func buildRouter(
 		apiKeys,
 		inboundMux,
 		inboundSecrets,
+		cohortSyncSvc,
 		versionMW,
 		rateLimiter,
 		perKeyRateLimiter,

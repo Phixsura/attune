@@ -151,6 +151,15 @@ func (m *mockRepo) InsertRun(_ context.Context, run repo.SyncRun) (*repo.SyncRun
 	return &row, nil
 }
 
+func (m *mockRepo) InsertExclusiveRun(_ context.Context, run repo.SyncRun) (*repo.SyncRun, error) {
+	if m.hasRunning {
+		return nil, repo.ErrConflict
+	}
+	row := run
+	m.runs[row.ID] = &row
+	return &row, nil
+}
+
 func (m *mockRepo) FinishRun(_ context.Context, id uuid.UUID, status string, added, removed, total int, msg string) error {
 	if r, ok := m.runs[id]; ok {
 		r.Status = status

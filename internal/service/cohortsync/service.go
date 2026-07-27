@@ -56,6 +56,7 @@ type Repo interface {
 	CleanExpired(ctx context.Context) (int64, error)
 	CountActiveMembers(ctx context.Context, tenantID string, cohortID uuid.UUID) (int, error)
 	InsertRun(ctx context.Context, run repo.SyncRun) (*repo.SyncRun, error)
+	InsertExclusiveRun(ctx context.Context, run repo.SyncRun) (*repo.SyncRun, error)
 	FinishRun(ctx context.Context, id uuid.UUID, status string, added, removed, total int, errorMessage string) error
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
 	HasRunningRun(ctx context.Context, tenantID string, cohortID uuid.UUID) (bool, error)
@@ -360,15 +361,9 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 		return s.skipDisabledCohortRun(ctx, tenantID, cohort, payload)
 	}
 
-	running, err := s.repo.HasRunningRun(ctx, tenantID, cohort.ID)
-	if err != nil {
-		return nil, err
-	}
-	if running {
-		return nil, fmt.Errorf("%w: a sync is already running for this cohort", repo.ErrConflict)
-	}
-
-	run, err := s.repo.InsertRun(ctx, repo.SyncRun{
+	// Atomic check-and-insert: prevents TOCTOU race between
+	// HasRunningRun + InsertRun when concurrent webhooks arrive.
+	run, err := s.repo.InsertExclusiveRun(ctx, repo.SyncRun{
 		ID:       uuid.New(),
 		TenantID: tenantID,
 		CohortID: cohort.ID,
@@ -428,6 +423,8 @@ func (s *Service) SyncNow(ctx context.Context, tenantID string, cohortID uuid.UU
 		return nil, err
 	}
 
+	// Best-effort pre-check to fail fast before credential decrypt + provider
+	// pull. The real atomic guard is InsertExclusiveRun inside ApplyFullSnapshot.
 	running, err := s.repo.HasRunningRun(ctx, tenantID, cohortID)
 	if err != nil {
 		return nil, err
