@@ -33,6 +33,20 @@ func New(pool *pgxpool.Pool) *Repo {
 // CreateSource inserts a new cohort source.
 func (r *Repo) CreateSource(ctx context.Context, in Source) (*Source, error) {
 	row := in
+	// Ensure byte slices are non-nil so pgx sends empty bytes, not SQL NULL,
+	// for NOT NULL BYTEA columns with DEFAULT ''.
+	cred := row.CredentialCiphertext
+	if cred == nil {
+		cred = []byte{}
+	}
+	wsCipher := row.WebhookSecretCiphertext
+	if wsCipher == nil {
+		wsCipher = []byte{}
+	}
+	cfg := row.ProviderConfig
+	if cfg == nil {
+		cfg = []byte("{}")
+	}
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO cohort_sources (id, tenant_id, provider, name, auth_type,
 		       credential_key_id, credential_ciphertext, base_url, provider_config,
@@ -41,8 +55,8 @@ func (r *Repo) CreateSource(ctx context.Context, in Source) (*Source, error) {
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
 		RETURNING created_at, updated_at`,
 		row.ID, row.TenantID, row.Provider, row.Name, row.AuthType,
-		row.CredentialKeyID, row.CredentialCiphertext, row.BaseURL, row.ProviderConfig,
-		row.WebhookSecretKeyID, row.WebhookSecretCiphertext, row.Enabled, row.Status,
+		row.CredentialKeyID, cred, row.BaseURL, cfg,
+		row.WebhookSecretKeyID, wsCipher, row.Enabled, row.Status,
 		row.CreatedBy, row.UpdatedBy,
 	).Scan(&row.CreatedAt, &row.UpdatedAt) // ptrext:allow scan-out-param
 	if err != nil {
