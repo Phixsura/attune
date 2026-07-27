@@ -587,3 +587,34 @@ func scanRun(s scannable) (SyncRun, error) {
 	) // ptrext:allow scan-out-param
 	return row, err
 }
+
+// ListMembers returns active members of a cohort.
+func (r *Repo) ListMembers(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]Membership, error) {
+	if limit <= 0 || limit > defaultLimit {
+		limit = defaultLimit
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, tenant_id, cohort_id, external_user_id, email, display_name,
+		       user_properties, joined_at, left_at, expires_at, last_seen_at
+		  FROM cohort_memberships
+		 WHERE tenant_id = $1 AND cohort_id = $2 AND left_at IS NULL
+		 ORDER BY external_user_id ASC
+		 LIMIT $3`, tenantID, cohortID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list cohort members: %w", err)
+	}
+	defer rows.Close()
+	var out []Membership
+	for rows.Next() {
+		var m Membership
+		if err := rows.Scan(
+			&m.ID, &m.TenantID, &m.CohortID, &m.ExternalUserID,
+			&m.Email, &m.DisplayName, &m.UserProperties,
+			&m.JoinedAt, &m.LeftAt, &m.ExpiresAt, &m.LastSeenAt,
+		); err != nil { // ptrext:allow scan-out-param
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}

@@ -61,6 +61,9 @@ type Repo interface {
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
 	HasRunningRun(ctx context.Context, tenantID string, cohortID uuid.UUID) (bool, error)
 	ApplyMembershipDelta(ctx context.Context, in repo.ApplyInput) (repo.ApplyResult, error)
+	RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error)
+	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error
+	ListEvents(ctx context.Context, tenantID string, sourceID uuid.UUID, limit int) ([]repo.SyncEvent, error)
 }
 
 type auditRecorder interface {
@@ -611,6 +614,18 @@ func (s *Service) Health(ctx context.Context, tenantID string) (HealthSummary, e
 		h.TotalActiveMembers += c.MemberCount
 	}
 	return h, nil
+}
+
+// ---------- Events ----------
+
+// RecordEvent records a webhook delivery for dedup. Returns repo.ErrDuplicateEvent if duplicate.
+func (s *Service) RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error) {
+	return s.repo.RecordEvent(ctx, in)
+}
+
+// UpdateEventStatus updates an event's status after processing.
+func (s *Service) UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error {
+	return s.repo.UpdateEventStatus(ctx, id, status, runID, failureReason)
 }
 
 // ---------- helpers ----------

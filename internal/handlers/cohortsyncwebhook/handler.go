@@ -31,6 +31,8 @@ type service interface {
 	DecryptCredential(source repo.Source) ([]byte, error)
 	ApplyDelta(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*svc.SyncRunResult, error)
 	ApplyFullSnapshot(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*svc.SyncRunResult, error)
+	RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error)
+	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error
 }
 
 // Handler is the cohort sync webhook receiver.
@@ -92,7 +94,7 @@ func (h *Handler) amplitude(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.applyPayload(ctx, w, where, tenantID, source.ID, payload)
+	h.applyPayload(ctx, w, where, tenantID, source.ID, payload, body)
 }
 
 func (h *Handler) mixpanel(w http.ResponseWriter, r *http.Request) {
@@ -127,21 +129,53 @@ func (h *Handler) mixpanel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.applyPayload(ctx, w, where, tenantID, source.ID, payload)
+	h.applyPayload(ctx, w, where, tenantID, source.ID, payload, body)
 }
 
-func (h *Handler) applyPayload(ctx context.Context, w http.ResponseWriter, where, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) {
-	var err error
-	if payload.IsFullSnapshot {
-		_, err = h.service.ApplyFullSnapshot(ctx, tenantID, sourceID, payload)
-	} else {
-		_, err = h.service.ApplyDelta(ctx, tenantID, sourceID, payload)
-	}
-	if err != nil {
-		metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "error").Inc()
-		h.reject(ctx, w, where, err)
+func (h *Handler) applyPayload(ctx context.Context, w http.ResponseWriter, where, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload, body []byte) {
+	// Dedup: record the event before processing. If the dedupe_key already
+	// exists, return 200 OK without re-processing (Amplitude retries are safe).
+	dedupeKey := payload.Provider + ":" + payload.ExternalCohortID + ":" + repo.EventPayloadDigest(body)
+	event, err := h.service.RecordEvent(ctx, repo.SyncEvent{
+		TenantID:       tenantID,
+		CohortSourceID: sourceID,
+		Provider:       payload.Provider,
+		EventType:      eventType(payload),
+		DedupeKey:      dedupeKey,
+		Status:         "received",
+		PayloadDigest:  repo.EventPayloadDigest(body),
+		MembersCount:   len(payload.Deltas),
+	})
+	if errors.Is(err, repo.ErrDuplicateEvent) {
+		metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "duplicate").Inc()
+		w.WriteHeader(http.StatusOK) // idempotent: already processed
+		logext.Infof(ctx, "[%s] duplicate event,tenant_id:%s,dedupe_key:%s", where, tenantID, dedupeKey)
 		return
 	}
+	if err != nil {
+		rejectInternal(ctx, w, where, err.Error())
+		return
+	}
+
+	var applyErr error
+	var result *svc.SyncRunResult
+	if payload.IsFullSnapshot {
+		result, applyErr = h.service.ApplyFullSnapshot(ctx, tenantID, sourceID, payload)
+	} else {
+		result, applyErr = h.service.ApplyDelta(ctx, tenantID, sourceID, payload)
+	}
+	if applyErr != nil {
+		metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "error").Inc()
+		_ = h.service.UpdateEventStatus(ctx, event.ID, "failed", nil, applyErr.Error())
+		h.reject(ctx, w, where, applyErr)
+		return
+	}
+
+	var runID *uuid.UUID
+	if result != nil {
+		runID = ptrext.Of(result.Run.ID)
+	}
+	_ = h.service.UpdateEventStatus(ctx, event.ID, "processed", runID, "")
 	metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "ok").Inc()
 	w.WriteHeader(http.StatusOK)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,source_id:%s,cohort:%s,deltas:%d",
@@ -209,6 +243,13 @@ func readBody(ctx context.Context, w http.ResponseWriter, r *http.Request, where
 		return nil, false
 	}
 	return body, true
+}
+
+func eventType(payload cohortsync.SyncPayload) string {
+	if payload.IsFullSnapshot {
+		return "full_snapshot"
+	}
+	return "incremental"
 }
 
 func lastPathSegment(path string) string {

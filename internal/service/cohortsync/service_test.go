@@ -192,6 +192,26 @@ func (m *mockRepo) HasRunningRun(_ context.Context, _ string, _ uuid.UUID) (bool
 	return m.hasRunning, nil
 }
 
+func (m *mockRepo) RecordEvent(_ context.Context, in repo.SyncEvent) (*repo.SyncEvent, error) {
+	row := in
+	if row.ID == uuid.Nil {
+		row.ID = uuid.New()
+	}
+	return &row, nil
+}
+
+func (m *mockRepo) UpdateEventStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID, _ string) error {
+	return nil
+}
+
+func (m *mockRepo) ListEvents(_ context.Context, _ string, _ uuid.UUID, _ int) ([]repo.SyncEvent, error) {
+	return nil, nil
+}
+
+func (m *mockRepo) ListMembers(_ context.Context, _ string, _ uuid.UUID, _ int) ([]repo.Membership, error) {
+	return nil, nil
+}
+
 // ---------- tests ----------
 
 func TestCreateSource_EncryptsCredential(t *testing.T) {

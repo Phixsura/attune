@@ -96,3 +96,20 @@ type SyncRun struct {
 	FinishedAt     *time.Time
 	CreatedAt      time.Time
 }
+
+// SyncEvent is one webhook delivery record for dedup and audit trail.
+type SyncEvent struct {
+	ID             uuid.UUID
+	TenantID       string
+	CohortSourceID uuid.UUID
+	Provider       string
+	EventType      string
+	DedupeKey      string
+	Status         string
+	PayloadDigest  string
+	MembersCount   int
+	FailureReason  string
+	RunID          *uuid.UUID
+	ReceivedAt     time.Time
+	CreatedAt      time.Time
+}

@@ -57,6 +57,16 @@ func (s *stubService) ApplyFullSnapshot(_ context.Context, _ string, _ uuid.UUID
 	return &svc.SyncRunResult{}, nil
 }
 
+func (s *stubService) RecordEvent(_ context.Context, in repo.SyncEvent) (*repo.SyncEvent, error) {
+	row := in
+	row.ID = uuid.New()
+	return &row, nil
+}
+
+func (s *stubService) UpdateEventStatus(_ context.Context, _ uuid.UUID, _ string, _ *uuid.UUID, _ string) error {
+	return nil
+}
+
 func setupRouter(svc service) *chi.Mux {
 	r := chi.NewMux()
 	h := NewHandler(svc)
