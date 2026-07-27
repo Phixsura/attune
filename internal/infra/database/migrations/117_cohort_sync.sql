@@ -112,3 +112,10 @@ CREATE TABLE IF NOT EXISTS cohort_sync_runs (
 
 CREATE INDEX IF NOT EXISTS idx_cohort_sync_runs_cohort
   ON cohort_sync_runs (tenant_id, cohort_id, created_at DESC);
+
+-- At most one running sync per cohort. Prevents the TOCTOU race where
+-- concurrent INSERT ... WHERE NOT EXISTS both see no running row and
+-- both succeed. The second INSERT hits a unique violation instead.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cohort_sync_runs_one_running
+  ON cohort_sync_runs (tenant_id, cohort_id)
+  WHERE status = 'running';

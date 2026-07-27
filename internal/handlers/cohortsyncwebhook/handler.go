@@ -61,16 +61,19 @@ func (h *Handler) amplitude(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, ok := readBody(ctx, w, r, where)
-	if !ok {
-		return
-	}
 
+	// Authenticate BEFORE reading the body to prevent unauthenticated
+	// callers from forcing 32MB allocations (DoS mitigation).
 	source, credential, ok := h.authenticateSource(ctx, w, r, where, tenantID, sourceID, "amplitude")
 	if !ok {
 		return
 	}
 	_ = credential // Amplitude uses basic auth; verification happens in authenticateSource
+
+	body, ok := readBody(ctx, w, r, where)
+	if !ok {
+		return
+	}
 
 	provider, providerOK := cohortsync.Lookup("amplitude")
 	if !providerOK {
@@ -100,12 +103,13 @@ func (h *Handler) mixpanel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, ok := readBody(ctx, w, r, where)
+
+	source, _, ok := h.authenticateSource(ctx, w, r, where, tenantID, sourceID, "mixpanel")
 	if !ok {
 		return
 	}
 
-	source, _, ok := h.authenticateSource(ctx, w, r, where, tenantID, sourceID, "mixpanel")
+	body, ok := readBody(ctx, w, r, where)
 	if !ok {
 		return
 	}

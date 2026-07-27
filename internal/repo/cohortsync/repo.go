@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 )
 
 const defaultLimit = 50
@@ -175,18 +176,29 @@ func (r *Repo) UpdateSourceSyncStatus(ctx context.Context, tenantID string, id u
 // ---------- Cohorts ----------
 
 // UpsertCohort inserts or updates a cohort definition keyed by (tenant, source, external_id).
+// On conflict (concurrent creation of the same cohort), the existing row is returned
+// unchanged — operator-set fields (name, stale_ttl_days, enabled) are never overwritten
+// by webhook-driven upserts. The RETURNING clause includes all columns so the returned
+// Go struct reflects the true DB state, not the caller's input.
 func (r *Repo) UpsertCohort(ctx context.Context, in Cohort) (*Cohort, error) {
-	row := in
+	var row Cohort
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO cohorts (id, tenant_id, cohort_source_id, external_cohort_id, name, description,
 		       stale_ttl_days, enabled)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT (tenant_id, cohort_source_id, external_cohort_id)
-		DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
-		RETURNING id, created_at, updated_at`,
-		row.ID, row.TenantID, row.CohortSourceID, row.ExternalCohortID,
-		row.Name, row.Description, row.StaleTTLDays, row.Enabled,
-	).Scan(&row.ID, &row.CreatedAt, &row.UpdatedAt) // ptrext:allow scan-out-param
+		DO UPDATE SET updated_at = NOW()
+		RETURNING id, tenant_id, cohort_source_id, external_cohort_id, name, description,
+		          stale_ttl_days, member_count, enabled, last_synced_at, last_error,
+		          created_at, updated_at`,
+		in.ID, in.TenantID, in.CohortSourceID, in.ExternalCohortID,
+		in.Name, in.Description, in.StaleTTLDays, in.Enabled,
+	).Scan(
+		&row.ID, &row.TenantID, &row.CohortSourceID, &row.ExternalCohortID,
+		&row.Name, &row.Description, &row.StaleTTLDays, &row.MemberCount,
+		&row.Enabled, &row.LastSyncedAt, &row.LastError,
+		&row.CreatedAt, &row.UpdatedAt,
+	) // ptrext:allow scan-out-param
 	if err != nil {
 		return nil, fmt.Errorf("upsert cohort: %w", err)
 	}
@@ -462,7 +474,7 @@ func (r *Repo) InsertExclusiveRun(ctx context.Context, run SyncRun) (*SyncRun, e
 		RETURNING started_at, created_at`,
 		row.ID, row.TenantID, row.CohortID, row.Trigger, row.Status,
 	).Scan(&row.StartedAt, &row.CreatedAt) // ptrext:allow scan-out-param
-	if errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) || pgxutil.IsUniqueViolation(err) {
 		return nil, ErrConflict
 	}
 	if err != nil {
