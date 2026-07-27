@@ -160,6 +160,18 @@ func (m *mockRepo) InsertExclusiveRun(_ context.Context, run repo.SyncRun) (*rep
 	return &row, nil
 }
 
+func (m *mockRepo) ApplyMembershipDelta(_ context.Context, in repo.ApplyInput) (repo.ApplyResult, error) {
+	if m.hasRunning && in.IsSnapshot {
+		return repo.ApplyResult{}, repo.ErrConflict
+	}
+	m.memberAdded += len(in.Members)
+	return repo.ApplyResult{
+		MembersAdded: len(in.Members),
+		Removed:      int64(len(in.RemoveIDs)),
+		MemberCount:  m.memberAdded,
+	}, nil
+}
+
 func (m *mockRepo) FinishRun(_ context.Context, id uuid.UUID, status string, added, removed, total int, msg string) error {
 	if r, ok := m.runs[id]; ok {
 		r.Status = status

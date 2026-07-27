@@ -60,6 +60,7 @@ type Repo interface {
 	FinishRun(ctx context.Context, id uuid.UUID, status string, added, removed, total int, errorMessage string) error
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
 	HasRunningRun(ctx context.Context, tenantID string, cohortID uuid.UUID) (bool, error)
+	ApplyMembershipDelta(ctx context.Context, in repo.ApplyInput) (repo.ApplyResult, error)
 }
 
 type auditRecorder interface {
@@ -427,58 +428,33 @@ func (s *Service) ApplyDelta(ctx context.Context, tenantID string, sourceID uuid
 		return s.skipDisabledCohortRun(ctx, tenantID, cohort, payload)
 	}
 
-	run, err := s.repo.InsertRun(ctx, repo.SyncRun{
-		ID:       uuid.New(),
-		TenantID: tenantID,
-		CohortID: cohort.ID,
-		Trigger:  "webhook",
-		Status:   "running",
+	adds, removes := splitDeltas(payload.Deltas)
+	removeIDs := make([]string, 0, len(removes))
+	for _, rm := range removes {
+		removeIDs = append(removeIDs, rm.ExternalUserID)
+	}
+
+	result, err := s.repo.ApplyMembershipDelta(ctx, repo.ApplyInput{
+		TenantID:     tenantID,
+		CohortID:     cohort.ID,
+		SourceID:     sourceID,
+		Trigger:      "webhook",
+		Members:      adds,
+		RemoveIDs:    removeIDs,
+		StaleTTLDays: cohort.StaleTTLDays,
 	})
 	if err != nil {
+		_ = s.repo.UpdateSourceSyncStatus(ctx, tenantID, sourceID, redact(err.Error()))
 		return nil, err
 	}
 
-	adds, removes := splitDeltas(payload.Deltas)
-	added, err := s.repo.UpsertMemberships(ctx, tenantID, cohort.ID, adds)
-	if err != nil {
-		return nil, s.failRun(ctx, run.ID, err)
-	}
-
-	var removed int64
-	if len(removes) > 0 {
-		removeIDs := make([]string, 0, len(removes))
-		for _, rm := range removes {
-			removeIDs = append(removeIDs, rm.ExternalUserID)
-		}
-		removed, err = s.repo.MarkMembersDeparted(ctx, tenantID, cohort.ID, cohort.StaleTTLDays, removeIDs)
-		if err != nil {
-			return nil, s.failRun(ctx, run.ID, err)
-		}
-	}
-
-	memberCount, err := s.repo.CountActiveMembers(ctx, tenantID, cohort.ID)
-	if err != nil {
-		return nil, s.failRun(ctx, run.ID, err)
-	}
-	if err := s.repo.UpdateCohortSyncResult(ctx, tenantID, cohort.ID, memberCount, ""); err != nil {
-		logext.Warnf(ctx, "[cohortsync.ApplyDelta] update cohort sync result failed,err:%s", err.Error())
-	}
-	if err := s.repo.UpdateSourceSyncStatus(ctx, tenantID, sourceID, ""); err != nil {
-		logext.Warnf(ctx, "[cohortsync.ApplyDelta] update source sync status failed,err:%s", err.Error())
-	}
-
-	finishErr := s.repo.FinishRun(ctx, run.ID, "succeeded", added, int(removed), memberCount, "")
-	if finishErr != nil {
-		logext.Warnf(ctx, "[cohortsync.ApplyDelta] finish run failed,err:%s", finishErr.Error())
-	}
-
-	recordSyncMetrics(source.Provider, "webhook", "succeeded", added, int(removed), memberCount)
+	recordSyncMetrics(source.Provider, "webhook", "succeeded", result.MembersAdded, int(result.Removed), result.MemberCount)
 
 	return ptrext.Of(SyncRunResult{
-		Run:     ptrext.Indirect(run),
+		Run:     result.Run,
 		Cohort:  ptrext.Indirect(cohort),
-		Added:   added,
-		Removed: int(removed),
+		Added:   result.MembersAdded,
+		Removed: int(result.Removed),
 	}), nil
 }
 
@@ -500,54 +476,35 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 		return s.skipDisabledCohortRun(ctx, tenantID, cohort, payload)
 	}
 
-	// Atomic check-and-insert: prevents TOCTOU race between
-	// HasRunningRun + InsertRun when concurrent webhooks arrive.
-	run, err := s.repo.InsertExclusiveRun(ctx, repo.SyncRun{
-		ID:       uuid.New(),
-		TenantID: tenantID,
-		CohortID: cohort.ID,
-		Trigger:  "webhook",
-		Status:   "running",
+	adds, _ := splitDeltas(payload.Deltas)
+
+	// Full-snapshot uses InsertExclusiveRun inside ApplyMembershipDelta
+	// (the partial unique index enforces at most one running run).
+	// We pass OlderThan = now so MarkDeparted runs after upsert — the
+	// upserted members have last_seen_at = NOW() which is >= OlderThan,
+	// so only genuinely absent members get marked departed.
+	result, err := s.repo.ApplyMembershipDelta(ctx, repo.ApplyInput{
+		TenantID:     tenantID,
+		CohortID:     cohort.ID,
+		SourceID:     sourceID,
+		Trigger:      "webhook",
+		Members:      adds,
+		StaleTTLDays: cohort.StaleTTLDays,
+		OlderThan:    time.Now(),
+		IsSnapshot:   true,
 	})
 	if err != nil {
+		_ = s.repo.UpdateSourceSyncStatus(ctx, tenantID, sourceID, redact(err.Error()))
 		return nil, err
 	}
 
-	adds, _ := splitDeltas(payload.Deltas)
-	added, err := s.repo.UpsertMemberships(ctx, tenantID, cohort.ID, adds)
-	if err != nil {
-		return nil, s.failRun(ctx, run.ID, err)
-	}
-
-	// Reconciliation: mark members not seen in this snapshot as departed.
-	removed, err := s.repo.MarkDeparted(ctx, tenantID, cohort.ID, cohort.StaleTTLDays, run.StartedAt)
-	if err != nil {
-		return nil, s.failRun(ctx, run.ID, err)
-	}
-
-	memberCount, err := s.repo.CountActiveMembers(ctx, tenantID, cohort.ID)
-	if err != nil {
-		return nil, s.failRun(ctx, run.ID, err)
-	}
-	if err := s.repo.UpdateCohortSyncResult(ctx, tenantID, cohort.ID, memberCount, ""); err != nil {
-		logext.Warnf(ctx, "[cohortsync.ApplyFullSnapshot] update cohort sync result failed,err:%s", err.Error())
-	}
-	if err := s.repo.UpdateSourceSyncStatus(ctx, tenantID, sourceID, ""); err != nil {
-		logext.Warnf(ctx, "[cohortsync.ApplyFullSnapshot] update source sync status failed,err:%s", err.Error())
-	}
-
-	finishErr := s.repo.FinishRun(ctx, run.ID, "succeeded", added, int(removed), memberCount, "")
-	if finishErr != nil {
-		logext.Warnf(ctx, "[cohortsync.ApplyFullSnapshot] finish run failed,err:%s", finishErr.Error())
-	}
-
-	recordSyncMetrics(source.Provider, "webhook", "succeeded", added, int(removed), memberCount)
+	recordSyncMetrics(source.Provider, "webhook", "succeeded", result.MembersAdded, int(result.Removed), result.MemberCount)
 
 	return ptrext.Of(SyncRunResult{
-		Run:     ptrext.Indirect(run),
+		Run:     result.Run,
 		Cohort:  ptrext.Indirect(cohort),
-		Added:   added,
-		Removed: int(removed),
+		Added:   result.MembersAdded,
+		Removed: int(result.Removed),
 	}), nil
 }
 
@@ -703,19 +660,6 @@ func (s *Service) skipDisabledCohortRun(ctx context.Context, tenantID string, co
 	}
 	_ = s.repo.FinishRun(ctx, run.ID, "skipped", 0, 0, cohort.MemberCount, "cohort or source is disabled")
 	return ptrext.Of(SyncRunResult{Run: ptrext.Indirect(run), Cohort: ptrext.Indirect(cohort)}), nil
-}
-
-func (s *Service) failRun(ctx context.Context, runID uuid.UUID, cause error) error {
-	msg := cause.Error()
-	if utf8.RuneCountInString(msg) > 2000 {
-		runes := []rune(msg)
-		msg = string(runes[:2000])
-	}
-	finishErr := s.repo.FinishRun(ctx, runID, "failed", 0, 0, 0, msg)
-	if finishErr != nil {
-		logext.Warnf(ctx, "[cohortsync] finish run (fail) failed,err:%s", finishErr.Error())
-	}
-	return cause
 }
 
 func splitDeltas(deltas []cohortsync.MemberDelta) (adds []repo.MembershipUpsert, removes []repo.MembershipUpsert) {
