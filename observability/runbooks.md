@@ -805,3 +805,42 @@ Check embedding worker logs for errors. Verify provider connectivity. If workers
 are healthy but queue is growing, scale horizontally.
 
 Recovery: queue depth returns to near zero for 10 minutes.
+
+---
+
+## AttuneCohortSyncSourceError
+
+**Summary:** A cohort sync source has been failing for 30+ minutes.
+
+**Investigation:**
+
+1. Open Console → Integrations → Cohort Sync.
+2. Identify the source with error status.
+3. Check the last error message in the source detail.
+4. Verify the provider webhook configuration and credentials.
+
+Confirm:
+
+```promql
+attune_cohort_sync_runs_total{status="failed"}
+```
+
+Recovery: source status returns to "active" after a successful sync run.
+
+## AttuneCohortSyncWebhookErrors
+
+**Summary:** Cohort sync webhook error rate is elevated.
+
+**Investigation:**
+
+1. Check webhook handler logs for auth failures or parse errors.
+2. Verify the provider is sending valid payloads.
+3. Check if the source credentials are still valid.
+
+Confirm:
+
+```promql
+rate(attune_cohort_sync_webhook_requests_total{status="error"}[10m])
+```
+
+Recovery: webhook error rate drops below 0.1/s for 15 minutes.

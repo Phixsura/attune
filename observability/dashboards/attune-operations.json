@@ -1057,6 +1057,71 @@
     },
     {
       "id": 24,
+      "type": "timeseries",
+      "title": "Cohort sync health",
+      "description": "Cohort sync webhook requests, membership changes, run outcomes, active members, and stale cleanup. Use this to verify provider push health and membership freshness.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 99
+      },
+      "targets": [
+        {
+          "expr": "(sum by (provider, status) (rate(attune_cohort_sync_webhook_requests_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "webhook / {{provider}} / {{status}}",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum by (provider, action) (rate(attune_cohort_sync_members_changed_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "members / {{provider}} / {{action}}",
+          "refId": "B"
+        },
+        {
+          "expr": "(sum by (provider, trigger, status) (rate(attune_cohort_sync_runs_total[$__rate_interval]))) or vector(0)",
+          "legendFormat": "runs / {{provider}} / {{trigger}} / {{status}}",
+          "refId": "C"
+        },
+        {
+          "expr": "(sum by (provider) (attune_cohort_sync_active_members)) or vector(0)",
+          "legendFormat": "active / {{provider}}",
+          "refId": "D"
+        },
+        {
+          "expr": "(rate(attune_cohort_sync_stale_members_cleaned_total[$__rate_interval])) or vector(0)",
+          "legendFormat": "stale cleaned",
+          "refId": "E"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 24,
       "type": "row",
       "title": "Database migrations",
       "gridPos": {

@@ -174,8 +174,8 @@ func TestAlertRulesHaveActionableAnnotations(t *testing.T) {
 			}
 		}
 	}
-	if count != 53 {
-		t.Fatalf("alert rule count = %d, want 53", count)
+	if count != 55 {
+		t.Fatalf("alert rule count = %d, want 55", count)
 	}
 }
 
