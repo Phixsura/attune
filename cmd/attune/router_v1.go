@@ -11,6 +11,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers"
+	"github.com/Phixsura/attune/internal/handlers/cohortsyncwebhook"
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/externalsyncwebhook"
 	"github.com/Phixsura/attune/internal/handlers/portal"
@@ -22,8 +23,10 @@ import (
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	cohortsyncrepo "github.com/Phixsura/attune/internal/repo/cohortsync"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
 )
 
@@ -57,6 +60,10 @@ func mountV1AdapterRoutes(r chi.Router, pool *pgxpool.Pool, inboundMux chi.Route
 	if inboundSecrets != nil {
 		webhooks := externalsyncwebhook.NewHandler(externalsyncsvc.New(externalsyncrepo.New(pool), inboundSecrets))
 		r.Mount("/external-sync/webhooks", webhooks.Routes())
+
+		cohortSyncSvc := cohortsyncservice.New(cohortsyncrepo.New(pool), inboundSecrets)
+		cohortWebhooks := cohortsyncwebhook.NewHandler(cohortSyncSvc)
+		r.Mount("/cohort-sync", cohortWebhooks.Routes())
 	}
 }
 
