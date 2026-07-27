@@ -15,7 +15,7 @@ import type {
   UpdateCohortSourceRequest,
 } from '@/proto/attune/v1/cohort_sync'
 
-const base = '/console/cohort-sync'
+const base = '/fb/v1/console/cohort-sync'
 
 // ---------- Sources ----------
 
