@@ -124,11 +124,91 @@ func (a *Adapter) ParseWebhook(body []byte, _ map[string]string, _ []byte) (core
 }
 
 // PullCohort fetches the current full membership via the Mixpanel Engage API.
+// The credential is expected to be "username:secret" (pull credential).
 // Operator-initiated only.
-func (a *Adapter) PullCohort(_ context.Context, _ core.Connection, _ string) (core.SyncPayload, error) {
-	// PullCohort is stubbed for v1. The Engage API query with cohort filter
-	// will be wired when operator demand justifies it.
-	return core.SyncPayload{}, fmt.Errorf("mixpanel: PullCohort not yet implemented")
+func (a *Adapter) PullCohort(ctx context.Context, conn core.Connection, externalCohortID string) (core.SyncPayload, error) {
+	baseURL := conn.BaseURL
+	if baseURL == "" {
+		baseURL = "https://mixpanel.com"
+	}
+	parts := strings.SplitN(string(conn.Credential), ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return core.SyncPayload{}, fmt.Errorf("mixpanel: pull credential must be 'username:secret'")
+	}
+	username, secret := parts[0], parts[1]
+
+	var allDeltas []core.MemberDelta
+	page := 0
+	sessionID := ""
+
+	for {
+		engageURL := fmt.Sprintf("%s/api/2.0/engage?filter_by_cohort={\"id\":%s}&page_size=1000", baseURL, externalCohortID)
+		if sessionID != "" {
+			engageURL += "&session_id=" + sessionID + "&page=" + fmt.Sprintf("%d", page)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, engageURL, nil)
+		if err != nil {
+			return core.SyncPayload{}, fmt.Errorf("mixpanel: create engage request: %w", err)
+		}
+		req.SetBasicAuth(username, secret)
+		resp, err := a.client.Do(req)
+		if err != nil {
+			return core.SyncPayload{}, fmt.Errorf("mixpanel: engage request: %w", err)
+		}
+
+		var engageResp struct {
+			Results   []engagePerson `json:"results"`
+			Total     int            `json:"total"`
+			Page      int            `json:"page"`
+			SessionID string         `json:"session_id"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&engageResp); err != nil { // ptrext:allow decode-out-param
+			_ = resp.Body.Close()
+			return core.SyncPayload{}, fmt.Errorf("mixpanel: parse engage response: %w", err)
+		}
+		_ = resp.Body.Close()
+
+		for _, person := range engageResp.Results {
+			uid := strings.TrimSpace(person.DistinctID)
+			if uid == "" {
+				continue
+			}
+			props := person.Properties
+			allDeltas = append(allDeltas, core.MemberDelta{
+				ExternalUserID: uid,
+				Email:          strings.TrimSpace(props.Email),
+				DisplayName:    buildDisplayName(props.FirstName, props.LastName),
+				Action:         "add",
+			})
+		}
+
+		sessionID = engageResp.SessionID
+		if len(engageResp.Results) == 0 || len(allDeltas) >= engageResp.Total {
+			break
+		}
+		page++
+		if page > 100 { // safety limit
+			break
+		}
+	}
+
+	return core.SyncPayload{
+		Provider:         providerID,
+		ExternalCohortID: externalCohortID,
+		IsFullSnapshot:   true,
+		Deltas:           allDeltas,
+	}, nil
+}
+
+type engagePerson struct {
+	DistinctID string                 `json:"$distinct_id"`
+	Properties engagePersonProperties `json:"$properties"`
+}
+
+type engagePersonProperties struct {
+	Email     string `json:"$email"`
+	FirstName string `json:"$first_name"`
+	LastName  string `json:"$last_name"`
 }
 
 func buildDisplayName(first, last string) string {
