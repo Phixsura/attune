@@ -27,6 +27,16 @@ service InboundSourceService {
       body: "*"
     };
   }
+  // PATCH /fb/v1/console/inbound/sources/{id} — update mutable settings
+  // (name + channel-specific config) without recreating the source: a
+  // delete/recreate would reset the sync watermark (full re-backfill)
+  // and orphan existing feedback's inbound_source_id linkage.
+  rpc UpdateInboundSource(UpdateInboundSourceRequest) returns (InboundSource) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/inbound/sources/{id}"
+      body: "*"
+    };
+  }
   // POST /fb/v1/console/inbound/sources/{id}/rotate-secret — webhook only.
   // Returns 409 with rotation_in_grace_window error if a prior rotation
   // is still inside its 24h grace.
@@ -91,6 +101,23 @@ message InboundSource {
   optional int64 tickets_synced = 12;
   optional int64 last_synced_ticket_id = 13;
   optional bool backfill_done = 14;
+  // Operator-editable Intercom settings (GET detail only) — lets the
+  // Console edit form prefill stored values instead of guessing.
+  // Credentials are never included.
+  optional IntercomSettings intercom_settings = 15;
+}
+
+// IntercomSettings is the decrypted, operator-visible slice of a stored
+// Intercom config: everything editable, nothing secret. Region and
+// workspace_id are surfaced read-only for display.
+message IntercomSettings {
+  string region = 1;
+  string start_from = 2;               // "now" | "full"
+  repeated string filter_states = 3;   // empty = all states
+  repeated string filter_tags = 4;
+  repeated string filter_exclude_tags = 5;
+  int32 max_detail_fetches = 6;        // 0 = server default
+  string workspace_id = 7;
 }
 
 message ListInboundSourcesRequest {}
@@ -114,6 +141,24 @@ message CreateInboundSourceRequest {
   optional SlackConnConfig slack_config = 5;
   optional ZendeskConnConfig zendesk_config = 6;
   optional IntercomConnConfig intercom_config = 7;
+}
+
+// UpdateInboundSourceRequest edits a source's mutable settings in
+// place. Sync state (watermark, cursor, stats) is always preserved.
+// Field semantics inside intercom_config: absent optional scalars
+// (start_from, max_detail_fetches) keep their stored values; the
+// repeated filter lists are always replaced with the provided set (an
+// empty list clears the filter — prefill from the GET detail's
+// intercom_settings to keep them). Credentials are replace-only: an
+// empty access_token keeps the stored one, a non-empty value is
+// re-validated against the provider before being persisted.
+message UpdateInboundSourceRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string name = 2;
+  // Intercom: region is immutable (it selects the API host the stored
+  // watermark was minted against); filters, start_from, budget, and the
+  // access token are editable.
+  optional IntercomConnConfig intercom_config = 3;
 }
 
 // CreateInboundSourceResponse always carries the persisted InboundSource.

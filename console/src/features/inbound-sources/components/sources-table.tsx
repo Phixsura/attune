@@ -10,6 +10,7 @@ import {
   MessageSquare,
   PauseCircle,
   PlayCircle,
+  Settings2,
   Trash2,
   Webhook,
 } from 'lucide-react'
@@ -35,6 +36,7 @@ export function SourcesTable({
   togglingId,
   onSelect,
   onRotate,
+  onEdit,
   onPause,
   onResume,
   onDelete,
@@ -44,6 +46,7 @@ export function SourcesTable({
   togglingId: string | undefined
   onSelect: (s: InboundSource) => void
   onRotate: (s: InboundSource) => void
+  onEdit: (s: InboundSource) => void
   onPause: (s: InboundSource) => void
   onResume: (s: InboundSource) => void
   onDelete: (s: InboundSource) => void
@@ -101,6 +104,16 @@ export function SourcesTable({
                   title={t('inbound_sources.actions.rotate')}
                 >
                   <Key className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {src.channel === 'intercom' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onEdit(src)}
+                  title={t('inbound_sources.actions.edit')}
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
                 </Button>
               )}
               {src.enabled ? (

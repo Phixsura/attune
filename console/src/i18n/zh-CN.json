@@ -3088,7 +3088,8 @@
       "rotate": "轮换 secret",
       "pause": "暂停",
       "resume": "恢复",
-      "delete": "删除"
+      "delete": "删除",
+      "edit": "编辑设置"
     },
     "create": {
       "title": "添加入站源",
@@ -3197,6 +3198,13 @@
       "title": "轮换 webhook secret？",
       "body": "旧的 secret 在 24 小时内仍可用，便于你逐步切换下游配置。轮换会得到一个全新的 secret，仅显示一次。",
       "confirm": "轮换"
+    },
+    "edit": {
+      "title": "编辑 Intercom 来源",
+      "body": "就地修改名称、标签过滤和详情预算；同步进度与已关联反馈保持不变。区域不可修改。",
+      "saved": "来源设置已保存",
+      "rotate_token": "轮换 Access Token（可选）",
+      "rotate_token_help": "留空则保留当前 token；填写后将先校验再替换"
     },
     "delete": {
       "title": "删除这个入站源？",

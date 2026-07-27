@@ -32,7 +32,33 @@ export interface InboundSource {
   /** Sync progress stats (populated for poll-mode channels like Zendesk). */
   ticketsSynced?: string | undefined;
   lastSyncedTicketId?: string | undefined;
-  backfillDone?: boolean | undefined;
+  backfillDone?:
+    | boolean
+    | undefined;
+  /**
+   * Operator-editable Intercom settings (GET detail only) — lets the
+   * Console edit form prefill stored values instead of guessing.
+   * Credentials are never included.
+   */
+  intercomSettings?: IntercomSettings | undefined;
+}
+
+/**
+ * IntercomSettings is the decrypted, operator-visible slice of a stored
+ * Intercom config: everything editable, nothing secret. Region and
+ * workspace_id are surfaced read-only for display.
+ */
+export interface IntercomSettings {
+  region: string;
+  /** "now" | "full" */
+  startFrom: string;
+  /** empty = all states */
+  filterStates: string[];
+  filterTags: string[];
+  filterExcludeTags: string[];
+  /** 0 = server default */
+  maxDetailFetches: number;
+  workspaceId: string;
 }
 
 export interface ListInboundSourcesRequest {
@@ -59,6 +85,30 @@ export interface CreateInboundSourceRequest {
   emailConfig?: EmailCreateConfig | undefined;
   slackConfig?: SlackConnConfig | undefined;
   zendeskConfig?: ZendeskConnConfig | undefined;
+  intercomConfig?: IntercomConnConfig | undefined;
+}
+
+/**
+ * UpdateInboundSourceRequest edits a source's mutable settings in
+ * place. Sync state (watermark, cursor, stats) is always preserved.
+ * Field semantics inside intercom_config: absent optional scalars
+ * (start_from, max_detail_fetches) keep their stored values; the
+ * repeated filter lists are always replaced with the provided set (an
+ * empty list clears the filter — prefill from the GET detail's
+ * intercom_settings to keep them). Credentials are replace-only: an
+ * empty access_token keeps the stored one, a non-empty value is
+ * re-validated against the provider before being persisted.
+ */
+export interface UpdateInboundSourceRequest {
+  id: string;
+  name?:
+    | string
+    | undefined;
+  /**
+   * Intercom: region is immutable (it selects the API host the stored
+   * watermark was minted against); filters, start_from, budget, and the
+   * access token are editable.
+   */
   intercomConfig?: IntercomConnConfig | undefined;
 }
 
@@ -272,6 +322,13 @@ export interface InboundSourceService {
    * example); the raw secret is never returned again.
    */
   CreateInboundSource(request: CreateInboundSourceRequest): Promise<CreateInboundSourceResponse>;
+  /**
+   * PATCH /fb/v1/console/inbound/sources/{id} — update mutable settings
+   * (name + channel-specific config) without recreating the source: a
+   * delete/recreate would reset the sync watermark (full re-backfill)
+   * and orphan existing feedback's inbound_source_id linkage.
+   */
+  UpdateInboundSource(request: UpdateInboundSourceRequest): Promise<InboundSource>;
   /**
    * POST /fb/v1/console/inbound/sources/{id}/rotate-secret — webhook only.
    * Returns 409 with rotation_in_grace_window error if a prior rotation

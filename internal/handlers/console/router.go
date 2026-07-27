@@ -3191,6 +3191,18 @@ func (r *Router) mountInbound(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		s.Patch("/{id}", dispatcher.Bind(
+			"console.inbound.Update",
+			dispatcher.Combine(
+				func() *attunev1.UpdateInboundSourceRequest { return ptrext.Of(attunev1.UpdateInboundSourceRequest{}) },
+				dispatcher.JSONBody[*attunev1.UpdateInboundSourceRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateInboundSourceRequest, id string) { req.Id = id }),
+			),
+			r.inbound.Update,
+			dispatcher.WithAuth(func(req *http.Request, _ *attunev1.UpdateInboundSourceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(req.Context()), nil
+			}),
+		))
 		s.Delete("/{id}", dispatcher.Bind(
 			"console.inbound.Delete",
 			dispatcher.Path(

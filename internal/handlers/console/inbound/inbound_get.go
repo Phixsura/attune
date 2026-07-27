@@ -13,6 +13,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound"
+	"github.com/Phixsura/attune/internal/inbound/adapter/intercom"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -29,7 +30,32 @@ func (h *Handler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], req *att
 	out := rowToProto(src)
 	// Best-effort sync stats extraction from encrypted config.
 	h.enrichWithSyncStats(src, out)
+	// Editable settings read-back so the Console edit form can prefill
+	// stored values instead of silently resetting them on save.
+	h.enrichIntercomSettings(src, out)
 	return dispatcher.OK(out)
+}
+
+// enrichIntercomSettings populates the operator-editable Intercom
+// settings (never credentials) on the detail response. Failures are
+// silently ignored — the edit form degrades to empty defaults.
+func (h *Handler) enrichIntercomSettings(src inbound.Source, out *attunev1.InboundSource) {
+	if src.Channel != channelIntercom || h.secrets == nil || len(src.Config) == 0 {
+		return
+	}
+	summary, err := intercom.DecodeConnSummary(src.Config, h.secrets)
+	if err != nil {
+		return
+	}
+	out.IntercomSettings = ptrext.Of(attunev1.IntercomSettings{
+		Region:            summary.Region,
+		StartFrom:         summary.StartFrom,
+		FilterStates:      summary.FilterStates,
+		FilterTags:        summary.FilterTags,
+		FilterExcludeTags: summary.FilterExcludeTags,
+		MaxDetailFetches:  int32(summary.MaxDetailFetches), //nolint:gosec // budget capped at 500 by validation
+		WorkspaceId:       summary.WorkspaceID,
+	})
 }
 
 // enrichWithSyncStats attempts to decrypt the config blob and populate

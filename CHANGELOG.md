@@ -113,6 +113,20 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
     Intercom API stub for full-pipeline E2E.
   - SSRF-hardened via `nethardening.Policy`, wired in
     `applyRuntimeHardening`.
+  - In-place source editing: `PATCH /fb/v1/console/inbound/sources/{id}`
+    (`UpdateInboundSource`) renames a source and edits Intercom settings
+    (tag filters, states, detail budget, `start_from`) or rotates the
+    access token without delete/recreate — the sync watermark, cursor,
+    and existing feedback linkage survive. Region is immutable; a new
+    token is auth-tested and pinned to the stored workspace before it
+    replaces the old one; absent optional fields keep their stored
+    values. The GET detail response now carries `intercom_settings`
+    (never credentials) so the Console edit dialog prefills stored
+    filters instead of resetting them; config persistence runs under
+    the secretlock writable-key guard, and the poller's tick-end stats
+    write re-reads and merges (CAS with retry) so a concurrent edit or
+    token rotation is never clobbered. Audited as
+    `inbound_source.update`.
 
 - Added Zendesk inbound adapter (#229): polls Zendesk's incremental ticket
   export API to extract product signals from support tickets.

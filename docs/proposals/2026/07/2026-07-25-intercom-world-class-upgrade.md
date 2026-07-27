@@ -182,6 +182,58 @@ customer requests" — all delivered in-scope:
   requests; an already-tracked cluster recommends one-click linking to
   the existing request instead of creating a duplicate.
 
+## 7. In-place source editing (`UpdateInboundSource`)
+
+Operators previously had exactly one way to change any Intercom
+setting — delete the source and recreate it — which resets the sync
+watermark (full re-backfill), orphans existing feedback's
+`inbound_source_id` linkage, and forces re-entering the token. A
+`PATCH /fb/v1/console/inbound/sources/{id}` endpoint fixes that; the
+design decisions:
+
+- **Region is immutable.** The region selects the API host the stored
+  watermark and permalinks were minted against; moving workspaces is a
+  new source, not an edit.
+- **Token is replace-only and workspace-pinned.** Empty keeps the
+  stored token. A non-empty token is auth-tested against Intercom and
+  rejected if its workspace `id_code` differs from the stored one — a
+  foreign-workspace token would corrupt idempotency keys and
+  permalinks minted under the stored workspace ID.
+- **PATCH semantics are presence-aware.** Absent optional scalars
+  (`start_from`, `max_detail_fetches`) keep their stored values;
+  repeated filter lists are always replaced. To make the latter safe,
+  the GET detail response carries `intercom_settings` (the decrypted
+  operator-editable slice, never credentials) so the Console edit
+  dialog prefills stored filters instead of silently wiping them.
+- **Validate-then-write, atomically ordered.** All validation legs
+  (name cap, channel match, region, auth-test, dry-run settings merge)
+  run before the first write, so a rejected request never leaves a
+  partially-applied, unaudited mutation. The config leg writes before
+  the rename; if a later leg fails after a persisted write, the
+  partial change is still audited.
+- **Concurrency: the config blob has two writers now.** The poller
+  persists cursor/stats at tick end; the handler persists settings.
+  Two guards close the lost-update race: (1) the handler re-reads the
+  blob under `SELECT ... FOR UPDATE` inside a `secretlock.WithTx`
+  transaction (which also runs `EnsureWritableKey`, same invariant as
+  every create/rotate path) and merges settings onto the fresh read;
+  (2) the poller's `persistSyncStats` re-reads the stored blob, grafts
+  ONLY the sync fields onto it, and writes via compare-and-swap
+  (`SwapConfig`, retry on conflict) — so a token rotation landing
+  mid-tick survives the tick-end stats write.
+- **Audited as `inbound_source.update`** (Go `validActions` + DB CHECK
+  via migration 116). Writing 116 surfaced that the constraint-rebuild
+  pattern is regression-prone — 115/116 initially shipped a
+  reconstructed list that dropped ~58 in-use actions. Both were
+  regenerated as strict supersets of 113, and
+  `TestAuditActionConstraintAppendOnly` now gates every future rebuild
+  (from the 111 baseline) to be a superset of its predecessor.
+
+Zendesk parity is deliberately deferred: `UpdateInboundSourceRequest`
+has a channel-config slot shape that extends additively
+(`zendesk_config = 4` when #229's edit story lands); rename already
+works for every channel today.
+
 ## Verification
 
 1. Unit tests for every new code path (filter matrix, ai_agent hint
@@ -190,3 +242,7 @@ customer requests" — all delivered in-scope:
    ai_agent escalated + source URL.
 3. `make ci-check` green.
 4. Coverage stays ≥ 85% on both packages.
+5. Update endpoint: omitted-fields-preserved, validation-before-write,
+   workspace pinning, CAS merge (`TestPersistSyncStats_MergesConcurrentEdit`,
+   `TestPersistSyncStats_RetriesLostSwap`), and Console dialog
+   prefill/lossless-save tests.

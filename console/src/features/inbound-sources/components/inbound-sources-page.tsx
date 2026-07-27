@@ -27,6 +27,7 @@ import { useRotateInboundSource } from '@/features/inbound-sources/api/rotate-in
 import { useSyncNow } from '@/features/inbound-sources/api/sync-now'
 import { CreateInboundSourceDialog } from '@/features/inbound-sources/components/create-dialog'
 import { DeleteInboundSourceDialog } from '@/features/inbound-sources/components/delete-dialog'
+import { EditIntercomSourceDialog } from '@/features/inbound-sources/components/edit-intercom-dialog'
 import { RotateConfirmDialog } from '@/features/inbound-sources/components/rotate-dialog'
 import { SecretRevealDialog } from '@/features/inbound-sources/components/secret-reveal-dialog'
 import {
@@ -58,6 +59,7 @@ export function InboundSourcesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [selectedSourceID, setSelectedSourceID] = useState('')
   const [rotateTarget, setRotateTarget] = useState<InboundSource | null>(null)
+  const [editTarget, setEditTarget] = useState<InboundSource | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<InboundSource | null>(null)
   const [reveal, setReveal] = useState<RevealState | null>(null)
   const sources = list.data ?? []
@@ -235,6 +237,7 @@ export function InboundSourcesPage() {
                 togglingId={togglingId}
                 onSelect={(s) => setSelectedSourceID(s.id)}
                 onRotate={(s) => setRotateTarget(s)}
+                onEdit={(s) => setEditTarget(s)}
                 onPause={handlePause}
                 onResume={handleResume}
                 onDelete={(s) => setDeleteTarget(s)}
@@ -295,6 +298,7 @@ export function InboundSourcesPage() {
         onConfirm={() => rotateTarget && handleRotate.mutate(rotateTarget.id)}
         pending={handleRotate.isPending}
       />
+      <EditIntercomSourceDialog source={editTarget} onClose={() => setEditTarget(null)} />
       <DeleteInboundSourceDialog
         source={deleteTarget}
         onCancel={() => setDeleteTarget(null)}

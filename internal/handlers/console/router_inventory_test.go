@@ -186,6 +186,7 @@ var expectedOtherRoutes = []string{
 	"DELETE /inbound/sources/{id}",
 	"POST /inbound/sources/{id}/rotate-secret",
 	"GET /inbound/sources/{id}/recent",
+	"PATCH /inbound/sources/{id}",
 	"POST /inbound/sources/{id}/pause",
 	"POST /inbound/sources/{id}/resume",
 	"POST /inbound/sources/{id}/sync-now",
