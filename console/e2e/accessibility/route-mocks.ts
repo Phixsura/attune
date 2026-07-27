@@ -319,6 +319,26 @@ async function handleRoute(
     return true
   }
 
+  // Cohort sync: feedback page loads cohort list for filter dropdown (#233)
+  if (method === 'GET' && path === '/cohort-sync/cohorts') {
+    await fulfillJson(route, { cohorts: [] })
+    return true
+  }
+  if (method === 'GET' && path === '/cohort-sync/health') {
+    await fulfillJson(route, {
+      source_count: 0,
+      active_sources: 0,
+      error_sources: 0,
+      cohort_count: 0,
+      total_active_members: 0,
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/cohort-sync/sources') {
+    await fulfillJson(route, { sources: [] })
+    return true
+  }
+
   if (method === 'GET' && path === '/feedback') {
     const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
     const source = url.searchParams.get('source')
