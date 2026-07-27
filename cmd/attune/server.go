@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/cohortsync"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/externalsync"
 	"github.com/Phixsura/attune/internal/handlers"
@@ -235,6 +236,7 @@ func applyRuntimeHardening(cfg *config.Config) {
 	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
 	replydraftsvc.SetEgressPolicy(egress)
+	cohortsync.SetEgressPolicy(egress)
 	// Trusted-proxy hop count for client-IP resolution outside the API-key
 	// middleware (audit actor IP, etc.).
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)

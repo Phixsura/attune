@@ -111,6 +111,19 @@ func (r *Repo) ListSources(ctx context.Context, tenantID string) ([]Source, erro
 // UpdateSource updates mutable fields of a cohort source.
 func (r *Repo) UpdateSource(ctx context.Context, in Source) (*Source, error) {
 	row := in
+	// Guard nil byte slices — pgx sends nil as SQL NULL for NOT NULL columns.
+	cfg := row.ProviderConfig
+	if cfg == nil {
+		cfg = []byte("{}")
+	}
+	cred := row.CredentialCiphertext
+	if cred == nil {
+		cred = []byte{}
+	}
+	wsCipher := row.WebhookSecretCiphertext
+	if wsCipher == nil {
+		wsCipher = []byte{}
+	}
 	err := r.pool.QueryRow(ctx, `
 		UPDATE cohort_sources
 		   SET name = $3, enabled = $4, status = $5, base_url = $6,
@@ -120,8 +133,8 @@ func (r *Repo) UpdateSource(ctx context.Context, in Source) (*Source, error) {
 		 WHERE tenant_id = $1 AND id = $2
 		RETURNING updated_at`,
 		row.TenantID, row.ID, row.Name, row.Enabled, row.Status, row.BaseURL,
-		row.ProviderConfig, row.CredentialKeyID, row.CredentialCiphertext,
-		row.WebhookSecretKeyID, row.WebhookSecretCiphertext,
+		cfg, row.CredentialKeyID, cred,
+		row.WebhookSecretKeyID, wsCipher,
 		row.LastError, row.UpdatedBy,
 	).Scan(&row.UpdatedAt) // ptrext:allow scan-out-param
 	if errors.Is(err, pgx.ErrNoRows) {

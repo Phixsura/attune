@@ -16,6 +16,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/cohortsync"
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -133,9 +134,11 @@ func (h *Handler) applyPayload(ctx context.Context, w http.ResponseWriter, where
 		_, err = h.service.ApplyDelta(ctx, tenantID, sourceID, payload)
 	}
 	if err != nil {
+		metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "error").Inc()
 		h.reject(ctx, w, where, err)
 		return
 	}
+	metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "ok").Inc()
 	w.WriteHeader(http.StatusOK)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,source_id:%s,cohort:%s,deltas:%d",
 		where, tenantID, sourceID.String(), payload.ExternalCohortID, len(payload.Deltas))

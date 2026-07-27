@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -16,8 +17,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/cohortsync"
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/pkg/logext"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/cohortsync"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
@@ -329,6 +332,8 @@ func (s *Service) ApplyDelta(ctx context.Context, tenantID string, sourceID uuid
 		logext.Warnf(ctx, "[cohortsync.ApplyDelta] finish run failed,err:%s", finishErr.Error())
 	}
 
+	recordSyncMetrics(source.Provider, "webhook", "succeeded", added, int(removed), memberCount)
+
 	return ptrext.Of(SyncRunResult{
 		Run:     ptrext.Indirect(run),
 		Cohort:  ptrext.Indirect(cohort),
@@ -350,6 +355,9 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 	cohort, err := s.ensureCohort(ctx, tenantID, sourceID, payload)
 	if err != nil {
 		return nil, err
+	}
+	if !cohort.Enabled {
+		return s.skipDisabledCohortRun(ctx, tenantID, cohort, payload)
 	}
 
 	running, err := s.repo.HasRunningRun(ctx, tenantID, cohort.ID)
@@ -399,6 +407,8 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 		logext.Warnf(ctx, "[cohortsync.ApplyFullSnapshot] finish run failed,err:%s", finishErr.Error())
 	}
 
+	recordSyncMetrics(source.Provider, "webhook", "succeeded", added, int(removed), memberCount)
+
 	return ptrext.Of(SyncRunResult{
 		Run:     ptrext.Indirect(run),
 		Cohort:  ptrext.Indirect(cohort),
@@ -447,7 +457,7 @@ func (s *Service) SyncNow(ctx context.Context, tenantID string, cohortID uuid.UU
 		Credential:     credential,
 	}, cohort.ExternalCohortID)
 	if err != nil {
-		errMsg := err.Error()
+		errMsg := redact(err.Error())
 		_ = s.repo.UpdateSourceSyncStatus(ctx, tenantID, source.ID, errMsg)
 		return nil, err
 	}
@@ -636,6 +646,33 @@ func sourceAudit(src *repo.Source) map[string]any {
 		"status":   src.Status,
 		"base_url": src.BaseURL,
 	}
+}
+
+func recordSyncMetrics(provider, trigger, status string, added, removed, activeMembers int) {
+	metrics.CohortSyncRunsTotal.WithLabelValues(provider, trigger, status).Inc()
+	if added > 0 {
+		metrics.CohortSyncMembersChangedTotal.WithLabelValues(provider, "add").Add(float64(added))
+	}
+	if removed > 0 {
+		metrics.CohortSyncMembersChangedTotal.WithLabelValues(provider, "remove").Add(float64(removed))
+	}
+	metrics.CohortSyncActiveMembers.WithLabelValues(provider).Set(float64(activeMembers))
+}
+
+var urlPattern = regexp.MustCompile(`https?://[^\s"'<>)]+`)
+
+// redact replaces URLs in error messages with their redacted form to prevent
+// accidental credential leakage (e.g. base_url with query-string tokens).
+func redact(s string) string {
+	s = strings.TrimSpace(s)
+	return urlPattern.ReplaceAllStringFunc(s, func(raw string) string {
+		suffix := ""
+		for len(raw) > 0 && strings.ContainsAny(raw[len(raw)-1:], ".,;:!?") {
+			suffix = raw[len(raw)-1:] + suffix
+			raw = raw[:len(raw)-1]
+		}
+		return nethardening.RedactURL(raw) + suffix
+	})
 }
 
 func cohortAudit(c *repo.Cohort) map[string]any {
