@@ -43,6 +43,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
+import { listCohortsQuery } from '@/features/cohort-sync/api/cohort-sync'
 import { useBatchDeleteFeedback } from '@/features/feedback/api/batch-delete'
 import { useBatchRetryEnrichment } from '@/features/feedback/api/batch-retry-enrichment'
 import { useBatchUpdateTags } from '@/features/feedback/api/batch-update-tags'
@@ -160,6 +161,7 @@ export function FeedbackPage({
   const displayOf = useDisplayName()
   const { can } = usePermissions()
   const me = useQuery(meQuery())
+  const cohortList = useQuery(listCohortsQuery())
   const canViewLLMConfig = can('llm_config:view')
   const canViewRuntimeConfig = can('settings:enrichment_runtime:view')
   const portalHref = me.data?.tenant?.slug
@@ -172,6 +174,7 @@ export function FeedbackPage({
 
   const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [tagFilter, setTagFilter] = useState<string>('')
+  const [cohortFilter, setCohortFilter] = useState<string>('')
   const [workflowFilter, setWorkflowFilter] = useState<string>('')
   const [enrichmentFilter, setEnrichmentFilter] = useState<string>('')
   const [sourceFilter, setSourceFilter] = useState<string>(initialSourceFilter)
@@ -257,6 +260,7 @@ export function FeedbackPage({
       source: sourceFilter || undefined,
       type: typeFilter || undefined,
       tag: tagFilter || undefined,
+      cohort_id: cohortFilter || undefined,
       workflowState: workflowFilter || undefined,
       enrichmentStatus: effectiveEnrichmentStatus || undefined,
       terminalFailedOnly: queueMode === 'terminal' ? true : undefined,
@@ -271,6 +275,7 @@ export function FeedbackPage({
   }, [
     attrFilters,
     tagFilter,
+    cohortFilter,
     urgentOnly,
     workflowFilter,
     enrichmentFilter,
@@ -364,6 +369,7 @@ export function FeedbackPage({
   const activeFilterCount =
     Object.values(attrFilters).filter((value) => value && value !== '__all').length +
     (tagFilter ? 1 : 0) +
+    (cohortFilter ? 1 : 0) +
     (workflowFilter ? 1 : 0) +
     (enrichmentFilter ? 1 : 0) +
     (sourceFilter !== initialSourceFilter ? 1 : 0) +
@@ -548,6 +554,15 @@ export function FeedbackPage({
       })
     }
 
+    if (cohortFilter) {
+      chips.push({
+        key: 'cohort',
+        label: 'Cohort',
+        value: cohortFilter,
+        onRemove: () => setCohortFilter(''),
+      })
+    }
+
     if (workflowLabel) {
       chips.push({
         key: 'workflow',
@@ -687,6 +702,7 @@ export function FeedbackPage({
     searchMode,
     sortMode,
     tagFilter,
+    cohortFilter,
     tagList,
     t,
     typeFilter,
@@ -793,6 +809,7 @@ export function FeedbackPage({
   const clearFilters = () => {
     setAttrFilters({})
     setTagFilter('')
+    setCohortFilter('')
     setWorkflowFilter('')
     setEnrichmentFilter('')
     setSourceFilter(initialSourceFilter)
@@ -903,6 +920,9 @@ export function FeedbackPage({
                 dims={dims}
                 attrFilters={attrFilters}
                 tagFilter={tagFilter}
+                cohortFilter={cohortFilter}
+                cohorts={(cohortList.data ?? []).map((c) => ({ id: c.id, name: c.name }))}
+                onCohortChange={setCohortFilter}
                 workflowFilter={workflowFilter}
                 enrichmentFilter={enrichmentFilter}
                 sourceFilter={sourceFilter}
@@ -1287,11 +1307,14 @@ function FilterBar({
   dims,
   attrFilters,
   tagFilter,
+  cohortFilter,
   workflowFilter,
   enrichmentFilter,
   sourceFilter,
   typeFilter,
   tags,
+  cohorts,
+  onCohortChange,
   workflowStates,
   urgentOnly,
   q,
@@ -1311,6 +1334,7 @@ function FilterBar({
   dims: Dimension[]
   attrFilters: Record<string, string>
   tagFilter: string
+  cohortFilter: string
   workflowFilter: string
   enrichmentFilter: string
   sourceFilter: string
@@ -1323,6 +1347,8 @@ function FilterBar({
   semanticIsLoading: boolean
   onAttrChange: (dim: string, value: string) => void
   onTagChange: (tagId: string) => void
+  cohorts: Array<{ id: string; name: string }>
+  onCohortChange: (cohortId: string) => void
   onWorkflowChange: (stateId: string) => void
   onEnrichmentChange: (status: string) => void
   onSourceChange: (source: string) => void
@@ -1494,6 +1520,24 @@ function FilterBar({
                     style={{ backgroundColor: tag.color }}
                   />
                   {tag.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        {cohorts.length > 0 && (
+          <Select
+            value={cohortFilter || '__all'}
+            onValueChange={(v) => onCohortChange(v === '__all' ? '' : v)}
+          >
+            <SelectTrigger className="h-10 w-full bg-background" aria-label="All cohorts">
+              <SelectValue placeholder="All cohorts" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all">All cohorts</SelectItem>
+              {cohorts.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
                 </SelectItem>
               ))}
             </SelectContent>
