@@ -204,6 +204,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
   {
     group: 'integrations',
+    icon: RefreshCcw,
+    labelKey: 'nav.cohort_sync',
+    path: '/integrations/cohort-sync',
+    permission: 'settings:cohort_sync:view',
+    settingsAliases: ['cohort-sync', 'cohort_sync'],
+  },
+  {
+    group: 'integrations',
     icon: ShieldCheck,
     labelKey: 'nav.public_visibility',
     path: '/integrations/public-visibility',

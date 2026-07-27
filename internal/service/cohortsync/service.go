@@ -481,6 +481,42 @@ func (s *Service) ListRuns(ctx context.Context, tenantID string, cohortID uuid.U
 	return s.repo.ListRuns(ctx, tenantID, cohortID, limit)
 }
 
+// HealthSummary is a snapshot of cohort sync health for a tenant.
+type HealthSummary struct {
+	SourceCount        int
+	ActiveSources      int
+	ErrorSources       int
+	CohortCount        int
+	TotalActiveMembers int
+}
+
+// Health returns a health summary for the tenant.
+func (s *Service) Health(ctx context.Context, tenantID string) (HealthSummary, error) {
+	sources, err := s.repo.ListSources(ctx, tenantID)
+	if err != nil {
+		return HealthSummary{}, err
+	}
+	var h HealthSummary
+	h.SourceCount = len(sources)
+	for _, src := range sources {
+		switch src.Status {
+		case "active":
+			h.ActiveSources++
+		case "error":
+			h.ErrorSources++
+		}
+	}
+	cohorts, err := s.repo.ListAllCohorts(ctx, tenantID)
+	if err != nil {
+		return HealthSummary{}, err
+	}
+	h.CohortCount = len(cohorts)
+	for _, c := range cohorts {
+		h.TotalActiveMembers += c.MemberCount
+	}
+	return h, nil
+}
+
 // ---------- helpers ----------
 
 func (s *Service) ensureCohort(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*repo.Cohort, error) {

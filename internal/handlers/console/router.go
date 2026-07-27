@@ -3318,6 +3318,14 @@ func (r *Router) mountCohortSync(m chi.Router) {
 			r.cohortSync.ListSyncRuns,
 			dispatcher.WithAuth(sessionAuth[attunev1.ListCohortSyncRunsRequest]),
 		))
+		cs.Get("/health", dispatcher.Bind(
+			"console.CohortSyncHandler.Health",
+			dispatcher.Empty(func() *attunev1.GetCohortSyncHealthRequest {
+				return ptrext.Of(attunev1.GetCohortSyncHealthRequest{})
+			}),
+			r.cohortSync.Health,
+			dispatcher.WithAuth(sessionAuth[attunev1.GetCohortSyncHealthRequest]),
+		))
 	})
 }
 

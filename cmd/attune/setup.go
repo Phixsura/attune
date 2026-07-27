@@ -37,7 +37,6 @@ import (
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	auditlogviewrepo "github.com/Phixsura/attune/internal/repo/auditlogview"
 	breakglassrepo "github.com/Phixsura/attune/internal/repo/breakglass"
-	cohortsyncrepo "github.com/Phixsura/attune/internal/repo/cohortsync"
 	customerrequestrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	customerrequestviewrepo "github.com/Phixsura/attune/internal/repo/customerrequestview"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
@@ -210,6 +209,7 @@ func buildConsoleRouter(
 	llm llmclient.LLMClient,
 	enrichRuntime *enrichruntimesvc.Service,
 	sources domain.SourceSet,
+	cohortSyncSvc *cohortsyncservice.Service,
 ) (chi.Router, error) {
 	if cfg.ConsoleBaseURL == "" {
 		return nil, fmt.Errorf("console requires console.base_url")
@@ -314,7 +314,7 @@ func buildConsoleRouter(
 	)
 	wireRequestNotificationHandlers(router, pool, secrets, cfg.ConsoleBaseURL, idempotencyRepo, auditLogSvc)
 	router.SetPublicVisibilityHandler(buildPublicVisibilityHandler(pool, auditLogSvc))
-	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets), nil
+	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets, cohortSyncSvc), nil
 }
 
 type consoleAuditTarget func(*auditlogsvc.Service)
@@ -396,9 +396,10 @@ func configureConsoleRouter(
 	adminRepo *admin.Repo,
 	feedbackRepo *feedback.FeedbackRepo,
 	secrets *secretstore.TinkStore,
+	cohortSyncSvc *cohortsyncservice.Service,
 ) chi.Router {
 	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
-	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets)
+	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets, cohortSyncSvc)
 	return router.Mount()
 }
 
@@ -418,10 +419,10 @@ func buildSearchHandler(
 	return searchHandler
 }
 
-func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo, secrets *secretstore.TinkStore) {
+func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo, secrets *secretstore.TinkStore, cohortSyncSvc *cohortsyncservice.Service) {
 	attachOutboxHandler(router, pool, auditLogSvc)
 	attachExternalSyncHandler(router, pool, auditLogSvc, secrets)
-	attachCohortSyncHandler(router, pool, auditLogSvc, secrets)
+	attachCohortSyncHandler(router, cohortSyncSvc, auditLogSvc)
 	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
@@ -439,11 +440,10 @@ func attachExternalSyncHandler(router *console.Router, pool *pgxpool.Pool, audit
 	router.SetExternalSyncHandler(console.NewExternalSyncHandler(svc))
 }
 
-func attachCohortSyncHandler(router *console.Router, pool *pgxpool.Pool, audit *auditlogsvc.Service, secrets *secretstore.TinkStore) {
-	if secrets == nil {
+func attachCohortSyncHandler(router *console.Router, svc *cohortsyncservice.Service, audit *auditlogsvc.Service) {
+	if svc == nil {
 		return
 	}
-	svc := cohortsyncservice.New(cohortsyncrepo.New(pool), secrets)
 	svc.SetAuditLogger(audit)
 	router.SetCohortSyncHandler(consolecohortsync.NewHandler(svc))
 }

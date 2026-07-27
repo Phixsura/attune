@@ -158,7 +158,7 @@ func buildRouter(
 	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {
-		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo, llm, enrichRuntime, sources)
+		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, adminRepo, llm, enrichRuntime, sources, cohortSyncSvc)
 		if err != nil {
 			return nil, fmt.Errorf("build console: %w", err)
 		}

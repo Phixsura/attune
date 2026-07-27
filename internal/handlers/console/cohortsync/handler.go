@@ -34,6 +34,7 @@ type service interface {
 	UpdateCohort(ctx context.Context, in svc.UpdateCohortInput) (*repo.Cohort, error)
 	SyncNow(ctx context.Context, tenantID string, cohortID uuid.UUID, actor svc.Actor, auditActor auditlogsvc.Actor) (*svc.SyncRunResult, error)
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
+	Health(ctx context.Context, tenantID string) (svc.HealthSummary, error)
 }
 
 // Handler is the Console cohort sync handler.
@@ -203,6 +204,24 @@ func (h *Handler) ListSyncRuns(
 		items = append(items, runToProto(runs[i]))
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.ListCohortSyncRunsResponse{Runs: items}))
+}
+
+// Health returns cohort sync health for the tenant.
+func (h *Handler) Health(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	_ *attunev1.GetCohortSyncHealthRequest,
+) (dispatcher.Result[*attunev1.CohortSyncHealth], error) {
+	health, err := h.service.Health(ctx, ctx.Auth.TenantID)
+	if err != nil {
+		return internalError[*attunev1.CohortSyncHealth](ctx, "Health", err)
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.CohortSyncHealth{
+		SourceCount:        int32(health.SourceCount),
+		ActiveSources:      int32(health.ActiveSources),
+		ErrorSources:       int32(health.ErrorSources),
+		CohortCount:        int32(health.CohortCount),
+		TotalActiveMembers: int32(health.TotalActiveMembers),
+	}))
 }
 
 // ---------- converters ----------
