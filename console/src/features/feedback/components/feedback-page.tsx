@@ -43,7 +43,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
-import { listCohortsQuery } from '@/features/cohort-sync/api/cohort-sync'
 import { useBatchDeleteFeedback } from '@/features/feedback/api/batch-delete'
 import { useBatchRetryEnrichment } from '@/features/feedback/api/batch-retry-enrichment'
 import { useBatchUpdateTags } from '@/features/feedback/api/batch-update-tags'
@@ -79,6 +78,7 @@ import {
 } from '@/features/feedback/lib/terminal-failure-workbench'
 import { meQuery } from '@/features/session/api/get-me'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
+import { api } from '@/lib/api-client'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { FeedbackFilter } from '@/proto/attune/v1/batch'
 import type { Dimension } from '@/proto/attune/v1/common'
@@ -161,7 +161,15 @@ export function FeedbackPage({
   const displayOf = useDisplayName()
   const { can } = usePermissions()
   const me = useQuery(meQuery())
-  const cohortList = useQuery(listCohortsQuery())
+  const cohortList = useQuery({
+    queryKey: ['cohort-sync', 'cohorts'],
+    queryFn: ({ signal }) =>
+      api<{ cohorts?: Array<{ id: string; name: string }> }>('/fb/v1/console/cohort-sync/cohorts', {
+        signal,
+      })
+        .then((r) => r.cohorts ?? [])
+        .catch(() => []),
+  })
   const canViewLLMConfig = can('llm_config:view')
   const canViewRuntimeConfig = can('settings:enrichment_runtime:view')
   const portalHref = me.data?.tenant?.slug
