@@ -1,0 +1,7 @@
+{
+  "cohort_id": "abc123",
+  "cohort_name": "Power Users",
+  "operation": "create",
+  "user_ids": ["user-1", "user-2", "user-3"],
+  "user_id_type": "BY_ID"
+}
