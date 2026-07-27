@@ -233,7 +233,7 @@ export function useLinkCustomerRequestFeedback(id: string) {
     onSuccess: (detail) => {
       updateCustomerRequestCache(qc, detail)
       // Refresh the recurrence card's dedup state (anchor/neighbor
-      // linked_requests) so the link action flips to "已关联".
+      // linked_requests) so the link action flips to its linked state.
       void qc.invalidateQueries({ queryKey: ['console', 'feedback', 'similar'] })
     },
   })

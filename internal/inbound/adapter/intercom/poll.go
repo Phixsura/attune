@@ -62,6 +62,15 @@ type intercomConfigUpdater interface {
 	UpdateConfig(ctx context.Context, id string, config []byte) error
 }
 
+// intercomConfigSwapper is the optional compare-and-swap facet: the
+// write only lands if the stored blob still matches what this tick
+// read, so a concurrent operator edit (token rotation, filter change)
+// is never clobbered by the tick-start snapshot. *inboundsource.Repo
+// implements it; plain-updater fallback keeps test fakes working.
+type intercomConfigSwapper interface {
+	SwapConfig(ctx context.Context, id string, expected, updated []byte) (bool, error)
+}
+
 var newPollTicker = func(d time.Duration) (<-chan time.Time, func()) {
 	ticker := time.NewTicker(d)
 	return ticker.C, ticker.Stop
@@ -776,25 +785,69 @@ func (a *adapter) handleSearchFailure(ctx context.Context, src inbound.Source, w
 	a.transientError(ctx, src, "conversation search: transient")
 }
 
-// persistSyncStats re-encrypts and writes the config blob with updated stats.
+// persistSyncStats writes the tick's sync state back to the config
+// blob. The poller owns ONLY the sync fields (cursor, window, stats):
+// it re-reads the stored blob just before writing and grafts the sync
+// state onto it, so an operator edit that landed mid-tick (token
+// rotation, filter change) survives. With a CAS-capable store the
+// write additionally retries on conflict, closing the read→write gap
+// entirely; the plain-updater fallback keeps the merge-on-write
+// behavior (millisecond window) for stores without SwapConfig.
 func (a *adapter) persistSyncStats(ctx context.Context, sourceID string, cfg Config, where string) {
 	updater, ok := a.deps.Sources.(intercomConfigUpdater)
 	if !ok {
 		return
 	}
-	raw, err := jsonMarshal(cfg)
-	if err != nil {
-		logext.Warnf(ctx, "[%s] marshal config failed,source_id:%s,err:%+v", where, sourceID, err.Error())
-		return
+	swapper, canSwap := a.deps.Sources.(intercomConfigSwapper)
+	const maxSwapAttempts = 3
+	for attempt := 0; attempt < maxSwapAttempts; attempt++ {
+		// Re-read the stored blob and graft ONLY the sync fields onto
+		// it. If the reload/parse fails, fall back to the tick-start
+		// snapshot: losing this tick's cursor would strand a saturated
+		// window, which is worse than the (already rare) merge miss.
+		merged := cfg
+		var storedBlob []byte
+		if src, err := a.deps.Sources.Get(ctx, sourceID); err != nil {
+			logext.Warnf(ctx, "[%s] reload config failed,using tick snapshot,source_id:%s,err:%+v", where, sourceID, err.Error())
+		} else if fresh, token, perr := parseConfig(src.Config, a.deps.Secrets); perr != nil {
+			logext.Warnf(ctx, "[%s] parse fresh config failed,using tick snapshot,source_id:%s,err:%+v", where, sourceID, perr.Error())
+		} else {
+			wipeBytes(token)
+			fresh.SyncCursor = cfg.SyncCursor
+			fresh.SyncWindowStart = cfg.SyncWindowStart
+			fresh.SyncWindowEnd = cfg.SyncWindowEnd
+			fresh.SyncStats = cfg.SyncStats
+			merged = fresh
+			storedBlob = src.Config
+		}
+
+		raw, err := jsonMarshal(merged)
+		if err != nil {
+			logext.Warnf(ctx, "[%s] marshal config failed,source_id:%s,err:%+v", where, sourceID, err.Error())
+			return
+		}
+		encrypted, err := a.deps.Secrets.Encrypt(raw)
+		if err != nil {
+			logext.Warnf(ctx, "[%s] encrypt config failed,source_id:%s,err:%+v", where, sourceID, err.Error())
+			return
+		}
+		if !canSwap || storedBlob == nil {
+			if err := updater.UpdateConfig(ctx, sourceID, encrypted); err != nil {
+				logext.Warnf(ctx, "[%s] persist config failed,source_id:%s,err:%+v", where, sourceID, err.Error())
+			}
+			return
+		}
+		swapped, err := swapper.SwapConfig(ctx, sourceID, storedBlob, encrypted)
+		if err != nil {
+			logext.Warnf(ctx, "[%s] persist config failed,source_id:%s,err:%+v", where, sourceID, err.Error())
+			return
+		}
+		if swapped {
+			return
+		}
+		// Blob changed under us — re-read and re-merge.
 	}
-	encrypted, err := a.deps.Secrets.Encrypt(raw)
-	if err != nil {
-		logext.Warnf(ctx, "[%s] encrypt config failed,source_id:%s,err:%+v", where, sourceID, err.Error())
-		return
-	}
-	if err := updater.UpdateConfig(ctx, sourceID, encrypted); err != nil {
-		logext.Warnf(ctx, "[%s] persist config failed,source_id:%s,err:%+v", where, sourceID, err.Error())
-	}
+	logext.Warnf(ctx, "[%s] persist config: swap contention exhausted retries,source_id:%s", where, sourceID)
 }
 
 func (a *adapter) persistPollResult(ctx context.Context, src inbound.Source, lastUID int64, eventAt time.Time, lastError string) {

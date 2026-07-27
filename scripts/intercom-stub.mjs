@@ -300,7 +300,11 @@ async function handleControl(req, res, url) {
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://127.0.0.1:${port}`)
   const auth = req.headers.authorization ?? ''
-  console.log(`[intercom-stub] ${req.method} ${url.pathname}${url.search}`)
+  // Strip control characters before logging — method/path are
+  // request-controlled and could otherwise forge log lines (CodeQL
+  // js/log-injection).
+  const logSafe = (s) => String(s).replace(/[\r\n]/g, '')
+  console.log(`[intercom-stub] ${logSafe(req.method)} ${logSafe(url.pathname + url.search)}`)
 
   if (url.pathname.startsWith('/_stub/')) {
     await handleControl(req, res, url)

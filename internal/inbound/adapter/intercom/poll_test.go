@@ -3,6 +3,7 @@
 package intercom
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1569,5 +1570,105 @@ func TestPollSource_LookbackReplayDedupsForFree(t *testing.T) {
 	}
 	if fake.detailCalls != 0 {
 		t.Errorf("tick 2: replay must not consume detail budget, detailCalls = %d", fake.detailCalls)
+	}
+}
+
+// swapFakeSources adds SwapConfig (CAS) on top of fakeSourcesWithConfig
+// so tests can exercise the poller's merge-and-swap persistence path.
+type swapFakeSources struct {
+	*fakeSourcesWithConfig
+	swapCalls int
+	// failFirstSwap simulates a concurrent writer landing between the
+	// poller's re-read and its CAS attempt.
+	failFirstSwap bool
+}
+
+func (f *swapFakeSources) SwapConfig(ctx context.Context, id string, expected, updated []byte) (bool, error) {
+	f.swapCalls++
+	if f.failFirstSwap && f.swapCalls == 1 {
+		return false, nil
+	}
+	cur, err := f.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if !bytes.Equal(cur.Config, expected) {
+		return false, nil
+	}
+	f.configUpdates[id] = updated
+	// Reflect the write so a later Get sees it (mirrors the real repo).
+	cur.Config = updated
+	f.Put("t1", cur)
+	return true, nil
+}
+
+// TestPersistSyncStats_MergesConcurrentEdit locks the lost-update fix:
+// a token rotation persisted mid-tick must survive the tick-end stats
+// write — the poller grafts only the sync fields onto the FRESH blob.
+func TestPersistSyncStats_MergesConcurrentEdit(t *testing.T) {
+	sources, _, _, deps := buildDeps(t)
+	swap := &swapFakeSources{fakeSourcesWithConfig: sources} // ptrext:allow test-fixture
+	deps.Sources = swap
+	fake := ptrext.Of(fakeAPIClient{})
+	a := buildTestAdapter(fake, deps)
+
+	tickCfg := Config{
+		Version: ConfigVersion, Region: "us", WorkspaceID: "ws-1",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "old-token"),
+		SyncCursor:           "cursor-next",
+		SyncStats:            SyncStats{ConversationsSynced: 42, BackfillDone: true},
+	}
+	// The operator rotated the token AFTER the tick snapshotted tickCfg.
+	rotated := tickCfg
+	rotated.AccessTokenEncrypted = encryptedToken(t, deps.Secrets, "rotated-token")
+	rotated.FilterTags = []string{"vip"}
+	rotated.SyncCursor = ""
+	rotated.SyncStats = SyncStats{}
+	testSource(t, sources, deps.Secrets, rotated, 0)
+
+	a.persistSyncStats(context.Background(), "src-1", tickCfg, "test")
+
+	blob, ok := sources.configUpdates["src-1"]
+	if !ok {
+		t.Fatal("expected a persisted config")
+	}
+	stored, token, err := parseConfig(blob, deps.Secrets)
+	if err != nil {
+		t.Fatalf("parse persisted config: %v", err)
+	}
+	defer wipeBytes(token)
+	if string(token) != "rotated-token" {
+		t.Errorf("token = %q, want the concurrently-rotated token preserved", string(token))
+	}
+	if len(stored.FilterTags) != 1 || stored.FilterTags[0] != "vip" {
+		t.Errorf("filter tags = %v, want the concurrent edit preserved", stored.FilterTags)
+	}
+	if stored.SyncCursor != "cursor-next" || stored.SyncStats.ConversationsSynced != 42 {
+		t.Errorf("sync state = %q/%d, want the tick's cursor+stats grafted on", stored.SyncCursor, stored.SyncStats.ConversationsSynced)
+	}
+}
+
+// TestPersistSyncStats_RetriesLostSwap covers the CAS-conflict retry.
+func TestPersistSyncStats_RetriesLostSwap(t *testing.T) {
+	sources, _, _, deps := buildDeps(t)
+	swap := &swapFakeSources{fakeSourcesWithConfig: sources, failFirstSwap: true} // ptrext:allow test-fixture
+	deps.Sources = swap
+	fake := ptrext.Of(fakeAPIClient{})
+	a := buildTestAdapter(fake, deps)
+
+	cfg := Config{
+		Version: ConfigVersion, Region: "us", WorkspaceID: "ws-1",
+		AccessTokenEncrypted: encryptedToken(t, deps.Secrets, "tok"),
+		SyncStats:            SyncStats{ConversationsSynced: 7},
+	}
+	testSource(t, sources, deps.Secrets, cfg, 0)
+
+	a.persistSyncStats(context.Background(), "src-1", cfg, "test")
+
+	if swap.swapCalls < 2 {
+		t.Errorf("swapCalls = %d, want a retry after the lost CAS", swap.swapCalls)
+	}
+	if _, ok := sources.configUpdates["src-1"]; !ok {
+		t.Error("expected the retried swap to persist")
 	}
 }
