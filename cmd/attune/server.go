@@ -30,11 +30,13 @@ import (
 	slackadapter "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
+	"github.com/Phixsura/attune/internal/infra/intercomclient"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
 	"github.com/Phixsura/attune/internal/infra/llmguard"
 	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/infra/observability"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
+	"github.com/Phixsura/attune/internal/infra/zendeskclient"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
@@ -192,7 +194,7 @@ func runServer() error {
 
 	r, err := buildRouter(
 		ctx, cfg, ingestHandler, runtimeDeps.apiKeys, pool, ready, runtimeDeps.llm,
-		inb.subRouter, inb.secrets, inb.sources, inb.adminRepo, runtimeDeps.enrichRuntime,
+		inb.subRouter, inb.secrets, inb.sources, inb.manager, inb.adminRepo, runtimeDeps.enrichRuntime,
 		runtimeDeps.ingestor, runtimeDeps.sources, workers.cohortSyncService,
 	)
 	if err != nil {
@@ -232,11 +234,14 @@ func applyRuntimeHardening(cfg *config.Config) {
 	// link-local); config relaxes loopback/private for dev / on-prem.
 	egress := cfg.EgressPolicy()
 	slackadapter.SetAPIBaseURL(cfg.SlackAPIBaseURL)
+	intercomclient.SetAPIBaseURL(cfg.IntercomAPIBaseURL)
 	notify.SetEgressPolicy(egress)
 	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
 	replydraftsvc.SetEgressPolicy(egress)
 	cohortsync.SetEgressPolicy(egress)
+	zendeskclient.SetEgressPolicy(egress)
+	intercomclient.SetEgressPolicy(egress)
 	// Trusted-proxy hop count for client-IP resolution outside the API-key
 	// middleware (audit actor IP, etc.).
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)

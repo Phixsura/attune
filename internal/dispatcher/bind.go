@@ -280,7 +280,7 @@ func writeDecodeError(ctx context.Context, w http.ResponseWriter, err error, whe
 
 func writeHandlerError(ctx context.Context, w http.ResponseWriter, err error, where string, start time.Time) {
 	if errors.Is(err, context.Canceled) {
-		logext.Warnf(ctx, "[%s] canceled,latency_ms:%d", where, time.Since(start).Milliseconds())
+		logext.Infof(ctx, "[%s] canceled,latency_ms:%d", where, time.Since(start).Milliseconds())
 		respond.Error(ctx, w, statusClientClosedRequest, attunev1.ErrorCode_CLIENT_CANCELED, "client canceled request")
 		return
 	}

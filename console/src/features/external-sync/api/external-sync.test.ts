@@ -1,12 +1,19 @@
 import { HttpResponse, http } from 'msw'
 import { describe, expect, it } from 'vitest'
 import {
+  createExternalProviderInstallation,
   deleteExternalConnection,
+  deleteExternalProviderInstallation,
   ExternalSyncDirection,
+  externalProviderInstallationResourcesQuery,
+  externalProviderInstallationsQuery,
   externalSyncConnectionSchemaQuery,
   externalSyncEventsQuery,
+  externalSyncProvidersQuery,
   externalSyncRunsQuery,
+  qualifyExternalProviderInstallation,
   retryExternalSyncFailure,
+  selectExternalProviderInstallationResources,
   updateExternalMapping,
 } from '@/features/external-sync/api/external-sync'
 import { server } from '@/testing/mocks/server'
@@ -95,6 +102,146 @@ describe('external sync api helpers', () => {
     ])
   })
 
+  it('sends provider installation management requests', async () => {
+    const calls: Array<{ method: string; url: string; body?: unknown }> = []
+    server.use(
+      http.get('/fb/v1/console/external-sync/provider-installations', ({ request }) => {
+        calls.push({ method: request.method, url: new URL(request.url).pathname })
+        return HttpResponse.json({ installations: [] })
+      }),
+      http.get(
+        '/fb/v1/console/external-sync/provider-installations/pi-1/resources',
+        ({ request }) => {
+          calls.push({ method: request.method, url: new URL(request.url).pathname })
+          return HttpResponse.json({ resources: [] })
+        },
+      ),
+      http.post('/fb/v1/console/external-sync/provider-installations', async ({ request }) => {
+        calls.push({
+          method: request.method,
+          url: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return HttpResponse.json({
+          id: 'pi-1',
+          tenantId: 'tenant-1',
+          provider: 'github',
+          displayName: 'GitHub App',
+          installationKind: 'github_app',
+          status: 'active',
+          externalInstallationId: '123',
+          accountLogin: 'acme',
+          accountId: '',
+          accountUrl: '',
+          baseUrl: '',
+          permissionsJson: '{"metadata":"read","issues":"write"}',
+          capabilityProfileJson: '{}',
+          resourceSelection: 'selected',
+          qualificationStatus: 'untested',
+          lastQualifiedAt: '',
+          lastError: '',
+          createdBy: 'admin',
+          updatedBy: 'admin',
+          createdAt: '2026-07-08T01:00:00Z',
+          updatedAt: '2026-07-08T01:00:00Z',
+        })
+      }),
+      http.post(
+        '/fb/v1/console/external-sync/provider-installations/pi-1:qualify',
+        ({ request }) => {
+          calls.push({ method: request.method, url: new URL(request.url).pathname })
+          return HttpResponse.json({
+            installationId: 'pi-1',
+            ready: true,
+            grade: 'full_app',
+            checks: [],
+          })
+        },
+      ),
+      http.post(
+        '/fb/v1/console/external-sync/provider-installations/pi-1/resources:select',
+        async ({ request }) => {
+          calls.push({
+            method: request.method,
+            url: new URL(request.url).pathname,
+            body: await request.json(),
+          })
+          return HttpResponse.json({ resources: [] })
+        },
+      ),
+      http.delete('/fb/v1/console/external-sync/provider-installations/pi-1', ({ request }) => {
+        calls.push({ method: request.method, url: new URL(request.url).pathname })
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+
+    const installationsQuery = externalProviderInstallationsQuery()
+    const resourcesQuery = externalProviderInstallationResourcesQuery('pi-1')
+    const disabledResourcesQuery = externalProviderInstallationResourcesQuery()
+    if (typeof installationsQuery.queryFn !== 'function') {
+      throw new Error('missing installations queryFn')
+    }
+    if (typeof resourcesQuery.queryFn !== 'function') {
+      throw new Error('missing installation resources queryFn')
+    }
+    if (typeof disabledResourcesQuery.queryFn !== 'function') {
+      throw new Error('missing disabled resources queryFn')
+    }
+
+    await installationsQuery.queryFn({ signal: new AbortController().signal } as never)
+    await resourcesQuery.queryFn({ signal: new AbortController().signal } as never)
+    await expect(
+      disabledResourcesQuery.queryFn({ signal: new AbortController().signal } as never),
+    ).resolves.toEqual([])
+    await createExternalProviderInstallation({
+      provider: 'github',
+      displayName: 'GitHub App',
+      installationKind: 'github_app',
+      externalInstallationId: '123',
+      accountLogin: 'acme',
+      accountId: '',
+      accountUrl: '',
+      baseUrl: '',
+      permissionsJson: '{"metadata":"read","issues":"write"}',
+      capabilityProfileJson: '{}',
+      resourceSelection: 'selected',
+      resources: [],
+    })
+    await qualifyExternalProviderInstallation('pi-1')
+    await selectExternalProviderInstallationResources('pi-1', ['resource-1'])
+    await deleteExternalProviderInstallation('pi-1')
+
+    expect(calls).toEqual([
+      { method: 'GET', url: '/fb/v1/console/external-sync/provider-installations' },
+      { method: 'GET', url: '/fb/v1/console/external-sync/provider-installations/pi-1/resources' },
+      {
+        method: 'POST',
+        url: '/fb/v1/console/external-sync/provider-installations',
+        body: {
+          provider: 'github',
+          displayName: 'GitHub App',
+          installationKind: 'github_app',
+          externalInstallationId: '123',
+          accountLogin: 'acme',
+          accountId: '',
+          accountUrl: '',
+          baseUrl: '',
+          permissionsJson: '{"metadata":"read","issues":"write"}',
+          capabilityProfileJson: '{}',
+          resourceSelection: 'selected',
+          resources: [],
+        },
+      },
+      { method: 'POST', url: '/fb/v1/console/external-sync/provider-installations/pi-1:qualify' },
+      {
+        method: 'POST',
+        url: '/fb/v1/console/external-sync/provider-installations/pi-1/resources:select',
+        body: { resourceIds: ['resource-1'] },
+      },
+      { method: 'DELETE', url: '/fb/v1/console/external-sync/provider-installations/pi-1' },
+    ])
+  })
+
   it('includes filters and cursors in external sync list queries', async () => {
     const seenQueries: string[] = []
     server.use(
@@ -151,6 +298,31 @@ describe('external sync api helpers', () => {
       '?limit=5',
       '?limit=3',
     ])
+  })
+
+  it('loads the registered external sync providers', async () => {
+    const seen: string[] = []
+    server.use(
+      http.get('/fb/v1/console/external-sync/providers', ({ request }) => {
+        seen.push(new URL(request.url).pathname)
+        return HttpResponse.json({
+          providers: [
+            { provider: 'github', display: 'GitHub' },
+            { provider: 'jira', display: 'Jira' },
+          ],
+        })
+      }),
+    )
+
+    const providersQuery = externalSyncProvidersQuery()
+    const providersQueryFn = providersQuery.queryFn
+    if (typeof providersQueryFn !== 'function') throw new Error('missing providers queryFn')
+
+    await expect(providersQueryFn({ signal: undefined } as never)).resolves.toEqual([
+      { provider: 'github', display: 'GitHub' },
+      { provider: 'jira', display: 'Jira' },
+    ])
+    expect(seen).toEqual(['/fb/v1/console/external-sync/providers'])
   })
 
   it('short-circuits schema discovery when no connection is selected', async () => {

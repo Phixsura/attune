@@ -2,12 +2,15 @@ import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import {
   AlertTriangle,
+  Headphones,
   Key,
   Loader2,
   Mail,
+  MessageCircle,
   MessageSquare,
   PauseCircle,
   PlayCircle,
+  Settings2,
   Trash2,
   Webhook,
 } from 'lucide-react'
@@ -33,6 +36,7 @@ export function SourcesTable({
   togglingId,
   onSelect,
   onRotate,
+  onEdit,
   onPause,
   onResume,
   onDelete,
@@ -42,6 +46,7 @@ export function SourcesTable({
   togglingId: string | undefined
   onSelect: (s: InboundSource) => void
   onRotate: (s: InboundSource) => void
+  onEdit: (s: InboundSource) => void
   onPause: (s: InboundSource) => void
   onResume: (s: InboundSource) => void
   onDelete: (s: InboundSource) => void
@@ -101,6 +106,16 @@ export function SourcesTable({
                   <Key className="h-3.5 w-3.5" />
                 </Button>
               )}
+              {src.channel === 'intercom' && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onEdit(src)}
+                  title={t('inbound_sources.actions.edit')}
+                >
+                  <Settings2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
               {src.enabled ? (
                 <Button
                   variant="ghost"
@@ -146,17 +161,27 @@ export function SourcesTable({
   )
 }
 
+const channelIcons: Record<string, typeof Webhook> = {
+  email: Mail,
+  slack: MessageSquare,
+  zendesk: Headphones,
+  intercom: MessageCircle,
+  webhook: Webhook,
+}
+
+const channelLabelKeys: Record<string, string> = {
+  email: 'inbound_sources.channel.email',
+  slack: 'inbound_sources.channel.slack',
+  zendesk: 'inbound_sources.channel.zendesk',
+  intercom: 'inbound_sources.channel.intercom',
+  webhook: 'inbound_sources.channel.webhook',
+}
+
 export function ChannelPill({ channel }: { channel: string }) {
   const { t } = useTranslation()
-  const Icon = channel === 'email' ? Mail : channel === 'slack' ? MessageSquare : Webhook
-  const label =
-    channel === 'email'
-      ? t('inbound_sources.channel.email')
-      : channel === 'slack'
-        ? t('inbound_sources.channel.slack')
-        : channel === 'webhook'
-          ? t('inbound_sources.channel.webhook')
-          : channel
+  const Icon = channelIcons[channel] ?? Webhook
+  const labelKey = channelLabelKeys[channel]
+  const label = labelKey ? t(labelKey) : channel
   return (
     <span className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-xs">
       <Icon className="h-3 w-3" />

@@ -25,6 +25,7 @@ const maxWebhookBodyBytes = 1 << 20
 
 type service interface {
 	RecordGitHubWebhook(ctx context.Context, in svc.GitHubWebhookInput) (*repo.SyncEvent, error)
+	RecordJiraWebhook(ctx context.Context, in svc.JiraWebhookInput) (*repo.SyncEvent, error)
 }
 
 type Handler struct {
@@ -38,6 +39,7 @@ func NewHandler(service service) *Handler {
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/github/{tenant_id}/{connection_id}", h.GitHub)
+	r.Post("/jira/{tenant_id}/{connection_id}", h.Jira)
 	return r
 }
 
@@ -68,7 +70,39 @@ func (h *Handler) GitHub(w http.ResponseWriter, r *http.Request) {
 		Body:            body,
 	})
 	if err != nil {
-		h.reject(ctx, w, where, err)
+		h.reject(ctx, w, where, "github", err)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,connection_id:%s", where, tenantID, connectionID.String())
+}
+
+func (h *Handler) Jira(w http.ResponseWriter, r *http.Request) {
+	const where = "handlers.ExternalSyncWebhookHandler.Jira"
+	ctx := r.Context()
+	tenantID := chi.URLParam(r, "tenant_id")
+	connectionID, err := uuid.Parse(chi.URLParam(r, "connection_id"))
+	if err != nil {
+		dispatcher.Reject(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid connection id")
+		return
+	}
+	body, err := readWebhookBody(r)
+	if err != nil {
+		dispatcher.Reject(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "failed to read webhook body")
+		return
+	}
+	if len(body) > maxWebhookBodyBytes {
+		dispatcher.Reject(ctx, w, http.StatusRequestEntityTooLarge, attunev1.ErrorCode_BODY_TOO_LARGE, "webhook body exceeds the size limit")
+		return
+	}
+	_, err = h.service.RecordJiraWebhook(ctx, svc.JiraWebhookInput{
+		TenantID:     tenantID,
+		ConnectionID: connectionID,
+		Signature:    r.Header.Get("X-Hub-Signature"),
+		Body:         body,
+	})
+	if err != nil {
+		h.reject(ctx, w, where, "jira", err)
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
@@ -80,11 +114,11 @@ func readWebhookBody(r *http.Request) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(r.Body, maxWebhookBodyBytes+1))
 }
 
-func (h *Handler) reject(ctx context.Context, w http.ResponseWriter, where string, err error) {
+func (h *Handler) reject(ctx context.Context, w http.ResponseWriter, where, provider string, err error) {
 	switch {
 	case errors.Is(err, svc.ErrWebhookSignature):
-		logext.Warnf(ctx, "[%s] reject: github signature failed", where)
-		dispatcher.Reject(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "github webhook signature verification failed")
+		logext.Warnf(ctx, "[%s] reject: %s signature failed", where, provider)
+		dispatcher.Reject(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, provider+" webhook signature verification failed")
 	case errors.Is(err, svc.ErrValidation):
 		logext.Warnf(ctx, "[%s] reject: validation failed,err:%s", where, err.Error())
 		dispatcher.Reject(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())

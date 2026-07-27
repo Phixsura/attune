@@ -52,18 +52,24 @@ type TenantResolver interface {
 	FirstActiveID(ctx context.Context) (string, error)
 }
 
+// MembershipStore syncs OIDC users into tenant-scoped RBAC membership.
+type MembershipStore interface {
+	EnsureOIDCMember(ctx context.Context, tenantID, userID string, role domain.Role) error
+}
+
 // Service handles OIDC authentication business logic.
 type Service struct {
-	cfg       *config.OIDCConfig
-	provider  *oidc.Provider
-	verifier  *oidc.IDTokenVerifier
-	oauth2Cfg *oauth2.Config
-	users     UserStore
-	tenants   TenantResolver
+	cfg         *config.OIDCConfig
+	provider    *oidc.Provider
+	verifier    *oidc.IDTokenVerifier
+	oauth2Cfg   *oauth2.Config
+	users       UserStore
+	tenants     TenantResolver
+	memberships MembershipStore
 }
 
 // NewService initializes OIDC provider via discovery.
-func NewService(ctx context.Context, cfg *config.OIDCConfig, users UserStore, tenants TenantResolver) (*Service, error) {
+func NewService(ctx context.Context, cfg *config.OIDCConfig, users UserStore, tenants TenantResolver, memberships MembershipStore) (*Service, error) {
 	const where = "oidcauth.NewService"
 
 	if !cfg.Enabled {
@@ -103,12 +109,13 @@ func NewService(ctx context.Context, cfg *config.OIDCConfig, users UserStore, te
 	})
 
 	return ptrext.Of(Service{
-		cfg:       cfg,
-		provider:  provider,
-		verifier:  verifier,
-		oauth2Cfg: oauth2Cfg,
-		users:     users,
-		tenants:   tenants,
+		cfg:         cfg,
+		provider:    provider,
+		verifier:    verifier,
+		oauth2Cfg:   oauth2Cfg,
+		users:       users,
+		tenants:     tenants,
+		memberships: memberships,
 	}), nil
 }
 
@@ -266,6 +273,28 @@ func (s *Service) FindOrCreateUser(ctx context.Context, claims *domain.OIDCClaim
 	}
 
 	return result, nil
+}
+
+// EnsureMembership syncs the OIDC user into tenant_members before a session is issued.
+func (s *Service) EnsureMembership(ctx context.Context, tenantID, userID, role string) error {
+	const where = "oidcauth.Service.EnsureMembership"
+
+	if s.memberships == nil {
+		return nil
+	}
+	if tenantID == "" {
+		return errors.New("oidc membership tenant_id is required")
+	}
+	if userID == "" {
+		return errors.New("oidc membership user_id is required")
+	}
+
+	if err := s.memberships.EnsureOIDCMember(ctx, tenantID, userID, domain.ParseRole(role)); err != nil {
+		logext.Errorf(ctx, "[%s] ensure member failed,tenant_id:%s,user_id:%s,err:%s",
+			where, tenantID, userID, err.Error())
+		return err
+	}
+	return nil
 }
 
 // ResolveDefaultTenant returns the first active tenant ID.

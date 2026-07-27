@@ -858,6 +858,78 @@ func TestPG_FindSimilarFeedback(t *testing.T) {
 	}
 }
 
+// TestPG_FindSimilarFeedback_CollapsesSameThreadSnapshots verifies that
+// snapshots of the same support conversation (evolution capture rows,
+// keyed by workspace + conversation ID in source_meta) collapse to one
+// neighbor and the anchor's own thread never appears.
+func TestPG_FindSimilarFeedback_CollapsesSameThreadSnapshots(t *testing.T) {
+	e := setup(t)
+
+	baseEmb := make([]float32, 256)
+	for i := range baseEmb {
+		baseEmb[i] = 1.0 / 16.0
+	}
+
+	insertWithThread := func(content, source, meta string) int64 {
+		t.Helper()
+		var id int64
+		err := e.pool.QueryRow(e.ctx,
+			`INSERT INTO user_feedback (tenant_id, user_id, source, content, enriched_title, enrichment_status, embedding, embedding_model, source_meta)
+			 VALUES ($1, 'u1', $2, $3, $3, 'done', $4::vector, 'test-model', $5::jsonb) RETURNING id`,
+			e.tenantID, source, content, vecToString(baseEmb), meta,
+		).Scan(&id) // ptrext:allow scan-target
+		if err != nil {
+			t.Fatalf("insert threaded feedback: %v", err)
+		}
+		return id
+	}
+
+	// Anchor: snapshot 1 of conversation 900 in workspace ws1.
+	anchorID := insertWithThread("conv 900 snapshot 1", "intercom",
+		`{"intercom_workspace_id":"ws1","intercom_conversation_id":"900"}`)
+	// Same thread, later snapshot — must NOT surface as a neighbor.
+	_ = insertWithThread("conv 900 snapshot 2", "intercom",
+		`{"intercom_workspace_id":"ws1","intercom_conversation_id":"900"}`)
+	// Different conversation — two snapshots must collapse to ONE hit.
+	otherA := insertWithThread("conv 901 snapshot 1", "intercom",
+		`{"intercom_workspace_id":"ws1","intercom_conversation_id":"901"}`)
+	otherB := insertWithThread("conv 901 snapshot 2", "intercom",
+		`{"intercom_workspace_id":"ws1","intercom_conversation_id":"901"}`)
+	// Same conversation ID in a DIFFERENT workspace → distinct thread.
+	otherWS := insertWithThread("ws2 conv 901", "intercom",
+		`{"intercom_workspace_id":"ws2","intercom_conversation_id":"901"}`)
+
+	hits, err := e.feedback.FindSimilarFeedback(e.ctx, e.tenantID, anchorID, 5, 0.5)
+	if err != nil {
+		t.Fatalf("FindSimilarFeedback: %v", err)
+	}
+
+	sameThread := 0
+	conv901 := 0
+	ws2 := 0
+	for _, h := range hits {
+		switch h.Feedback.ID {
+		case anchorID:
+			t.Error("anchor must not appear in results")
+		case otherA, otherB:
+			conv901++
+		case otherWS:
+			ws2++
+		default:
+			sameThread++
+		}
+	}
+	if sameThread != 0 {
+		t.Errorf("anchor's own thread snapshots must be excluded, got %d", sameThread)
+	}
+	if conv901 != 1 {
+		t.Errorf("same-thread snapshots must collapse to 1 hit, got %d", conv901)
+	}
+	if ws2 != 1 {
+		t.Errorf("same conversation ID in another workspace is a distinct thread, got %d hits", ws2)
+	}
+}
+
 // TestPG_SearchExcludesDeleted tests that deleted items are excluded.
 func TestPG_SearchExcludesDeleted(t *testing.T) {
 	e := setup(t)

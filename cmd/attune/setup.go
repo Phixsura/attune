@@ -18,9 +18,11 @@ import (
 	consolefeedback "github.com/Phixsura/attune/internal/handlers/console/feedback"
 	"github.com/Phixsura/attune/internal/handlers/console/feedbackjob"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
+	consoleinbound "github.com/Phixsura/attune/internal/handlers/console/inbound"
 	consoleoidc "github.com/Phixsura/attune/internal/handlers/console/oidc"
 	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
 	"github.com/Phixsura/attune/internal/handlers/console/system"
+	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/database"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -205,6 +207,7 @@ func buildConsoleRouter(
 	pool *pgxpool.Pool,
 	secrets *secretstore.TinkStore,
 	sourceRepo *inboundsourcerepo.Repo,
+	inboundManager *inbound.Manager,
 	adminRepo *admin.Repo,
 	llm llmclient.LLMClient,
 	enrichRuntime *enrichruntimesvc.Service,
@@ -236,14 +239,7 @@ func buildConsoleRouter(
 	auditLog.SetSavedViewService(auditViewSvc)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
-	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
-	replyDraftRepo := replydraftrepo.NewDraftTaskRepo(pool)
-	feedback.SetDrafter(replydraftsvc.NewReplyDrafter(replyDraftRepo, llm))
-	feedback.SetReplyDraftWorkflow(replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil))
-	// Per-tenant backstop on the synchronous Regenerate endpoint: generous
-	// enough never to bother a human triaging (60/min, burst 20), tight enough
-	// to bound a scripted loop's LLM spend on top of the per-row cooldown.
-	feedback.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
+	feedback := buildFeedbackHandler(feedbackRepo, tenantRepo, pool, secrets, llm)
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
 	enrichConfig := buildEnrichConfigHandler(tenantRepo, feedbackRepo, llm)
@@ -252,7 +248,7 @@ func buildConsoleRouter(
 		enrichmentRuntimeHandler = console.NewEnrichmentRuntimeHandler(enrichRuntime, cfg.GDPRStepUpTTL)
 	}
 	guardPolicies := console.NewGuardPolicyHandler(guardpolicysvc.NewService(guardpolicyrepo.New(pool), sources))
-	inboundHandler := console.NewInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL)
+	inboundHandler := newInboundHandler(sourceRepo, pool, secrets, cfg.ConsoleBaseURL, inboundManager)
 	llmConfig := console.NewLLMConfigHandler(llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets))
 	clustersHandler := console.NewClustersHandler(embeddingrepo.NewTaskRepo(pool))
 	digestSub := console.NewDigestSubscriptionHandler(digestsubrepo.New(pool), tenantRepo)
@@ -335,6 +331,7 @@ func buildCustomerRequestHandler(
 	settingsRepo := systemsettingsrepo.NewRepo(pool)
 	service := customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc)
 	service.SetNotificationSink(notifications)
+	service.SetIssueCreateRunStore(externalsyncrepo.New(pool))
 	handler := console.NewCustomerRequestHandler(service)
 	handler.SetSavedViewService(customerrequestviewsvc.New(customerrequestviewrepo.New(settingsRepo)))
 	return handler
@@ -538,6 +535,28 @@ func (f preflightRunnerFunc) RunChecks(ctx context.Context, env *preflight.Envir
 	return f(ctx, env, names)
 }
 
+// buildFeedbackHandler assembles the feedback handler with its optional
+// capabilities: reply drafting, the Regenerate rate backstop (60/min,
+// burst 20 — generous for humans, bounding for scripted loops on top of
+// the per-row cooldown), and the recurrence signal behind
+// GET /feedback/{id}/similar.
+func buildFeedbackHandler(
+	feedbackRepo *feedback.FeedbackRepo,
+	tenantRepo *tenant.TenantRepo,
+	pool *pgxpool.Pool,
+	secrets *secretstore.TinkStore,
+	llm llmclient.LLMClient,
+) *consolefeedback.FeedbackHandler {
+	h := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
+	replyDraftRepo := replydraftrepo.NewDraftTaskRepo(pool)
+	h.SetDrafter(replydraftsvc.NewReplyDrafter(replyDraftRepo, llm))
+	h.SetReplyDraftWorkflow(replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil))
+	h.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
+	h.SetSimilarFinder(feedbackRepo)
+	h.SetRequestLinkReader(feedbackRepo)
+	return h
+}
+
 func buildGDPRHandler(
 	cfg *config.Config,
 	pool *pgxpool.Pool,
@@ -573,7 +592,8 @@ func buildOIDCHandler(
 	}
 
 	oidcUsers := oidcuserrepo.NewRepo(pool)
-	oidcSvc, err := oidcauth.NewService(ctx, &cfg.OIDC, oidcUsers, tenants) // ptrext:allow struct-field
+	memberships := oidcMembershipStore{members: tenantmember.NewRepo(pool)}
+	oidcSvc, err := oidcauth.NewService(ctx, &cfg.OIDC, oidcUsers, tenants, memberships) // ptrext:allow struct-field
 	if err != nil {
 		logext.Errorf(ctx, "[buildOIDCHandler] OIDC service init failed,err:%s", err.Error())
 		return nil
@@ -594,6 +614,15 @@ func buildOIDCHandler(
 	}
 
 	return consoleoidc.NewHandler(oidcSvc, signer, aead, cfg.ConsoleBaseURL)
+}
+
+type oidcMembershipStore struct {
+	members *tenantmember.Repo
+}
+
+func (s oidcMembershipStore) EnsureOIDCMember(ctx context.Context, tenantID, userID string, role domain.Role) error {
+	_, err := s.members.EnsureOIDCMember(ctx, tenantID, userID, role)
+	return err
 }
 
 func enrichmentRuntimeBootstrapSpec(cfg *config.Config) enrichruntime.Spec {
@@ -694,4 +723,20 @@ func evalReportToEnrichconfig(sa evalsvc.SuggestedAttrsReport) *enrichconfig.Sug
 		})
 	}
 	return out
+}
+
+// newInboundHandler creates the Console inbound handler and wires the
+// sync-now trigger if a Manager is available.
+func newInboundHandler(
+	sourceRepo *inboundsourcerepo.Repo,
+	pool *pgxpool.Pool,
+	secrets *secretstore.TinkStore,
+	baseURL string,
+	mgr *inbound.Manager,
+) *consoleinbound.Handler {
+	h := console.NewInboundHandler(sourceRepo, pool, secrets, baseURL)
+	if mgr != nil {
+		h.SetSyncTrigger(mgr.TriggerSync)
+	}
+	return h
 }

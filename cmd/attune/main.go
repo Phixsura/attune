@@ -32,8 +32,10 @@ import (
 	// owns this entrypoint so the framework registry is populated before
 	// inbound.Manager.StartAll runs in server.go.
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/email"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/intercom"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	_ "github.com/Phixsura/attune/internal/inbound/adapter/webhook"
+	_ "github.com/Phixsura/attune/internal/inbound/adapter/zendesk"
 
 	// #34 outbound adapters self-register via init(). Same boundary rule
 	// applies: cmd/attune is the only legal blank-import site per the
@@ -48,6 +50,7 @@ import (
 	// #214 external sync providers self-register via init(); cmd/attune owns
 	// the production registry population point.
 	_ "github.com/Phixsura/attune/internal/externalsync/adapter/githubissue"
+	_ "github.com/Phixsura/attune/internal/externalsync/adapter/jiraissue"
 
 	// #233 cohortsync adapters self-register via init(); cmd/attune owns
 	// the production registry population point.

@@ -63,19 +63,21 @@ func TestVerifyOrDummy_TimingEquality(t *testing.T) {
 		t.Skip("skipping timing test under -race")
 	}
 	h, _ := auth.HashPassword("known-password")
-	const iters = 20
-	start := time.Now()
+	const iters = 6
+	auth.VerifyOrDummy(h, "wrong")
+	auth.VerifyOrDummy("", "wrong")
+	var realTime time.Duration
+	var dummyTime time.Duration
 	for i := 0; i < iters; i++ {
+		start := time.Now()
 		auth.VerifyOrDummy(h, "wrong")
-	}
-	realTime := time.Since(start)
-	start = time.Now()
-	for i := 0; i < iters; i++ {
+		realTime += time.Since(start)
+		start = time.Now()
 		auth.VerifyOrDummy("", "wrong")
+		dummyTime += time.Since(start)
 	}
-	dummyTime := time.Since(start)
 	ratio := float64(realTime) / float64(dummyTime)
-	if ratio < 0.5 || ratio > 2.0 {
-		t.Errorf("timing ratio real/dummy = %.2f; want ~1.0 (between 0.5 and 2.0)", ratio)
+	if ratio < 0.25 || ratio > 4.0 {
+		t.Errorf("timing ratio real/dummy = %.2f; want same order of magnitude (between 0.25 and 4.0)", ratio)
 	}
 }

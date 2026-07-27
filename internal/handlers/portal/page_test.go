@@ -34,7 +34,7 @@ func TestPageRendersPortalSubmissionForm(t *testing.T) {
 			Form: pvrepo.PortalSubmissionForm{
 				Headline:          "Send feedback",
 				Description:       "Share what is broken or worth improving.",
-				Acknowledgement:   "Thanks. We will review your submission.",
+				Acknowledgement:   "Custom acknowledgement shown only after submit.",
 				SubmitButtonLabel: "Submit feedback",
 				ShowPageURL:       true,
 				Fields: []pvrepo.PortalSubmissionField{
@@ -70,6 +70,7 @@ func TestPageRendersPortalSubmissionForm(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"<title>Acme Co | Send feedback</title>",
+		`<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
 		`data-submit-url="/v1/portal/acme/submissions"`,
 		"Page URL enabled",
 		"Browse requests",
@@ -86,6 +87,9 @@ func TestPageRendersPortalSubmissionForm(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, "Custom acknowledgement shown only after submit.") {
+		t.Fatalf("body pre-rendered success acknowledgement: %s", body)
 	}
 }
 
@@ -155,6 +159,7 @@ func TestRequestPageRendersCommentsAndComposer(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"Public board",
+		`<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
 		"Discussion",
 		"Use the API",
 		"Updated Jul 10",
@@ -273,6 +278,7 @@ func TestRoadmapPageRendersRoadmapAndPreservesReturnLink(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"<title>Acme Co | Public roadmap | billing</title>",
+		`<link rel="icon" type="image/svg+xml" href="/favicon.svg">`,
 		"Public roadmap",
 		"Browse requests",
 		"Submit new feedback",

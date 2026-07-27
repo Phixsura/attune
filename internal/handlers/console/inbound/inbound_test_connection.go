@@ -17,7 +17,9 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
+	"github.com/Phixsura/attune/internal/inbound/adapter/intercom"
 	"github.com/Phixsura/attune/internal/inbound/adapter/slack"
+	"github.com/Phixsura/attune/internal/inbound/adapter/zendesk"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -41,10 +43,10 @@ func (h *Handler) TestConnection(ctx *dispatcher.RequestContext[*session.AuthCtx
 	const where = "console.inbound.TestConnection"
 	auth := ctx.Auth
 	channel := strings.TrimSpace(strings.ToLower(req.GetChannel()))
-	if channel != channelEmail && channel != channelSlack {
+	if channel != channelEmail && channel != channelSlack && channel != channelZendesk && channel != channelIntercom {
 		return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
 			Ok:    false,
-			Error: ptrext.Of("test-connection only supports the email or slack channel"),
+			Error: ptrext.Of("test-connection only supports the email, slack, zendesk, or intercom channel"),
 		}))
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, testConnTimeout)
@@ -92,10 +94,17 @@ func (h *Handler) TestConnection(ctx *dispatcher.RequestContext[*session.AuthCtx
 	}
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,target_id:%s,latency_ms:%d",
 		where, auth.TenantID, targetID, latency)
-	return dispatcher.OK(ptrext.Of(attunev1.TestInboundConnectionResponse{
+	resp := ptrext.Of(attunev1.TestInboundConnectionResponse{
 		Ok:        true,
 		LatencyMs: ptrext.Of(latency),
-	}))
+	})
+	// Surface the connected upstream's human-readable identity when the
+	// probe resolved one (Intercom workspace name today; other channels
+	// may fill the same audit key later).
+	if name, ok := auditFields["intercom_workspace_name"].(string); ok && name != "" {
+		resp.WorkspaceName = ptrext.Of(name)
+	}
+	return dispatcher.OK(resp)
 }
 
 func (h *Handler) resolveTestConnection(ctx context.Context, req *attunev1.TestInboundConnectionRequest, channel string) (string, string, map[string]any, error) {
@@ -104,6 +113,10 @@ func (h *Handler) resolveTestConnection(ctx context.Context, req *attunev1.TestI
 		return h.testEmailConnection(ctx, req.GetEmailConfig())
 	case channelSlack:
 		return h.testSlackConnection(ctx, req.GetSlackConfig())
+	case channelZendesk:
+		return h.testZendeskConnection(ctx, req.GetZendeskConfig())
+	case channelIntercom:
+		return h.testIntercomConnection(ctx, req.GetIntercomConfig())
 	default:
 		return "", "", nil, fmt.Errorf("unsupported channel %q", channel)
 	}
@@ -178,6 +191,82 @@ func (h *Handler) testSlackChannel(ctx context.Context, inputs slack.ConnInputs,
 	auditFields["slack_channel_id"] = channelInfo.ID
 	auditFields["slack_channel_name"] = channelInfo.Name
 	return inputs.ChannelID, nil
+}
+
+func (h *Handler) testZendeskConnection(ctx context.Context, cfg *attunev1.ZendeskConnConfig) (string, string, map[string]any, error) {
+	if cfg == nil {
+		return "", "", nil, errors.New("zendesk_config is required")
+	}
+	inputs, validateErr := zendesk.ValidateConnConfig(
+		cfg.GetSubdomain(),
+		cfg.GetAuthMode(),
+		cfg.GetEmail(),
+		cfg.GetApiToken(),
+		cfg.GetOauthAccessToken(),
+		cfg.GetOauthRefreshToken(),
+		cfg.GetOauthClientIdV2(),
+		cfg.GetOauthClientSecretV2(),
+	)
+	if validateErr != nil {
+		return "", "", nil, validateErr
+	}
+	auditFields := map[string]any{
+		"channel":   channelZendesk,
+		"subdomain": inputs.Subdomain,
+		"auth_mode": inputs.AuthMode,
+	}
+	authTest := h.zendeskAuthTest
+	if authTest == nil {
+		switch inputs.AuthMode {
+		case zendesk.AuthModeAPIToken:
+			authTest = func(ctx2 context.Context, _ zendesk.ConnInputs) (zendesk.AccountInfo, error) {
+				return zendesk.AuthTestAPIToken(ctx2, inputs.Subdomain, inputs.Email, inputs.APIToken)
+			}
+		case zendesk.AuthModeOAuth:
+			authTest = func(ctx2 context.Context, _ zendesk.ConnInputs) (zendesk.AccountInfo, error) {
+				return zendesk.AuthTestOAuth(ctx2, inputs.Subdomain, inputs.OAuthAccessToken)
+			}
+		}
+	}
+	acct, err := authTest(ctx, inputs)
+	if err != nil {
+		return inputs.Subdomain, "Tested inbound zendesk connection", auditFields, errors.New(friendlyZendeskError(err, inputs.Subdomain))
+	}
+	auditFields["zendesk_account_id"] = acct.AccountID
+	return inputs.Subdomain, "Tested inbound zendesk connection", auditFields, nil
+}
+
+func (h *Handler) testIntercomConnection(ctx context.Context, cfg *attunev1.IntercomConnConfig) (string, string, map[string]any, error) {
+	if cfg == nil {
+		return "", "", nil, errors.New("intercom_config is required")
+	}
+	inputs, validateErr := intercom.ValidateConnConfig(
+		cfg.GetRegion(),
+		cfg.GetAccessToken(),
+		cfg.GetStartFrom(),
+		cfg.GetFilterStates(),
+		cfg.GetFilterTags(),
+		cfg.GetFilterExcludeTags(),
+		int(cfg.GetMaxDetailFetches()),
+	)
+	if validateErr != nil {
+		return "", "", nil, validateErr
+	}
+	auditFields := map[string]any{
+		"channel": channelIntercom,
+		"region":  inputs.Region,
+	}
+	authTest := h.intercomAuthTest
+	if authTest == nil {
+		authTest = intercom.AuthTest
+	}
+	acct, err := authTest(ctx, inputs.Region, inputs.AccessToken)
+	if err != nil {
+		return "intercom-auth", "Tested inbound intercom connection", auditFields, errors.New(friendlyIntercomError(err))
+	}
+	auditFields["intercom_workspace_id"] = acct.WorkspaceID
+	auditFields["intercom_workspace_name"] = acct.WorkspaceName
+	return acct.WorkspaceID, "Tested inbound intercom connection", auditFields, nil
 }
 
 // testConnInputs — narrower variant of EmailCreateConfig used only by

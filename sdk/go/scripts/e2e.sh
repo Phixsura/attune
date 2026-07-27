@@ -68,6 +68,7 @@ AUDIT_PUBLIC_KEY="$("$BIN" audit export-public-key --signing-key "$AUDIT_SIGNING
 
 log "write throwaway config (keyset generated fresh)"
 KEYSET="$("$BIN" secrets generate-keyset 2>/dev/null)"
+INDENTED_KEYSET="$(printf '%s\n' "$KEYSET" | sed 's/^/    /')"
 cat > "$CONFIG" <<EOF
 port: ${SRV_PORT}
 database:
@@ -84,7 +85,7 @@ audit_evidence:
   signing_key: "${AUDIT_SIGNING_KEY}"
 secrets:
   tink_keyset: |
-    ${KEYSET}
+${INDENTED_KEYSET}
 EOF
 
 log "boot server (auto-migrates)"

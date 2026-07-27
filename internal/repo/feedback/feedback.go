@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -32,7 +33,17 @@ var ErrIdempotencyConflict = errors.New("idempotency key reused with a different
 // internally pools connections, so a single shared FeedbackRepo serves
 // every caller.
 type FeedbackRepo struct {
-	pool *pgxpool.Pool
+	pool dbPool
+}
+
+// dbPool is the slice of *pgxpool.Pool the repo actually uses — an
+// interface so unit tests can inject fakes for paths whose behavior is
+// otherwise only reachable on a live database (PR #122 pattern).
+type dbPool interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 type queryer interface {
@@ -107,7 +118,8 @@ func (r *FeedbackRepo) InsertIdempotentTx(
 // tokens are dropped. Returns the number of rows cleared.
 func (r *FeedbackRepo) PurgeExpiredIdempotencyKeys(ctx context.Context, retention time.Duration) (int64, error) {
 	const where = "repo.FeedbackRepo.PurgeExpiredIdempotencyKeys"
-	tag, err := r.pool.Exec(ctx, `
+	tag, err := r.pool.Exec(
+		ctx, `
 		UPDATE user_feedback
 		SET idempotency_key = NULL, idempotency_hash = NULL
 		WHERE idempotency_key IS NOT NULL
@@ -300,6 +312,7 @@ func (r *FeedbackRepo) TryClaimWithOwner(ctx context.Context, id int64, owner st
 type EnrichInput struct {
 	Content         string
 	Source          string
+	Type            string
 	UserID          string
 	Language        string
 	DisplayLocale   string
@@ -328,7 +341,7 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 	)
 	err := r.pool.QueryRow(
 		ctx,
-		`SELECT uf.content, uf.source, uf.user_id, COALESCE(uf.language, ''),
+		`SELECT uf.content, uf.source, COALESCE(uf.type, ''), uf.user_id, COALESCE(uf.language, ''),
 		 COALESCE(t.locale, 'en'), uf.tenant_id, uf.created_at,
 			 uf.inbound_source_id, COALESCE(src.tags, '{}'::text[]),
 			 t.enrich_prompt_template, t.enrich_dimensions, t.enrich_prompt_policy,
@@ -337,7 +350,7 @@ func (r *FeedbackRepo) LoadForEnrich(ctx context.Context, id int64) (*EnrichInpu
 		 LEFT JOIN tenants t ON t.id = uf.tenant_id
 		 LEFT JOIN inbound_sources src ON src.id = uf.inbound_source_id
 		 WHERE uf.id = $1`, id,
-	).Scan(&in.Content, &in.Source, &in.UserID, &in.Language, &in.DisplayLocale, &in.TenantID, &in.CreatedAt,
+	).Scan(&in.Content, &in.Source, &in.Type, &in.UserID, &in.Language, &in.DisplayLocale, &in.TenantID, &in.CreatedAt,
 		&inboundSource, &in.SourceTags, &in.PromptTemplate, &dimsRaw, &policyRaw, &in.PromptVersionID)
 	if err != nil {
 		return nil, fmt.Errorf("load feedback %d: %w", id, err)
@@ -814,7 +827,8 @@ func (r *FeedbackRepo) SampleEnrichedByTenant(ctx context.Context, tenantID stri
 
 // SetUrgent updates the is_urgent flag on a feedback row.
 func (r *FeedbackRepo) SetUrgent(ctx context.Context, tenantID string, id int64, urgent bool) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := r.pool.Exec(
+		ctx,
 		`UPDATE user_feedback SET is_urgent = $3, updated_at = NOW()
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID, urgent,

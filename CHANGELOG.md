@@ -14,7 +14,203 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   sync health visible in Console; stale membership handled via soft-delete
   with configurable TTL; GDPR erasure cascades to cohort memberships (#233).
 
+- Added Intercom inbound adapter (#230): polls Intercom's conversations
+  search API with an `updated_at` watermark to extract product signals
+  from support conversations.
+  - Shared `internal/infra/intercomclient/` HTTP client (reusable by #32
+    bidirectional sync), pinned to Intercom API version 2.16.
+  - US / EU / AU regional host selection with per-region host allowlist.
+  - Watermark-based incremental sync in `LastUID` with a mid-window
+    continuation cursor: UTC-day-floored/padded search windows (both
+    bounds — Intercom search timestamps are date-indexed) + client-side
+    second-precision filtering. Early stops (budget, rate floor,
+    transient failure) step the watermark back one second so
+    boundary-second conversations are never lost; a per-source
+    processed-set makes the boundary re-cover free; the persisted
+    cursor lets days with more covered conversations than one tick can
+    list drain instead of relisting from the day floor forever. Items
+    updated at/after tick start drain the window and drop the cursor —
+    a continuation is never persisted past a deferred item — and a
+    rejected continuation cursor falls back to a fresh window scan in
+    the same tick (cross-tick cursor lifetime is undocumented).
+  - Failure taxonomy that cannot wedge the source: transient detail /
+    ingest failures (5xx, network, DB down) retry next tick without
+    advancing the watermark; deterministic conditions (empty
+    conversations, validation rejects, oversized/undecodable responses)
+    skip or degrade to the summary shape and advance — a poison-pill
+    item slows the source down (transient ticks now count toward
+    backoff, measured from last attempt) but never stalls it. Adapter
+    poll state (backoff, processed-set, lag) is keyed by source ID
+    (slugs are only unique per tenant), and the poll-lag gauge keeps
+    its value on degraded ticks instead of reporting zero.
+  - Out-of-order search results (the ascending sort is undocumented in
+    the 2.16 schema, though production-proven) stop the tick without
+    advancing the watermark instead of silently skipping older items.
+  - Full-thread extraction via one `display_as=plaintext` detail call per
+    conversation; `[customer]`/`[agent]`/`[bot]` role tagging; internal
+    notes and redacted parts excluded; bot parts dropped first under the
+    4,500-byte budget, then structural truncation (first 3 + last 2
+    customer messages, rune-safe cuts). Seed bodies are HTML-stripped
+    (search results carry HTML even when parts are plaintext); operator
+    permalinks use the regional app host (EU/AU workspaces).
+  - Contact identity (`intercom_contact_external_id`, email, name) and
+    company metadata carried in SourceMeta as customer-profile join keys;
+    Intercom inbox permalink as the operator backlink.
+  - Replay-safe idempotency key `intercom_{workspace}_{id}_{updatedAt}` —
+    conversation updates produce new feedback rows, replays dedup.
+  - 429 handling via `X-RateLimit-Reset`; per-conversation detail
+    failures degrade gracefully (skip, never disable the source);
+    exponential backoff on consecutive failures.
+  - Conversation state filtering (open/closed/snoozed), tag
+    include/exclude filtering (filtered conversations never consume
+    detail budget), and per-tick detail budget (Console advanced UI);
+    sync-now, sync stats, and recent-preview reuse the existing
+    machinery.
+  - Custom attributes (`intercom_custom_attributes` JSON passthrough)
+    and the customer-side conversation start URL
+    (`intercom_source_url`) captured in SourceMeta.
+  - Company revenue context: `GetCompany` resolves `monthly_spend`,
+    `plan`, `size`, and `industry` (per-tick cached), emitted as
+    `intercom_company_*` SourceMeta keys.
+  - Automatic customer/account attribution at promote: promoting
+    inbound-channel feedback derives customer links and account
+    profiles (revenue, tier, size) from source_meta inside the promote
+    transaction — a promoted Intercom conversation lands with its
+    customer, company, and revenue-weighted decision score already
+    populated. Channel-agnostic: Zendesk requester/organization keys
+    ride the same derivation. Account/contact identities are
+    workspace-scoped (two workspaces' "company 5" never merge), values
+    are clamped to the DB limits, and fractional revenue rounds to
+    cents.
+  - Teammate resolution: assignee IDs resolve to display names via
+    `ListAdmins` (lazy, one call per poll tick, only when a qualifying
+    conversation is assigned) → `intercom_teammate_name` SourceMeta.
+  - Request-candidate surfacing: intercom/zendesk feedback detail now
+    shows a "客户需求候选" card with a signal-aware prompt (Fin
+    escalation / negative feedback strongest, support priority second)
+    and a one-click promote that pre-fills the customer-request flow.
+  - Recurring-signal detection: new `GET /feedback/{id}/similar`
+    endpoint surfaces semantically-similar feedback (pgvector, ≥0.78
+    similarity); snapshots of the same workspace-scoped conversation/
+    ticket collapse to one neighbor so evolution capture never inflates
+    the recurrence count, and cancelled requests never surface as dedup
+    targets. The candidate card shows "该问题已在其他反馈中出现 N 次"
+    with the top neighbors and upgrades the promote action to bundle
+    the untracked cluster as evidence in one click.
+  - Duplicate-request prevention: the endpoint returns the anchor's own
+    linked requests (resolved even when embeddings are unavailable)
+    plus each neighbor's; an already-tracked anchor renders a terminal
+    "已被 CR-N 跟踪" state with no promote action, already-tracked
+    neighbors are excluded from the bundle, and link/promote mutations
+    invalidate the recurrence query so the card state stays live.
+  - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
+    rating, last answer type); escalated / negative-feedback Fin
+    conversations produce a `complaint` enrichment hint.
+  - Proactive rate self-throttling: tracks `X-RateLimit-Remaining` and
+    gracefully stops a tick before Intercom starts returning 429s.
+  - Test-connection returns the connected workspace name
+    (`TestInboundConnectionResponse.workspace_name`, channel-generic).
+  - `intercom.api_base_url` config knob points the adapter at a mock
+    API for local stacks (Slack `api_base_url` parity; refused under
+    `profile: production` since it bypasses the host allowlist);
+    `make dev-stack --intercom-stub <url>` wires it plus loopback
+    egress, and `scripts/intercom-stub.mjs` ships a deterministic
+    Intercom API stub for full-pipeline E2E.
+  - SSRF-hardened via `nethardening.Policy`, wired in
+    `applyRuntimeHardening`.
+  - In-place source editing: `PATCH /fb/v1/console/inbound/sources/{id}`
+    (`UpdateInboundSource`) renames a source and edits Intercom settings
+    (tag filters, states, detail budget, `start_from`) or rotates the
+    access token without delete/recreate — the sync watermark, cursor,
+    and existing feedback linkage survive. Region is immutable; a new
+    token is auth-tested and pinned to the stored workspace before it
+    replaces the old one; absent optional fields keep their stored
+    values. The GET detail response now carries `intercom_settings`
+    (never credentials) so the Console edit dialog prefills stored
+    filters instead of resetting them; config persistence runs under
+    the secretlock writable-key guard, and the poller's tick-end stats
+    write re-reads and merges (CAS with retry) so a concurrent edit or
+    token rotation is never clobbered. Audited as
+    `inbound_source.update`.
+
+- Added Zendesk inbound adapter (#229): polls Zendesk's incremental ticket
+  export API to extract product signals from support tickets.
+  - Shared `internal/infra/zendeskclient/` HTTP client (reusable by #31).
+  - Customer-vs-agent `[customer]`/`[agent]` role tagging.
+  - Ticket metadata → enrichment type hint via `IngestInput.Type`; enricher
+    now appends the hint to the LLM prompt.
+  - Custom field extraction as JSON passthrough in SourceMeta.
+  - Multi-page continuous pagination (10x backfill speed).
+  - 429 Retry-After compliance with exponential backoff.
+  - OAuth 2.0 paste-mode (access + refresh + client credentials) with
+    automatic token refresh and 3-param refresh grant.
+  - SSRF-hardened via `nethardening.Policy`, wired in `applyRuntimeHardening`.
+  - Ticket filtering by tags, exclude-tags, and statuses (Console advanced UI).
+  - Sync progress tracking (SyncStats persisted + Console display).
+  - Sync-now trigger (adapter → framework → handler → Console button).
+  - Recent sync preview (GET /{id}/recent + Console rendering).
+  - Smart comment fetching: 2-page strategy (first asc + last desc).
+  - Structural content truncation: first 3 + last 2 customer messages.
+  - Idempotency key includes `GeneratedTimestamp` to capture ticket updates.
+  - Comment auth failure degrades gracefully (skip ticket, not disable source).
+  - User-friendly error messages via `friendlyZendeskError`.
+
+- Added `make dev-stack`, a disposable source-tree launcher that builds the
+  Console bundle, starts temporary local PostgreSQL, boots the current Go
+  server with generated runtime secrets, seeds demo data, and prints the exact
+  Console URL for browser verification.
+
+- Added `make script-tests` and wired it into `make ci-check`, so repository
+  helper scripts have a required local unit-test gate.
+
+- Added a supported-Node wrapper for local repository scripts, keeping
+  `make ci-check` aligned with CI's Node 22 runtime even when another Node
+  version is first on `PATH`.
+
+- Added external provider installation management for Console external sync,
+  including installation records, authorized resource selection, qualification
+  grading, connection binding with selected-resource provider configuration,
+  audit events, and OpenAPI/proto contract coverage.
+
+- Added a Customer Request delivery graph projection to the generated API,
+  Go detail model, and Console detail drawer, so linked external issue artifacts
+  are presented with provider-neutral nodes, relationships, health, and
+  last-seen context.
+
+- Customer Request delivery graphs now merge provider-normalized external
+  object link metadata into linked issue artifacts, including provider title,
+  status reason, assignee, URL, last-seen time, source, and external-sync
+  failure state.
+
+- Added a provider-neutral Customer Request delivery artifact projection table
+  and repository upsert/read path, so request detail graphs can include pull
+  requests, commits, branches, deployments, releases, project items, sub-issues,
+  and support tickets alongside legacy issue links.
+
+- External sync pull children for pull requests, commits, branches,
+  deployments, releases, project items, sub-issues, and support tickets now
+  project into Customer Request delivery graphs with provider relationship,
+  status, assignee, payload, and last-seen context.
+
+- GitHub issue pulls now read issue timeline events and emit referenced pull
+  requests plus closing commits as delivery artifact children, making provider
+  data reach Customer Request delivery graphs without manual projection code.
+
+### Changed
+
+- Managed GitHub issue-link binding now runs through the external sync
+  repository boundary, keeping Customer Request persistence focused on local
+  issue links while preserving managed pull enqueue behavior.
+
 ### Security
+
+- GitHub and Jira webhook diagnostic payloads now redact comment bodies and Jira
+  email addresses, retaining only safe identity fields plus body digest metadata
+  for troubleshooting.
+
+- `make ci-check` now runs the TruffleHog secret scan through a required local
+  binary or pinned Docker fallback, removing the previous local skip when the
+  binary was absent.
 
 - Removed `golang.org/x/crypto` from the root dependency graph and raised the
   Go floor to `1.26.5`. Console password hashing plus break-glass token and
@@ -23,6 +219,154 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   package from the module graph.
 
 ### Fixed
+
+- Fixed the Intercom watermark permanently skipping conversations whose
+  search-index entry appeared late: `conversations/search` is eventually
+  consistent with no index-order guarantee, so a conversation updated at
+  T could enter the index after a later-updated conversation had already
+  advanced the watermark past T. The client-side skip boundary now sits
+  a 120s lookback below the watermark (the same defense as Airbyte's
+  `lookback_window`); re-covered snapshots dedup for free via the
+  per-source processed-set and the ingest idempotency key, and the
+  former one-second watermark step-back is superseded.
+
+- GDPR subject export (Art. 15) now includes the customer-request
+  identity rows the delete path anonymizes: the export bundle gains
+  `customer_request_customer_links.jsonl` and
+  `customer_request_votes.jsonl` (matched by subject key, or by the
+  tenant-scoped subject hash for rows a previous erasure anonymized),
+  with counts in the manifest — export and erasure now cover the same
+  identity scope.
+
+- Closed a promote/erasure race that could resurrect an erased subject's
+  identity: the promote-time attribution read now takes `FOR SHARE` on
+  the feedback row, serializing against GDPR erasure's `FOR UPDATE`
+  locks so a concurrent promote either sees the row deleted or commits
+  its link before the erasure's anonymize pass scrubs it.
+
+- Transient contact-resolution failures during Intercom ingestion now
+  retry the conversation next tick instead of ingesting under the
+  seed-author fallback identity — snapshot subject keys no longer drift
+  between email and contact-ID forms when the contacts API hiccups
+  (identity drift would make an email-keyed GDPR request miss rows).
+  Permanent failures (plan-gated contacts API) still degrade gracefully.
+
+- Promote-time auto-attribution now copies the feedback row's own GDPR
+  subject key into the customer link verbatim instead of re-deriving one
+  from metadata: for email-less contacts the derived key
+  (`intercom:<ws>:<external-id>`) diverged from the row's
+  (`contact:<id>`), so an erasure keyed on the feedback subject would
+  never reach the attribution rows. Metadata derivation remains the
+  fallback for rows without a subject key.
+
+- Structural transcript truncation (Intercom and Zendesk) now keeps the
+  agent replies inside the kept conversation ranges (head through the
+  3rd customer message, tail from the 2nd-from-last onward) instead of
+  dropping every agent message, and the `[... N messages omitted ...]`
+  marker counts all omitted messages rather than only customer ones.
+  Zendesk's byte-truncation fallback is now rune-safe — a mid-rune cut
+  produced invalid UTF-8 that PostgreSQL rejects with an error outside
+  the deterministic-reject list, wedging the export cursor.
+
+- Intercom HTML entity unescaping no longer depends on the body carrying
+  a tag: tag-free bodies with `&amp;`-style entities now read the same
+  as marked-up ones.
+
+- Fixed the inbound recent-preview endpoint returning 500 on live
+  PostgreSQL: `created_at` (timestamptz) was scanned into a string; it
+  now scans into `time.Time` and serializes RFC3339. The preview also
+  surfaces `intercom_conversation_id`/`intercom_state` metadata.
+
+- GDPR erasure now covers customer-request attribution: deleting a data
+  subject anonymizes their `customer_request_customer_links` and
+  `customer_request_votes` rows in place (email/name/note scrubbed, the
+  per-tenant subject hash keeps request aggregates like vote and
+  customer counts intact). These tables carry the subject's identity via
+  manual linking and promote-time auto-attribution but have no FK to
+  `user_feedback`, so the feedback purge never reached them. Delete
+  audits report the anonymized row counts.
+
+- Fixed three Zendesk adapter defects (parity with the Intercom
+  hardening):
+  - Transient ingest failures (DB down) no longer advance the export
+    cursor past the failed ticket — the incremental export never
+    re-lists a passed snapshot, so the previous skip-and-continue lost
+    those tickets forever. Deterministic validation rejects still skip.
+  - Tickets beyond the per-tick comment budget are no longer ingested
+    comment-less (which locked the degraded snapshot in under its
+    idempotency key) — the page stops at the budget boundary and the
+    remainder lands next tick with full comments; a per-source
+    processed-set makes the re-fetched head free. Transient comment
+    failures likewise retry next tick instead of degrading.
+  - Backoff now measures from the last attempt (was: last success,
+    which never engaged for never-succeeded sources and self-disabled
+    after one interval), counts degraded ticks as failures, and keys
+    all in-memory poll state by source ID instead of tenant-scoped
+    slug; the poll-lag gauge keeps its value on degraded ticks.
+
+- OIDC Console login now syncs the authenticated IdP user into
+  `tenant_members` before issuing the session, and tenant membership lookups
+  normalize the `oidc` session alias to `oidc_user`, preventing successful SSO
+  sessions from being denied by tenant RBAC as `not a tenant member`.
+
+- Production readiness now reports an already-created Console admin with the
+  bootstrap seed removed as passing; it only warns when bootstrap credentials
+  are still configured after the first admin exists.
+
+- Local Docker-backed `make test-integration` now starts PostgreSQL with an
+  explicit shared-memory size, preventing Docker's small default `/dev/shm`
+  from destabilizing long PostgreSQL integration runs; the secret-scan
+  allow-list also covers fake embedded-credential validation fixtures so
+  network verification timeouts cannot turn them into unknown findings.
+
+- Startup migrations now strip legacy top-level `BEGIN` plus `COMMIT` or
+  `ROLLBACK` wrappers, including transaction-control lines with trailing SQL
+  comments, from the execution body while preserving migration checksums. This
+  prevents PostgreSQL transaction-state warnings during fresh local stack boots.
+
+- Console primary buttons now keep an opaque hover background, preserving
+  WCAG text contrast for mouse-driven workflows.
+
+- Public board detail pages now return 404/400 for hidden or invalid public
+  request lookups surfaced by the public-visibility service instead of a generic
+  500 page.
+
+- Console and public portal pages now ship an explicit root favicon asset,
+  preventing browser smoke tests and real local sessions from logging missing
+  favicon resources.
+
+- Customer Request GitHub Issue creation now only enables Console actions for
+  push-capable external-sync mappings and sends the selected connection id,
+  preventing pull-only connections from surfacing a backend conflict.
+
+- Jira issue label construction now avoids an overflow-prone preallocation,
+  and Console external-sync internal errors no longer log raw error strings in
+  the shared error path, which keeps the CodeQL scan clean.
+
+- Jira request-label markers now honor the configured `request_label_prefix`
+  when Attune pulls issues back into the Customer Request ledger, so custom
+  prefixes keep bridging cleanly without falling back to the default label
+  pattern.
+
+- Request notification Console now hides public changelog links until the
+  tenant enables changelog publishing, and hides the changelog publish kind
+  until it can actually be used.
+
+- Console request cancellations caused by normal browser navigation now log at
+  info level instead of warning level while preserving the 499
+  `CLIENT_CANCELED` response.
+
+- Customer Request detail drawers now refresh shortly after queued GitHub Issue
+  creation runs, so the synced external issue link appears without a manual
+  page reload.
+
+- Go SDK end-to-end smoke now indents the generated Tink keyset before writing
+  its temporary config, so the real-stack SDK harness boots the server with a
+  valid YAML config.
+
+- Public portal submission pages now only show the acknowledgement after a
+  successful submission, preventing duplicate success text when visitors submit
+  feedback from the rendered page.
 
 - Request notification previews now wrap long JSON fields inside the card,
   preventing horizontal overflow in deployed Console pages on narrow viewports.
@@ -68,11 +412,41 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   labels for the column name and order controls, keeping the console
   accessibility gate green on the public visibility configuration page.
 
+- Feedback tag search popovers now expose a named dialog and listbox option
+  semantics for empty states, keeping duplicate-tag suppression accessible in
+  browser checks.
+
 - Feedback list queries now forward the `source` and `type` filters into the
   console list options, so the reserved request parameters actually affect the
   repo query instead of being dropped after binding.
 
 ### Added
+
+- **Jira bidirectional issue sync.**
+  Added the Jira `issue` provider, webhook receiver, and connection flow so
+  Attune can pull, push, and dedupe Jira issues with signed deliveries.
+
+- External sync Console provider selection now loads registered adapters from
+  the backend registry and hides the test-only `noop` provider, so GitHub and
+  Jira are discoverable from the same create-connection dialog.
+
+- GitHub external sync now supports webhook-triggered bidirectional issue
+  refreshes and pulls issue comments into a deduplicated external comment
+  ledger, including event hints for single-issue replay, deleted-comment
+  tombstones, managed manual-link bridging, single-record manual run selectors,
+  a Customer Request detail action that queues single-request GitHub issue
+  creation through external sync, managed link-existing by GitHub connection
+  and issue number or by matching GitHub URL with an immediate targeted pull
+  run, ambiguous same-repository managed URL links and managed issue rebinding
+  conflicts are rejected, managed issue unlink writes a local tombstone so
+  later pulls and scheduled pushes do not silently relink or recreate it unless
+  an operator explicitly links or creates it again, GitHub status category
+  and assignee projection into Customer Request delivery links, provider payload
+  snapshots for delivery timeline labels and assignees, safe linked-issue
+  updates that avoid overwriting GitHub-authored title/body/labels by default,
+  marker-deduped managed request-context comments, run input metadata
+  diagnostics, and comment timeline entries without advancing the scheduled
+  cursor.
 
 - **Close-the-loop request notifications.**
   Added tenant-scoped request notification settings, sender configuration,

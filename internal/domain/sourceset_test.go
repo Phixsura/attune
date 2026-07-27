@@ -102,18 +102,20 @@ func TestIsReservedSource(t *testing.T) {
 func TestSourceVocabulary_AppendOnly(t *testing.T) {
 	t.Parallel()
 	golden := map[string]string{
-		"api":     "API client",
-		"webhook": "Webhook",
-		"email":   "Email",
-		"slack":   "Slack",
-		"web":     "Web Widget",
-		"mcp":     "MCP",
-		"other":   "Other",
-		"portal":  "Portal",
+		"api":      "API client",
+		"webhook":  "Webhook",
+		"email":    "Email",
+		"slack":    "Slack",
+		"zendesk":  "Zendesk",
+		"intercom": "Intercom",
+		"web":      "Web Widget",
+		"mcp":      "MCP",
+		"other":    "Other",
+		"portal":   "Portal",
 	}
 	set := DefaultSourceSet()
 
-	wantAll := []string{"api", "email", "mcp", "other", "portal", "slack", "web", "webhook"} // sorted
+	wantAll := []string{"api", "email", "intercom", "mcp", "other", "portal", "slack", "web", "webhook", "zendesk"} // sorted
 	if got := set.All(); !reflect.DeepEqual(got, wantAll) {
 		t.Fatalf("DefaultSourceSet().All() = %v; want %v (a removal is a breaking change)", got, wantAll)
 	}

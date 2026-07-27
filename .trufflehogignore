@@ -7,11 +7,20 @@ cmd/attune/cli_extra_coverage_test.go
 cmd/attune/drill_coverage_test.go
 internal/infra/config/config_test.go
 internal/infra/database/pool_coverage_test.go
+internal/infra/database/pool_test.go
+internal/testdb/postgres_coverage_test.go
 internal/restoredrill/orchestrate_test.go
 internal/service/requestnotification/service_flow_test.go
 
 # Node SDK test with a fake embedded-credentials URL used for validation
 sdk/node/test/client.test.ts
+
+# Go SDK test with a fake embedded-credentials URL used for validation
+sdk/go/client_test.go
+
+# Validation tests with fake embedded-credentials URLs used to assert rejection
+internal/handlers/console/notifytarget/notify_targets_test.go
+internal/service/llmconfig/service_test.go
 
 # Documentation with example localhost postgres URIs
 docs/private-deploy.md

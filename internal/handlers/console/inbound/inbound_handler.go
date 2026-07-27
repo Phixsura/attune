@@ -31,8 +31,10 @@ import (
 
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/inbound/adapter/email"
+	"github.com/Phixsura/attune/internal/inbound/adapter/intercom"
 	"github.com/Phixsura/attune/internal/inbound/adapter/slack"
 	"github.com/Phixsura/attune/internal/inbound/adapter/webhook"
+	"github.com/Phixsura/attune/internal/inbound/adapter/zendesk"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	"github.com/Phixsura/attune/internal/repo/inboundsource"
@@ -44,9 +46,11 @@ import (
 // package fails compilation, AND the literal lives in exactly one place
 // per channel (#66 review M7).
 const (
-	channelWebhook = webhook.Channel
-	channelEmail   = email.Channel
-	channelSlack   = slack.ChannelName
+	channelWebhook  = webhook.Channel
+	channelEmail    = email.Channel
+	channelSlack    = slack.ChannelName
+	channelZendesk  = zendesk.Channel
+	channelIntercom = intercom.Channel
 )
 
 // rotator is the subset of webhook.RotateSecret the handler depends on,
@@ -69,10 +73,15 @@ type Handler struct {
 	baseURL              string
 	rotate               rotator
 	slackWithTx          secretlockWithTxFn
+	zendeskWithTx        secretlockWithTxFn
+	intercomWithTx       secretlockWithTxFn
 	testConn             testConnFn
 	slackAuthTest        slackAuthTestFn
 	slackDiscover        slackDiscoverFn
 	slackValidateChannel slackValidateChannelFn
+	zendeskAuthTest      zendeskAuthTestFn
+	intercomAuthTest     intercomAuthTestFn
+	syncTrigger          syncTriggerFn
 	tenantSlug           tenantLookup
 	audit                auditRecorder
 }
@@ -81,6 +90,9 @@ type (
 	slackAuthTestFn        func(ctx context.Context, token string) (slack.AuthInfo, error)
 	slackDiscoverFn        func(ctx context.Context, token string) (slack.AuthInfo, []slack.Channel, error)
 	slackValidateChannelFn func(ctx context.Context, token, channelID string) (slack.AuthInfo, slack.Channel, error)
+	zendeskAuthTestFn      func(ctx context.Context, inputs zendesk.ConnInputs) (zendesk.AccountInfo, error)
+	intercomAuthTestFn     func(ctx context.Context, region, accessToken string) (intercom.AccountInfo, error)
+	syncTriggerFn          func(sourceID string)
 	secretlockWithTxFn     func(ctx context.Context, pool *pgxpool.Pool, commit bool, fn func(context.Context, secretlock.Tx) error) error
 )
 
@@ -110,6 +122,12 @@ func NewHandler(sources *inboundsource.Repo, p *pgxpool.Pool, secrets inbound.Se
 
 func (h *Handler) SetAuditLogger(audit auditRecorder) {
 	h.audit = audit
+}
+
+// SetSyncTrigger wires a callback that triggers an immediate sync for
+// a source. In production this calls the Zendesk adapter's TriggerSync.
+func (h *Handler) SetSyncTrigger(fn syncTriggerFn) {
+	h.syncTrigger = fn
 }
 
 // rowToProto projects an inbound.Source into the wire-shape

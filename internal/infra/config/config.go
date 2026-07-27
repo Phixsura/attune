@@ -61,6 +61,7 @@ type Config struct {
 	GDPR          GDPRConfig
 	Console       ConsoleConfig
 	Slack         SlackConfig
+	Intercom      IntercomConfig
 	Shutdown      ShutdownConfig
 	Secrets       SecretsConfig
 	Observability ObservabilityConfig
@@ -84,6 +85,7 @@ type Config struct {
 	ConsoleSessionKey       string
 	ConsoleBaseURL          string
 	SlackAPIBaseURL         string
+	IntercomAPIBaseURL      string
 	RateLimitPerMinute      int
 	RateLimitBurst          int
 	RateLimitDisabled       bool
@@ -173,6 +175,13 @@ type ConsoleConfig struct {
 type SlackConfig struct {
 	// APIBaseURL points the Slack client at a mock or regional API base.
 	// Empty keeps the default slack.com API origin.
+	APIBaseURL string `yaml:"api_base_url"`
+}
+
+type IntercomConfig struct {
+	// APIBaseURL points the Intercom client at a mock API base for local
+	// stacks and tests. Empty keeps the region-derived *.intercom.io
+	// origin (and its host allowlist).
 	APIBaseURL string `yaml:"api_base_url"`
 }
 
@@ -272,6 +281,7 @@ type yamlConfig struct {
 	GDPR           GDPRConfig          `yaml:"gdpr"`
 	Console        ConsoleConfig       `yaml:"console"`
 	Slack          SlackConfig         `yaml:"slack"`
+	Intercom       IntercomConfig      `yaml:"intercom"`
 	Shutdown       ShutdownConfig      `yaml:"shutdown"`
 	Secrets        SecretsConfig       `yaml:"secrets"`
 	Observability  ObservabilityConfig `yaml:"observability"`
@@ -345,6 +355,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		GDPR:           yc.GDPR,
 		Console:        yc.Console,
 		Slack:          yc.Slack,
+		Intercom:       yc.Intercom,
 		Shutdown:       yc.Shutdown,
 		Secrets:        yc.Secrets,
 		Observability:  yc.Observability,
@@ -533,6 +544,7 @@ func (c *Config) parseSimpleFields() {
 	c.ConsoleSessionKey = strings.TrimSpace(c.Console.SessionKey)
 	c.ConsoleBaseURL = strings.TrimSpace(c.Console.BaseURL)
 	c.SlackAPIBaseURL = strings.TrimSpace(c.Slack.APIBaseURL)
+	c.IntercomAPIBaseURL = strings.TrimSpace(c.Intercom.APIBaseURL)
 	c.RateLimitPerMinute = c.RateLimit.PerMinute
 	c.RateLimitBurst = c.RateLimit.Burst
 	c.RateLimitDisabled = c.RateLimit.Disabled
@@ -682,6 +694,7 @@ func (c *Config) validate() error {
 		c.validateSecretsConfig,
 		c.validateConsole,
 		c.validateSlackConfig,
+		c.validateIntercomConfig,
 		c.validateSecurityConfig,
 		c.OIDC.Validate,
 		c.validateAuditConfig,
@@ -909,6 +922,28 @@ func (c *Config) validateSlackConfig() error {
 	}
 	if parsed.Host == "" {
 		return fmt.Errorf("config: slack.api_base_url must include a host")
+	}
+	return nil
+}
+
+func (c *Config) validateIntercomConfig() error {
+	if c.IntercomAPIBaseURL == "" {
+		return nil
+	}
+	// The override bypasses the client's *.intercom.io host allowlist
+	// (it exists for local mock stacks), so production refuses it.
+	if c.IsProduction() {
+		return fmt.Errorf("config: intercom.api_base_url must not be set with profile: production")
+	}
+	parsed, err := url.ParseRequestURI(c.IntercomAPIBaseURL)
+	if err != nil {
+		return fmt.Errorf("config: intercom.api_base_url must be a valid URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("config: intercom.api_base_url must use http or https")
+	}
+	if parsed.Host == "" {
+		return fmt.Errorf("config: intercom.api_base_url must include a host")
 	}
 	return nil
 }

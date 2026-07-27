@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   customerRequestDetailQuery,
+  customerRequestGitHubIssueConnectionOptionsQuery,
+  customerRequestGitHubIssueConnectionsQuery,
   customerRequestKeys,
   customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
@@ -11,6 +13,7 @@ import {
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
+  useCreateCustomerRequestGitHubIssue,
   useCreateCustomerRequestSavedView,
   useDeleteCustomerRequestNote,
   useDeleteCustomerRequestSavedView,
@@ -41,10 +44,15 @@ import {
   SortDirection,
 } from '@/proto/attune/v1/customer_request'
 import { server } from '@/testing/mocks/server'
-import { renderHook, waitFor } from '@/testing/test-utils'
+import { act, renderHook, waitFor } from '@/testing/test-utils'
 
 const baseURL = '/fb/v1/console/customer-requests'
 const requestID = '11111111-1111-1111-1111-111111111111'
+const githubIssueRefreshDelaysMs = [750, 1_500, 3_000, 5_000]
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 function makeQueryClient() {
   return new QueryClient({
@@ -61,7 +69,103 @@ function wrapperFor(queryClient: QueryClient) {
   )
 }
 
+async function advanceGitHubIssueRefreshTimers(count = githubIssueRefreshDelaysMs.length) {
+  for (const delayMs of githubIssueRefreshDelaysMs.slice(0, count)) {
+    await advanceTimersBy(delayMs)
+  }
+}
+
+async function advanceTimersBy(delayMs: number) {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(delayMs)
+  })
+}
+
 describe('customer request API', () => {
+  it('classifies GitHub issue connections by link and create capability', async () => {
+    const connection = (id: string, provider = 'github', enabled = true, status = 'active') => ({
+      id,
+      tenantId: 't-1',
+      provider,
+      name: id,
+      enabled,
+      status,
+      authType: 'token',
+      baseUrl: '',
+      providerConfigJson: '{"repo_url":"https://github.com/Phixsura/attune"}',
+      scopes: ['issues'],
+      lastTestedAt: '',
+      lastTestStatus: 'ok',
+      lastError: '',
+      createdBy: 'tester',
+      updatedBy: 'tester',
+      createdAt: '2026-07-07T00:00:00Z',
+      updatedAt: '2026-07-07T00:00:00Z',
+      webhookSecretConfigured: true,
+    })
+    const mapping = (connectionId: string, direction: string, enabled = true) => ({
+      id: `mapping-${connectionId}`,
+      tenantId: 't-1',
+      connectionId,
+      localObjectType: 'customer_request',
+      externalObjectType: 'issue',
+      direction,
+      fieldMappingJson: '{}',
+      statusMappingJson: '{}',
+      conflictPolicy: 'manual',
+      tombstonePolicy: 'mark_stale',
+      enabled,
+      mappingVersion: 1,
+      createdAt: '2026-07-07T00:00:00Z',
+      updatedAt: '2026-07-07T00:00:00Z',
+    })
+    const mappings: Record<string, unknown[]> = {
+      'github-pull': [mapping('github-pull', 'EXTERNAL_SYNC_DIRECTION_PULL')],
+      'github-bidirectional': [
+        mapping('github-bidirectional', 'EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL'),
+      ],
+      'github-push': [mapping('github-push', 'EXTERNAL_SYNC_DIRECTION_PUSH')],
+      'github-disabled-mapping': [
+        mapping('github-disabled-mapping', 'EXTERNAL_SYNC_DIRECTION_PULL', false),
+      ],
+    }
+    server.use(
+      http.get('/fb/v1/console/external-sync/connections', () =>
+        HttpResponse.json({
+          connections: [
+            connection('github-pull'),
+            connection('github-bidirectional'),
+            connection('github-push'),
+            connection('github-disabled-mapping'),
+            connection('github-disabled', 'github', false),
+            connection('jira-active', 'jira'),
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/external-sync/mappings', ({ request }) => {
+        const connectionID = new URL(request.url).searchParams.get('connection_id') ?? ''
+        return HttpResponse.json({ mappings: mappings[connectionID] ?? [] })
+      }),
+    )
+
+    const queryClient = makeQueryClient()
+    const got = await queryClient.fetchQuery(customerRequestGitHubIssueConnectionsQuery())
+    const options = await queryClient.fetchQuery(customerRequestGitHubIssueConnectionOptionsQuery())
+
+    expect(got.map((item) => item.id)).toEqual(['github-pull', 'github-bidirectional'])
+    expect(
+      options.map((option) => ({
+        id: option.connection.id,
+        canLink: option.canLink,
+        canCreate: option.canCreate,
+      })),
+    ).toEqual([
+      { id: 'github-pull', canLink: true, canCreate: false },
+      { id: 'github-bidirectional', canLink: true, canCreate: true },
+      { id: 'github-push', canLink: false, canCreate: true },
+    ])
+  })
+
   it('builds list query params for filters and pagination', async () => {
     const urls: string[] = []
     server.use(
@@ -124,6 +228,23 @@ describe('customer request API', () => {
     expect(params.get('limit')).toBe('50')
     expect(params.has('q')).toBe(false)
     expect(params.has('status')).toBe(false)
+  })
+
+  it('treats a null list cursor as the end of pagination', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ requests: [], nextCursor: null })
+      }),
+    )
+
+    await makeQueryClient().fetchInfiniteQuery({
+      ...customerRequestsInfiniteQuery(),
+      pages: 2,
+    })
+
+    expect(urls).toHaveLength(1)
   })
 
   it('fetches details only when an id is present', async () => {
@@ -340,6 +461,7 @@ describe('customer request API', () => {
         deleteNote: useDeleteCustomerRequestNote(requestID),
         merge: useMergeCustomerRequests(requestID),
         linkIssue: useLinkCustomerRequestIssue(requestID),
+        createGitHubIssue: useCreateCustomerRequestGitHubIssue(requestID),
         unlinkIssue: useUnlinkCustomerRequestIssue(requestID),
         recordSync: useRecordCustomerRequestIssueSync(requestID),
       }),
@@ -383,8 +505,14 @@ describe('customer request API', () => {
       provider: 'github',
       externalUrl: 'https://github.com/Phixsura/attune/issues/212',
       externalKey: '212',
+      connectionId: 'connection-1',
+      issueNumber: '212',
       title: 'Customer requests',
       status: 'open',
+    })
+    await result.current.createGitHubIssue.mutateAsync({
+      connectionId: 'connection-1',
+      mappingId: 'mapping-1',
     })
     await result.current.unlinkIssue.mutateAsync('issue-link-1')
     await result.current.recordSync.mutateAsync({
@@ -393,7 +521,7 @@ describe('customer request API', () => {
       status: 'done',
     })
 
-    await waitFor(() => expect(calls).toHaveLength(15))
+    await waitFor(() => expect(calls).toHaveLength(16))
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       `POST ${baseURL}`,
       `POST ${baseURL}:promote-feedback`,
@@ -408,12 +536,28 @@ describe('customer request API', () => {
       `DELETE ${baseURL}/${requestID}/notes/note-1`,
       `POST ${baseURL}/${requestID}:merge`,
       `POST ${baseURL}/${requestID}/issue-links`,
+      `POST ${baseURL}/${requestID}/issue-links:create-github`,
       `DELETE ${baseURL}/${requestID}/issue-links/issue-link-1`,
       `POST ${baseURL}/${requestID}/issue-links/issue-link-1:record-sync`,
     ])
     expect(calls[2].body).toEqual({ id: requestID, title: 'Renamed' })
     expect(calls[9].body).toEqual({ id: requestID, body: 'Coordinate with ACME.' })
-    expect(calls[14].body).toEqual({
+    expect(calls[12].body).toEqual({
+      id: requestID,
+      provider: 'github',
+      externalUrl: 'https://github.com/Phixsura/attune/issues/212',
+      externalKey: '212',
+      connectionId: 'connection-1',
+      issueNumber: '212',
+      title: 'Customer requests',
+      status: 'open',
+    })
+    expect(calls[13].body).toEqual({
+      id: requestID,
+      connectionId: 'connection-1',
+      mappingId: 'mapping-1',
+    })
+    expect(calls[15].body).toEqual({
       id: requestID,
       issueLinkId: 'issue-link-1',
       syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
@@ -421,6 +565,173 @@ describe('customer request API', () => {
     })
     expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
     expect(qc.getQueryData(customerRequestKeys.detail('cached-request'))).toEqual(detail)
+  })
+
+  it('refreshes the detail cache after queued GitHub issue creation surfaces a link', async () => {
+    vi.useFakeTimers()
+    const queued = sampleDetail(requestID)
+    const linked = sampleDetailWithGitHubIssue(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(linked)
+      }),
+    )
+    const qc = makeQueryClient()
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(queued)
+    expect(detailLoads).toBe(0)
+    await advanceGitHubIssueRefreshTimers(1)
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked)
+    expect(detailLoads).toBe(1)
+  })
+
+  it('keeps polling until a queued GitHub issue has a rendered external URL', async () => {
+    vi.useFakeTimers()
+    const queued = sampleDetail(requestID)
+    const pending = sampleDetailWithIssueLinks(requestID, [
+      { provider: 'jira', externalUrl: 'https://jira.example/browse/ATT-7' },
+      { provider: 'github', externalUrl: '   ' },
+    ])
+    const linked = sampleDetailWithGitHubIssue(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(detailLoads === 1 ? pending : linked)
+      }),
+    )
+    const qc = makeQueryClient()
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+
+    await advanceGitHubIssueRefreshTimers(1)
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(pending)
+    await advanceTimersBy(githubIssueRefreshDelaysMs[1])
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked)
+    expect(detailLoads).toBe(2)
+  })
+
+  it('invalidates request caches when queued GitHub issue refresh fails', async () => {
+    vi.useFakeTimers()
+    const queued = sampleDetail(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json({ code: 'internal', message: 'failed' }, { status: 500 })
+      }),
+    )
+    const qc = makeQueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+    invalidate.mockClear()
+
+    await advanceGitHubIssueRefreshTimers(1)
+    expect(detailLoads).toBe(1)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.detail(requestID) })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
+  })
+
+  it('invalidates request caches when queued GitHub issue polling is exhausted', async () => {
+    vi.useFakeTimers()
+    const queued = sampleDetail(requestID)
+    const pending = sampleDetailWithIssueLinks(requestID, [{ provider: 'github', externalUrl: '' }])
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: queued,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(pending)
+      }),
+    )
+    const qc = makeQueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+    invalidate.mockClear()
+
+    await advanceGitHubIssueRefreshTimers()
+    expect(detailLoads).toBe(4)
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.detail(requestID) })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: customerRequestKeys.all })
+  })
+
+  it('skips queued GitHub issue polling when the mutation response already has a link', async () => {
+    vi.useFakeTimers()
+    const linked = sampleDetailWithGitHubIssue(requestID)
+    let detailLoads = 0
+    server.use(
+      http.post(`${baseURL}/${requestID}/issue-links:create-github`, () =>
+        HttpResponse.json({
+          detail: linked,
+          runId: 'run-1',
+          connectionId: 'connection-1',
+          mappingId: 'mapping-1',
+        }),
+      ),
+      http.get(`${baseURL}/${requestID}`, () => {
+        detailLoads += 1
+        return HttpResponse.json(linked)
+      }),
+    )
+    const qc = makeQueryClient()
+    const { result } = renderHook(() => useCreateCustomerRequestGitHubIssue(requestID), {
+      wrapper: wrapperFor(qc),
+    })
+
+    await result.current.mutateAsync({})
+    await advanceGitHubIssueRefreshTimers()
+
+    expect(qc.getQueryData(customerRequestKeys.detail(requestID))).toEqual(linked)
+    expect(detailLoads).toBe(0)
   })
 
   it('does not cache mutation responses without a request id', async () => {
@@ -501,6 +812,47 @@ function sampleDetail(id: string): CustomerRequestDetail {
     accountProfiles: [],
     notes: [],
   }
+}
+
+function sampleDetailWithIssueLinks(
+  id: string,
+  links: Array<{ provider: string; externalUrl: string }>,
+): CustomerRequestDetail {
+  const detail = sampleDetail(id)
+  return {
+    ...detail,
+    request: detail.request
+      ? {
+          ...detail.request,
+          linkedIssueCount: 1,
+          syncedIssueCount: 1,
+          deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED,
+        }
+      : undefined,
+    issueLinks: links.map((link, index) => ({
+      id: `issue-link-${index + 1}`,
+      provider: link.provider,
+      externalKey: String(702 + index),
+      externalUrl: link.externalUrl,
+      title: `${link.provider} #${702 + index}`,
+      status: 'open',
+      createdBy: 'tester',
+      createdAt: '2026-07-07T00:00:00Z',
+      updatedAt: '2026-07-07T00:00:00Z',
+      lastSyncedAt: '2026-07-07T00:00:00Z',
+      syncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED,
+      externalStatusCategory: 'open',
+      externalAssignee: '',
+      externalUpdatedAt: '2026-07-07T00:00:00Z',
+      syncError: '',
+    })),
+  }
+}
+
+function sampleDetailWithGitHubIssue(id: string): CustomerRequestDetail {
+  return sampleDetailWithIssueLinks(id, [
+    { provider: 'github', externalUrl: 'https://github.com/acme/app/issues/702' },
+  ])
 }
 
 function sampleScoringSettings(

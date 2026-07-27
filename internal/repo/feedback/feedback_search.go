@@ -666,7 +666,11 @@ func (r *FeedbackRepo) GetFeedbackEmbedding(
 }
 
 // FindSimilarFeedback finds feedback items similar to a given feedback item.
-// Uses the item's embedding if available.
+// Uses the item's embedding if available. Snapshots of the same source
+// thread (inbound adapters create one row per conversation/ticket update
+// under an updated_at-suffixed idempotency key) collapse to their best
+// hit, so a long-running conversation never inflates the recurrence
+// signal with copies of itself.
 func (r *FeedbackRepo) FindSimilarFeedback(
 	ctx context.Context,
 	tenantID string,
@@ -685,12 +689,12 @@ func (r *FeedbackRepo) FindSimilarFeedback(
 		return nil, fmt.Errorf("%s: feedback %d has no embedding", where, feedbackID)
 	}
 
-	// Search excluding the source feedback.
+	// Over-fetch: self-match + same-thread snapshots are dropped below.
 	params := ptrext.Of(SemanticSearchParams{
 		TenantID:       tenantID,
 		Embedding:      emb,
 		EmbeddingModel: model,
-		Limit:          limit + 1, // +1 to account for potential self-match.
+		Limit:          limit*3 + 1,
 		MinSimilarity:  minSimilarity,
 	})
 
@@ -699,12 +703,36 @@ func (r *FeedbackRepo) FindSimilarFeedback(
 		return nil, err
 	}
 
-	// Filter out the source feedback.
+	ids := make([]int64, 0, len(hits)+1)
+	ids = append(ids, feedbackID)
+	for _, h := range hits {
+		ids = append(ids, h.Feedback.ID)
+	}
+	threads, err := r.feedbackThreadKeys(ctx, tenantID, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter: drop the anchor row, anything from the anchor's own
+	// thread, and later (lower-similarity) snapshots of an already-seen
+	// thread. Hits arrive similarity-descending, so the first snapshot
+	// per thread is the best one.
+	seenThreads := map[string]bool{}
+	if k := threads[feedbackID]; k != "" {
+		seenThreads[k] = true
+	}
 	var filtered []SemanticSearchHit
 	for _, h := range hits {
-		if h.Feedback.ID != feedbackID {
-			filtered = append(filtered, h)
+		if h.Feedback.ID == feedbackID {
+			continue
 		}
+		if k := threads[h.Feedback.ID]; k != "" {
+			if seenThreads[k] {
+				continue
+			}
+			seenThreads[k] = true
+		}
+		filtered = append(filtered, h)
 	}
 
 	// Trim to requested limit.
@@ -713,6 +741,85 @@ func (r *FeedbackRepo) FindSimilarFeedback(
 	}
 
 	return filtered, nil
+}
+
+// feedbackThreadKeys resolves each feedback row to its source-thread
+// identity when the row came from an inbound support channel. The key
+// includes the workspace/subdomain scope: conversation/ticket IDs are
+// only unique within one workspace, and a tenant can connect several.
+// Rows without a thread identity map to "" and are never deduped
+// against each other.
+func (r *FeedbackRepo) feedbackThreadKeys(ctx context.Context, tenantID string, feedbackIDs []int64) (map[int64]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, source,
+			COALESCE(source_meta->>'intercom_workspace_id', source_meta->>'zendesk_subdomain', ''),
+			COALESCE(source_meta->>'intercom_conversation_id', source_meta->>'zendesk_ticket_id', '')
+		FROM user_feedback
+		WHERE tenant_id = $1 AND id = ANY($2)`,
+		tenantID, feedbackIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("feedback thread keys: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var source, scope, threadID string
+		if err := rows.Scan(&id, &source, &scope, &threadID); err != nil { // ptrext:allow pgx-scan
+			return nil, fmt.Errorf("feedback thread keys scan: %w", err)
+		}
+		if threadID != "" {
+			out[id] = source + ":" + scope + ":" + threadID
+		}
+	}
+	return out, rows.Err()
+}
+
+// LinkedRequestRef identifies a customer request already tracking a
+// feedback row (via customer_request_feedback_links).
+type LinkedRequestRef struct {
+	ID     string
+	CrNo   int64
+	Title  string
+	Status string
+}
+
+// RequestsLinkedToFeedback resolves which active customer requests
+// reference each of the given feedback rows — the dedup signal behind
+// "link to the existing request instead of creating a duplicate".
+func (r *FeedbackRepo) RequestsLinkedToFeedback(ctx context.Context, tenantID string, feedbackIDs []int64) (map[int64][]LinkedRequestRef, error) {
+	if len(feedbackIDs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT fl.feedback_id, cr.id, cr.display_number, cr.title, cr.status
+		FROM customer_request_feedback_links fl
+		JOIN customer_requests cr
+		  ON cr.tenant_id = fl.tenant_id AND cr.id = fl.request_id
+		WHERE fl.tenant_id = $1
+		  AND fl.feedback_id = ANY($2)
+		  AND cr.archived_at IS NULL
+		  AND cr.status <> 'cancelled'
+		ORDER BY cr.updated_at DESC`,
+		tenantID, feedbackIDs,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("requests linked to feedback: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[int64][]LinkedRequestRef{}
+	for rows.Next() {
+		var feedbackID int64
+		var ref LinkedRequestRef
+		if err := rows.Scan(&feedbackID, &ref.ID, &ref.CrNo, &ref.Title, &ref.Status); err != nil { // ptrext:allow pgx-scan
+			return nil, fmt.Errorf("requests linked to feedback scan: %w", err)
+		}
+		out[feedbackID] = append(out[feedbackID], ref)
+	}
+	return out, rows.Err()
 }
 
 // HasEmbedding checks if a tenant has any embedded feedback.

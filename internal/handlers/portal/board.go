@@ -31,6 +31,7 @@ var portalBoardTemplate = template.Must(template.New("portal-board").Parse(`<!do
   <meta name="robots" content="{{if .NoIndex}}noindex,nofollow{{else}}index,follow{{end}}">
   <meta name="description" content="{{.TenantName}} public board for browsing, voting, and commenting on requests.">
   <link rel="canonical" href="{{.BoardURL}}">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   {{if .NextURL}}<link rel="next" href="{{.NextURL}}">{{end}}
   <title>{{.TenantName}} | Public board{{if .HasQuery}} | {{.Query}}{{end}}</title>
   <style>
@@ -934,9 +935,9 @@ func portalBoardLoadError(w http.ResponseWriter, r *http.Request, err error) boo
 		return false
 	}
 	switch {
-	case errors.Is(err, portalsvc.ErrNotFound), errors.Is(err, pvrepo.ErrNotFound):
+	case errors.Is(err, portalsvc.ErrNotFound), errors.Is(err, pvsvc.ErrNotFound), errors.Is(err, pvrepo.ErrNotFound):
 		http.NotFound(w, r)
-	case errors.Is(err, portalsvc.ErrValidation), errors.Is(err, pvrepo.ErrInvalidInput):
+	case errors.Is(err, portalsvc.ErrValidation), errors.Is(err, pvsvc.ErrValidation), errors.Is(err, pvrepo.ErrInvalidInput):
 		http.Error(w, "invalid request", http.StatusBadRequest)
 	default:
 		http.Error(w, "portal unavailable", http.StatusInternalServerError)

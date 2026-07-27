@@ -575,6 +575,7 @@ func TestRouterHTTPDispatch_ExternalSync(t *testing.T) {
 	r.mountExternalSync(mux)
 
 	connectionID := "11111111-1111-4111-8111-111111111111"
+	installationID := "77777777-7777-4777-8777-777777777777"
 	mappingID := "22222222-2222-4222-8222-222222222222"
 	runID := "33333333-3333-4333-8333-333333333333"
 	failureID := "44444444-4444-4444-8444-444444444444"
@@ -584,6 +585,17 @@ func TestRouterHTTPDispatch_ExternalSync(t *testing.T) {
 	cases := []struct {
 		name, method, path, body string
 	}{
+		{"GET /external-sync/provider-installations", http.MethodGet, "/external-sync/provider-installations", ""},
+		{"POST /external-sync/provider-installations", http.MethodPost, "/external-sync/provider-installations", `{}`},
+		{"DELETE /external-sync/provider-installations/{id}", http.MethodDelete, "/external-sync/provider-installations/" + installationID, ""},
+		{"POST /external-sync/provider-installations/{id}:qualify", http.MethodPost, "/external-sync/provider-installations/" + installationID + ":qualify", ""},
+		{"GET /external-sync/provider-installations/{id}/resources", http.MethodGet, "/external-sync/provider-installations/" + installationID + "/resources", ""},
+		{
+			"POST /external-sync/provider-installations/{id}/resources:select",
+			http.MethodPost,
+			"/external-sync/provider-installations/" + installationID + "/resources:select",
+			`{}`,
+		},
 		{"GET /external-sync/connections", http.MethodGet, "/external-sync/connections", ""},
 		{"POST /external-sync/connections", http.MethodPost, "/external-sync/connections", `{}`},
 		{"PATCH /external-sync/connections/{id}", http.MethodPatch, "/external-sync/connections/" + connectionID, `{}`},
@@ -839,6 +851,17 @@ func TestRouterHTTPDispatch_Members(t *testing.T) {
 			serveAndAssertDispatched(t, mux, tc.method, tc.path, tc.body)
 		})
 	}
+}
+
+// ---------- mountExternalSync provider routes ----------
+
+func TestRouterHTTPDispatch_ExternalSyncProviders(t *testing.T) {
+	t.Parallel()
+	r := dispatchRouter()
+	mux := newRecovererMux()
+	r.mountExternalSync(mux)
+
+	serveAndAssertDispatched(t, mux, http.MethodGet, "/external-sync/providers", "")
 }
 
 // ---------- authProviders handler ----------

@@ -136,7 +136,7 @@ func newMetadataHandler(t *testing.T, providerName string, oidcOnly bool) *Handl
 		OIDCOnly:           oidcOnly,
 		InsecureSkipVerify: true,
 	})
-	svc, err := oidcauth.NewService(t.Context(), cfg, nil, nil)
+	svc, err := oidcauth.NewService(t.Context(), cfg, nil, nil, nil)
 	require.NoError(t, err)
 
 	signer, err := session.NewSigner("0123456789abcdef0123456789abcdef")

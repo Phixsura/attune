@@ -146,12 +146,17 @@ func (FakeSecrets) Encrypt(b []byte) ([]byte, error) {
 	return out, nil
 }
 
-// Decrypt strips the test marker.
+// Decrypt strips the test marker. Returns a fresh buffer (never a view
+// into the ciphertext) — production KMS decrypts allocate, and callers
+// wipe decrypted credentials after use, which must not corrupt a
+// ciphertext they alias.
 func (FakeSecrets) Decrypt(b []byte) ([]byte, error) {
 	if len(b) < 2 {
 		return nil, errCrypto
 	}
-	return b[2:], nil
+	out := make([]byte, len(b)-2)
+	copy(out, b[2:])
+	return out, nil
 }
 
 // FakeMetrics — recorder; tests can introspect every emitted call to

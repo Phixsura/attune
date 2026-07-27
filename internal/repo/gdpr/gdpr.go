@@ -12,15 +12,27 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	"github.com/Phixsura/attune/internal/pkg/subjectkey"
 )
 
 var ErrSubjectNotFound = errors.New("gdpr subject not found")
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool dbPool
+}
+
+// dbPool is the slice of *pgxpool.Pool the repo actually uses — an
+// interface so unit tests can drive the erasure transaction against a
+// scripted Tx (PR #122 pattern; the real flow needs a live database).
+type dbPool interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
 func New(pool *pgxpool.Pool) *Repo {
@@ -37,6 +49,11 @@ type Counts struct {
 	ReplyDraftRevisionCount   int
 	ReplyDraftEventCount      int
 	ReplyDeliveryAttemptCount int
+	// CustomerLinkCount / VoteCount are customer-request rows carrying
+	// the subject's identity (email/name); erasure anonymizes them
+	// in place instead of deleting so request aggregates survive.
+	CustomerLinkCount int
+	VoteCount         int
 }
 
 type ExportData struct {
@@ -51,7 +68,11 @@ type ExportData struct {
 	ReplyDraftRevisionRows   []json.RawMessage
 	ReplyDraftEventRows      []json.RawMessage
 	ReplyDeliveryAttemptRows []json.RawMessage
-	Counts                   Counts
+	// Customer-request rows carrying the subject's identity — the same
+	// rows the delete path anonymizes (Art. 15 must cover Art. 17's scope).
+	CustomerLinkRows []json.RawMessage
+	VoteRows         []json.RawMessage
+	Counts           Counts
 }
 
 type DeleteResult struct {
@@ -84,6 +105,8 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 		ReplyDraftRevisionRows:   rows.replyDraftRevisions,
 		ReplyDraftEventRows:      rows.replyDraftEvents,
 		ReplyDeliveryAttemptRows: rows.replyDeliveryAttempts,
+		CustomerLinkRows:         rows.customerLinks,
+		VoteRows:                 rows.votes,
 		Counts:                   rows.counts(),
 	}), nil
 }
@@ -97,6 +120,8 @@ type subjectExportRows struct {
 	replyDraftRevisions   []json.RawMessage
 	replyDraftEvents      []json.RawMessage
 	replyDeliveryAttempts []json.RawMessage
+	customerLinks         []json.RawMessage
+	votes                 []json.RawMessage
 }
 
 func (rows subjectExportRows) counts() Counts {
@@ -109,6 +134,8 @@ func (rows subjectExportRows) counts() Counts {
 		ReplyDraftRevisionCount:   len(rows.replyDraftRevisions),
 		ReplyDraftEventCount:      len(rows.replyDraftEvents),
 		ReplyDeliveryAttemptCount: len(rows.replyDeliveryAttempts),
+		CustomerLinkCount:         len(rows.customerLinks),
+		VoteCount:                 len(rows.votes),
 	}
 }
 
@@ -135,6 +162,12 @@ func (r *Repo) exportSubjectRows(ctx context.Context, tenantID, subjectKey strin
 	}
 	if rows.replyDraftEvents, err = r.exportReplyDraftEventRows(ctx, tenantID, subjectKey); err != nil {
 		return subjectExportRows{}, err
+	}
+	if rows.customerLinks, err = r.exportCustomerRequestSubjectRows(ctx, tenantID, subjectKey, "customer_request_customer_links"); err != nil {
+		return rows, err
+	}
+	if rows.votes, err = r.exportCustomerRequestSubjectRows(ctx, tenantID, subjectKey, "customer_request_votes"); err != nil {
+		return rows, err
 	}
 	if rows.replyDeliveryAttempts, err = r.exportReplyDeliveryAttemptRows(ctx, tenantID, subjectKey); err != nil {
 		return subjectExportRows{}, err
@@ -163,6 +196,29 @@ func (r *Repo) exportFeedbackRows(ctx context.Context, tenantID, subjectKey stri
 		return nil, fmt.Errorf("query feedback export rows: %w", err)
 	}
 	return feedbackRows, nil
+}
+
+// exportCustomerRequestSubjectRows exports the subject's identity rows
+// from one customer-request table (links or votes) — the same rows the
+// delete path anonymizes. Matches by subject_key, or by the tenant-scoped
+// subject_hash for rows already anonymized in a previous erasure. `table`
+// is a compile-time constant at every call site, never user input.
+func (r *Repo) exportCustomerRequestSubjectRows(ctx context.Context, tenantID, subjectKey, table string) ([]json.RawMessage, error) {
+	subjectHash := subjectkey.Hash(tenantID, subjectKey)
+	rows, err := r.queryJSONLines(ctx, `
+		SELECT row_to_json(t)
+		FROM (
+			SELECT x.*, cr.display_id AS request_display_id, cr.title AS request_title
+			FROM `+table+` x
+			JOIN customer_requests cr ON cr.tenant_id = x.tenant_id AND cr.id = x.request_id
+			WHERE x.tenant_id = $1
+			  AND (x.subject_key = $2 OR (x.subject_key = '' AND x.subject_hash = $3))
+			ORDER BY x.created_at, x.id
+		) t`, tenantID, subjectKey, subjectHash)
+	if err != nil {
+		return nil, fmt.Errorf("query %s export rows: %w", table, err)
+	}
+	return rows, nil
 }
 
 func (r *Repo) exportFeedbackTagRows(ctx context.Context, tenantID, subjectKey string) ([]json.RawMessage, error) {
@@ -325,7 +381,7 @@ func (r *Repo) Delete(ctx context.Context, tenantID, subjectKey string) (*Delete
 		return nil, fmt.Errorf("delete cohort memberships: %w", err)
 	}
 
-	counts, err := deleteLockedSubject(ctx, tx, tenantID, info.feedbackIDs)
+	counts, err := deleteLockedSubject(ctx, tx, tenantID, subjectKey, info.feedbackIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -370,7 +426,7 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 	if err != nil {
 		return nil, err
 	}
-	counts, err := deleteLockedSubject(ctx, tx, tenantID, info.feedbackIDs)
+	counts, err := deleteLockedSubject(ctx, tx, tenantID, subjectKey, info.feedbackIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +441,7 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 	}), nil
 }
 
-func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, feedbackIDs []int64) (Counts, error) {
+func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectKey string, feedbackIDs []int64) (Counts, error) {
 	var counts Counts
 	if err := tx.QueryRow(
 		ctx, `
@@ -430,7 +486,71 @@ func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, feedba
 	if _, err := tx.Exec(ctx, `DELETE FROM user_feedback WHERE tenant_id = $1 AND id = ANY($2)`, tenantID, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete user_feedback rows: %w", err)
 	}
+	linkCount, voteCount, err := anonymizeCustomerRequestSubject(ctx, tx, tenantID, subjectKey)
+	if err != nil {
+		return Counts{}, err
+	}
+	counts.CustomerLinkCount = linkCount
+	counts.VoteCount = voteCount
 	return counts, nil
+}
+
+// anonymizeCustomerRequestSubject scrubs the subject's identity from
+// customer-request links and votes. These tables carry the subject's
+// email (subject_key) and name (subject_display) — copied there by
+// manual linking and by the promote-time auto-attribution — but have no
+// FK to user_feedback, so the feedback purge never reaches them.
+// Anonymize in place: the per-tenant subject_hash keeps rows unique and
+// keeps request aggregates (vote counts, customer counts) intact
+// without retaining the raw identity.
+func anonymizeCustomerRequestSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectKey string) (linkCount, voteCount int, err error) {
+	subjectHash := subjectkey.Hash(tenantID, subjectKey)
+	for _, table := range []string{"customer_request_customer_links", "customer_request_votes"} {
+		count, tableErr := anonymizeSubjectRowsInTable(ctx, tx, table, tenantID, subjectKey, subjectHash)
+		if tableErr != nil {
+			return 0, 0, tableErr
+		}
+		if table == "customer_request_customer_links" {
+			linkCount = count
+		} else {
+			voteCount = count
+		}
+	}
+	return linkCount, voteCount, nil
+}
+
+// anonymizeSubjectRowsInTable scrubs one table's rows for the subject.
+// All the subject's rows on one request+account collapse to a single
+// anonymized tuple — the unique constraint requires keeping exactly one
+// per group before scrubbing.
+func anonymizeSubjectRowsInTable(ctx context.Context, tx pgx.Tx, table, tenantID, subjectKey, subjectHash string) (int, error) {
+	if _, err := tx.Exec(ctx, `
+		DELETE FROM `+table+`
+		WHERE tenant_id = $1
+		  AND (subject_key = $2 OR (subject_key = '' AND subject_hash = $3))
+		  AND id NOT IN (
+			SELECT (array_agg(id ORDER BY created_at, id))[1]
+			FROM `+table+`
+			WHERE tenant_id = $1
+			  AND (subject_key = $2 OR (subject_key = '' AND subject_hash = $3))
+			GROUP BY request_id, account_key
+		  )`,
+		tenantID, subjectKey, subjectHash,
+	); err != nil {
+		return 0, fmt.Errorf("dedup %s rows: %w", table, err)
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE `+table+`
+		SET subject_key = '', subject_display = '', note = '',
+		    subject_hash = $3
+		WHERE tenant_id = $1
+		  AND subject_key = $2`,
+		tenantID, subjectKey, subjectHash,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("anonymize %s rows: %w", table, err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 type subjectMetadata struct {

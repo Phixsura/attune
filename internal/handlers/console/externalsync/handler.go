@@ -28,6 +28,12 @@ import (
 
 type service interface {
 	ListConnections(ctx context.Context, tenantID string) ([]repo.Connection, error)
+	ListProviderInstallations(ctx context.Context, tenantID string) ([]repo.ProviderInstallation, error)
+	CreateProviderInstallation(ctx context.Context, in svc.CreateProviderInstallationInput) (*repo.ProviderInstallation, []repo.ProviderInstallationResource, error)
+	DeleteProviderInstallation(ctx context.Context, tenantID string, id uuid.UUID, actor svc.Actor, auditActor auditlogsvc.Actor) error
+	QualifyProviderInstallation(ctx context.Context, tenantID string, id uuid.UUID, actor svc.Actor, auditActor auditlogsvc.Actor) (svc.ProviderInstallationQualificationResult, error)
+	ListProviderInstallationResources(ctx context.Context, tenantID string, installationID uuid.UUID) ([]repo.ProviderInstallationResource, error)
+	SelectProviderInstallationResources(ctx context.Context, in svc.SelectProviderInstallationResourcesInput) ([]repo.ProviderInstallationResource, error)
 	CreateConnection(ctx context.Context, in svc.CreateConnectionInput) (*repo.Connection, error)
 	UpdateConnection(ctx context.Context, in svc.UpdateConnectionInput) (*repo.Connection, error)
 	DeleteConnection(ctx context.Context, tenantID string, id uuid.UUID, actor svc.Actor, auditActor auditlogsvc.Actor) error
@@ -76,24 +82,142 @@ func (h *Handler) ListConnections(ctx *dispatcher.RequestContext[*session.AuthCt
 	return dispatcher.OK(ptrext.Of(attunev1.ListExternalConnectionsResponse{Connections: out}))
 }
 
+func (h *Handler) ListProviders(_ *dispatcher.RequestContext[*session.AuthCtx], _ *attunev1.ListExternalSyncProvidersRequest) (dispatcher.Result[*attunev1.ListExternalSyncProvidersResponse], error) {
+	entries := externalsynccore.Providers()
+	out := make([]*attunev1.ExternalSyncProvider, 0, len(entries))
+	for _, entry := range entries {
+		if entry.Provider == "noop" {
+			continue
+		}
+		out = append(out, ptrext.Of(attunev1.ExternalSyncProvider{
+			Provider: entry.Provider,
+			Display:  entry.Display,
+		}))
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.ListExternalSyncProvidersResponse{Providers: out}))
+}
+
+func (h *Handler) ListProviderInstallations(ctx *dispatcher.RequestContext[*session.AuthCtx], _ *attunev1.ListExternalProviderInstallationsRequest) (dispatcher.Result[*attunev1.ListExternalProviderInstallationsResponse], error) {
+	rows, err := h.service.ListProviderInstallations(ctx, ctx.Auth.TenantID)
+	if err != nil {
+		return internalError[*attunev1.ListExternalProviderInstallationsResponse](ctx, "ListProviderInstallations", err)
+	}
+	out := make([]*attunev1.ExternalProviderInstallation, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, providerInstallationToProto(row))
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.ListExternalProviderInstallationsResponse{Installations: out}))
+}
+
+func (h *Handler) CreateProviderInstallation(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.CreateExternalProviderInstallationRequest) (dispatcher.Result[*attunev1.ExternalProviderInstallation], error) {
+	row, _, err := h.service.CreateProviderInstallation(ctx, svc.CreateProviderInstallationInput{
+		TenantID:               ctx.Auth.TenantID,
+		Provider:               req.GetProvider(),
+		DisplayName:            req.GetDisplayName(),
+		InstallationKind:       req.GetInstallationKind(),
+		ExternalInstallationID: req.GetExternalInstallationId(),
+		AccountLogin:           req.GetAccountLogin(),
+		AccountID:              req.GetAccountId(),
+		AccountURL:             req.GetAccountUrl(),
+		BaseURL:                req.GetBaseUrl(),
+		PermissionsJSON:        req.GetPermissionsJson(),
+		CapabilityProfileJSON:  req.GetCapabilityProfileJson(),
+		ResourceSelection:      req.GetResourceSelection(),
+		Resources:              resourceInputsFromProto(req.GetResources()),
+		Actor:                  actor(ctx.Auth),
+		AuditActor:             auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()),
+	})
+	if err != nil {
+		return mapError[*attunev1.ExternalProviderInstallation](ctx, "CreateProviderInstallation", err)
+	}
+	return dispatcher.OK(providerInstallationToProto(ptrext.Indirect(row)))
+}
+
+func (h *Handler) DeleteProviderInstallation(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.DeleteExternalProviderInstallationRequest) (dispatcher.Result[*attunev1.DeleteExternalProviderInstallationResponse], error) {
+	id, err := parseUUID(req.GetId())
+	if err != nil {
+		return badID[*attunev1.DeleteExternalProviderInstallationResponse]("invalid provider installation id")
+	}
+	err = h.service.DeleteProviderInstallation(ctx, ctx.Auth.TenantID, id, actor(ctx.Auth), auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()))
+	if err != nil {
+		return mapError[*attunev1.DeleteExternalProviderInstallationResponse](ctx, "DeleteProviderInstallation", err)
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.DeleteExternalProviderInstallationResponse{}))
+}
+
+func (h *Handler) QualifyProviderInstallation(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.QualifyExternalProviderInstallationRequest) (dispatcher.Result[*attunev1.QualifyExternalProviderInstallationResponse], error) {
+	id, err := parseUUID(req.GetId())
+	if err != nil {
+		return badID[*attunev1.QualifyExternalProviderInstallationResponse]("invalid provider installation id")
+	}
+	result, err := h.service.QualifyProviderInstallation(ctx, ctx.Auth.TenantID, id, actor(ctx.Auth), auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()))
+	if err != nil {
+		return mapError[*attunev1.QualifyExternalProviderInstallationResponse](ctx, "QualifyProviderInstallation", err)
+	}
+	return dispatcher.OK(providerInstallationQualificationToProto(result))
+}
+
+func (h *Handler) ListProviderInstallationResources(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.ListExternalProviderInstallationResourcesRequest) (dispatcher.Result[*attunev1.ListExternalProviderInstallationResourcesResponse], error) {
+	id, err := parseUUID(req.GetId())
+	if err != nil {
+		return badID[*attunev1.ListExternalProviderInstallationResourcesResponse]("invalid provider installation id")
+	}
+	rows, err := h.service.ListProviderInstallationResources(ctx, ctx.Auth.TenantID, id)
+	if err != nil {
+		return mapError[*attunev1.ListExternalProviderInstallationResourcesResponse](ctx, "ListProviderInstallationResources", err)
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.ListExternalProviderInstallationResourcesResponse{
+		Resources: providerInstallationResourcesToProto(rows),
+	}))
+}
+
+func (h *Handler) SelectProviderInstallationResources(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.SelectExternalProviderInstallationResourcesRequest) (dispatcher.Result[*attunev1.SelectExternalProviderInstallationResourcesResponse], error) {
+	id, err := parseUUID(req.GetId())
+	if err != nil {
+		return badID[*attunev1.SelectExternalProviderInstallationResourcesResponse]("invalid provider installation id")
+	}
+	resourceIDs, err := parseUUIDs(req.GetResourceIds())
+	if err != nil {
+		return badID[*attunev1.SelectExternalProviderInstallationResourcesResponse]("invalid provider installation resource id")
+	}
+	rows, err := h.service.SelectProviderInstallationResources(ctx, svc.SelectProviderInstallationResourcesInput{
+		TenantID:       ctx.Auth.TenantID,
+		InstallationID: id,
+		ResourceIDs:    resourceIDs,
+		Actor:          actor(ctx.Auth),
+		AuditActor:     auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()),
+	})
+	if err != nil {
+		return mapError[*attunev1.SelectExternalProviderInstallationResourcesResponse](ctx, "SelectProviderInstallationResources", err)
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.SelectExternalProviderInstallationResourcesResponse{
+		Resources: providerInstallationResourcesToProto(rows),
+	}))
+}
+
 func (h *Handler) CreateConnection(ctx *dispatcher.RequestContext[*session.AuthCtx], req *attunev1.CreateExternalConnectionRequest) (dispatcher.Result[*attunev1.ExternalConnection], error) {
 	enabled := true
 	if req.Enabled != nil {
 		enabled = req.GetEnabled()
 	}
+	providerInstallationID, err := parseOptionalUUID(req.GetProviderInstallationId())
+	if err != nil {
+		return badID[*attunev1.ExternalConnection]("invalid provider installation id")
+	}
 	row, err := h.service.CreateConnection(ctx, svc.CreateConnectionInput{
-		TenantID:           ctx.Auth.TenantID,
-		Provider:           req.GetProvider(),
-		Name:               req.GetName(),
-		AuthType:           req.GetAuthType(),
-		Credential:         req.GetCredential(),
-		WebhookSecret:      req.GetWebhookSecret(),
-		BaseURL:            req.GetBaseUrl(),
-		ProviderConfigJSON: req.GetProviderConfigJson(),
-		Scopes:             req.GetScopes(),
-		Enabled:            enabled,
-		Actor:              actor(ctx.Auth),
-		AuditActor:         auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()),
+		TenantID:               ctx.Auth.TenantID,
+		ProviderInstallationID: providerInstallationID,
+		Provider:               req.GetProvider(),
+		Name:                   req.GetName(),
+		AuthType:               req.GetAuthType(),
+		Credential:             req.GetCredential(),
+		WebhookSecret:          req.GetWebhookSecret(),
+		BaseURL:                req.GetBaseUrl(),
+		ProviderConfigJSON:     req.GetProviderConfigJson(),
+		Scopes:                 req.GetScopes(),
+		Enabled:                enabled,
+		Actor:                  actor(ctx.Auth),
+		AuditActor:             auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()),
 	})
 	if err != nil {
 		return mapError[*attunev1.ExternalConnection](ctx, "CreateConnection", err)
@@ -320,12 +444,14 @@ func (h *Handler) RequestRun(ctx *dispatcher.RequestContext[*session.AuthCtx], r
 		mappingID = ptrext.Of(id)
 	}
 	row, err := h.service.RequestRun(ctx, svc.RequestRunInput{
-		TenantID:     ctx.Auth.TenantID,
-		ConnectionID: connectionID,
-		MappingID:    mappingID,
-		Direction:    runDirectionFromProto(req.GetDirection()),
-		Actor:        actor(ctx.Auth),
-		AuditActor:   auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()),
+		TenantID:      ctx.Auth.TenantID,
+		ConnectionID:  connectionID,
+		MappingID:     mappingID,
+		Direction:     runDirectionFromProto(req.GetDirection()),
+		LocalObjectID: req.GetLocalObjectId(),
+		ExternalKey:   req.GetExternalKey(),
+		Actor:         actor(ctx.Auth),
+		AuditActor:    auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()),
 	})
 	if err != nil {
 		return mapError[*attunev1.ExternalSyncRun](ctx, "RequestRun", err)
@@ -580,7 +706,7 @@ func mapError[T proto.Message](ctx context.Context, where string, err error) (di
 		return dispatcher.Fail[T](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	case errors.Is(err, svc.ErrProviderUnavailable):
 		return dispatcher.Fail[T](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
-	case errors.Is(err, repo.ErrConnectionNotFound), errors.Is(err, repo.ErrMappingNotFound), errors.Is(err, repo.ErrRunNotFound), errors.Is(err, repo.ErrFailureNotFound), errors.Is(err, repo.ErrConflictNotFound), errors.Is(err, repo.ErrEventNotFound):
+	case errors.Is(err, repo.ErrConnectionNotFound), errors.Is(err, repo.ErrMappingNotFound), errors.Is(err, repo.ErrRunNotFound), errors.Is(err, repo.ErrFailureNotFound), errors.Is(err, repo.ErrConflictNotFound), errors.Is(err, repo.ErrEventNotFound), errors.Is(err, repo.ErrInstallationNotFound), errors.Is(err, repo.ErrResourceNotFound):
 		return dispatcher.Fail[T](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, "external sync resource not found")
 	case errors.Is(err, repo.ErrConflict):
 		return dispatcher.Fail[T](http.StatusConflict, attunev1.ErrorCode_CONFLICT, err.Error())
@@ -593,7 +719,7 @@ func internalError[T proto.Message](ctx context.Context, where string, err error
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return dispatcher.Result[T]{}, err
 	}
-	logext.Errorf(ctx, "[console.externalsync.%s] failed,err:%+v", where, err.Error())
+	logext.Errorf(ctx, "[console.externalsync.%s] failed,err_type:%T", where, err)
 	return dispatcher.Fail[T](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "external sync operation failed")
 }
 
@@ -613,6 +739,13 @@ func formatTimePtr(t *time.Time) string {
 		return ""
 	}
 	return formatTime(ptrext.Indirect(t))
+}
+
+func formatUUIDPtr(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return ptrext.Indirect(id).String()
 }
 
 func directionFromProto(direction attunev1.ExternalSyncDirection) string {
@@ -765,7 +898,98 @@ func connectionToProto(row repo.Connection) *attunev1.ExternalConnection {
 		CreatedAt:               formatTime(row.CreatedAt),
 		UpdatedAt:               formatTime(row.UpdatedAt),
 		WebhookSecretConfigured: row.WebhookSecretKeyID != "" && len(row.WebhookSecretCiphertext) > 0,
+		ProviderInstallationId:  formatUUIDPtr(row.ProviderInstallationID),
 	})
+}
+
+func providerInstallationToProto(row repo.ProviderInstallation) *attunev1.ExternalProviderInstallation {
+	return ptrext.Of(attunev1.ExternalProviderInstallation{
+		Id:                     row.ID.String(),
+		TenantId:               row.TenantID,
+		Provider:               row.Provider,
+		DisplayName:            row.DisplayName,
+		InstallationKind:       row.InstallationKind,
+		Status:                 row.Status,
+		ExternalInstallationId: row.ExternalInstallationID,
+		AccountLogin:           row.AccountLogin,
+		AccountId:              row.AccountID,
+		AccountUrl:             row.AccountURL,
+		BaseUrl:                row.BaseURL,
+		PermissionsJson:        string(row.Permissions),
+		CapabilityProfileJson:  string(row.CapabilityProfile),
+		ResourceSelection:      row.ResourceSelection,
+		QualificationStatus:    row.QualificationStatus,
+		LastQualifiedAt:        formatTimePtr(row.LastQualifiedAt),
+		LastError:              row.LastError,
+		CreatedBy:              row.CreatedBy,
+		UpdatedBy:              row.UpdatedBy,
+		CreatedAt:              formatTime(row.CreatedAt),
+		UpdatedAt:              formatTime(row.UpdatedAt),
+	})
+}
+
+func providerInstallationResourcesToProto(rows []repo.ProviderInstallationResource) []*attunev1.ExternalProviderInstallationResource {
+	out := make([]*attunev1.ExternalProviderInstallationResource, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, providerInstallationResourceToProto(row))
+	}
+	return out
+}
+
+func providerInstallationResourceToProto(row repo.ProviderInstallationResource) *attunev1.ExternalProviderInstallationResource {
+	return ptrext.Of(attunev1.ExternalProviderInstallationResource{
+		Id:                 row.ID.String(),
+		TenantId:           row.TenantID,
+		InstallationId:     row.InstallationID.String(),
+		Provider:           row.Provider,
+		ResourceType:       row.ResourceType,
+		ExternalResourceId: row.ExternalResourceID,
+		ResourceKey:        row.ResourceKey,
+		DisplayName:        row.DisplayName,
+		HtmlUrl:            row.HTMLURL,
+		Selected:           row.Selected,
+		Status:             row.Status,
+		PermissionsJson:    string(row.Permissions),
+		LastSeenAt:         formatTimePtr(row.LastSeenAt),
+		CreatedAt:          formatTime(row.CreatedAt),
+		UpdatedAt:          formatTime(row.UpdatedAt),
+	})
+}
+
+func providerInstallationQualificationToProto(row svc.ProviderInstallationQualificationResult) *attunev1.QualifyExternalProviderInstallationResponse {
+	checks := make([]*attunev1.ExternalSyncQualificationCheck, 0, len(row.Checks))
+	for _, check := range row.Checks {
+		checks = append(checks, ptrext.Of(attunev1.ExternalSyncQualificationCheck{
+			Name:       check.Name,
+			Status:     qualificationStatusToProto(check.Status),
+			Summary:    check.Summary,
+			DetailJson: check.DetailJSON,
+		}))
+	}
+	return ptrext.Of(attunev1.QualifyExternalProviderInstallationResponse{
+		InstallationId: row.Installation.ID.String(),
+		Ready:          row.Ready,
+		Grade:          row.Grade,
+		Checks:         checks,
+		Installation:   providerInstallationToProto(row.Installation),
+	})
+}
+
+func resourceInputsFromProto(rows []*attunev1.ExternalProviderInstallationResourceInput) []svc.ProviderInstallationResourceInput {
+	out := make([]svc.ProviderInstallationResourceInput, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, svc.ProviderInstallationResourceInput{
+			ResourceType:       row.GetResourceType(),
+			ExternalResourceID: row.GetExternalResourceId(),
+			ResourceKey:        row.GetResourceKey(),
+			DisplayName:        row.GetDisplayName(),
+			HTMLURL:            row.GetHtmlUrl(),
+			Selected:           row.GetSelected(),
+			Status:             row.GetStatus(),
+			PermissionsJSON:    row.GetPermissionsJson(),
+		})
+	}
+	return out
 }
 
 func mappingToProto(row repo.Mapping) *attunev1.ExternalObjectMapping {
@@ -815,29 +1039,30 @@ func qualificationToProto(row svc.QualificationResult) *attunev1.QualifyExternal
 
 func runToProto(row repo.SyncRun) *attunev1.ExternalSyncRun {
 	return ptrext.Of(attunev1.ExternalSyncRun{
-		Id:               row.ID.String(),
-		TenantId:         row.TenantID,
-		ConnectionId:     row.ConnectionID.String(),
-		MappingId:        uuidToString(row.MappingID),
-		Direction:        directionToProto(row.Direction),
-		Trigger:          triggerToProto(row.Trigger),
-		Status:           statusToProto(row.Status),
-		Attempts:         int32(row.Attempts),
-		NextRetryAt:      formatTime(row.NextRetryAt),
-		StartedAt:        formatTimePtr(row.StartedAt),
-		FinishedAt:       formatTimePtr(row.FinishedAt),
-		CursorBeforeJson: string(row.CursorBefore),
-		CursorAfterJson:  string(row.CursorAfter),
-		RecordsSeen:      int32(row.RecordsSeen),
-		RecordsChanged:   int32(row.RecordsChanged),
-		RecordsFailed:    int32(row.RecordsFailed),
-		ConflictsCreated: int32(row.ConflictsCreated),
-		ErrorKind:        row.ErrorKind,
-		ErrorMessage:     row.ErrorMessage,
-		ActorId:          row.ActorID,
-		CreatedAt:        formatTime(row.CreatedAt),
-		UpdatedAt:        formatTime(row.UpdatedAt),
-		InFlight:         row.ClaimedAt != nil,
+		Id:                row.ID.String(),
+		TenantId:          row.TenantID,
+		ConnectionId:      row.ConnectionID.String(),
+		MappingId:         uuidToString(row.MappingID),
+		Direction:         directionToProto(row.Direction),
+		Trigger:           triggerToProto(row.Trigger),
+		Status:            statusToProto(row.Status),
+		Attempts:          int32(row.Attempts),
+		NextRetryAt:       formatTime(row.NextRetryAt),
+		StartedAt:         formatTimePtr(row.StartedAt),
+		FinishedAt:        formatTimePtr(row.FinishedAt),
+		CursorBeforeJson:  string(row.CursorBefore),
+		CursorAfterJson:   string(row.CursorAfter),
+		InputMetadataJson: string(row.InputMetadata),
+		RecordsSeen:       int32(row.RecordsSeen),
+		RecordsChanged:    int32(row.RecordsChanged),
+		RecordsFailed:     int32(row.RecordsFailed),
+		ConflictsCreated:  int32(row.ConflictsCreated),
+		ErrorKind:         row.ErrorKind,
+		ErrorMessage:      row.ErrorMessage,
+		ActorId:           row.ActorID,
+		CreatedAt:         formatTime(row.CreatedAt),
+		UpdatedAt:         formatTime(row.UpdatedAt),
+		InFlight:          row.ClaimedAt != nil,
 	})
 }
 

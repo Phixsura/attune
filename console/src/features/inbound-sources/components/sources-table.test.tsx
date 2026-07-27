@@ -64,6 +64,7 @@ describe('SourcesTable', () => {
         togglingId="src-email"
         onSelect={vi.fn()}
         onRotate={vi.fn()}
+        onEdit={vi.fn()}
         onPause={vi.fn()}
         onResume={vi.fn()}
         onDelete={vi.fn()}

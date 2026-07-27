@@ -1,6 +1,7 @@
 package database
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -90,12 +91,178 @@ func TestIsNoTxMigration(t *testing.T) {
 	}
 }
 
+func TestMigrationExecutionBodyStripsOuterTransactionEnvelope(t *testing.T) {
+	body := []byte(`-- legacy migration with explicit transaction wrapper
+
+BEGIN;
+CREATE TABLE IF NOT EXISTS example_items (
+    id TEXT PRIMARY KEY
+);
+COMMIT;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Contains(t, got, "legacy migration")
+	require.Contains(t, got, "CREATE TABLE IF NOT EXISTS example_items")
+	require.NotContains(t, got, "\nBEGIN;\n")
+	require.NotContains(t, got, "\nCOMMIT;\n")
+}
+
+func TestMigrationExecutionBodyKeepsPLpgSQLBlocks(t *testing.T) {
+	body := []byte(`DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1) THEN
+    RAISE NOTICE 'ok';
+  END IF;
+END $$;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Equal(t, string(body), got)
+	require.Contains(t, got, "\nBEGIN\n")
+	require.Contains(t, got, "END $$;")
+}
+
+func TestMigrationExecutionBodyKeepsOnlyInnerPLpgSQLBlocksWhenWrapped(t *testing.T) {
+	body := []byte(`BEGIN;
+DO $$
+BEGIN
+  RAISE NOTICE 'inside';
+END $$;
+COMMIT;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.NotContains(t, got, "BEGIN;\nDO")
+	require.Contains(t, got, "DO $$\nBEGIN\n")
+	require.Contains(t, got, "END $$;")
+	require.NotContains(t, got, "\nCOMMIT;")
+}
+
+func TestMigrationExecutionBodyStripsCaseInsensitiveLegacyEnvelope(t *testing.T) {
+	body := []byte(`-- old hand-written migration
+
+ begin  ;
+ALTER TABLE example_items ADD COLUMN title TEXT;
+ commit ;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Contains(t, got, "-- old hand-written migration")
+	require.Contains(t, got, "ALTER TABLE example_items")
+	require.NotContains(t, strings.ToLower(got), "begin")
+	require.NotContains(t, strings.ToLower(got), "commit")
+}
+
+func TestMigrationExecutionBodyStripsEnvelopeWithTrailingComments(t *testing.T) {
+	body := []byte(`-- legacy wrapper with comments
+BEGIN; -- explicit transaction starts here
+ALTER TABLE example_items ADD COLUMN subtitle TEXT;
+COMMIT; -- explicit transaction ends here
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Contains(t, got, "legacy wrapper with comments")
+	require.Contains(t, got, "ALTER TABLE example_items ADD COLUMN subtitle TEXT")
+	require.NotContains(t, got, "explicit transaction starts here")
+	require.NotContains(t, got, "explicit transaction ends here")
+}
+
+func TestMigrationExecutionBodyStripsRollbackEnvelope(t *testing.T) {
+	body := []byte(`BEGIN;
+CREATE TABLE example_items (id TEXT PRIMARY KEY);
+ROLLBACK;
+`)
+
+	got := string(migrationExecutionBody(body))
+
+	require.Equal(t, "CREATE TABLE example_items (id TEXT PRIMARY KEY);\n", got)
+}
+
+func TestMigrationExecutionBodyKeepsUnpairedTransactionControlLines(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "begin without terminal commit",
+			body: "BEGIN;\nCREATE TABLE example_items (id TEXT PRIMARY KEY);\n",
+		},
+		{
+			name: "commit without opening begin",
+			body: "CREATE TABLE example_items (id TEXT PRIMARY KEY);\nCOMMIT;\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.body, string(migrationExecutionBody([]byte(tt.body))))
+		})
+	}
+}
+
+func TestMigrationExecutionBodyKeepsCommentOnlyTransactionMentions(t *testing.T) {
+	body := []byte(`-- BEGIN;
+CREATE TABLE example_items (id TEXT PRIMARY KEY);
+-- COMMIT;
+`)
+
+	require.Equal(t, string(body), string(migrationExecutionBody(body)))
+}
+
+func TestMigrationExecutionBodyNormalizesEmbeddedLegacyWrappers(t *testing.T) {
+	t.Parallel()
+
+	names, err := LoadMigrationNames()
+	require.NoError(t, err)
+
+	normalized := 0
+	for _, name := range names {
+		body, err := migrationFS.ReadFile("migrations/" + name)
+		require.NoError(t, err)
+		execBody := migrationExecutionBody(body)
+		if string(execBody) == string(body) {
+			continue
+		}
+		normalized++
+		require.False(t, isTransactionControlLine([]byte(firstEffectiveLine(execBody)), "begin"), name)
+		require.False(t, isTransactionControlLine([]byte(lastEffectiveLine(execBody)), "commit"), name)
+		require.False(t, isTransactionControlLine([]byte(lastEffectiveLine(execBody)), "rollback"), name)
+	}
+
+	require.GreaterOrEqual(t, normalized, 1)
+}
+
 func TestMigrationCount(t *testing.T) {
 	t.Parallel()
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 113, count, "should match current migration count")
+	require.Equal(t, 118, count, "should match current migration count")
+}
+
+func firstEffectiveLine(body []byte) string {
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(strings.TrimSpace(line), "--") {
+			return line
+		}
+	}
+	return ""
+}
+
+func lastEffectiveLine(body []byte) string {
+	lines := strings.Split(string(body), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(strings.TrimSpace(line), "--") {
+			return line
+		}
+	}
+	return ""
 }
 
 func TestPublicVisibilityMigrationAllowsPublicModerationAuditActions(t *testing.T) {
@@ -140,6 +307,54 @@ func TestExternalSyncMigrationAllowsAllExternalSyncAuditActions(t *testing.T) {
 		"external_sync_event.replay",
 	} {
 		require.Contains(t, sql, "'"+action+"'", "audit action must be accepted by chk_audit_action_value")
+	}
+}
+
+func TestGitHubBidirectionalSyncMigrationAllowsCreateIssueAuditAction(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/112_github_bidirectional_issue_sync.sql")
+	require.NoError(t, err)
+	require.Contains(t, string(body), "'customer_request.create_github_issue'")
+}
+
+func TestExternalProviderInstallationsMigrationAllowsAuditActions(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/113_external_provider_installations.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, action := range []string{
+		"external_provider_installation.create",
+		"external_provider_installation.delete",
+		"external_provider_installation.qualify",
+		"external_provider_installation.resources_select",
+	} {
+		require.Contains(t, sql, "'"+action+"'", "audit action must be accepted by chk_audit_action_value")
+	}
+}
+
+func TestCustomerRequestDeliveryArtifactsMigrationDefinesProjectionContract(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/114_customer_request_delivery_artifacts.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, value := range []string{
+		"customer_request_delivery_artifacts",
+		"'pull_request'",
+		"'commit'",
+		"'deployment'",
+		"'release'",
+		"'project_item'",
+		"'support_ticket'",
+		"'implements'",
+		"'ships_in'",
+		"'tracked_by'",
+		"idx_customer_request_delivery_artifacts_unique",
+		"jsonb_typeof(payload) = 'object'",
+	} {
+		require.Contains(t, sql, value, "delivery artifact migration should include %s", value)
 	}
 }
 
@@ -257,4 +472,68 @@ func TestMigrationLockKey(t *testing.T) {
 
 	// Verify the lock key is a stable constant
 	require.Equal(t, int64(0x7AEC0ADBA51C042), migrationLockKey)
+}
+
+// TestAuditActionConstraintAppendOnly guards the two-layer audit
+// allow-list against silent regression: every migration that rebuilds
+// chk_audit_action_value (DROP + re-ADD) must carry a SUPERSET of the
+// previous rebuild's action list. Migration 115/116 nearly shipped a
+// from-scratch list that dropped ~58 in-use actions (all mcp.*,
+// request_notification.*, workflow_state.*, ...) — with best-effort
+// audit writes, every dropped action's row would have been silently
+// rejected by the CHECK. Enforced from migration 111 (the modern
+// baseline) onward; one historical drop (066, later restored) predates
+// the rule and is already applied everywhere.
+func TestAuditActionConstraintAppendOnly(t *testing.T) {
+	t.Parallel()
+
+	entries, err := migrationFS.ReadDir("migrations")
+	require.NoError(t, err)
+
+	const baseline = "111"
+	actionRe := regexp.MustCompile(`'([a-z_]+(?:\.[a-z_.]+)?)'`)
+	var prev map[string]bool
+	var prevName string
+	for _, entry := range entries { // ReadDir returns sorted names
+		if entry.Name() < baseline {
+			continue
+		}
+		body, err := migrationFS.ReadFile("migrations/" + entry.Name())
+		require.NoError(t, err)
+		sql := string(body)
+		idx := strings.Index(sql, "ADD CONSTRAINT chk_audit_action_value")
+		if idx < 0 {
+			continue
+		}
+		seg := sql[idx:]
+		if end := strings.Index(seg, "));"); end >= 0 {
+			seg = seg[:end]
+		}
+		cur := map[string]bool{}
+		for _, m := range actionRe.FindAllStringSubmatch(seg, -1) {
+			cur[m[1]] = true
+		}
+		require.NotEmpty(t, cur, "%s: constraint rebuild with no actions", entry.Name())
+		for action := range prev {
+			require.Contains(t, cur, action,
+				"%s dropped audit action %q that %s allowed — the vocabulary is append-only",
+				entry.Name(), action, prevName)
+		}
+		prev = cur
+		prevName = entry.Name()
+	}
+	require.NotNil(t, prev, "no chk_audit_action_value rebuilds found")
+}
+
+// TestLatestAuditConstraintCoversInboundUpdate pins the newest rebuild
+// to the two actions this branch introduces.
+func TestLatestAuditConstraintCoversInboundUpdate(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/116_inbound_source_update_audit.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, action := range []string{"inbound_source.sync_now", "inbound_source.update"} {
+		require.Contains(t, sql, "'"+action+"'", "audit action must be accepted by chk_audit_action_value")
+	}
 }

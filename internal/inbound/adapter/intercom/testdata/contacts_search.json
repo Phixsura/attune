@@ -1,0 +1,21 @@
+{
+  "type": "list",
+  "data": [
+    {
+      "type": "contact",
+      "id": "contact-alice",
+      "external_id": "cust-70",
+      "role": "user",
+      "email": "alice@customer.com",
+      "name": "Alice Zhang"
+    },
+    {
+      "type": "contact",
+      "id": "contact-bob",
+      "external_id": "",
+      "role": "lead",
+      "email": "bob@lead.com",
+      "name": "Bob Lee"
+    }
+  ]
+}

@@ -397,7 +397,8 @@ func upsertDemoFeedback(
 	embedding, embeddingModel, embeddingDims, embeddedAt := demoEmbeddingInsertFields(seed, index, now)
 	createdAt := now.Add(-time.Duration(seed.AgeHours) * time.Hour)
 	var id int64
-	err = pool.QueryRow(ctx, `
+	err = pool.QueryRow(
+		ctx, `
 		INSERT INTO user_feedback
 		 (tenant_id, user_id, subject_key, subject_display, subject_hash, source,
 		  source_meta, type, content, page_url, attachments, enrichment_status,
@@ -468,7 +469,8 @@ func insertDemoSemanticRun(ctx context.Context, pool *pgxpool.Pool, tenantID str
 	if err != nil {
 		return fmt.Errorf("marshal semantic confidence: %w", err)
 	}
-	_, err = pool.Exec(ctx, `
+	_, err = pool.Exec(
+		ctx, `
 		INSERT INTO semantic_extraction_runs
 		 (tenant_id, subject_type, subject_id, domain_pack, schema_version,
 		  prompt_version, model, attrs, confidence, rationale, dropped_attrs,

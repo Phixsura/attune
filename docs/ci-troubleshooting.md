@@ -20,6 +20,7 @@ Quick fixes for common CI failures. Run `make ci-check` locally before pushing t
 | console (tsc) | `pnpm -C console tsc -b --noEmit` | Fix TypeScript errors |
 | console (biome) | `pnpm -C console biome check` | Run `pnpm -C console biome check --write` |
 | console (vitest) | `pnpm -C console vitest run` | Fix failing tests |
+| console (arch) | `pnpm -C console arch` | Use supported Node and fix dependency-cruiser violations |
 | Console Coverage | `pnpm -C console vitest run --coverage` | See [coverage](#coverage) |
 | Go Coverage | `go test -race -coverprofile=c.out ./...` | See [coverage](#coverage) |
 | integration-postgres | `make test-integration` | See [integration-postgres](#integration-postgres) |
@@ -99,6 +100,27 @@ func (c *Config) Validate() error {
 
 ---
 
+### console arch
+
+**Error:** dependency-cruiser reports that the current Node version is not
+supported.
+
+**Fix:** CI runs Console checks on Node 22. Local `make ci-check` automatically
+uses `scripts/with-supported-node.sh` to select Node 20, 22, or 24+ when one is
+installed. If Node is installed in a custom location, set:
+
+```bash
+ATTUNE_NODE_BIN=/path/to/node make ci-check
+```
+
+For ordinary direct Console commands, use Node 22 or run through the wrapper:
+
+```bash
+bash scripts/with-supported-node.sh corepack pnpm -C console arch
+```
+
+---
+
 ### lint-slog
 
 **Error:** Rule-2 or Rule-3 violation.
@@ -126,6 +148,18 @@ client := &http.Client{
 ---
 
 ### trufflehog
+
+**Error:** TruffleHog is required for local CI preflight.
+
+Install TruffleHog or start Docker:
+```bash
+brew install trufflehog
+# or
+docker pull ghcr.io/trufflesecurity/trufflehog:3.95.5
+```
+
+The local target mirrors the repository Secret Scan workflow by scanning
+verified and unknown findings while honoring `.trufflehogignore`.
 
 **Error:** Found secrets in committed files.
 

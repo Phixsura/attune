@@ -211,11 +211,17 @@ func (h *Handler) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	tenantID := h.svc.ResolveDefaultTenant(ctx)
+	if err := h.svc.EnsureMembership(ctx, tenantID, user.ID, role); err != nil {
+		metrics.OIDCLoginTotal.WithLabelValues("user_sync_failed").Inc()
+		h.redirectError(w, r, "internal_error")
+		return
+	}
+
 	// Clear state cookie
 	h.clearStateCookie(w)
 
 	// Issue session (with UserType)
-	tenantID := h.svc.ResolveDefaultTenant(ctx)
 	if err := h.signer.IssueSessionCookieWithType(responseWriterAdapter{w}, tenantID, user.ID, "oidc"); err != nil {
 		logext.Errorf(ctx, "[%s] session issue failed,err:%s", where, err.Error())
 		metrics.OIDCLoginTotal.WithLabelValues("session_failed").Inc()

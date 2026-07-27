@@ -37,6 +37,7 @@ func (r *Repo) ListConnections(ctx context.Context, tenantID string) ([]Connecti
 		       provider_config, scopes, credential_key_id, credential_ciphertext,
 		       webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		       last_tested_at, last_test_status, last_error, created_by, updated_by,
+		       provider_installation_id,
 		       created_at, updated_at
 		  FROM external_connections
 		 WHERE tenant_id = $1
@@ -63,6 +64,7 @@ func (r *Repo) GetConnection(ctx context.Context, tenantID string, id uuid.UUID)
 		       provider_config, scopes, credential_key_id, credential_ciphertext,
 		       webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		       last_tested_at, last_test_status, last_error, created_by, updated_by,
+		       provider_installation_id,
 		       created_at, updated_at
 		  FROM external_connections
 		 WHERE tenant_id = $1
@@ -89,24 +91,26 @@ func (r *Repo) CreateConnection(ctx context.Context, in Connection) (*Connection
 			}
 		}
 		var scanErr error
-		row, scanErr = scanConnection(tx.QueryRow(ctx, `
+		row, scanErr = scanConnection(tx.QueryRow(
+			ctx, `
 			INSERT INTO external_connections
 			 (id, tenant_id, provider, name, enabled, status, auth_type, base_url,
 			  provider_config, scopes, credential_key_id, credential_ciphertext,
 			  webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
-			  created_by, updated_by)
+			  provider_installation_id, created_by, updated_by)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12,
 			        NULLIF($13, ''), $14, CASE WHEN NULLIF($13, '') IS NULL THEN NULL ELSE NOW() END,
-			        $15, $16)
+			        $15, $16, $17)
 			RETURNING id, tenant_id, provider, name, enabled, status, auth_type, base_url,
 			          provider_config, scopes, credential_key_id, credential_ciphertext,
 			          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 			          last_tested_at, last_test_status, last_error, created_by, updated_by,
+			          provider_installation_id,
 			          created_at, updated_at`,
 			in.ID, in.TenantID, in.Provider, in.Name, in.Enabled, in.Status, in.AuthType,
 			in.BaseURL, string(in.ProviderConfig), in.Scopes, in.CredentialKeyID,
 			in.CredentialCiphertext, in.WebhookSecretKeyID, in.WebhookSecretCiphertext,
-			in.CreatedBy, in.UpdatedBy,
+			in.ProviderInstallationID, in.CreatedBy, in.UpdatedBy,
 		))
 		if scanErr != nil {
 			return scanErr
@@ -142,7 +146,8 @@ func (r *Repo) UpdateConnection(ctx context.Context, in Connection, updateCreden
 			}
 		}
 		var scanErr error
-		row, scanErr = scanConnection(tx.QueryRow(ctx, `
+		row, scanErr = scanConnection(tx.QueryRow(
+			ctx, `
 			UPDATE external_connections
 			   SET name = $3,
 			       enabled = $4,
@@ -167,6 +172,7 @@ func (r *Repo) UpdateConnection(ctx context.Context, in Connection, updateCreden
 			          provider_config, scopes, credential_key_id, credential_ciphertext,
 			          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 			          last_tested_at, last_test_status, last_error, created_by, updated_by,
+			          provider_installation_id,
 			          created_at, updated_at`,
 			in.TenantID, in.ID, in.Name, in.Enabled, in.BaseURL, string(in.ProviderConfig),
 			in.Scopes, in.CredentialKeyID, in.CredentialCiphertext, updateCredential,
@@ -224,6 +230,7 @@ func (r *Repo) UpdateConnectionTestResult(ctx context.Context, tenantID string, 
 		          provider_config, scopes, credential_key_id, credential_ciphertext,
 		          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		          last_tested_at, last_test_status, last_error, created_by, updated_by,
+		          provider_installation_id,
 		          created_at, updated_at`,
 		tenantID, id, status, truncate(lastError, 2000)))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -251,6 +258,7 @@ func (r *Repo) ResumeConnection(ctx context.Context, tenantID string, id uuid.UU
 		          provider_config, scopes, credential_key_id, credential_ciphertext,
 		          webhook_secret_key_id, webhook_secret_ciphertext, webhook_secret_set_at,
 		          last_tested_at, last_test_status, last_error, created_by, updated_by,
+		          provider_installation_id,
 		          created_at, updated_at`,
 		tenantID, id, actor))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -429,7 +437,7 @@ func (r *Repo) ResetCursor(ctx context.Context, tenantID string, mappingID uuid.
 		VALUES ($1, $2, $3, $4, 'pull', 'manual', 'queued', '{}'::jsonb, '{}'::jsonb, $5)
 		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		          cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
 		uuid.New(), tenantID, mapping.ConnectionID, mapping.ID, actor))
 	if err != nil {
@@ -500,7 +508,7 @@ func (r *Repo) EnqueueBackfill(ctx context.Context, tenantID string, mappingID u
 		VALUES ($1, $2, $3, $4, 'pull', 'backfill', 'queued', '{}'::jsonb, '{}'::jsonb, $5)
 		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		          cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
 		uuid.New(), tenantID, mapping.ConnectionID, mapping.ID, actor))
 	if err != nil {
@@ -512,17 +520,407 @@ func (r *Repo) EnqueueBackfill(ctx context.Context, tenantID string, mappingID u
 	return ptrext.Of(BackfillResult{Mapping: mapping, Run: run}), nil
 }
 
+func (r *Repo) CreateCustomerRequestIssueRun(
+	ctx context.Context,
+	in CustomerRequestIssueCreateRunInput,
+) (*CustomerRequestIssueCreateRunResult, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin customer request issue create run: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	mapping, err := selectCustomerRequestIssueCreateMapping(ctx, tx, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockCustomerRequestForIssueCreate(ctx, tx, in.TenantID, in.RequestID); err != nil {
+		return nil, err
+	}
+	if err := rejectExistingCustomerRequestIssueLink(ctx, tx, in.TenantID, in.RequestID, mapping.ID); err != nil {
+		return nil, err
+	}
+	if err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, tx, in.TenantID, in.RequestID, mapping.ID); err != nil {
+		return nil, err
+	}
+
+	if run, err := existingCustomerRequestIssueCreateRun(ctx, tx, in.TenantID, in.RequestID, mapping.ID); err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit existing customer request issue create run: %w", err)
+		}
+		return ptrext.Of(CustomerRequestIssueCreateRunResult{Mapping: mapping, Run: run}), nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	run, err := scanRun(tx.QueryRow(ctx, `
+		INSERT INTO external_sync_runs
+		 (id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		  cursor_before, cursor_after, input_metadata, actor_id)
+		VALUES ($1, $2, $3, $4, 'push', 'manual', 'queued', '{}'::jsonb, '{}'::jsonb, $5::jsonb, $6)
+		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
+		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
+		uuid.New(), in.TenantID, mapping.ConnectionID, mapping.ID,
+		string(customerRequestIssueCreateRunMetadata(in.RequestID)), in.ActorID))
+	if err != nil {
+		return nil, fmt.Errorf("enqueue customer request issue create run: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit customer request issue create run: %w", err)
+	}
+	return ptrext.Of(CustomerRequestIssueCreateRunResult{Mapping: mapping, Run: run}), nil
+}
+
+func (r *Repo) CreateCustomerRequestIssuePullRun(
+	ctx context.Context,
+	in CustomerRequestIssuePullRunInput,
+) (*CustomerRequestIssuePullRunResult, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin customer request issue pull run: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	mapping, err := selectCustomerRequestIssuePullMapping(ctx, tx, in)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockCustomerRequestForIssueCreate(ctx, tx, in.TenantID, in.RequestID); err != nil {
+		return nil, err
+	}
+	if err := requireCustomerRequestIssueExternalLink(ctx, tx, in.TenantID, in.RequestID, mapping.ID, in.ExternalKey); err != nil {
+		return nil, err
+	}
+	if run, err := existingCustomerRequestIssuePullRun(ctx, tx, in.TenantID, in.RequestID, mapping.ID, in.ExternalKey); err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit existing customer request issue pull run: %w", err)
+		}
+		return ptrext.Of(CustomerRequestIssuePullRunResult{Mapping: mapping, Run: run}), nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+
+	run, err := scanRun(tx.QueryRow(ctx, `
+		INSERT INTO external_sync_runs
+		 (id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		  cursor_before, cursor_after, input_metadata, actor_id)
+		VALUES ($1, $2, $3, $4, 'pull', 'manual', 'queued', '{}'::jsonb, '{}'::jsonb, $5::jsonb, $6)
+		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
+		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
+		uuid.New(), in.TenantID, mapping.ConnectionID, mapping.ID,
+		string(customerRequestIssuePullRunMetadata(in.RequestID, in.ExternalKey)), in.ActorID))
+	if err != nil {
+		return nil, fmt.Errorf("enqueue customer request issue pull run: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit customer request issue pull run: %w", err)
+	}
+	return ptrext.Of(CustomerRequestIssuePullRunResult{Mapping: mapping, Run: run}), nil
+}
+
+func selectCustomerRequestIssueCreateMapping(
+	ctx context.Context,
+	tx pgx.Tx,
+	in CustomerRequestIssueCreateRunInput,
+) (Mapping, error) {
+	var connectionID any
+	if in.ConnectionID != nil {
+		connectionID = ptrext.Indirect(in.ConnectionID)
+	}
+	var mappingID any
+	if in.MappingID != nil {
+		mappingID = ptrext.Indirect(in.MappingID)
+	}
+	rows, err := tx.Query(ctx, `
+		SELECT m.id, m.tenant_id, m.connection_id, m.local_object_type, m.external_object_type,
+		       m.direction, m.field_mapping, m.status_mapping, m.conflict_policy, m.tombstone_policy,
+		       m.enabled, m.mapping_version, m.created_at, m.updated_at
+		  FROM external_object_mappings m
+		  JOIN external_connections c
+		    ON c.tenant_id = m.tenant_id
+		   AND c.id = m.connection_id
+		   AND c.deleted_at IS NULL
+		 WHERE m.tenant_id = $1
+		   AND c.provider = 'github'
+		   AND c.enabled
+		   AND c.status = 'active'
+		   AND m.enabled
+		   AND m.local_object_type = 'customer_request'
+		   AND m.external_object_type = 'issue'
+		   AND m.direction IN ('push', 'bidirectional')
+		   AND ($2::uuid IS NULL OR c.id = $2)
+		   AND ($3::uuid IS NULL OR m.id = $3)
+		 ORDER BY m.created_at ASC, m.id ASC
+		 LIMIT 2`, in.TenantID, connectionID, mappingID)
+	if err != nil {
+		return Mapping{}, fmt.Errorf("select customer request issue create mapping: %w", err)
+	}
+	defer rows.Close()
+	matches := []Mapping{}
+	for rows.Next() {
+		mapping, err := scanMapping(rows)
+		if err != nil {
+			return Mapping{}, err
+		}
+		matches = append(matches, mapping)
+	}
+	if err := rows.Err(); err != nil {
+		return Mapping{}, err
+	}
+	switch len(matches) {
+	case 0:
+		return Mapping{}, ErrMappingNotFound
+	case 1:
+		return matches[0], nil
+	default:
+		return Mapping{}, ErrConflict
+	}
+}
+
+func selectCustomerRequestIssuePullMapping(
+	ctx context.Context,
+	tx pgx.Tx,
+	in CustomerRequestIssuePullRunInput,
+) (Mapping, error) {
+	in.ExternalKey = strings.TrimSpace(in.ExternalKey)
+	if in.TenantID == "" || in.RequestID == uuid.Nil || in.ConnectionID == uuid.Nil ||
+		in.MappingID == uuid.Nil || in.ExternalKey == "" {
+		return Mapping{}, ErrMappingNotFound
+	}
+	mapping, err := scanMapping(tx.QueryRow(ctx, `
+		SELECT m.id, m.tenant_id, m.connection_id, m.local_object_type, m.external_object_type,
+		       m.direction, m.field_mapping, m.status_mapping, m.conflict_policy, m.tombstone_policy,
+		       m.enabled, m.mapping_version, m.created_at, m.updated_at
+		  FROM external_object_mappings m
+		  JOIN external_connections c
+		    ON c.tenant_id = m.tenant_id
+		   AND c.id = m.connection_id
+		   AND c.deleted_at IS NULL
+		 WHERE m.tenant_id = $1
+		   AND c.id = $2
+		   AND m.id = $3
+		   AND c.provider = 'github'
+		   AND c.enabled
+		   AND c.status = 'active'
+		   AND m.enabled
+		   AND m.local_object_type = 'customer_request'
+		   AND m.external_object_type = 'issue'
+		   AND m.direction IN ('pull', 'bidirectional')`,
+		in.TenantID, in.ConnectionID, in.MappingID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Mapping{}, ErrMappingNotFound
+	}
+	if err != nil {
+		return Mapping{}, fmt.Errorf("select customer request issue pull mapping: %w", err)
+	}
+	return mapping, nil
+}
+
+func lockCustomerRequestForIssueCreate(ctx context.Context, tx pgx.Tx, tenantID string, requestID uuid.UUID) error {
+	var locked uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id
+		  FROM customer_requests
+		 WHERE tenant_id = $1
+		   AND id = $2
+		   AND archived_at IS NULL
+		   AND merged_into_request_id IS NULL
+		 FOR UPDATE`, tenantID, requestID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrLocalObjectNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock customer request for issue create: %w", err)
+	}
+	return nil
+}
+
+func requireCustomerRequestIssueExternalLink(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+	externalKey string,
+) error {
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			  FROM external_object_links
+			 WHERE tenant_id = $1
+			   AND mapping_id = $2
+			   AND local_object_type = 'customer_request'
+			   AND local_object_id = $3
+			   AND external_object_type = 'issue'
+			   AND external_key = $4
+			   AND external_deleted_at IS NULL
+			   AND local_deleted_at IS NULL
+		)`, tenantID, mappingID, requestID.String(), strings.TrimSpace(externalKey)).Scan(&exists); err != nil {
+		return fmt.Errorf("check customer request issue external link: %w", err)
+	}
+	if !exists {
+		return ErrLocalObjectNotFound
+	}
+	return nil
+}
+
+func rejectExistingCustomerRequestIssueLink(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+) error {
+	var hasIssueLink bool
+	var hasObjectLink bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			  FROM customer_request_issue_links
+			 WHERE tenant_id = $1
+			   AND request_id = $2
+			   AND provider = 'github'
+		), EXISTS (
+			SELECT 1
+			  FROM external_object_links
+			 WHERE tenant_id = $1
+			   AND mapping_id = $3
+			   AND local_object_type = 'customer_request'
+			   AND local_object_id = $2::text
+			   AND local_deleted_at IS NULL
+		)`, tenantID, requestID, mappingID).Scan(&hasIssueLink, &hasObjectLink); err != nil {
+		return fmt.Errorf("check existing customer request issue links: %w", err)
+	}
+	if hasIssueLink || hasObjectLink {
+		return ErrConflict
+	}
+	return nil
+}
+
+func rejectConcurrentCustomerRequestIssueCreateRun(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+) error {
+	var hasOtherRun bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			  FROM external_sync_runs r
+			  JOIN external_object_mappings m
+			    ON m.tenant_id = r.tenant_id
+			   AND m.id = r.mapping_id
+			  JOIN external_connections c
+			    ON c.tenant_id = m.tenant_id
+			   AND c.id = m.connection_id
+			 WHERE r.tenant_id = $1
+			   AND r.mapping_id <> $3
+			   AND r.direction = 'push'
+			   AND r.trigger = 'manual'
+			   AND r.status IN ('queued', 'running')
+			   AND r.input_metadata->>'local_object_id' = $2
+			   AND c.provider = 'github'
+			   AND m.local_object_type = 'customer_request'
+			   AND m.external_object_type = 'issue'
+		)`, tenantID, requestID.String(), mappingID).Scan(&hasOtherRun); err != nil {
+		return fmt.Errorf("check concurrent customer request issue create runs: %w", err)
+	}
+	if hasOtherRun {
+		return ErrConflict
+	}
+	return nil
+}
+
+func existingCustomerRequestIssueCreateRun(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+) (SyncRun, error) {
+	run, err := scanRun(tx.QueryRow(ctx, `
+		SELECT id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		       claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
+		       cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
+		       conflicts_created, error_kind, error_message, actor_id, created_at, updated_at
+		  FROM external_sync_runs
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND direction = 'push'
+		   AND trigger = 'manual'
+		   AND status IN ('queued', 'running')
+		   AND input_metadata->>'local_object_id' = $3
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT 1`, tenantID, mappingID, requestID.String()))
+	if err != nil {
+		return SyncRun{}, err
+	}
+	return run, nil
+}
+
+func existingCustomerRequestIssuePullRun(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+	externalKey string,
+) (SyncRun, error) {
+	run, err := scanRun(tx.QueryRow(ctx, `
+		SELECT id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		       claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
+		       cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
+		       conflicts_created, error_kind, error_message, actor_id, created_at, updated_at
+		  FROM external_sync_runs
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND direction = 'pull'
+		   AND trigger = 'manual'
+		   AND status IN ('queued', 'running')
+		   AND input_metadata->>'local_object_id' = $3
+		   AND input_metadata->>'external_key' = $4
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT 1`, tenantID, mappingID, requestID.String(), strings.TrimSpace(externalKey)))
+	if err != nil {
+		return SyncRun{}, err
+	}
+	return run, nil
+}
+
+func customerRequestIssueCreateRunMetadata(requestID uuid.UUID) []byte {
+	return normalizeJSONObjectBytes(marshalJSONObject(map[string]any{
+		"local_object_id": requestID.String(),
+		"source":          "customer_request_issue_create",
+	}))
+}
+
+func customerRequestIssuePullRunMetadata(requestID uuid.UUID, externalKey string) []byte {
+	return normalizeJSONObjectBytes(marshalJSONObject(map[string]any{
+		"external_key":    strings.TrimSpace(externalKey),
+		"local_object_id": requestID.String(),
+		"source":          "customer_request_issue_link",
+	}))
+}
+
 func (r *Repo) InsertRun(ctx context.Context, run SyncRun) (*SyncRun, error) {
 	row, err := scanRun(r.pool.QueryRow(ctx, `
 		INSERT INTO external_sync_runs
 		 (id, tenant_id, connection_id, mapping_id, direction, trigger, status,
-		  cursor_before, cursor_after, actor_id)
-		VALUES ($1, $2, $3, $4, $5, $6, 'queued', '{}'::jsonb, '{}'::jsonb, $7)
+		  cursor_before, cursor_after, input_metadata, actor_id)
+		VALUES ($1, $2, $3, $4, $5, $6, 'queued', '{}'::jsonb, '{}'::jsonb, $7::jsonb, $8)
 		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		          cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
-		run.ID, run.TenantID, run.ConnectionID, run.MappingID, run.Direction, run.Trigger, run.ActorID))
+		run.ID, run.TenantID, run.ConnectionID, run.MappingID, run.Direction, run.Trigger,
+		string(normalizeJSONObjectBytes(run.InputMetadata)), run.ActorID))
 	if err != nil {
 		return nil, fmt.Errorf("insert external sync run: %w", err)
 	}
@@ -662,13 +1060,13 @@ func (r *Repo) ReplayEvent(ctx context.Context, tenantID string, id uuid.UUID, a
 	run, err := scanRun(tx.QueryRow(ctx, `
 		INSERT INTO external_sync_runs
 		 (id, tenant_id, connection_id, mapping_id, direction, trigger, status,
-		  cursor_before, cursor_after, actor_id)
-		VALUES ($1, $2, $3, $4, $5, 'webhook', 'queued', '{}'::jsonb, '{}'::jsonb, $6)
+		  cursor_before, cursor_after, input_metadata, actor_id)
+		VALUES ($1, $2, $3, $4, $5, 'webhook', 'queued', '{}'::jsonb, '{}'::jsonb, $6::jsonb, $7)
 		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		          cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
-		uuid.New(), tenantID, event.ConnectionID, mappingID, direction, actor))
+		uuid.New(), tenantID, event.ConnectionID, mappingID, direction, string(runInputMetadataFromEvent(event)), actor))
 	if err != nil {
 		return nil, nil, fmt.Errorf("enqueue external sync event replay run: %w", err)
 	}
@@ -697,6 +1095,154 @@ func (r *Repo) ReplayEvent(ctx context.Context, tenantID string, id uuid.UUID, a
 	return ptrext.Of(event), ptrext.Of(run), nil
 }
 
+func (r *Repo) EnqueueEventRun(ctx context.Context, tenantID string, id uuid.UUID, actor string) (*SyncEvent, *SyncRun, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("begin external sync event enqueue: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	event, err := scanEvent(tx.QueryRow(ctx, `
+		SELECT id, tenant_id, connection_id, mapping_id, provider, event_type,
+		       external_event_id, dedupe_key, signature_status, status,
+		       payload_digest, normalized_payload, received_at, replayed_at,
+		       replayed_by, run_id, failure_reason, created_at, updated_at
+		  FROM external_sync_events
+		 WHERE tenant_id = $1
+		   AND id = $2
+		 FOR UPDATE`, tenantID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrEventNotFound
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("load external sync event for enqueue: %w", err)
+	}
+	if event.RunID != nil || event.Status != EventStatusReceived {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, nil, fmt.Errorf("commit external sync event noop enqueue: %w", err)
+		}
+		return ptrext.Of(event), nil, nil
+	}
+
+	mapping, err := resolveEventIssuePullMapping(ctx, tx, event)
+	if errors.Is(err, ErrMappingNotFound) {
+		ignored, markErr := markEventIgnored(ctx, tx, tenantID, id, "no enabled pull issue mapping")
+		if markErr != nil {
+			return nil, nil, markErr
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, nil, fmt.Errorf("commit ignored external sync event enqueue: %w", err)
+		}
+		return ptrext.Of(ignored), nil, nil
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+
+	run, err := scanRun(tx.QueryRow(ctx, `
+		INSERT INTO external_sync_runs
+		 (id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		  cursor_before, cursor_after, input_metadata, actor_id)
+		VALUES ($1, $2, $3, $4, 'pull', 'webhook', 'queued', '{}'::jsonb, '{}'::jsonb, $5::jsonb, $6)
+		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
+		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
+		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
+		uuid.New(), tenantID, event.ConnectionID, mapping.ID, string(runInputMetadataFromEvent(event)), actor))
+	if err != nil {
+		return nil, nil, fmt.Errorf("enqueue external sync event run: %w", err)
+	}
+
+	event, err = scanEvent(tx.QueryRow(ctx, `
+		UPDATE external_sync_events
+		   SET mapping_id = $3,
+		       status = 'replayed',
+		       replayed_at = NOW(),
+		       replayed_by = $4,
+		       run_id = $5,
+		       failure_reason = '',
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND id = $2
+		RETURNING id, tenant_id, connection_id, mapping_id, provider, event_type,
+		          external_event_id, dedupe_key, signature_status, status,
+		          payload_digest, normalized_payload, received_at, replayed_at,
+		          replayed_by, run_id, failure_reason, created_at, updated_at`,
+		tenantID, id, mapping.ID, actor, run.ID))
+	if err != nil {
+		return nil, nil, fmt.Errorf("mark external sync event enqueued: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, fmt.Errorf("commit external sync event enqueue: %w", err)
+	}
+	return ptrext.Of(event), ptrext.Of(run), nil
+}
+
+func resolveEventIssuePullMapping(ctx context.Context, tx pgx.Tx, event SyncEvent) (Mapping, error) {
+	if event.MappingID != nil {
+		mapping, err := scanMapping(tx.QueryRow(ctx, `
+			SELECT id, tenant_id, connection_id, local_object_type, external_object_type,
+			       direction, field_mapping, status_mapping, conflict_policy, tombstone_policy,
+			       enabled, mapping_version, created_at, updated_at
+			  FROM external_object_mappings
+			 WHERE tenant_id = $1
+			   AND id = $2
+			   AND connection_id = $3
+			   AND enabled
+			   AND local_object_type = 'customer_request'
+			   AND external_object_type = 'issue'
+			   AND direction IN ('pull', 'bidirectional')`,
+			event.TenantID, ptrext.Indirect(event.MappingID), event.ConnectionID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Mapping{}, ErrMappingNotFound
+		}
+		if err != nil {
+			return Mapping{}, fmt.Errorf("resolve external event mapping: %w", err)
+		}
+		return mapping, nil
+	}
+	mapping, err := scanMapping(tx.QueryRow(ctx, `
+		SELECT id, tenant_id, connection_id, local_object_type, external_object_type,
+		       direction, field_mapping, status_mapping, conflict_policy, tombstone_policy,
+		       enabled, mapping_version, created_at, updated_at
+		  FROM external_object_mappings
+		 WHERE tenant_id = $1
+		   AND connection_id = $2
+		   AND enabled
+		   AND local_object_type = 'customer_request'
+		   AND external_object_type = 'issue'
+		   AND direction IN ('pull', 'bidirectional')
+		 ORDER BY created_at ASC
+		 LIMIT 1`,
+		event.TenantID, event.ConnectionID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Mapping{}, ErrMappingNotFound
+	}
+	if err != nil {
+		return Mapping{}, fmt.Errorf("resolve external event mapping: %w", err)
+	}
+	return mapping, nil
+}
+
+func markEventIgnored(ctx context.Context, tx pgx.Tx, tenantID string, id uuid.UUID, reason string) (SyncEvent, error) {
+	event, err := scanEvent(tx.QueryRow(ctx, `
+		UPDATE external_sync_events
+		   SET status = 'ignored',
+		       failure_reason = $3,
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND id = $2
+		RETURNING id, tenant_id, connection_id, mapping_id, provider, event_type,
+		          external_event_id, dedupe_key, signature_status, status,
+		          payload_digest, normalized_payload, received_at, replayed_at,
+		          replayed_by, run_id, failure_reason, created_at, updated_at`,
+		tenantID, id, truncate(reason, 2000)))
+	if err != nil {
+		return SyncEvent{}, fmt.Errorf("mark external sync event ignored: %w", err)
+	}
+	return event, nil
+}
+
 func boundedRunListLimit(limit int) int {
 	if limit <= 0 || limit > 200 {
 		return defaultLimit
@@ -708,7 +1254,7 @@ func (r *Repo) listRunsQuery(ctx context.Context, filter ListRunsFilter, limit i
 	query := `
 		SELECT id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		       claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		       cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		       cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		       conflicts_created, error_kind, error_message, actor_id, created_at, updated_at
 		  FROM external_sync_runs
 		 WHERE tenant_id = $1`
@@ -825,7 +1371,7 @@ func (r *Repo) GetRunDetail(ctx context.Context, tenantID string, id uuid.UUID) 
 	run, err := scanRun(r.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		       claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		       cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		       cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		       conflicts_created, error_kind, error_message, actor_id, created_at, updated_at
 		  FROM external_sync_runs
 		 WHERE tenant_id = $1 AND id = $2`, tenantID, id))
@@ -862,9 +1408,59 @@ const recordTimelineQuery = `
 			           'external_url', eol.external_url,
 			           'external_version', eol.external_version,
 			           'sync_state', eol.sync_state,
-			           'tombstone_reason', eol.tombstone_reason
+			           'tombstone_reason', eol.tombstone_reason,
+			           'provider_payload', jsonb_strip_nulls(jsonb_build_object(
+			               'state_reason', NULLIF(eol.normalized_payload->>'state_reason', ''),
+			               'labels', CASE
+			                   WHEN jsonb_typeof(eol.normalized_payload->'labels') = 'array'
+			                   THEN eol.normalized_payload->'labels'
+			                   ELSE NULL
+			               END,
+			               'assignee', NULLIF(eol.normalized_payload->>'assignee', ''),
+			               'assignees', CASE
+			                   WHEN jsonb_typeof(eol.normalized_payload->'assignees') = 'array'
+			                   THEN eol.normalized_payload->'assignees'
+			                   ELSE NULL
+			               END,
+			               'comments', CASE
+			                   WHEN eol.normalized_payload ? 'comments'
+			                   THEN eol.normalized_payload->'comments'
+			                   ELSE NULL
+			               END,
+			               'closed_at', NULLIF(eol.normalized_payload->>'closed_at', '')
+			           ))
 			       ) AS detail
 		  FROM external_object_links eol
+		 WHERE eol.tenant_id = $1
+		   AND eol.mapping_id = $2
+		   AND ($3 = '' OR eol.local_object_id = $3)
+		   AND ($4 = '' OR eol.external_key = $4)
+		UNION ALL
+		SELECT 'comment',
+		       eoc.updated_at,
+		       eoc.last_run_id,
+		       eoc.sync_state,
+		       eoc.direction,
+		       eol.local_object_id,
+		       eol.external_key,
+		       CASE
+		         WHEN eoc.deleted_at IS NOT NULL OR eoc.sync_state = 'deleted' THEN 'Issue comment deleted'
+		         ELSE 'Issue comment synced'
+		       END,
+			       jsonb_build_object(
+			           'provider_comment_id', eoc.provider_comment_id,
+			           'author_display', eoc.author_display,
+			           'external_url', eoc.external_url,
+			           'external_version', eoc.external_version,
+			           'external_updated_at', eoc.external_updated_at,
+			           'body_digest', eoc.body_digest,
+			           'body_truncated', eoc.body_truncated,
+			           'marker', eoc.marker
+			       )
+		  FROM external_object_comments eoc
+		  JOIN external_object_links eol
+		    ON eol.tenant_id = eoc.tenant_id
+		   AND eol.id = eoc.external_object_link_id
 		 WHERE eol.tenant_id = $1
 		   AND eol.mapping_id = $2
 		   AND ($3 = '' OR eol.local_object_id = $3)
@@ -992,6 +1588,7 @@ func (r *Repo) ApplyPullResult(ctx context.Context, in ApplyPullInput) (ApplySta
 	in.StreamKey = normalizeStreamKey(in.StreamKey)
 	in.CursorBefore = normalizeJSONObjectBytes(in.CursorBefore)
 	in.CursorAfter = normalizeCursorAfter(in.CursorBefore, in.CursorAfter)
+	in.InputMetadata = normalizeJSONObjectBytes(in.InputMetadata)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return ApplyStats{}, fmt.Errorf("begin external pull apply: %w", err)
@@ -1014,20 +1611,16 @@ func (r *Repo) ApplyPullResult(ctx context.Context, in ApplyPullInput) (ApplySta
 		return ApplyStats{}, fmt.Errorf("load external mapping for pull apply: %w", err)
 	}
 
-	stats := ApplyStats{RecordsSeen: len(in.Records)}
-	var highWatermark *time.Time
-	for _, record := range in.Records {
-		outcome, applyErr := applyPullRecord(ctx, tx, in, mapping, record)
-		if applyErr != nil {
-			return ApplyStats{}, applyErr
-		}
-		stats.RecordsChanged += outcome.changed
-		stats.RecordsFailed += outcome.failed
-		stats.ConflictsCreated += outcome.conflicts
-		if record.ExternalUpdatedAt != nil && (highWatermark == nil || record.ExternalUpdatedAt.After(ptrext.Indirect(highWatermark))) {
-			highWatermark = record.ExternalUpdatedAt
-		}
+	stats, highWatermark, err := applyPullRecords(ctx, tx, in, mapping)
+	if err != nil {
+		return ApplyStats{}, err
 	}
+	childStats, childHighWatermark, err := applyPullChildren(ctx, tx, in, mapping)
+	if err != nil {
+		return ApplyStats{}, err
+	}
+	stats = mergeApplyStats(stats, childStats)
+	highWatermark = laterOptionalTime(highWatermark, childHighWatermark)
 	if err := upsertCursor(ctx, tx, in, highWatermark); err != nil {
 		return ApplyStats{}, err
 	}
@@ -1054,24 +1647,82 @@ func (r *Repo) ApplyPullResult(ctx context.Context, in ApplyPullInput) (ApplySta
 	return stats, nil
 }
 
+func applyPullRecords(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping Mapping) (ApplyStats, *time.Time, error) {
+	stats := ApplyStats{RecordsSeen: len(in.Records)}
+	var highWatermark *time.Time
+	for _, record := range in.Records {
+		outcome, err := applyPullRecord(ctx, tx, in, mapping, record)
+		if err != nil {
+			return ApplyStats{}, nil, err
+		}
+		stats = addPullOutcome(stats, outcome)
+		highWatermark = laterOptionalTime(highWatermark, record.ExternalUpdatedAt)
+	}
+	return stats, highWatermark, nil
+}
+
+func applyPullChildren(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping Mapping) (ApplyStats, *time.Time, error) {
+	stats := ApplyStats{RecordsSeen: len(in.Children)}
+	var highWatermark *time.Time
+	for _, child := range in.Children {
+		outcome, err := applyPullChildRecord(ctx, tx, in, mapping, child)
+		if err != nil {
+			return ApplyStats{}, nil, err
+		}
+		stats = addPullOutcome(stats, outcome)
+		highWatermark = laterOptionalTime(highWatermark, child.ExternalUpdatedAt)
+	}
+	return stats, highWatermark, nil
+}
+
+func addPullOutcome(stats ApplyStats, outcome pullApplyOutcome) ApplyStats {
+	stats.RecordsChanged += outcome.changed
+	stats.RecordsFailed += outcome.failed
+	stats.ConflictsCreated += outcome.conflicts
+	return stats
+}
+
+func mergeApplyStats(left, right ApplyStats) ApplyStats {
+	left.RecordsSeen += right.RecordsSeen
+	left.RecordsChanged += right.RecordsChanged
+	left.RecordsFailed += right.RecordsFailed
+	left.ConflictsCreated += right.ConflictsCreated
+	return left
+}
+
+func laterOptionalTime(left, right *time.Time) *time.Time {
+	if left == nil {
+		return right
+	}
+	if right != nil && right.After(ptrext.Indirect(left)) {
+		return right
+	}
+	return left
+}
+
 func (r *Repo) PreparePushRecords(ctx context.Context, runID uuid.UUID, owner, tenantID string, mappingID uuid.UUID, provider string, limit int) ([]PushRecord, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
 	var claimed bool
+	var inputMetadata []byte
 	if err := r.pool.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1
+		WITH eligible_run AS (
+			SELECT input_metadata
 			  FROM external_sync_runs
 			 WHERE id = $1
 			   AND tenant_id = $3
 			   AND ($2 = '' OR claimed_by = $2)
-		)`, runID, owner, tenantID).Scan(&claimed); err != nil {
+		)
+		SELECT EXISTS (SELECT 1 FROM eligible_run),
+		       COALESCE((SELECT input_metadata FROM eligible_run), '{}'::jsonb)`,
+		runID, owner, tenantID).Scan(&claimed, &inputMetadata); err != nil {
 		return nil, fmt.Errorf("check external push run claim: %w", err)
 	}
 	if !claimed {
 		return nil, ErrRunNotFound
 	}
+	hint := pushRunHintFromMetadata(inputMetadata)
 	mapping, err := r.loadMapping(ctx, tenantID, mappingID)
 	if err != nil {
 		return nil, err
@@ -1079,6 +1730,7 @@ func (r *Repo) PreparePushRecords(ctx context.Context, runID uuid.UUID, owner, t
 	if mapping.LocalObjectType != "customer_request" || mapping.ExternalObjectType != "issue" {
 		return nil, nil
 	}
+	allowLocalTombstone := hint.Source == "customer_request_issue_create" && hint.LocalObjectID != ""
 	rows, err := r.pool.Query(ctx, `
 		SELECT cr.id::text,
 		       cr.display_id,
@@ -1108,6 +1760,20 @@ func (r *Repo) PreparePushRecords(ctx context.Context, runID uuid.UUID, owner, t
 		 WHERE cr.tenant_id = $1
 		   AND cr.archived_at IS NULL
 		   AND cr.merged_into_request_id IS NULL
+		   AND ($5 = '' OR cr.id::text = $5)
+		   AND ($6 = '' OR COALESCE(eol.external_key, issue_link.external_key, '') = $6)
+		   AND (
+			$7
+			OR NOT EXISTS (
+				SELECT 1
+				  FROM external_object_links local_tombstone
+				 WHERE local_tombstone.tenant_id = cr.tenant_id
+				   AND local_tombstone.mapping_id = $2
+				   AND local_tombstone.local_object_type = 'customer_request'
+				   AND local_tombstone.local_object_id = cr.id::text
+				   AND local_tombstone.local_deleted_at IS NOT NULL
+			)
+		   )
 		   AND (
 			eol.id IS NULL
 			OR eol.sync_state IN ('pending', 'failed', 'stale')
@@ -1118,7 +1784,8 @@ func (r *Repo) PreparePushRecords(ctx context.Context, runID uuid.UUID, owner, t
 		   )
 		 ORDER BY cr.updated_at ASC, cr.id ASC
 		 LIMIT $4`,
-		tenantID, mappingID, issueProvider(provider), limit)
+		tenantID, mappingID, issueProvider(provider), limit, hint.LocalObjectID, hint.ExternalKey,
+		allowLocalTombstone)
 	if err != nil {
 		return nil, fmt.Errorf("prepare external push records: %w", err)
 	}
@@ -1132,6 +1799,21 @@ func (r *Repo) PreparePushRecords(ctx context.Context, runID uuid.UUID, owner, t
 		out = append(out, record)
 	}
 	return out, rows.Err()
+}
+
+type pushRunHint struct {
+	LocalObjectID string
+	ExternalKey   string
+	Source        string
+}
+
+func pushRunHintFromMetadata(raw []byte) pushRunHint {
+	raw = normalizeJSONObjectBytes(raw)
+	return pushRunHint{
+		LocalObjectID: truncate(strings.TrimSpace(payloadString(raw, "local_object_id")), 512),
+		ExternalKey:   truncate(strings.TrimSpace(payloadString(raw, "external_key")), 512),
+		Source:        truncate(strings.TrimSpace(payloadString(raw, "source")), 120),
+	}
 }
 
 func (r *Repo) loadMapping(ctx context.Context, tenantID string, mappingID uuid.UUID) (Mapping, error) {
@@ -1274,7 +1956,7 @@ func (r *Repo) ClaimBatch(ctx context.Context, n int, owner string) ([]SyncRun, 
 		 )
 		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		          cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
 		n, owner)
 	if err != nil {
@@ -1396,7 +2078,7 @@ func (r *Repo) RetryRun(ctx context.Context, tenantID string, id uuid.UUID) (*Sy
 		   AND status IN ('failed', 'dead')
 		RETURNING id, tenant_id, connection_id, mapping_id, direction, trigger, status,
 		          claimed_at, claimed_by, attempts, next_retry_at, started_at, finished_at,
-		          cursor_before, cursor_after, records_seen, records_changed, records_failed,
+		          cursor_before, cursor_after, input_metadata, records_seen, records_changed, records_failed,
 		          conflicts_created, error_kind, error_message, actor_id, created_at, updated_at`,
 		tenantID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -1532,7 +2214,8 @@ func (r *Repo) ResolveConflicts(ctx context.Context, tenantID string, ids []uuid
 
 func (r *Repo) Health(ctx context.Context, tenantID string) (Health, error) {
 	var h Health
-	err := r.pool.QueryRow(ctx, `
+	err := r.pool.QueryRow(
+		ctx, `
 		WITH latest_problem_attempts AS (
 			SELECT DISTINCT ON (r.id)
 			       r.id,
@@ -1666,6 +2349,7 @@ type objectLinkRow struct {
 	ExternalURL     string
 	ExternalVersion string
 	SyncState       string
+	LocalDeleted    bool
 }
 
 func scanPushCandidate(row scanner) (PushRecord, error) {
@@ -1755,9 +2439,29 @@ func applyPushRecord(ctx context.Context, tx pgx.Tx, in ApplyPushInput, mapping 
 	result.ErrorKind = strings.TrimSpace(result.ErrorKind)
 	result.ErrorMessage = strings.TrimSpace(result.ErrorMessage)
 	if result.ErrorKind != "" {
+		return applyPushRecordWithError(ctx, tx, in, mapping, record, result)
+	}
+	return applySuccessfulPushRecord(ctx, tx, in, mapping, record, result)
+}
+
+func applyPushRecordWithError(ctx context.Context, tx pgx.Tx, in ApplyPushInput, mapping Mapping, record PushRecord, result PushResult) (pullApplyOutcome, error) {
+	if result.ExternalKey == "" {
 		return pullApplyOutcome{failed: 1}, insertPushRecordFailure(ctx, tx, in, mapping.ID, record, result,
 			result.ErrorKind, result.ErrorMessage, result.Retryable)
 	}
+	outcome, err := applySuccessfulPushRecord(ctx, tx, in, mapping, record, result)
+	if err != nil || outcome.failed > 0 || outcome.conflicts > 0 {
+		return outcome, err
+	}
+	if err := insertPushRecordFailure(ctx, tx, in, mapping.ID, record, result,
+		result.ErrorKind, result.ErrorMessage, result.Retryable); err != nil {
+		return pullApplyOutcome{}, err
+	}
+	outcome.failed = 1
+	return outcome, nil
+}
+
+func applySuccessfulPushRecord(ctx context.Context, tx pgx.Tx, in ApplyPushInput, mapping Mapping, record PushRecord, result PushResult) (pullApplyOutcome, error) {
 	if result.ExternalKey == "" {
 		return pullApplyOutcome{failed: 1}, insertPushRecordFailure(ctx, tx, in, mapping.ID, record, result,
 			"validation", "external_key is required", false)
@@ -1769,6 +2473,10 @@ func applyPushRecord(ctx context.Context, tx pgx.Tx, in ApplyPushInput, mapping 
 	externalLink, err := findLinkByExternal(ctx, tx, in.TenantID, mapping.ID, mapping.ExternalObjectType, result.ExternalKey)
 	if err != nil {
 		return pullApplyOutcome{}, err
+	}
+	if externalLink != nil && ptrext.Indirect(externalLink).LocalDeleted {
+		return pullApplyOutcome{failed: 1}, insertPushRecordFailure(ctx, tx, in, mapping.ID, record, result,
+			"local_tombstone", "external object link was unlinked locally", false)
 	}
 	if externalLink != nil && externalLink.LocalObjectID != record.LocalObjectID {
 		created, err := createPushConflict(ctx, tx, in, mapping, record, result, "link_mismatch")
@@ -1872,7 +2580,12 @@ func upsertCustomerRequestIssueLinkFromPush(ctx context.Context, tx pgx.Tx, in A
 	title := truncate(payloadString(record.Payload, "title", "summary", "name"), 500)
 	status := truncate(payloadString(record.Payload, "status", "state"), 120)
 	externalUpdatedAt := parseExternalVersionTime(result.ExternalVersion)
-	_, err := tx.Exec(ctx, `
+	updated, err := updateCustomerRequestIssueLinkByObjectLink(ctx, tx, in.TenantID, requestID,
+		linkID, issueProvider(in.Provider), result.ExternalURL, title, status, externalUpdatedAt, false, "", "")
+	if err != nil || updated {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO customer_request_issue_links
 		 (tenant_id, request_id, provider, external_key, external_url, title, status,
 		  created_by, last_synced_at, sync_state, external_updated_at, sync_error,
@@ -1897,6 +2610,41 @@ func upsertCustomerRequestIssueLinkFromPush(ctx context.Context, tx pgx.Tx, in A
 		return fmt.Errorf("upsert customer request issue link from external push: %w", err)
 	}
 	return nil
+}
+
+func updateCustomerRequestIssueLinkByObjectLink(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	requestID, linkID uuid.UUID,
+	provider, externalURL, title, status string,
+	externalUpdatedAt *time.Time,
+	setExternalFields bool,
+	externalStatusCategory, externalAssignee string,
+) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE customer_request_issue_links
+		   SET external_url = $5,
+		       title = $6,
+		       status = $7,
+		       last_synced_at = NOW(),
+		       sync_state = 'synced',
+		       external_updated_at = $8,
+		       external_status_category = CASE WHEN $9 THEN $10 ELSE external_status_category END,
+		       external_assignee = CASE WHEN $9 THEN $11 ELSE external_assignee END,
+		       sync_error = '',
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND request_id = $2
+		   AND provider = $3
+		   AND external_object_link_id = $4`,
+		tenantID, requestID, provider, linkID, truncate(externalURL, 2048),
+		title, status, externalUpdatedAt, setExternalFields, truncate(externalStatusCategory, 120),
+		truncate(externalAssignee, 500))
+	if err != nil {
+		return false, fmt.Errorf("update customer request issue link by external object link: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func createPushConflict(ctx context.Context, tx pgx.Tx, in ApplyPushInput, mapping Mapping, record PushRecord, result PushResult, kind string) (int, error) {
@@ -2003,6 +2751,9 @@ func applyPullRecord(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping 
 		return pullApplyOutcome{}, err
 	}
 	if externalLink != nil {
+		if ptrext.Indirect(externalLink).LocalDeleted {
+			return pullApplyOutcome{}, nil
+		}
 		if shouldCreateVersionConflict(ptrext.Indirect(externalLink), record) {
 			created, err := createConflict(ctx, tx, in, mapping, ptrext.Indirect(externalLink), record, "version_mismatch", payload)
 			return pullApplyOutcome{conflicts: created}, err
@@ -2024,7 +2775,7 @@ func applyPullRecord(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping 
 		return pullApplyOutcome{changed: changed}, err
 	}
 
-	linkID, err := insertExternalLink(ctx, tx, in, mapping, record, localObjectID)
+	linkID, err := insertExternalLink(ctx, tx, in, mapping, record, localObjectID, payload)
 	if err != nil {
 		return pullApplyOutcome{}, err
 	}
@@ -2032,6 +2783,270 @@ func applyPullRecord(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping 
 		return pullApplyOutcome{}, err
 	}
 	return pullApplyOutcome{changed: 1}, nil
+}
+
+func applyPullChildRecord(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping Mapping, child PullChildRecord) (pullApplyOutcome, error) {
+	child.Type = strings.TrimSpace(child.Type)
+	child.ParentExternalKey = strings.TrimSpace(child.ParentExternalKey)
+	child.ExternalKey = strings.TrimSpace(child.ExternalKey)
+	child.ExternalURL = strings.TrimSpace(child.ExternalURL)
+	child.ExternalVersion = strings.TrimSpace(child.ExternalVersion)
+	payload := normalizePayloadObject(child.Payload)
+	if child.Type == ChildTypeComment {
+		return applyPullCommentChildRecord(ctx, tx, in, mapping, child, payload)
+	}
+	if !isDeliveryArtifactChildType(child.Type) {
+		return pullApplyOutcome{}, nil
+	}
+	return applyPullDeliveryArtifactChildRecord(ctx, tx, in, mapping, child, payload)
+}
+
+func applyPullCommentChildRecord(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ApplyPullInput,
+	mapping Mapping,
+	child PullChildRecord,
+	payload []byte,
+) (pullApplyOutcome, error) {
+	if mapping.ExternalObjectType != "issue" {
+		return pullApplyOutcome{}, nil
+	}
+	if child.ParentExternalKey == "" || child.ExternalKey == "" {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"validation", "comment parent_external_key and external_key are required", payload, false)
+	}
+	link, err := findLinkByExternal(ctx, tx, in.TenantID, mapping.ID, mapping.ExternalObjectType, child.ParentExternalKey)
+	if err != nil {
+		return pullApplyOutcome{}, err
+	}
+	if link != nil && ptrext.Indirect(link).LocalDeleted {
+		return pullApplyOutcome{}, nil
+	}
+	if link == nil {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"parent_link_not_found", "parent external object link was not found", payload, true)
+	}
+	if child.Deleted {
+		changed, err := markExternalObjectCommentDeleted(ctx, tx, in, ptrext.Indirect(link), child)
+		return pullApplyOutcome{changed: changed}, err
+	}
+	changed, err := upsertExternalObjectComment(ctx, tx, in, mapping, ptrext.Indirect(link), child, payload)
+	return pullApplyOutcome{changed: changed}, err
+}
+
+func applyPullDeliveryArtifactChildRecord(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ApplyPullInput,
+	mapping Mapping,
+	child PullChildRecord,
+	payload []byte,
+) (pullApplyOutcome, error) {
+	if mapping.LocalObjectType != "customer_request" || mapping.ExternalObjectType != "issue" {
+		return pullApplyOutcome{}, nil
+	}
+	if child.ParentExternalKey == "" || child.ExternalKey == "" {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"validation", "delivery artifact parent_external_key and external_key are required", payload, false)
+	}
+	link, err := findLinkByExternal(ctx, tx, in.TenantID, mapping.ID, mapping.ExternalObjectType, child.ParentExternalKey)
+	if err != nil {
+		return pullApplyOutcome{}, err
+	}
+	if link != nil && ptrext.Indirect(link).LocalDeleted {
+		return pullApplyOutcome{}, nil
+	}
+	if link == nil {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"parent_link_not_found", "parent external object link was not found", payload, true)
+	}
+	requestID, err := uuid.Parse(ptrext.Indirect(link).LocalObjectID)
+	if err != nil {
+		return pullApplyOutcome{failed: 1}, insertChildRecordFailure(ctx, tx, in, mapping.ID, child,
+			"validation", "parent link local_object_id must be a customer request UUID", payload, false)
+	}
+	if child.Deleted {
+		changed, err := markDeliveryArtifactDeleted(ctx, tx, in, requestID, child)
+		return pullApplyOutcome{changed: changed}, err
+	}
+	changed, err := upsertDeliveryArtifactChild(ctx, tx, in, mapping, ptrext.Indirect(link), requestID, child, payload)
+	return pullApplyOutcome{changed: changed}, err
+}
+
+func upsertExternalObjectComment(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping Mapping, link objectLinkRow, child PullChildRecord, payload []byte) (int, error) {
+	body, bodyTruncated := truncateUTF8(payloadString(payload, "body", "text"), 5000)
+	eventID := inputMetadataEventID(in.InputMetadata)
+	_, err := tx.Exec(ctx, `
+		INSERT INTO external_object_comments
+		 (id, tenant_id, external_object_link_id, provider, external_object_type, external_key,
+		  direction, origin, provider_comment_id, author_display, author_external_id, body,
+		  body_digest, marker, external_url, external_version, external_created_at,
+		  external_updated_at, last_synced_at, sync_state, sync_error, external_sync_event_id,
+		  first_run_id, last_run_id, created_by, updated_by, body_truncated)
+		VALUES ($1, $2, $3, $4, $5, $6, 'pull', 'external', $7, $8, $9, $10,
+		        $11, $12, $13, $14, $15, $16, NOW(), 'synced', '', $17, $18, $18, $19, 'external_sync', $20)
+		ON CONFLICT (tenant_id, external_object_link_id, provider_comment_id)
+		WHERE provider_comment_id <> '' AND deleted_at IS NULL
+		DO UPDATE
+		   SET author_display = EXCLUDED.author_display,
+		       author_external_id = EXCLUDED.author_external_id,
+		       body = EXCLUDED.body,
+		       body_digest = EXCLUDED.body_digest,
+		       marker = EXCLUDED.marker,
+		       external_url = EXCLUDED.external_url,
+		       external_version = EXCLUDED.external_version,
+		       external_created_at = COALESCE(external_object_comments.external_created_at, EXCLUDED.external_created_at),
+		       external_updated_at = EXCLUDED.external_updated_at,
+		       last_synced_at = NOW(),
+		       sync_state = 'synced',
+		       sync_error = '',
+		       external_sync_event_id = EXCLUDED.external_sync_event_id,
+		       first_run_id = COALESCE(external_object_comments.first_run_id, EXCLUDED.first_run_id),
+		       last_run_id = EXCLUDED.last_run_id,
+		       updated_by = 'external_sync',
+		       body_truncated = EXCLUDED.body_truncated,
+		       deleted_at = NULL`,
+		uuid.New(), in.TenantID, link.ID, issueProvider(in.Provider), mapping.ExternalObjectType,
+		child.ParentExternalKey, child.ExternalKey, truncate(payloadString(payload, "author_login", "author"), 200),
+		truncate(payloadString(payload, "author_external_id"), 200), body, commentBodyDigest(payload, body),
+		truncate(payloadString(payload, "marker", "attune_comment_id"), 200), truncate(child.ExternalURL, 2048),
+		truncate(child.ExternalVersion, 512), payloadTime(payload, "created_at"), child.ExternalUpdatedAt,
+		eventID, in.RunID, truncate(payloadString(payload, "author_login", "author"), 200), bodyTruncated)
+	if err != nil {
+		return 0, fmt.Errorf("upsert external object comment: %w", err)
+	}
+	return 1, nil
+}
+
+func upsertDeliveryArtifactChild(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ApplyPullInput,
+	mapping Mapping,
+	link objectLinkRow,
+	requestID uuid.UUID,
+	child PullChildRecord,
+	payload []byte,
+) (int, error) {
+	externalURL := firstNonEmpty(child.ExternalURL, payloadFlexibleString(payload, "html_url", "external_url", "url"))
+	displayKey := firstNonEmpty(payloadFlexibleString(payload, "display_key", "number", "name"), child.ExternalKey)
+	_, err := tx.Exec(ctx, `
+		INSERT INTO customer_request_delivery_artifacts (
+			id, tenant_id, request_id, provider, connection_id, mapping_id,
+			external_object_link_id, artifact_type, relationship, external_key,
+			external_url, display_key, title, status, status_category, state_reason,
+			assignee, sync_state, sync_error, source, payload, external_updated_at,
+			last_seen_at
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, $6,
+			$7, $8, $9, $10,
+			$11, $12, $13, $14, $15, $16,
+			$17, 'synced', '', 'external_sync_child', $18::jsonb, $19,
+			$20
+		)
+		ON CONFLICT (tenant_id, request_id, provider, artifact_type, external_key)
+		WHERE deleted_at IS NULL
+		DO UPDATE SET
+			connection_id = EXCLUDED.connection_id,
+			mapping_id = EXCLUDED.mapping_id,
+			external_object_link_id = EXCLUDED.external_object_link_id,
+			relationship = EXCLUDED.relationship,
+			external_url = EXCLUDED.external_url,
+			display_key = EXCLUDED.display_key,
+			title = EXCLUDED.title,
+			status = EXCLUDED.status,
+			status_category = EXCLUDED.status_category,
+			state_reason = EXCLUDED.state_reason,
+			assignee = EXCLUDED.assignee,
+			sync_state = EXCLUDED.sync_state,
+			sync_error = '',
+			source = EXCLUDED.source,
+			payload = EXCLUDED.payload,
+			external_updated_at = EXCLUDED.external_updated_at,
+			last_seen_at = EXCLUDED.last_seen_at,
+			deleted_at = NULL,
+			updated_at = NOW()`,
+		uuid.New(), in.TenantID, requestID, issueProvider(in.Provider), nilUUID(in.ConnectionID), mapping.ID,
+		link.ID, child.Type, deliveryArtifactRelationship(child.Type, payload), child.ExternalKey,
+		truncate(externalURL, 2048), truncate(displayKey, 512),
+		truncate(payloadFlexibleString(payload, "title", "name", "summary", "subject"), 500),
+		truncate(payloadFlexibleString(payload, "status", "state", "conclusion"), 120),
+		truncate(payloadFlexibleString(payload, "status_category", "state_reason", "conclusion"), 120),
+		truncate(payloadFlexibleString(payload, "state_reason", "reason"), 240),
+		truncate(payloadAssignee(payload), 500), string(payload),
+		firstNonNilTime(child.ExternalUpdatedAt, payloadTime(payload, "updated_at")),
+		firstNonNilTime(child.ExternalUpdatedAt, payloadTime(payload, "updated_at")))
+	if err != nil {
+		return 0, fmt.Errorf("upsert customer request delivery artifact child: %w", err)
+	}
+	return 1, nil
+}
+
+func markDeliveryArtifactDeleted(ctx context.Context, tx pgx.Tx, in ApplyPullInput, requestID uuid.UUID, child PullChildRecord) (int, error) {
+	seenAt := firstNonNilTime(child.ExternalUpdatedAt, parseExternalVersionTime(child.ExternalVersion))
+	tag, err := tx.Exec(ctx, `
+		UPDATE customer_request_delivery_artifacts
+		   SET sync_state = 'deleted',
+		       deleted_at = COALESCE(deleted_at, NOW()),
+		       sync_error = '',
+		       external_updated_at = $6,
+		       last_seen_at = $6,
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND request_id = $2
+		   AND provider = $3
+		   AND artifact_type = $4
+		   AND external_key = $5
+		   AND deleted_at IS NULL`,
+		in.TenantID, requestID, issueProvider(in.Provider), child.Type, child.ExternalKey, seenAt)
+	if err != nil {
+		return 0, fmt.Errorf("mark customer request delivery artifact deleted: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func markExternalObjectCommentDeleted(ctx context.Context, tx pgx.Tx, in ApplyPullInput, link objectLinkRow, child PullChildRecord) (int, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE external_object_comments
+		   SET sync_state = 'deleted',
+		       deleted_at = COALESCE(deleted_at, NOW()),
+		       external_version = $4,
+		       external_updated_at = $5,
+		       last_synced_at = NOW(),
+		       last_run_id = $6,
+		       external_sync_event_id = $7,
+		       updated_by = 'external_sync',
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND external_object_link_id = $2
+		   AND provider_comment_id = $3
+		   AND deleted_at IS NULL`,
+		in.TenantID, link.ID, child.ExternalKey, truncate(child.ExternalVersion, 512),
+		child.ExternalUpdatedAt, in.RunID, inputMetadataEventID(in.InputMetadata))
+	if err != nil {
+		return 0, fmt.Errorf("mark external object comment deleted: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+func insertChildRecordFailure(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mappingID uuid.UUID, child PullChildRecord, kind, message string, payload []byte, retryable bool) error {
+	externalKey := child.ParentExternalKey
+	if child.ExternalKey != "" {
+		externalKey = strings.TrimSpace(externalKey + "/comments/" + child.ExternalKey)
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO external_sync_record_failures
+		 (id, tenant_id, run_id, mapping_id, operation, local_object_id, external_key,
+		  failure_kind, message, payload_digest, retry_mode, normalized_payload, retryable)
+		VALUES ($1, $2, $3, $4, 'pull', '', $5, $6, $7, $8, 'refetch', $9::jsonb, $10)`,
+		uuid.New(), in.TenantID, in.RunID, mappingID, truncate(externalKey, 512),
+		truncate(kind, 120), truncate(message, 2000), payloadDigest(child.Payload), string(payload), retryable)
+	if err != nil {
+		return fmt.Errorf("insert external sync child record failure: %w", err)
+	}
+	return nil
 }
 
 func validateLocalObjectReference(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping Mapping, record PullRecord, payload []byte) (bool, error) {
@@ -2063,7 +3078,8 @@ func validateLocalObjectReference(ctx context.Context, tx pgx.Tx, in ApplyPullIn
 
 func findLinkByExternal(ctx context.Context, tx pgx.Tx, tenantID string, mappingID uuid.UUID, externalObjectType, externalKey string) (*objectLinkRow, error) {
 	row, err := scanObjectLink(tx.QueryRow(ctx, `
-		SELECT id, local_object_id, external_key, external_url, external_version, sync_state
+		SELECT id, local_object_id, external_key, external_url, external_version, sync_state,
+		       local_deleted_at IS NOT NULL
 		  FROM external_object_links
 		 WHERE tenant_id = $1
 		   AND mapping_id = $2
@@ -2082,7 +3098,8 @@ func findLinkByExternal(ctx context.Context, tx pgx.Tx, tenantID string, mapping
 
 func findLinkByLocal(ctx context.Context, tx pgx.Tx, tenantID string, mappingID uuid.UUID, localObjectType, localObjectID string) (*objectLinkRow, error) {
 	row, err := scanObjectLink(tx.QueryRow(ctx, `
-		SELECT id, local_object_id, external_key, external_url, external_version, sync_state
+		SELECT id, local_object_id, external_key, external_url, external_version, sync_state,
+		       local_deleted_at IS NOT NULL
 		  FROM external_object_links
 		 WHERE tenant_id = $1
 		   AND mapping_id = $2
@@ -2099,18 +3116,26 @@ func findLinkByLocal(ctx context.Context, tx pgx.Tx, tenantID string, mappingID 
 	return ptrext.Of(row), nil
 }
 
-func insertExternalLink(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mapping Mapping, record PullRecord, localObjectID string) (uuid.UUID, error) {
+func insertExternalLink(
+	ctx context.Context,
+	tx pgx.Tx,
+	in ApplyPullInput,
+	mapping Mapping,
+	record PullRecord,
+	localObjectID string,
+	payload []byte,
+) (uuid.UUID, error) {
 	id := uuid.New()
 	err := tx.QueryRow(ctx, `
 		INSERT INTO external_object_links
 		 (id, tenant_id, mapping_id, local_object_type, local_object_id,
 		  external_object_type, external_key, external_url, external_version,
-		  external_updated_at, sync_state, sync_error, last_synced_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'synced', '', NOW())
+		  external_updated_at, normalized_payload, sync_state, sync_error, last_synced_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'synced', '', NOW())
 		RETURNING id`,
 		id, in.TenantID, mapping.ID, mapping.LocalObjectType, localObjectID,
 		mapping.ExternalObjectType, record.ExternalKey, truncate(record.ExternalURL, 2048),
-		truncate(record.ExternalVersion, 512), record.ExternalUpdatedAt).Scan(&id)
+		truncate(record.ExternalVersion, 512), record.ExternalUpdatedAt, string(payload)).Scan(&id)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("insert external object link: %w", err)
 	}
@@ -2127,6 +3152,7 @@ func updateExternalLink(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mappi
 		   SET external_url = $2,
 		       external_version = $3,
 		       external_updated_at = $4,
+		       normalized_payload = $5::jsonb,
 		       external_deleted_at = NULL,
 		       sync_state = 'synced',
 		       sync_error = '',
@@ -2135,7 +3161,7 @@ func updateExternalLink(ctx context.Context, tx pgx.Tx, in ApplyPullInput, mappi
 		       updated_at = NOW()
 		 WHERE id = $1`,
 		link.ID, truncate(record.ExternalURL, 2048), truncate(record.ExternalVersion, 512),
-		record.ExternalUpdatedAt); err != nil {
+		record.ExternalUpdatedAt, string(payload)); err != nil {
 		return 0, fmt.Errorf("update external object link: %w", err)
 	}
 	if err := upsertCustomerRequestIssueLink(ctx, tx, in, mapping, record, link.LocalObjectID, link.ID, payload); err != nil {
@@ -2271,12 +3297,20 @@ func upsertCustomerRequestIssueLink(ctx context.Context, tx pgx.Tx, in ApplyPull
 	provider := issueProvider(in.Provider)
 	title := truncate(payloadString(payload, "title", "summary", "name"), 500)
 	status := truncate(payloadString(payload, "status", "state"), 120)
+	externalStatusCategory := issueExternalStatusCategory(payload)
+	externalAssignee := issueExternalAssignee(payload)
+	updated, err := updateCustomerRequestIssueLinkByObjectLink(ctx, tx, in.TenantID, requestID,
+		linkID, provider, record.ExternalURL, title, status, record.ExternalUpdatedAt, true,
+		externalStatusCategory, externalAssignee)
+	if err != nil || updated {
+		return err
+	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO customer_request_issue_links
 		 (tenant_id, request_id, provider, external_key, external_url, title, status,
 		  created_by, last_synced_at, sync_state, external_updated_at, sync_error,
-		  external_object_link_id)
-		SELECT $1, cr.id, $3, $4, $5, $6, $7, 'external_sync', NOW(), 'synced', $8, '', $9
+		  external_object_link_id, external_status_category, external_assignee)
+		SELECT $1, cr.id, $3, $4, $5, $6, $7, 'external_sync', NOW(), 'synced', $8, '', $9, $10, $11
 		  FROM customer_requests cr
 		 WHERE cr.tenant_id = $1
 		   AND cr.id = $2
@@ -2289,9 +3323,12 @@ func upsertCustomerRequestIssueLink(ctx context.Context, tx pgx.Tx, in ApplyPull
 		       sync_state = 'synced',
 		       external_updated_at = EXCLUDED.external_updated_at,
 		       sync_error = '',
-		       external_object_link_id = EXCLUDED.external_object_link_id`,
+		       external_object_link_id = EXCLUDED.external_object_link_id,
+		       external_status_category = EXCLUDED.external_status_category,
+		       external_assignee = EXCLUDED.external_assignee`,
 		in.TenantID, requestID, provider, record.ExternalKey, truncate(record.ExternalURL, 2048),
-		title, status, record.ExternalUpdatedAt, linkID)
+		title, status, record.ExternalUpdatedAt, linkID, truncate(externalStatusCategory, 120),
+		truncate(externalAssignee, 500))
 	if err != nil {
 		return fmt.Errorf("upsert customer request issue link from external sync: %w", err)
 	}
@@ -2305,6 +3342,11 @@ func markCustomerRequestIssueLinkStale(ctx context.Context, tx pgx.Tx, in ApplyP
 	requestID, err := uuid.Parse(localObjectID)
 	if err != nil {
 		return nil
+	}
+	updated, err := markCustomerRequestIssueLinkStaleByObjectLink(ctx, tx, in.TenantID, requestID,
+		linkID, issueProvider(in.Provider))
+	if err != nil || updated {
+		return err
 	}
 	_, err = tx.Exec(ctx, `
 		UPDATE customer_request_issue_links
@@ -2321,6 +3363,25 @@ func markCustomerRequestIssueLinkStale(ctx context.Context, tx pgx.Tx, in ApplyP
 		return fmt.Errorf("mark customer request issue link stale from external sync: %w", err)
 	}
 	return nil
+}
+
+func markCustomerRequestIssueLinkStaleByObjectLink(ctx context.Context, tx pgx.Tx, tenantID string, requestID, linkID uuid.UUID, provider string) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		UPDATE customer_request_issue_links
+		   SET sync_state = 'stale',
+		       sync_error = '',
+		       last_synced_at = NOW(),
+		       external_object_link_id = $4,
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND request_id = $2
+		   AND provider = $3
+		   AND external_object_link_id = $4`,
+		tenantID, requestID, provider, linkID)
+	if err != nil {
+		return false, fmt.Errorf("mark customer request issue link stale by external object link: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 func normalizeStreamKey(streamKey string) string {
@@ -2375,6 +3436,64 @@ func marshalJSONObject(v map[string]any) []byte {
 	return out
 }
 
+func runInputMetadataFromEvent(event SyncEvent) []byte {
+	var payload map[string]any
+	_ = json.Unmarshal(event.NormalizedPayload, &payload) // ptrext:allow unmarshal-out-param
+	out := map[string]any{
+		"external_sync_event_id": event.ID.String(),
+	}
+	if event.ExternalEventID != "" {
+		out["provider_event_id"] = event.ExternalEventID
+	}
+	addStringHint(out, "event_type", payload["event_type"])
+	addStringHint(out, "action", payload["action"])
+	addNestedStringHint(out, payload, "repository", "full_name", "repository_full_name")
+	addNestedStringHint(out, payload, "repository", "html_url", "repository_url")
+	addNestedNumberHint(out, payload, "issue", "number", "issue_number")
+	addNestedStringHint(out, payload, "issue", "html_url", "issue_url")
+	addNestedNumberHint(out, payload, "comment", "id", "comment_id")
+	return normalizeJSONObjectBytes(marshalJSONObject(out))
+}
+
+func addStringHint(out map[string]any, key string, value any) {
+	if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+		out[key] = strings.TrimSpace(s)
+	}
+}
+
+func addNestedStringHint(out map[string]any, payload map[string]any, objectKey, fieldKey, outKey string) {
+	object, ok := payload[objectKey].(map[string]any)
+	if !ok {
+		return
+	}
+	addStringHint(out, outKey, object[fieldKey])
+}
+
+func addNestedNumberHint(out map[string]any, payload map[string]any, objectKey, fieldKey, outKey string) {
+	object, ok := payload[objectKey].(map[string]any)
+	if !ok {
+		return
+	}
+	addNumberHint(out, outKey, object[fieldKey])
+}
+
+func addNumberHint(out map[string]any, key string, value any) {
+	switch v := value.(type) {
+	case float64:
+		if v > 0 {
+			out[key] = int64(v)
+		}
+	case int64:
+		if v > 0 {
+			out[key] = v
+		}
+	case int:
+		if v > 0 {
+			out[key] = v
+		}
+	}
+}
+
 func payloadDigest(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
@@ -2391,6 +3510,162 @@ func payloadString(payload []byte, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func payloadFlexibleString(payload []byte, keys ...string) string {
+	var v map[string]any
+	if err := json.Unmarshal(payload, &v); err != nil {
+		return ""
+	}
+	for _, key := range keys {
+		if value := payloadValueString(v[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func payloadValueString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case float64:
+		if typed == float64(int64(typed)) {
+			return fmt.Sprintf("%d", int64(typed))
+		}
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.6f", typed), "0"), ".")
+	case map[string]any:
+		return payloadObjectDisplay(typed)
+	default:
+		return ""
+	}
+}
+
+func payloadObjectDisplay(raw map[string]any) string {
+	for _, key := range []string{"login", "name", "display_name", "email", "url"} {
+		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func payloadAssignee(payload []byte) string {
+	var v map[string]any
+	if err := json.Unmarshal(payload, &v); err != nil {
+		return ""
+	}
+	if value := payloadValueString(v["assignee"]); value != "" {
+		return value
+	}
+	items, ok := v["assignees"].([]any)
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, min(len(items), 3))
+	for _, item := range items {
+		if value := payloadValueString(item); value != "" {
+			parts = append(parts, value)
+		}
+		if len(parts) == 3 {
+			break
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func payloadTime(payload []byte, key string) *time.Time {
+	value := payloadString(payload, key)
+	if value == "" {
+		return nil
+	}
+	ts, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		ts, err = time.Parse(time.RFC3339, value)
+	}
+	if err != nil {
+		return nil
+	}
+	return ptrext.Of(ts)
+}
+
+func inputMetadataEventID(metadata []byte) *uuid.UUID {
+	value := payloadString(metadata, "external_sync_event_id")
+	if value == "" {
+		return nil
+	}
+	id, err := uuid.Parse(value)
+	if err != nil {
+		return nil
+	}
+	return ptrext.Of(id)
+}
+
+func commentBodyDigest(payload []byte, body string) string {
+	if digest := payloadString(payload, "body_digest"); digest != "" {
+		return truncate(digest, 200)
+	}
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+func issueExternalStatusCategory(payload []byte) string {
+	switch strings.ToLower(payloadString(payload, "state", "status")) {
+	case "open":
+		return "open"
+	case "closed":
+		return "closed"
+	default:
+		return "unknown"
+	}
+}
+
+func issueExternalAssignee(payload []byte) string {
+	if assignee := payloadString(payload, "assignee"); assignee != "" {
+		return truncate(assignee, 500)
+	}
+	return truncate(strings.Join(payloadStringSlice(payload, "assignees"), ", "), 500)
+}
+
+func payloadStringSlice(payload []byte, key string) []string {
+	var v map[string]any
+	if err := json.Unmarshal(payload, &v); err != nil {
+		return nil
+	}
+	raw, ok := v[key].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		value, ok := item.(string)
+		if !ok {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func truncateUTF8(s string, n int) (string, bool) {
+	s = strings.TrimSpace(s)
+	if len(s) <= n {
+		return s, false
+	}
+	if n <= 0 {
+		return "", s != ""
+	}
+	cut := 0
+	for idx := range s {
+		if idx > n {
+			return s[:cut], true
+		}
+		cut = idx
+	}
+	return s[:cut], true
 }
 
 func issueProvider(provider string) string {
@@ -2411,6 +3686,60 @@ func conflictMessage(kind string) string {
 	}
 }
 
+func isDeliveryArtifactChildType(value string) bool {
+	switch strings.TrimSpace(value) {
+	case "pull_request", "commit", "branch", "deployment", "release", "project_item", "sub_issue", "support_ticket":
+		return true
+	default:
+		return false
+	}
+}
+
+func deliveryArtifactRelationship(artifactType string, payload []byte) string {
+	switch payloadFlexibleString(payload, "relationship", "link_type") {
+	case "tracked_by", "implements", "blocks", "duplicates", "references", "ships_in", "reported_from", "parent", "child":
+		return payloadFlexibleString(payload, "relationship", "link_type")
+	}
+	switch artifactType {
+	case "pull_request":
+		return "implements"
+	case "deployment", "release":
+		return "ships_in"
+	case "sub_issue":
+		return "child"
+	case "support_ticket":
+		return "reported_from"
+	default:
+		return "references"
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func firstNonNilTime(left, right *time.Time) *time.Time {
+	if left != nil && !ptrext.Indirect(left).IsZero() {
+		return left
+	}
+	if right != nil && !ptrext.Indirect(right).IsZero() {
+		return right
+	}
+	return nil
+}
+
+func nilUUID(value uuid.UUID) *uuid.UUID {
+	if value == uuid.Nil {
+		return nil
+	}
+	return ptrext.Of(value)
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -2425,12 +3754,14 @@ type failureRetrySeed struct {
 func scanConnection(row scanner) (Connection, error) {
 	var c Connection
 	var webhookSecretKeyID *string
+	var providerInstallationID *uuid.UUID
 	err := row.Scan(&c.ID, &c.TenantID, &c.Provider, &c.Name, &c.Enabled, &c.Status,
 		&c.AuthType, &c.BaseURL, &c.ProviderConfig, &c.Scopes, &c.CredentialKeyID,
 		&c.CredentialCiphertext, &webhookSecretKeyID, &c.WebhookSecretCiphertext,
 		&c.WebhookSecretSetAt, &c.LastTestedAt, &c.LastTestStatus, &c.LastError,
-		&c.CreatedBy, &c.UpdatedBy, &c.CreatedAt, &c.UpdatedAt)
+		&c.CreatedBy, &c.UpdatedBy, &providerInstallationID, &c.CreatedAt, &c.UpdatedAt)
 	c.WebhookSecretKeyID = ptrext.Indirect(webhookSecretKeyID)
+	c.ProviderInstallationID = providerInstallationID
 	return c, err
 }
 
@@ -2449,8 +3780,8 @@ func scanRun(row scanner) (SyncRun, error) {
 	err := row.Scan(&run.ID, &run.TenantID, &run.ConnectionID, &run.MappingID,
 		&run.Direction, &run.Trigger, &run.Status, &run.ClaimedAt, &claimedBy,
 		&run.Attempts, &run.NextRetryAt, &run.StartedAt, &run.FinishedAt,
-		&run.CursorBefore, &run.CursorAfter, &run.RecordsSeen, &run.RecordsChanged,
-		&run.RecordsFailed, &run.ConflictsCreated, &run.ErrorKind, &run.ErrorMessage,
+		&run.CursorBefore, &run.CursorAfter, &run.InputMetadata, &run.RecordsSeen,
+		&run.RecordsChanged, &run.RecordsFailed, &run.ConflictsCreated, &run.ErrorKind, &run.ErrorMessage,
 		&run.ActorID, &run.CreatedAt, &run.UpdatedAt)
 	run.ClaimedBy = ptrext.Indirect(claimedBy)
 	return run, err
@@ -2510,7 +3841,7 @@ func scanTimelineEntry(row scanner) (RecordTimelineEntry, error) {
 func scanObjectLink(row scanner) (objectLinkRow, error) {
 	var link objectLinkRow
 	err := row.Scan(&link.ID, &link.LocalObjectID, &link.ExternalKey,
-		&link.ExternalURL, &link.ExternalVersion, &link.SyncState)
+		&link.ExternalURL, &link.ExternalVersion, &link.SyncState, &link.LocalDeleted)
 	return link, err
 }
 

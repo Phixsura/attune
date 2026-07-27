@@ -19,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	crrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
+	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	idempotencyrepo "github.com/Phixsura/attune/internal/repo/idempotency"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
@@ -229,6 +230,391 @@ func TestPGCustomerRequestDeliveryHealthRollup(t *testing.T) {
 	assertDeliveryHealth(t, e, synced.ID, crrepo.DeliveryHealthSynced, 1, 0, 0, 0, 0)
 	assertDeliveryHealth(t, e, noLinks.ID, crrepo.DeliveryHealthNoLinks, 0, 0, 0, 0, 0)
 	assertDeliveryHealthSort(t, e, failed.ID, stale.ID, pending.ID)
+}
+
+func TestPGCustomerRequestLinkGitHubIssueByConnectionAndNumber(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Managed existing GitHub issue")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	detail, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:     e.tenantID,
+		RequestID:    request.ID,
+		ConnectionID: ptrext.Of(connectionID),
+		MappingID:    ptrext.Of(mappingID),
+		IssueNumber:  "00212",
+		Actor:        auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue by connection and number: %v", err)
+	}
+	if len(detail.Request.IssueLinks) != 1 {
+		t.Fatalf("issue links len = %d, want one", len(detail.Request.IssueLinks))
+	}
+	link := detail.Request.IssueLinks[0]
+	if link.ExternalKey != "Phixsura/attune#212" ||
+		link.ExternalURL != "https://github.com/Phixsura/attune/issues/212" ||
+		link.SyncState != crrepo.IssueSyncStatePending {
+		t.Fatalf("issue link = %+v; want managed pending GitHub issue link", link)
+	}
+	assertManagedGitHubExternalObjectLink(t, e, request.ID, mappingID, "212", link.ExternalURL)
+	assertManagedGitHubIssuePullRun(t, e, request.ID, connectionID, mappingID, "212")
+}
+
+func TestPGCustomerRequestDeliveryGraphUsesExternalObjectPayload(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Delivery graph payload request")
+	_, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	linked, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/228",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue managed URL: %v", err)
+	}
+	if len(linked.Request.IssueLinks) != 1 {
+		t.Fatalf("issue links len = %d, want one", len(linked.Request.IssueLinks))
+	}
+
+	payloadUpdatedAt := time.Date(2026, 7, 7, 1, 30, 0, 0, time.UTC)
+	updateExternalObjectPayload(t, e, request.ID, mappingID, "228", payloadUpdatedAt)
+
+	detail, err := e.repo.GetDetail(e.ctx, e.tenantID, request.ID, 50)
+	if err != nil {
+		t.Fatalf("GetDetail with external object payload: %v", err)
+	}
+	if detail.DeliveryGraph.Health != crrepo.DeliveryHealthFailed {
+		t.Fatalf("delivery graph health = %q, want failed", detail.DeliveryGraph.Health)
+	}
+	if len(detail.DeliveryGraph.Artifacts) != 2 {
+		t.Fatalf("delivery graph artifacts len = %d, want 2", len(detail.DeliveryGraph.Artifacts))
+	}
+	artifact := detail.DeliveryGraph.Artifacts[1]
+	if artifact.Source != "external_object_link" || artifact.Title != "Provider payload title" {
+		t.Fatalf("delivery artifact = %+v, want external payload source/title", artifact)
+	}
+	if artifact.Status != "closed" || artifact.StatusCategory != "completed" {
+		t.Fatalf("delivery artifact status = %q/%q, want closed/completed", artifact.Status, artifact.StatusCategory)
+	}
+	if artifact.Assignee != "octo, hubot" || artifact.SyncError != "secondary rate limit" {
+		t.Fatalf("delivery artifact assignee/error = %q/%q", artifact.Assignee, artifact.SyncError)
+	}
+	if artifact.LastSeenAt == nil || !artifact.LastSeenAt.Equal(payloadUpdatedAt) {
+		t.Fatalf("delivery artifact last seen = %+v, want %s", artifact.LastSeenAt, payloadUpdatedAt)
+	}
+}
+
+func TestPGCustomerRequestDeliveryGraphUsesProjectedArtifacts(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Delivery graph projected artifact request")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	if _, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/229",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	}); err != nil {
+		t.Fatalf("LinkIssue managed URL: %v", err)
+	}
+	prSeenAt := time.Date(2026, 7, 7, 2, 0, 0, 0, time.UTC)
+	insertProjectedDeliveryArtifact(t, e, request.ID, connectionID, mappingID, prSeenAt)
+
+	detail, err := e.repo.GetDetail(e.ctx, e.tenantID, request.ID, 50)
+	if err != nil {
+		t.Fatalf("GetDetail with projected delivery artifact: %v", err)
+	}
+	if detail.DeliveryGraph.Health != crrepo.DeliveryHealthFailed {
+		t.Fatalf("delivery graph health = %q, want failed", detail.DeliveryGraph.Health)
+	}
+	if detail.DeliveryGraph.HealthExplanation != "2 linked artifacts: 1 failed, 1 pending." {
+		t.Fatalf("delivery graph explanation = %q", detail.DeliveryGraph.HealthExplanation)
+	}
+	if len(detail.DeliveryGraph.Artifacts) != 3 || len(detail.DeliveryGraph.Relationships) != 2 {
+		t.Fatalf("delivery graph = %+v, want root plus issue plus PR with two relationships", detail.DeliveryGraph)
+	}
+	artifact := detail.DeliveryGraph.Artifacts[2]
+	if artifact.ArtifactType != "pull_request" || artifact.Title != "Implement delivery graph projection" {
+		t.Fatalf("projected artifact = %+v, want PR projection", artifact)
+	}
+	if artifact.Health != crrepo.DeliveryHealthFailed || artifact.SyncError != "merge conflict" {
+		t.Fatalf("projected artifact health/error = %q/%q", artifact.Health, artifact.SyncError)
+	}
+	if artifact.LastSeenAt == nil || !artifact.LastSeenAt.Equal(prSeenAt) {
+		t.Fatalf("projected artifact last seen = %+v, want %s", artifact.LastSeenAt, prSeenAt)
+	}
+	if detail.DeliveryGraph.Relationships[1].RelationshipType != "implements" {
+		t.Fatalf("projected relationship = %+v, want implements", detail.DeliveryGraph.Relationships[1])
+	}
+}
+
+func TestPGCustomerRequestLinkGitHubIssueURLQueuesManagedPullRun(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Managed GitHub issue by URL")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	detail, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/213",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue by GitHub URL: %v", err)
+	}
+	if len(detail.Request.IssueLinks) != 1 {
+		t.Fatalf("issue links len = %d, want one", len(detail.Request.IssueLinks))
+	}
+	link := detail.Request.IssueLinks[0]
+	if link.ExternalKey != "Phixsura/attune#213" ||
+		link.ExternalURL != "https://github.com/Phixsura/attune/issues/213" ||
+		link.SyncState != crrepo.IssueSyncStatePending {
+		t.Fatalf("issue link = %+v; want managed pending GitHub URL link", link)
+	}
+	assertManagedGitHubExternalObjectLink(t, e, request.ID, mappingID, "213", link.ExternalURL)
+	assertManagedGitHubIssuePullRun(t, e, request.ID, connectionID, mappingID, "213")
+}
+
+func TestPGCustomerRequestUnlinkManagedGitHubIssueTombstonesLocalLink(t *testing.T) {
+	e := setup(t)
+	first := e.createRequest(t, e.tenantID, "Managed GitHub issue to unlink")
+	second := e.createRequest(t, e.tenantID, "Managed GitHub issue rebind target")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+	actor := auditlogsvc.Actor{Type: "admin", ID: "operator-1"}
+
+	detail, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   first.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/219",
+		Actor:       actor,
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue initial managed URL: %v", err)
+	}
+	if len(detail.Request.IssueLinks) != 1 {
+		t.Fatalf("initial issue links len = %d, want one", len(detail.Request.IssueLinks))
+	}
+
+	if _, err := service.UnlinkIssue(e.ctx, e.tenantID, first.ID, detail.Request.IssueLinks[0].ID, actor); err != nil {
+		t.Fatalf("UnlinkIssue managed URL: %v", err)
+	}
+	assertIssueLinkCount(t, e, first.ID, 0)
+	assertLocalGitHubExternalObjectLinkTombstone(t, e, first.ID, mappingID, "219")
+
+	rebuilt, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   second.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/219",
+		Actor:       actor,
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue rebind managed URL: %v", err)
+	}
+	if len(rebuilt.Request.IssueLinks) != 1 {
+		t.Fatalf("rebound issue links len = %d, want one", len(rebuilt.Request.IssueLinks))
+	}
+	assertIssueLinkCount(t, e, first.ID, 0)
+	assertManagedGitHubExternalObjectLink(t, e, second.ID, mappingID, "219", "https://github.com/Phixsura/attune/issues/219")
+	assertManagedGitHubIssuePullRun(t, e, second.ID, connectionID, mappingID, "219")
+}
+
+func TestPGCustomerRequestLinkGitHubIssueURLWithPushOnlyMappingStaysManual(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Manual GitHub link stays manual")
+	connectionID, mappingID := e.seedGitHubExternalIssueMappingWithDirection(
+		t,
+		"https://github.com/Phixsura/attune",
+		"push",
+	)
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	detail, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/214",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue with push-only mapping: %v", err)
+	}
+	if len(detail.Request.IssueLinks) != 1 {
+		t.Fatalf("issue links len = %d, want one", len(detail.Request.IssueLinks))
+	}
+	link := detail.Request.IssueLinks[0]
+	if link.SyncState != crrepo.IssueSyncStateManual {
+		t.Fatalf("issue link sync state = %s, want manual", link.SyncState)
+	}
+	assertIssueLinkNotManaged(t, e, link.ID)
+	assertNoManagedGitHubExternalObjectLink(t, e, request.ID, mappingID)
+	assertNoExternalSyncRuns(t, e, connectionID, mappingID)
+}
+
+func TestPGCustomerRequestLinkGitHubIssueURLConflictsWhenExternalIssueAlreadyManaged(t *testing.T) {
+	e := setup(t)
+	first := e.createRequest(t, e.tenantID, "First managed GitHub link")
+	second := e.createRequest(t, e.tenantID, "Second managed GitHub link")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	firstDetail, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   first.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/215",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if err != nil {
+		t.Fatalf("LinkIssue first managed URL: %v", err)
+	}
+	if len(firstDetail.Request.IssueLinks) != 1 {
+		t.Fatalf("first issue links len = %d, want one", len(firstDetail.Request.IssueLinks))
+	}
+
+	_, err = service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   second.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/215",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if !errors.Is(err, crrepo.ErrConflict) {
+		t.Fatalf("LinkIssue duplicate managed URL error = %v, want ErrConflict", err)
+	}
+	assertManagedGitHubExternalObjectLink(t, e, first.ID, mappingID, "215", "https://github.com/Phixsura/attune/issues/215")
+	assertManagedGitHubIssuePullRun(t, e, first.ID, connectionID, mappingID, "215")
+	assertIssueLinkCount(t, e, second.ID, 0)
+}
+
+func TestPGCustomerRequestLinkGitHubIssueURLConflictsWhenRequestAlreadyManagedToDifferentIssue(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Already managed GitHub link")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	if _, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/217",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	}); err != nil {
+		t.Fatalf("LinkIssue first managed URL: %v", err)
+	}
+
+	_, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/218",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if !errors.Is(err, crrepo.ErrConflict) {
+		t.Fatalf("LinkIssue second managed URL error = %v, want ErrConflict", err)
+	}
+	assertIssueLinkCount(t, e, request.ID, 1)
+	assertManagedGitHubExternalObjectLink(t, e, request.ID, mappingID, "217", "https://github.com/Phixsura/attune/issues/217")
+	assertExternalSyncRunCount(t, e, connectionID, mappingID, 1)
+}
+
+func TestPGCustomerRequestLinkGitHubIssueURLConflictsWhenLocalTombstoneTargetsRequestWithDifferentActiveIssue(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Active managed link with old tombstone")
+	connectionID, mappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+	actor := auditlogsvc.Actor{Type: "admin", ID: "operator-1"}
+
+	if _, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/220",
+		Actor:       actor,
+	}); err != nil {
+		t.Fatalf("LinkIssue active managed URL: %v", err)
+	}
+	if _, err := e.pool.Exec(e.ctx, `
+		INSERT INTO external_object_links
+		 (id, tenant_id, mapping_id, local_object_type, local_object_id,
+		  external_object_type, external_key, external_url, sync_state,
+		  local_deleted_at, tombstone_reason)
+		VALUES ($1, $2, $3, 'customer_request', $4, 'issue', '221',
+		        'https://github.com/Phixsura/attune/issues/221', 'deleted',
+		        NOW(), 'local_unlinked')`,
+		uuid.New(), e.tenantID, mappingID, request.ID.String()); err != nil {
+		t.Fatalf("insert local tombstone: %v", err)
+	}
+
+	_, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/221",
+		Actor:       actor,
+	})
+	if !errors.Is(err, crrepo.ErrConflict) {
+		t.Fatalf("LinkIssue local tombstone with active link error = %v, want ErrConflict", err)
+	}
+	assertIssueLinkCount(t, e, request.ID, 1)
+	assertManagedGitHubExternalObjectLink(t, e, request.ID, mappingID, "220", "https://github.com/Phixsura/attune/issues/220")
+	assertExternalSyncRunCount(t, e, connectionID, mappingID, 1)
+}
+
+func TestPGCustomerRequestLinkGitHubIssueURLConflictsWhenRepositoryMappingIsAmbiguous(t *testing.T) {
+	e := setup(t)
+	request := e.createRequest(t, e.tenantID, "Ambiguous managed GitHub link")
+	firstConnectionID, firstMappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	secondConnectionID, secondMappingID := e.seedGitHubExternalIssueMapping(t, "https://github.com/Phixsura/attune")
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, nil, auditlogsvc.New(auditRepo))
+	service.SetIssueCreateRunStore(externalsyncrepo.New(e.pool))
+
+	_, err := service.LinkIssue(e.ctx, crsvc.LinkIssueInput{
+		TenantID:    e.tenantID,
+		RequestID:   request.ID,
+		Provider:    "github",
+		ExternalURL: "https://github.com/Phixsura/attune/issues/216",
+		Actor:       auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	})
+	if !errors.Is(err, crrepo.ErrConflict) {
+		t.Fatalf("LinkIssue ambiguous managed URL error = %v, want ErrConflict", err)
+	}
+	assertIssueLinkCount(t, e, request.ID, 0)
+	assertNoManagedGitHubExternalObjectLink(t, e, request.ID, firstMappingID)
+	assertNoManagedGitHubExternalObjectLink(t, e, request.ID, secondMappingID)
+	assertNoExternalSyncRuns(t, e, firstConnectionID, firstMappingID)
+	assertNoExternalSyncRuns(t, e, secondConnectionID, secondMappingID)
 }
 
 func TestPGCustomerRequestNotesWriteAuditAndTouchRequest(t *testing.T) {
@@ -1011,6 +1397,303 @@ func (e env) createTenant(t *testing.T, slug string) string {
 		t.Fatalf("create tenant %q: %v", slug, err)
 	}
 	return tenantID
+}
+
+func (e env) seedGitHubExternalIssueMapping(t *testing.T, repoURL string) (uuid.UUID, uuid.UUID) {
+	t.Helper()
+	return e.seedGitHubExternalIssueMappingWithDirection(t, repoURL, "bidirectional")
+}
+
+func (e env) seedGitHubExternalIssueMappingWithDirection(t *testing.T, repoURL, direction string) (uuid.UUID, uuid.UUID) {
+	t.Helper()
+	keyID := "kid-" + uuid.NewString()
+	if _, err := e.pool.Exec(e.ctx, `
+		INSERT INTO secret_key_registry (key_id, status)
+		VALUES ($1, 'ENABLED')`, keyID); err != nil {
+		t.Fatalf("insert external sync key: %v", err)
+	}
+	connectionID := uuid.New()
+	if _, err := e.pool.Exec(e.ctx, `
+		INSERT INTO external_connections
+		 (id, tenant_id, provider, name, enabled, status, auth_type, provider_config,
+		  scopes, credential_key_id, credential_ciphertext, created_by, updated_by)
+		VALUES ($1, $2, 'github', $3, TRUE, 'active', 'token', $4::jsonb,
+		        ARRAY['issues'], $5, $6, 'tester', 'tester')`,
+		connectionID,
+		e.tenantID,
+		"GitHub "+connectionID.String()[:8],
+		`{"repo_url": "`+repoURL+`"}`,
+		keyID,
+		[]byte("ciphertext"),
+	); err != nil {
+		t.Fatalf("insert external connection: %v", err)
+	}
+	mappingID := uuid.New()
+	if _, err := e.pool.Exec(e.ctx, `
+		INSERT INTO external_object_mappings
+		 (id, tenant_id, connection_id, local_object_type, external_object_type,
+		  direction, field_mapping, status_mapping, conflict_policy, tombstone_policy)
+		VALUES ($1, $2, $3, 'customer_request', 'issue', $4,
+		        '{}'::jsonb, '{}'::jsonb, 'manual', 'mark_stale')`,
+		mappingID, e.tenantID, connectionID, direction); err != nil {
+		t.Fatalf("insert external object mapping: %v", err)
+	}
+	return connectionID, mappingID
+}
+
+func assertManagedGitHubExternalObjectLink(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+	externalKey string,
+	externalURL string,
+) {
+	t.Helper()
+	var gotKey, gotURL, gotState string
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT external_key, external_url, sync_state
+		  FROM external_object_links
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND local_object_id = $3
+		   AND external_deleted_at IS NULL
+		   AND local_deleted_at IS NULL`,
+		e.tenantID, mappingID, requestID.String()).Scan(&gotKey, &gotURL, &gotState); err != nil {
+		t.Fatalf("read managed external object link: %v", err)
+	}
+	if gotKey != externalKey || gotURL != externalURL || gotState != "pending" {
+		t.Fatalf("external object link = key:%q url:%q state:%q; want %q/%q/pending",
+			gotKey, gotURL, gotState, externalKey, externalURL)
+	}
+}
+
+func updateExternalObjectPayload(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+	externalKey string,
+	updatedAt time.Time,
+) {
+	t.Helper()
+	payload := `{
+		"title":"Provider payload title",
+		"state":"closed",
+		"state_reason":"completed",
+		"html_url":"https://github.com/Phixsura/attune/issues/228",
+		"updated_at":"` + updatedAt.Format(time.RFC3339) + `",
+		"assignees":[{"login":"octo"},{"login":"hubot"}]
+	}`
+	tag, err := e.pool.Exec(e.ctx, `
+		UPDATE external_object_links
+		   SET external_version = $5,
+		       external_updated_at = $6,
+		       normalized_payload = $7::jsonb,
+		       sync_state = 'failed',
+		       sync_error = 'secondary rate limit',
+		       last_synced_at = NOW(),
+		       updated_at = NOW()
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND local_object_id = $3
+		   AND external_key = $4
+		   AND external_deleted_at IS NULL
+		   AND local_deleted_at IS NULL`,
+		e.tenantID, mappingID, requestID.String(), externalKey, updatedAt.Format(time.RFC3339),
+		updatedAt, payload)
+	if err != nil {
+		t.Fatalf("update external object payload: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("update external object payload rows = %d, want 1", tag.RowsAffected())
+	}
+}
+
+func insertProjectedDeliveryArtifact(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	connectionID uuid.UUID,
+	mappingID uuid.UUID,
+	seenAt time.Time,
+) {
+	t.Helper()
+	tag, err := e.pool.Exec(e.ctx, `
+		INSERT INTO customer_request_delivery_artifacts (
+			tenant_id, request_id, provider, connection_id, mapping_id,
+			artifact_type, relationship, external_key, external_url, display_key,
+			title, status, status_category, state_reason, assignee, sync_state,
+			sync_error, source, payload, external_updated_at, last_seen_at
+		)
+		VALUES (
+			$1, $2, 'github', $3, $4,
+			'pull_request', 'implements', 'Phixsura/attune#313',
+			'https://github.com/Phixsura/attune/pull/313', 'PR #313',
+			'Implement delivery graph projection', 'blocked', 'blocked',
+			'merge_conflict', 'octo', 'failed',
+			'merge conflict', 'delivery_artifact', '{"checks":"failed"}'::jsonb,
+			$5, $5
+		)`,
+		e.tenantID, requestID, connectionID, mappingID, seenAt)
+	if err != nil {
+		t.Fatalf("insert projected delivery artifact: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("insert projected delivery artifact rows = %d, want 1", tag.RowsAffected())
+	}
+}
+
+func assertLocalGitHubExternalObjectLinkTombstone(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	mappingID uuid.UUID,
+	externalKey string,
+) {
+	t.Helper()
+	var localObjectID, syncState, tombstoneReason string
+	var localDeleted, externalDeleted bool
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT local_object_id, sync_state, tombstone_reason,
+		       local_deleted_at IS NOT NULL,
+		       external_deleted_at IS NOT NULL
+		  FROM external_object_links
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND external_key = $3`,
+		e.tenantID, mappingID, externalKey).Scan(
+		&localObjectID,
+		&syncState,
+		&tombstoneReason,
+		&localDeleted,
+		&externalDeleted,
+	); err != nil {
+		t.Fatalf("read local external object link tombstone: %v", err)
+	}
+	if localObjectID != requestID.String() || syncState != "deleted" ||
+		tombstoneReason != "local_unlinked" || !localDeleted || externalDeleted {
+		t.Fatalf(
+			"external object link tombstone = local:%q state:%q reason:%q local_deleted:%t external_deleted:%t; want local tombstone",
+			localObjectID,
+			syncState,
+			tombstoneReason,
+			localDeleted,
+			externalDeleted,
+		)
+	}
+}
+
+func assertIssueLinkNotManaged(t *testing.T, e env, issueLinkID uuid.UUID) {
+	t.Helper()
+	var managed bool
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT external_object_link_id IS NOT NULL
+		  FROM customer_request_issue_links
+		 WHERE tenant_id = $1
+		   AND id = $2`,
+		e.tenantID, issueLinkID).Scan(&managed); err != nil {
+		t.Fatalf("read issue link managed state: %v", err)
+	}
+	if managed {
+		t.Fatal("issue link external_object_link_id is set, want unmanaged manual link")
+	}
+}
+
+func assertManagedGitHubIssuePullRun(
+	t *testing.T,
+	e env,
+	requestID uuid.UUID,
+	connectionID uuid.UUID,
+	mappingID uuid.UUID,
+	externalKey string,
+) {
+	t.Helper()
+	var direction, trigger, status, gotExternalKey, gotLocalObjectID, source, actor string
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT direction, trigger, status,
+		       input_metadata->>'external_key',
+		       input_metadata->>'local_object_id',
+		       input_metadata->>'source',
+		       actor_id
+		  FROM external_sync_runs
+		 WHERE tenant_id = $1
+		   AND connection_id = $2
+		   AND mapping_id = $3
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT 1`,
+		e.tenantID, connectionID, mappingID).Scan(
+		&direction,
+		&trigger,
+		&status,
+		&gotExternalKey,
+		&gotLocalObjectID,
+		&source,
+		&actor,
+	); err != nil {
+		t.Fatalf("read managed GitHub issue pull run: %v", err)
+	}
+	if direction != "pull" || trigger != "manual" || status != "queued" ||
+		gotExternalKey != externalKey || gotLocalObjectID != requestID.String() ||
+		source != "customer_request_issue_link" || actor != "operator-1" {
+		t.Fatalf("pull run = direction:%q trigger:%q status:%q external:%q local:%q source:%q actor:%q",
+			direction, trigger, status, gotExternalKey, gotLocalObjectID, source, actor)
+	}
+}
+
+func assertNoManagedGitHubExternalObjectLink(t *testing.T, e env, requestID uuid.UUID, mappingID uuid.UUID) {
+	t.Helper()
+	var count int
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT COUNT(*)
+		  FROM external_object_links
+		 WHERE tenant_id = $1
+		   AND mapping_id = $2
+		   AND local_object_id = $3`,
+		e.tenantID, mappingID, requestID.String()).Scan(&count); err != nil {
+		t.Fatalf("count managed external object links: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("managed external object links count = %d, want 0", count)
+	}
+}
+
+func assertNoExternalSyncRuns(t *testing.T, e env, connectionID uuid.UUID, mappingID uuid.UUID) {
+	t.Helper()
+	assertExternalSyncRunCount(t, e, connectionID, mappingID, 0)
+}
+
+func assertExternalSyncRunCount(t *testing.T, e env, connectionID uuid.UUID, mappingID uuid.UUID, want int) {
+	t.Helper()
+	var count int
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT COUNT(*)
+		  FROM external_sync_runs
+		 WHERE tenant_id = $1
+		   AND connection_id = $2
+		   AND mapping_id = $3`,
+		e.tenantID, connectionID, mappingID).Scan(&count); err != nil {
+		t.Fatalf("count external sync runs: %v", err)
+	}
+	if count != want {
+		t.Fatalf("external sync runs count = %d, want %d", count, want)
+	}
+}
+
+func assertIssueLinkCount(t *testing.T, e env, requestID uuid.UUID, want int) {
+	t.Helper()
+	var count int
+	if err := e.pool.QueryRow(e.ctx, `
+		SELECT COUNT(*)
+		  FROM customer_request_issue_links
+		 WHERE tenant_id = $1
+		   AND request_id = $2`,
+		e.tenantID, requestID).Scan(&count); err != nil {
+		t.Fatalf("count issue links: %v", err)
+	}
+	if count != want {
+		t.Fatalf("issue link count = %d, want %d", count, want)
+	}
 }
 
 func (e env) createMember(t *testing.T, tenantID, userID, email string) uuid.UUID {

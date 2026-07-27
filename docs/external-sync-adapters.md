@@ -16,7 +16,8 @@ An adapter implements `externalsync.Provider`:
 - `Check(ctx, conn)` validates decrypted credentials and non-secret provider
   configuration.
 - `Discover(ctx, conn)` returns supported provider object schemas.
-- `Pull(ctx, req)` returns normalized external records and the next cursor.
+- `Pull(ctx, req)` returns normalized external records, optional child records,
+  and the next cursor.
 - `Push(ctx, req)` writes normalized local records to the provider.
 - `ClassifyError(err)` returns a redacted error kind, message, HTTP status,
   provider request id, optional `Retry-After`, and retryability decision.
@@ -127,15 +128,28 @@ The Console connection editor updates name, enabled state, base URL, provider
 configuration, and scopes. It rotates the credential or webhook secret only
 when a new value is submitted.
 
+The Console provider picker lists registered adapters from the backend
+registry, so the create-connection dialog can surface GitHub and Jira without
+hard-coded provider tokens. Test-only `noop` wiring is omitted from that list.
+
+GitHub Issue sync changes require the full-stack browser acceptance checklist in
+[`docs/testing.md`](testing.md). The checklist is intentionally mouse-driven:
+the deployed Console must be operated in a visible browser, while provider
+mock or sandbox logs, Postgres rows, and service logs prove that the UI state
+matches durable sync behavior.
+
 GitHub webhook setup:
 
 - set the connection `webhook_secret` when creating or updating the connection;
 - configure GitHub to deliver JSON webhooks to
   `/v1/external-sync/webhooks/github/{tenant_id}/{connection_id}`;
-- enable the `issues` event for issue sync diagnostics and `ping` for setup
-  validation;
+- enable the `issues` and `issue_comment` events for issue sync, plus `ping`
+  for setup validation;
 - Attune verifies `X-Hub-Signature-256`, records `X-GitHub-Delivery` as the
-  external event id, and stores only a compact normalized event payload.
+  external event id, stores only a compact normalized event payload, and queues
+  a webhook-triggered pull run for verified `issues` and `issue_comment`
+  deliveries that match an enabled Customer Request issue mapping. Verified
+  `ping` deliveries are recorded for setup diagnostics and do not enqueue a run.
 
 Pull behavior:
 
@@ -144,10 +158,18 @@ Pull behavior:
 - skips entries that are GitHub pull requests;
 - stores issue number, title, state, labels, assignees, URLs, and timestamps in
   a normalized payload;
+- fetches GitHub issue comments for changed issues and returns them as
+  `comment` child records keyed by provider comment id;
 - advances a JSON cursor with either `next_url` for paginated responses or
   `updated_since` for the high watermark;
 - extracts `<!-- attune:customer_request_id=<uuid> -->` from issue bodies and
-  uses it as `ExternalRecord.LocalObjectID`.
+  uses it as `ExternalRecord.LocalObjectID`;
+- webhook replay metadata can include an issue number and comment id; in that
+  case the adapter reads only that issue and its comments, and returns the same
+  cursor it received so scheduled pulls keep their high watermark;
+- `issue_comment.deleted` webhook replay emits a deleted `comment` child record
+  from the webhook `comment_id` when the comment no longer appears in GitHub's
+  comment list.
 
 Push behavior accepts `LocalRecord.Payload` JSON. Creating an issue uses:
 
@@ -160,7 +182,9 @@ Push behavior accepts `LocalRecord.Payload` JSON. Creating an issue uses:
 }
 ```
 
-Updating an issue uses the issue number as `external_key`:
+Updating an issue uses the issue number as `external_key`. The adapter also
+accepts same-repository keys in `owner/repo#number` form and normalizes them to
+the issue number before writing; keys for a different repository are rejected.
 
 ```json
 {
@@ -177,20 +201,89 @@ unmerged, unarchived requests. New requests without an object link become create
 payloads; synced requests whose local `updated_at` is newer than the last pushed
 version become update payloads with the stored `external_key`. The GitHub
 adapter maps local request status `shipped` and `cancelled` to closed GitHub
-issues and keeps other statuses open.
+issues. It does not reopen issues unless `allow_reopen` is enabled.
 
 Create payloads append the Customer Request marker when `customer_request_id` is
-present, or when the local record id itself is a UUID. Update payloads append
-the marker only when they explicitly include `body`; state-only updates do not
-overwrite the existing GitHub issue body. The marker makes later pulls
-idempotently bridge the GitHub issue back to the Customer Request issue-link
-ledger.
+present, or when the local record id itself is a UUID. Update payloads are safe
+by default: with `linked_existing_write_policy:
+read_state_with_backlink`, Attune does not overwrite GitHub issue title, body,
+or labels. Setting `linked_existing_write_policy: write_managed_fields` lets the
+adapter write the managed request section and perform read-modify-write label
+updates that preserve unmanaged labels while replacing labels under
+`managed_label_prefix`.
+
+When `sync_comments` is enabled, push also maintains one Attune-managed
+request-context issue comment. The comment body includes stable hidden
+`attune:comment_id` and `attune:customer_request_id` markers. Before creating a
+comment, the adapter lists issue comments and updates the marked comment when it
+already exists, so retries and scheduled pushes do not create duplicates.
+
+## Built-in Jira Issues Adapter
+
+The built-in Jira adapter registers provider token `jira` and supports external
+object type `issue`.
+
+Connection setup:
+
+```json
+{
+  "provider": "jira",
+  "auth_type": "token",
+  "webhook_secret": "replace-with-at-least-16-characters",
+  "provider_config": {
+    "site_url": "https://acme.atlassian.net",
+    "project_key": "ACME",
+    "issue_type": "Task",
+    "email": "bot@acme.com",
+    "request_label_prefix": "attune-customer-request-",
+    "status_transitions": {
+      "pending": "To Do",
+      "synced": "In Progress",
+      "failed": "Blocked"
+    }
+  },
+  "scopes": ["issues"]
+}
+```
+
+`provider_config` also accepts `api_base_url` or a connection `base_url` for
+the REST API base URL, and `issue_type_id` instead of `issue_type`. The
+credential is a Jira API token, and Attune sends it with the configured email
+as Basic auth `email:token`.
+
+Jira webhook setup:
+
+- set `webhook_secret` on the connection;
+- configure Jira to POST JSON deliveries to
+  `/v1/external-sync/webhooks/jira/{tenant_id}/{connection_id}`;
+- send `X-Hub-Signature` with the same `sha256=...` HMAC shape used by GitHub;
+- Attune records the delivery event with a compact normalized payload and
+  dedupe key.
+
+Pull behavior:
+
+- queries `/rest/api/3/search` for the configured project ordered by updated
+  time;
+- normalizes issue key, summary, status, labels, assignee, reporter,
+  timestamps, resolution, and comment metadata;
+- extracts Attune request markers from labels or comments and bridges them
+  back to `LocalObjectID`;
+- honors the configured `request_label_prefix` when matching request labels,
+  so tenants with custom marker prefixes remain idempotent on pull.
+
+Push behavior:
+
+- creates or updates issues with the configured project and issue type;
+- preserves the Attune request marker comment when needed;
+- transitions status using explicit `status_transitions` when configured, or a
+  heuristic fallback when the workflow is obvious.
 
 ## Pull Records
 
 `Pull` returns `externalsync.PullResult`:
 
 - `Records` contains provider-neutral `ExternalRecord` values.
+- `Children` contains provider-neutral child records such as issue comments.
 - `NextCursor` is a JSON object encoded as bytes.
 - `StreamKey` is optional; empty means the framework uses `default`.
 
@@ -209,6 +302,83 @@ UUID when the external issue is already bound to a request. If it is unknown,
 leave it empty; the framework stores a generic external link keyed by
 `external:<Key>` and skips the Customer Request issue-link bridge until a local
 object is known.
+
+Issue comment child records use `Type: "comment"`, `ParentKey` set to the issue
+number, and `Key` set to the provider comment id. The framework stores them in
+`external_object_comments` with a unique provider-comment ledger per external
+object link, so repeated pulls and webhook deliveries update the same row
+instead of duplicating comments.
+
+Customer Request manual GitHub links can join the managed sync identity model
+when the tenant has an active GitHub connection and an enabled
+Customer Request-to-issue mapping for the same repository. The manual link may
+keep its operator-facing key such as `acme/app#42`, while the generic
+`external_object_links` row stores provider key `42`. Later pulls, pushes, and
+tombstones update the existing issue link through `external_object_link_id`
+instead of creating a duplicate `customer_request_issue_links` row. If the same
+provider issue is already bound to a different request, the manual link is
+rejected as a conflict.
+
+GitHub pull apply projects delivery context into Customer Request issue links:
+the issue title and state update `title` and `status`, state is normalized to
+`external_status_category` as `open`, `closed`, or `unknown`, and the primary
+assignee or assignee list is stored in `external_assignee`.
+
+Record timelines include `comment` entries from `external_object_comments`.
+Issue link timeline detail JSON includes external URL, external version, sync
+state, tombstone reason, and a provider payload snapshot for normalized labels,
+assignees, state reason, close timestamp, and comment count. Comment timeline
+detail JSON includes provider comment id, author display, external URL, external
+version, external updated timestamp, body digest, truncation flag, and marker.
+It does not expose raw comment bodies.
+
+Manual run requests can include provider-neutral input metadata. For push runs,
+`local_object_id` limits `PreparePushRecords` to one local object, which enables
+single-request GitHub issue creation through the same worker path as scheduled
+pushes. For pull runs, `external_key` identifies one provider object when the
+adapter can use that key as a fetch hint. GitHub accepts either issue number
+`42` or display key `acme/app#42` and fetches that issue without advancing the
+scheduled cursor. Run responses expose `input_metadata_json` so operators can
+see which selector was used.
+
+Customer Request detail exposes a managed GitHub create action at
+`POST /fb/v1/console/customer-requests/{id}/issue-links:create-github`. The
+action queues a manual push run with `input_metadata.local_object_id` set to the
+request id; the worker then creates the issue through the same provider
+contract used by scheduled pushes. The request must not already have a GitHub
+issue link, and the tenant must have exactly one active, enabled GitHub mapping
+whose direction is `push` or `bidirectional` unless the caller supplies an
+explicit `connection_id` or `mapping_id`. Repeated clicks reuse an existing
+queued or running create run for the same request and mapping.
+
+Customer Request detail can also link an existing managed GitHub issue either
+by full GitHub URL or by connection-scoped issue number. `POST
+/fb/v1/console/customer-requests/{id}/issue-links` accepts `connection_id`, an
+optional `mapping_id`, and `issue_number` for provider `github`; it also accepts
+a plain `external_url` when the URL matches a tenant GitHub connection and a
+pull-capable Customer Request issue mapping. Attune resolves or derives the
+managed mapping, stores the Customer Request issue link, and binds the same
+issue number into `external_object_links` for subsequent pulls, pushes,
+tombstones, and delivery timeline entries. A successful managed link queues a
+targeted manual pull run with `input_metadata.external_key` set to the issue
+number, so Attune refreshes GitHub-owned title, state, assignee, label, and
+comment context without waiting for the next scheduled poll. Supplying both a
+full `external_url` and `issue_number` is rejected so each link request has one
+clear source of truth. If a URL matches more than one active pull-capable
+mapping for the same repository, Attune rejects the link instead of choosing a
+connection implicitly. If the request is already bound to a different GitHub
+issue through the same managed mapping, Attune rejects the new link instead of
+downgrading it to a passive manual reference.
+
+Unlinking a managed GitHub issue from a Customer Request marks the generic
+external object link as locally tombstoned with reason `local_unlinked` before
+removing the operator-facing issue link. Later pull runs skip that local
+tombstone and do not recreate the issue link automatically. Scheduled and
+ordinary push runs also skip locally tombstoned requests so a background run
+does not create a replacement issue just because the active link is gone. An
+explicit manual link request for the same GitHub issue can clear the local
+tombstone and rebind the external object link to the selected Customer Request;
+the explicit managed create action can create a new GitHub issue after unlink.
 
 ## Cursor Rules
 

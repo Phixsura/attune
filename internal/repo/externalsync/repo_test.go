@@ -4,6 +4,8 @@ package externalsync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -103,6 +105,10 @@ func TestRepoNormalizeHelpers(t *testing.T) {
 	if normalizeLocalObjectID("", " EXT-1 ") != "external:EXT-1" {
 		t.Fatalf("external key fallback not normalized")
 	}
+}
+
+func TestRepoNormalizeJSONAndCursorHelpers(t *testing.T) {
+	t.Parallel()
 
 	if string(normalizeJSONObjectBytes(nil)) != "{}" {
 		t.Fatalf("nil JSON should normalize to object")
@@ -115,6 +121,257 @@ func TestRepoNormalizeHelpers(t *testing.T) {
 	}
 	if got := string(normalizeCursorAfter([]byte(`{"page":1}`), nil)); got != `{"page":1}` {
 		t.Fatalf("empty cursor after should reuse cursor before, got %q", got)
+	}
+	if got := string(normalizeCursorAfter([]byte(`{"page":1}`), []byte(`{"page":2}`))); got != `{"page":2}` {
+		t.Fatalf("cursor after should win when present, got %q", got)
+	}
+	if got := string(normalizePayloadObject([]byte(` not-json `))); got != "{}" {
+		t.Fatalf("normalizePayloadObject(invalid) = %q, want object", got)
+	}
+	if got := string(marshalJSONObject(map[string]any{"bad": func() {}})); got != "{}" {
+		t.Fatalf("marshalJSONObject(unmarshalable) = %q, want object", got)
+	}
+
+	hint := pushRunHintFromMetadata([]byte(`{"local_object_id":" cr-1 ","external_key":" ISS-1 ","source":" customer_request_issue_create "}`))
+	if hint.LocalObjectID != "cr-1" || hint.ExternalKey != "ISS-1" || hint.Source != "customer_request_issue_create" {
+		t.Fatalf("push run hint = %+v; want trimmed selector", hint)
+	}
+	if bad := pushRunHintFromMetadata([]byte(`not-json`)); bad != (pushRunHint{}) {
+		t.Fatalf("bad push run hint = %+v; want empty selector", bad)
+	}
+}
+
+func TestCustomerRequestIssueRunMetadataHelpers(t *testing.T) {
+	t.Parallel()
+
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+
+	createMetadata := customerRequestIssueCreateRunMetadata(requestID)
+	if got := pushRunHintFromMetadata(createMetadata); got.LocalObjectID != requestID.String() ||
+		got.ExternalKey != "" ||
+		got.Source != "customer_request_issue_create" {
+		t.Fatalf("create metadata hint = %+v", got)
+	}
+
+	pullMetadata := customerRequestIssuePullRunMetadata(requestID, "  ISSUE-228  ")
+	if got := pushRunHintFromMetadata(pullMetadata); got.LocalObjectID != requestID.String() ||
+		got.ExternalKey != "ISSUE-228" ||
+		got.Source != "customer_request_issue_link" {
+		t.Fatalf("pull metadata hint = %+v", got)
+	}
+}
+
+func TestCustomerRequestIssueRunLinkChecks(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	tenantID := "tenant-1"
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	errBoom := errors.New("boom")
+
+	t.Run("require external link", func(t *testing.T) {
+		t.Parallel()
+
+		err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{true}}},
+		}), tenantID, requestID, mappingID, " ISSUE-228 ")
+		if err != nil {
+			t.Fatalf("linked request returned error: %v", err)
+		}
+		if err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false}}},
+		}), tenantID, requestID, mappingID, "ISSUE-404"); !errors.Is(err, ErrLocalObjectNotFound) {
+			t.Fatalf("missing link error = %v; want ErrLocalObjectNotFound", err)
+		}
+		if err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{err: errBoom}},
+		}), tenantID, requestID, mappingID, "ISSUE-500"); err == nil {
+			t.Fatal("link check query error returned nil")
+		}
+	})
+
+	t.Run("reject existing links", func(t *testing.T) {
+		t.Parallel()
+
+		err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false, false}}},
+		}), tenantID, requestID, mappingID)
+		if err != nil {
+			t.Fatalf("unlinked request returned error: %v", err)
+		}
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{true, false}}},
+		}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("issue link error = %v; want ErrConflict", err)
+		}
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false, true}}},
+		}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("object link error = %v; want ErrConflict", err)
+		}
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{err: errBoom}},
+		}), tenantID, requestID, mappingID); err == nil {
+			t.Fatal("existing link query error returned nil")
+		}
+	})
+
+	t.Run("reject concurrent create runs", func(t *testing.T) {
+		t.Parallel()
+
+		err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{false}}},
+		}), tenantID, requestID, mappingID)
+		if err != nil {
+			t.Fatalf("request without concurrent run returned error: %v", err)
+		}
+		if err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{values: []any{true}}},
+		}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("concurrent run error = %v; want ErrConflict", err)
+		}
+		if err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{{err: errBoom}},
+		}), tenantID, requestID, mappingID); err == nil {
+			t.Fatal("concurrent run query error returned nil")
+		}
+	})
+}
+
+func TestCustomerRequestIssueRunExistingRunHelpers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 8, 2, 3, 4, 0, time.UTC)
+	tenantID := "tenant-1"
+	connectionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+
+	row := issueRunFakeRow(runID, tenantID, connectionID, mappingID, now, DirectionPush)
+	run, err := existingCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{row}}), tenantID, requestID, mappingID)
+	if err != nil {
+		t.Fatalf("existing create run returned error: %v", err)
+	}
+	if run.ID != runID || run.Direction != DirectionPush || run.Trigger != TriggerManual {
+		t.Fatalf("existing create run = %+v", run)
+	}
+
+	row = issueRunFakeRow(runID, tenantID, connectionID, mappingID, now, DirectionPull)
+	run, err = existingCustomerRequestIssuePullRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{row}}), tenantID, requestID, mappingID, " ISSUE-228 ")
+	if err != nil {
+		t.Fatalf("existing pull run returned error: %v", err)
+	}
+	if run.ID != runID || run.Direction != DirectionPull || run.Trigger != TriggerManual {
+		t.Fatalf("existing pull run = %+v", run)
+	}
+
+	errBoom := errors.New("boom")
+	if _, err := existingCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{
+		rows: []fakeRow{{err: errBoom}},
+	}), tenantID, requestID, mappingID); !errors.Is(err, errBoom) {
+		t.Fatalf("existing create run error = %v; want boom", err)
+	}
+	if _, err := existingCustomerRequestIssuePullRun(ctx, ptrext.Of(fakeTx{
+		rows: []fakeRow{{err: errBoom}},
+	}), tenantID, requestID, mappingID, "ISSUE-228"); !errors.Is(err, errBoom) {
+		t.Fatalf("existing pull run error = %v; want boom", err)
+	}
+}
+
+func TestRunInputMetadataFromEventIncludesWebhookHints(t *testing.T) {
+	t.Parallel()
+
+	eventID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	raw := runInputMetadataFromEvent(SyncEvent{
+		ID:              eventID,
+		ExternalEventID: "delivery-1",
+		NormalizedPayload: []byte(`{
+			"event_type": "issue_comment",
+			"action": "deleted",
+			"repository": {
+				"full_name": "acme/app",
+				"html_url": "https://github.com/acme/app"
+			},
+			"issue": {
+				"number": 42,
+				"html_url": "https://github.com/acme/app/issues/42"
+			},
+			"comment": {
+				"id": 777
+			}
+		}`),
+	})
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("unmarshal run input metadata: %v", err)
+	}
+	wantStrings := map[string]string{
+		"external_sync_event_id": eventID.String(),
+		"provider_event_id":      "delivery-1",
+		"event_type":             "issue_comment",
+		"action":                 "deleted",
+		"repository_full_name":   "acme/app",
+		"repository_url":         "https://github.com/acme/app",
+		"issue_url":              "https://github.com/acme/app/issues/42",
+	}
+	for key, want := range wantStrings {
+		if got[key] != want {
+			t.Fatalf("metadata[%s] = %#v; want %q in %s", key, got[key], want, raw)
+		}
+	}
+	if got["issue_number"] != float64(42) || got["comment_id"] != float64(777) {
+		t.Fatalf("metadata numeric hints = issue:%#v comment:%#v; want 42/777 in %s",
+			got["issue_number"], got["comment_id"], raw)
+	}
+}
+
+func TestRunInputMetadataHintBranches(t *testing.T) {
+	t.Parallel()
+
+	eventID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	raw := runInputMetadataFromEvent(SyncEvent{
+		ID: eventID,
+		NormalizedPayload: []byte(`{
+			"event_type": "   ",
+			"repository": "not-an-object",
+			"issue": {"number": -1},
+			"comment": {"id": 0}
+		}`),
+	})
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil { // ptrext:allow unmarshal-out-param
+		t.Fatalf("unmarshal run input metadata: %v", err)
+	}
+	if got["external_sync_event_id"] != eventID.String() {
+		t.Fatalf("external_sync_event_id = %#v, want event id", got["external_sync_event_id"])
+	}
+	for _, key := range []string{"provider_event_id", "event_type", "repository_full_name", "issue_number", "comment_id"} {
+		if _, ok := got[key]; ok {
+			t.Fatalf("metadata[%s] present in %s, want omitted", key, raw)
+		}
+	}
+
+	out := map[string]any{}
+	addNumberHint(out, "float", float64(7))
+	addNumberHint(out, "int64", int64(8))
+	addNumberHint(out, "int", 9)
+	addNumberHint(out, "negative", -1)
+	addNumberHint(out, "zero", int64(0))
+	addNumberHint(out, "string", "10")
+	if out["float"] != int64(7) || out["int64"] != int64(8) || out["int"] != 9 {
+		t.Fatalf("numeric hints = %+v, want positive float/int64/int values", out)
+	}
+	if _, ok := out["negative"]; ok {
+		t.Fatalf("negative numeric hint was added: %+v", out)
+	}
+	if _, ok := out["zero"]; ok {
+		t.Fatalf("zero numeric hint was added: %+v", out)
+	}
+	if _, ok := out["string"]; ok {
+		t.Fatalf("string numeric hint was added: %+v", out)
 	}
 }
 
@@ -133,6 +390,69 @@ func TestRepoPayloadDigestAndStringHelpers(t *testing.T) {
 	}
 	if payloadString([]byte(`{"name":42}`), "title") != "" {
 		t.Fatalf("payloadString should ignore missing string keys")
+	}
+	if ts := payloadTime([]byte(`{"created_at":"2026-07-08T01:02:03.123456789Z"}`), "created_at"); ts == nil || ts.Nanosecond() != 123456789 {
+		t.Fatalf("payloadTime did not parse RFC3339Nano timestamp: %v", ts)
+	}
+	if ts := payloadTime([]byte(`{"created_at":"2026-07-08T01:02:03Z"}`), "created_at"); ts == nil || ts.UTC().Year() != 2026 {
+		t.Fatalf("payloadTime did not parse RFC3339 timestamp: %v", ts)
+	}
+	if payloadTime([]byte(`{"created_at":"not-time"}`), "created_at") != nil {
+		t.Fatalf("payloadTime should ignore invalid timestamps")
+	}
+}
+
+func TestRepoPayloadMetadataHelpers(t *testing.T) {
+	t.Parallel()
+
+	eventID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	if got := inputMetadataEventID([]byte(`{"external_sync_event_id":"` + eventID.String() + `"}`)); got == nil || ptrext.Indirect(got) != eventID {
+		t.Fatalf("inputMetadataEventID = %v, want %s", got, eventID)
+	}
+	if inputMetadataEventID([]byte(`{"external_sync_event_id":"not-a-uuid"}`)) != nil {
+		t.Fatalf("inputMetadataEventID should ignore invalid UUIDs")
+	}
+	longDigest := strings.Repeat("d", 250)
+	if got := commentBodyDigest([]byte(`{"body_digest":"`+longDigest+`"}`), "body"); len(got) != 200 {
+		t.Fatalf("commentBodyDigest should truncate provider digest to 200 chars, got %d", len(got))
+	}
+	sum := sha256.Sum256([]byte("body"))
+	if got := commentBodyDigest([]byte(`{}`), "body"); got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("commentBodyDigest = %q, want sha256 body hex", got)
+	}
+}
+
+func TestRepoIssueAssigneeAndStringSliceHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got := issueExternalAssignee([]byte(`{"assignees":[" octo ","","hub"]}`)); got != "octo, hub" {
+		t.Fatalf("issueExternalAssignee joined assignees = %q", got)
+	}
+	if got := issueExternalAssignee([]byte(`{"assignee":" maintainer "}`)); got != "maintainer" {
+		t.Fatalf("issueExternalAssignee direct assignee = %q", got)
+	}
+	if got := payloadStringSlice([]byte(`{"assignees":[" octo ", 42, " ", "hub"]}`), "assignees"); !reflect.DeepEqual(got, []string{"octo", "hub"}) {
+		t.Fatalf("payloadStringSlice filtered assignees = %#v", got)
+	}
+	if got := payloadStringSlice([]byte(`not-json`), "assignees"); got != nil {
+		t.Fatalf("payloadStringSlice(invalid JSON) = %#v, want nil", got)
+	}
+	if got := payloadStringSlice([]byte(`{"assignees":"octo"}`), "assignees"); got != nil {
+		t.Fatalf("payloadStringSlice(non-list) = %#v, want nil", got)
+	}
+}
+
+func TestRepoTruncateUTF8Helpers(t *testing.T) {
+	t.Parallel()
+
+	if got, truncated := truncateUTF8("  世界hello  ", len("世界")); got != "世界" || !truncated {
+		t.Fatalf("truncateUTF8 = %q/%t, want clean UTF-8 cut", got, truncated)
+	}
+	if got, truncated := truncateUTF8("  keep  ", 20); got != "keep" || truncated {
+		t.Fatalf("truncateUTF8 = %q/%t, want trimmed untruncated string", got, truncated)
+	}
+	if got, truncated := truncateUTF8("  x  ", 0); got != "" || !truncated {
+		t.Fatalf("truncateUTF8 = %q/%t, want empty truncated string", got, truncated)
 	}
 }
 
@@ -192,6 +512,21 @@ func TestCustomerRequestPushPayloadHelpers(t *testing.T) {
 	if decoded["external_key"] != "ISS-1" || decoded["title"] != "CR-1 Sync bug" {
 		t.Fatalf("payload = %+v", decoded)
 	}
+	payload, err = customerRequestIssuePayload("cr-2", "CR-2", "No external key", "", "planned", "medium", " ")
+	if err != nil {
+		t.Fatalf("customerRequestIssuePayload without external key returned error: %v", err)
+	}
+	decoded = map[string]any{}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("payload without external key JSON invalid: %v", err)
+	}
+	if _, ok := decoded["external_key"]; ok {
+		t.Fatalf("payload without external key should omit external_key: %+v", decoded)
+	}
+}
+
+func TestPushResultsByLocalSkipsBlankLocalObjects(t *testing.T) {
+	t.Parallel()
 
 	records := pushResultsByLocal([]PushResult{
 		{LocalObjectID: " cr-1 ", ExternalKey: "ISS-1"},
@@ -208,6 +543,7 @@ func TestRepoConnectionMappingRunEventScanners(t *testing.T) {
 	now := time.Date(2026, 7, 8, 2, 3, 4, 0, time.UTC)
 	tenantID := "tenant-1"
 	connectionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	providerInstallationID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
 	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 
@@ -216,14 +552,18 @@ func TestRepoConnectionMappingRunEventScanners(t *testing.T) {
 		"token", "https://api.github.com", []byte(`{"repo":"acme/app"}`),
 		[]string{"issues"},
 		"credential-key", []byte("credential"), stringPtr("webhook-key"), []byte("webhook"),
-		timePtr(now), timePtr(now), TestStatusOK, "", "admin", "admin", now, now,
+		timePtr(now), timePtr(now), TestStatusOK, "", "admin", "admin", ptrext.Of(providerInstallationID), now, now,
 	}})
 	if err != nil {
 		t.Fatalf("scanConnection returned error: %v", err)
 	}
-	if conn.WebhookSecretKeyID != "webhook-key" || conn.LastTestedAt == nil {
-		t.Fatalf("connection nullable fields = %+v", conn)
+	if conn.WebhookSecretKeyID != "webhook-key" {
+		t.Fatalf("connection webhook key = %q; want webhook-key", conn.WebhookSecretKeyID)
 	}
+	if conn.LastTestedAt == nil {
+		t.Fatalf("connection last tested at = nil; want timestamp")
+	}
+	requireScannedProviderInstallationID(t, conn.ProviderInstallationID, providerInstallationID)
 
 	mapping, err := scanMapping(fakeRow{values: []any{
 		mappingID, tenantID, connectionID, "customer_request", "issue", DirectionPull,
@@ -240,12 +580,12 @@ func TestRepoConnectionMappingRunEventScanners(t *testing.T) {
 		runID, tenantID, connectionID, ptrext.Of(mappingID), DirectionPull, TriggerManual, RunStatusRunning,
 		timePtr(now), stringPtr("worker-1"), 2, now.Add(time.Minute), timePtr(now),
 		timePtr(now.Add(time.Minute)), []byte(`{"before":1}`), []byte(`{"after":1}`),
-		5, 4, 1, 1, "rate_limited", "slow down", "admin", now, now,
+		[]byte(`{"issue_number":228}`), 5, 4, 1, 1, "rate_limited", "slow down", "admin", now, now,
 	}})
 	if err != nil {
 		t.Fatalf("scanRun returned error: %v", err)
 	}
-	if run.MappingID == nil || run.ClaimedBy != "worker-1" || run.RecordsSeen != 5 {
+	if run.MappingID == nil || run.ClaimedBy != "worker-1" || run.RecordsSeen != 5 || string(run.InputMetadata) == "" {
 		t.Fatalf("run = %+v", run)
 	}
 
@@ -322,7 +662,7 @@ func TestRepoConflictTimelineAndLinkScanners(t *testing.T) {
 
 	link, err := scanObjectLink(fakeRow{values: []any{
 		uuid.MustParse("77777777-7777-7777-7777-777777777777"), "cr-1", "ISS-1",
-		"https://github.com/acme/app/issues/1", "v1", SyncStatePending,
+		"https://github.com/acme/app/issues/1", "v1", SyncStatePending, false,
 	}})
 	if err != nil || link.SyncState != SyncStatePending {
 		t.Fatalf("link=%+v err=%v", link, err)
@@ -428,7 +768,7 @@ func TestApplyPullRecordBranches(t *testing.T) {
 
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{rows: []fakeRow{
-			{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStatePending}},
+			{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStatePending, false}},
 			{values: []any{1}},
 		}})
 		outcome, err := applyPullRecord(ctx, tx, input, mapping, PullRecord{
@@ -450,7 +790,7 @@ func TestApplyPullRecordBranches(t *testing.T) {
 
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{
-			rows:  []fakeRow{{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStateSynced}}},
+			rows:  []fakeRow{{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStateSynced, false}}},
 			execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 1")},
 		})
 		outcome, err := applyPullRecord(ctx, tx, input, mapping, PullRecord{
@@ -465,6 +805,28 @@ func TestApplyPullRecordBranches(t *testing.T) {
 		}
 		if outcome.changed != 0 || tx.execIdx != 1 {
 			t.Fatalf("outcome=%+v execs=%d", outcome, tx.execIdx)
+		}
+	})
+
+	t.Run("local tombstone skips existing external link", func(t *testing.T) {
+		t.Parallel()
+
+		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+		tx := ptrext.Of(fakeTx{rows: []fakeRow{
+			{values: []any{linkID, "cr-1", "ISS-1", "https://example.test/1", "v1", SyncStateDeleted, true}},
+		}})
+		outcome, err := applyPullRecord(ctx, tx, input, mapping, PullRecord{
+			ExternalKey:       "ISS-1",
+			ExternalURL:       "https://example.test/1",
+			ExternalVersion:   "v2",
+			ExternalUpdatedAt: ptrext.Of(now),
+			Payload:           []byte(`{"title":"bug"}`),
+		})
+		if err != nil {
+			t.Fatalf("applyPullRecord returned error: %v", err)
+		}
+		if outcome != (pullApplyOutcome{}) || tx.execIdx != 0 {
+			t.Fatalf("outcome=%+v execs=%d, want skipped tombstone", outcome, tx.execIdx)
 		}
 	})
 
@@ -489,6 +851,541 @@ func TestApplyPullRecordBranches(t *testing.T) {
 		}
 		if outcome.changed != 1 || tx.rowIdx != 3 {
 			t.Fatalf("outcome=%+v rows=%d", outcome, tx.rowIdx)
+		}
+	})
+}
+
+func TestApplyPullChildRecordBranches(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 8, 4, 0, 0, 123, time.UTC)
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	input := ApplyPullInput{
+		TenantID:      "tenant-1",
+		RunID:         uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+		ConnectionID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+		MappingID:     mappingID,
+		Provider:      "github",
+		InputMetadata: []byte(`{"external_sync_event_id":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}`),
+	}
+	mapping := Mapping{
+		ID:                 mappingID,
+		LocalObjectType:    "customer_request",
+		ExternalObjectType: "issue",
+	}
+	comment := PullChildRecord{
+		ParentExternalKey: "ISS-1",
+		Type:              ChildTypeComment,
+		ExternalKey:       "comment-1",
+		ExternalURL:       "https://example.test/1#issuecomment-1",
+		ExternalVersion:   now.Format(time.RFC3339Nano),
+		ExternalUpdatedAt: ptrext.Of(now),
+		Payload: []byte(`{
+			"body": "Hello from GitHub",
+			"author_login": " octo ",
+			"author_external_id": "42",
+			"marker": "attune:comment:1",
+			"created_at": "2026-07-08T04:00:00Z"
+		}`),
+	}
+
+	t.Run("non comment children are ignored", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, PullChildRecord{
+			ParentExternalKey: "ISS-1",
+			Type:              "label",
+			ExternalKey:       "triaged",
+		})
+		if err != nil || outcome != (pullApplyOutcome{}) || tx.rowIdx != 0 || tx.execIdx != 0 {
+			t.Fatalf("outcome=%+v err=%v rows=%d execs=%d, want ignored child", outcome, err, tx.rowIdx, tx.execIdx)
+		}
+	})
+
+	t.Run("non issue mappings are ignored", func(t *testing.T) {
+		t.Parallel()
+
+		otherMapping := mapping
+		otherMapping.ExternalObjectType = "ticket"
+		tx := ptrext.Of(fakeTx{})
+		outcome, err := applyPullChildRecord(ctx, tx, input, otherMapping, comment)
+		if err != nil || outcome != (pullApplyOutcome{}) || tx.rowIdx != 0 || tx.execIdx != 0 {
+			t.Fatalf("outcome=%+v err=%v rows=%d execs=%d, want ignored mapping", outcome, err, tx.rowIdx, tx.execIdx)
+		}
+	})
+
+	t.Run("missing identity records a validation failure", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{execs: []pgconn.CommandTag{pgconn.NewCommandTag("INSERT 0 1")}})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, PullChildRecord{
+			ParentExternalKey: "ISS-1",
+			Type:              ChildTypeComment,
+			Payload:           []byte(`{"body":"missing key"}`),
+		})
+		if err != nil || outcome.failed != 1 || tx.execIdx != 1 {
+			t.Fatalf("outcome=%+v err=%v execs=%d, want recorded validation failure", outcome, err, tx.execIdx)
+		}
+		args := tx.execArgs[0]
+		if args[4] != "ISS-1" || args[5] != "validation" || args[9] != false {
+			t.Fatalf("failure args = %#v, want validation failure for parent key", args)
+		}
+	})
+
+	t.Run("missing parent link records retryable failure", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{
+			rows:  []fakeRow{{err: pgx.ErrNoRows}},
+			execs: []pgconn.CommandTag{pgconn.NewCommandTag("INSERT 0 1")},
+		})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, comment)
+		if err != nil || outcome.failed != 1 || tx.rowIdx != 1 || tx.execIdx != 1 {
+			t.Fatalf("outcome=%+v err=%v rows=%d execs=%d, want retryable parent-link failure", outcome, err, tx.rowIdx, tx.execIdx)
+		}
+		args := tx.execArgs[0]
+		if args[4] != "ISS-1/comments/comment-1" || args[5] != "parent_link_not_found" || args[9] != true {
+			t.Fatalf("failure args = %#v, want retryable parent-link failure", args)
+		}
+	})
+
+	t.Run("local tombstone skips the child", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{rows: []fakeRow{
+			fakeObjectLinkRow(linkID, "cr-1", "ISS-1", SyncStateDeleted, true),
+		}})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, comment)
+		if err != nil || outcome != (pullApplyOutcome{}) || tx.execIdx != 0 {
+			t.Fatalf("outcome=%+v err=%v execs=%d, want skipped local tombstone", outcome, err, tx.execIdx)
+		}
+	})
+
+	t.Run("deleted comments are marked deleted", func(t *testing.T) {
+		t.Parallel()
+
+		deleted := comment
+		deleted.Deleted = true
+		tx := ptrext.Of(fakeTx{
+			rows:  []fakeRow{fakeObjectLinkRow(linkID, "cr-1", "ISS-1", SyncStateSynced, false)},
+			execs: []pgconn.CommandTag{pgconn.NewCommandTag("UPDATE 2")},
+		})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, deleted)
+		if err != nil || outcome.changed != 2 || tx.rowIdx != 1 || tx.execIdx != 1 {
+			t.Fatalf("outcome=%+v err=%v rows=%d execs=%d, want deleted comments marked", outcome, err, tx.rowIdx, tx.execIdx)
+		}
+		args := tx.execArgs[0]
+		if args[1] != linkID || args[2] != "comment-1" || args[5] != input.RunID {
+			t.Fatalf("delete args = %#v, want link/comment/run identifiers", args)
+		}
+	})
+
+	t.Run("delivery artifact children are projected", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{
+			rows:  []fakeRow{fakeObjectLinkRow(linkID, requestID.String(), "ISS-1", SyncStateSynced, false)},
+			execs: []pgconn.CommandTag{pgconn.NewCommandTag("INSERT 0 1")},
+		})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, PullChildRecord{
+			ParentExternalKey: "ISS-1",
+			Type:              "pull_request",
+			ExternalKey:       "acme/app#313",
+			ExternalURL:       "https://github.com/acme/app/pull/313",
+			ExternalVersion:   now.Format(time.RFC3339Nano),
+			ExternalUpdatedAt: ptrext.Of(now),
+			Payload: []byte(`{
+				"number": 313,
+				"title": "Ship delivery graph",
+				"state": "open",
+				"state_reason": "review_required",
+				"assignees": [{"login": "octo"}]
+			}`),
+		})
+		if err != nil || outcome.changed != 1 || tx.rowIdx != 1 || tx.execIdx != 1 {
+			t.Fatalf("outcome=%+v err=%v rows=%d execs=%d, want projected delivery artifact", outcome, err, tx.rowIdx, tx.execIdx)
+		}
+		args := tx.execArgs[0]
+		if args[2] != requestID || args[3] != "github" || args[5] != mappingID || args[6] != linkID {
+			t.Fatalf("projection identity args = %#v", args)
+		}
+		if args[7] != "pull_request" || args[8] != "implements" || args[9] != "acme/app#313" {
+			t.Fatalf("projection artifact args = %#v", args)
+		}
+		if args[11] != "313" || args[12] != "Ship delivery graph" || args[16] != "octo" {
+			t.Fatalf("projection payload args = %#v", args)
+		}
+	})
+
+	t.Run("comments are upserted with normalized payload fields", func(t *testing.T) {
+		t.Parallel()
+
+		tx := ptrext.Of(fakeTx{
+			rows:  []fakeRow{fakeObjectLinkRow(linkID, "cr-1", "ISS-1", SyncStateSynced, false)},
+			execs: []pgconn.CommandTag{pgconn.NewCommandTag("INSERT 0 1")},
+		})
+		outcome, err := applyPullChildRecord(ctx, tx, input, mapping, comment)
+		if err != nil || outcome.changed != 1 || tx.rowIdx != 1 || tx.execIdx != 1 {
+			t.Fatalf("outcome=%+v err=%v rows=%d execs=%d, want comment upserted", outcome, err, tx.rowIdx, tx.execIdx)
+		}
+		args := tx.execArgs[0]
+		if args[2] != linkID || args[3] != "github" || args[5] != "ISS-1" || args[6] != "comment-1" {
+			t.Fatalf("upsert identity args = %#v", args)
+		}
+		if args[7] != "octo" || args[9] != "Hello from GitHub" || args[11] != "attune:comment:1" || args[19] != false {
+			t.Fatalf("upsert payload args = %#v", args)
+		}
+		if args[14] == nil || args[16] == nil {
+			t.Fatalf("upsert timestamp/event args = %#v", args)
+		}
+	})
+}
+
+func TestApplyPullStatsHelpers(t *testing.T) {
+	t.Parallel()
+
+	early := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)
+	late := early.Add(time.Hour)
+
+	stats := addPullOutcome(ApplyStats{RecordsSeen: 2}, pullApplyOutcome{changed: 3, failed: 4, conflicts: 5})
+	if stats != (ApplyStats{RecordsSeen: 2, RecordsChanged: 3, RecordsFailed: 4, ConflictsCreated: 5}) {
+		t.Fatalf("addPullOutcome = %+v", stats)
+	}
+	merged := mergeApplyStats(stats, ApplyStats{RecordsSeen: 1, RecordsChanged: 1, RecordsFailed: 1, ConflictsCreated: 1})
+	if merged != (ApplyStats{RecordsSeen: 3, RecordsChanged: 4, RecordsFailed: 5, ConflictsCreated: 6}) {
+		t.Fatalf("mergeApplyStats = %+v", merged)
+	}
+	if laterOptionalTime(nil, ptrext.Of(early)) == nil {
+		t.Fatalf("laterOptionalTime should return the non-nil timestamp")
+	}
+	if got := laterOptionalTime(ptrext.Of(early), ptrext.Of(late)); got == nil || !ptrext.Indirect(got).Equal(late) {
+		t.Fatalf("laterOptionalTime = %v, want later timestamp", got)
+	}
+	if got := laterOptionalTime(ptrext.Of(late), ptrext.Of(early)); got == nil || !ptrext.Indirect(got).Equal(late) {
+		t.Fatalf("laterOptionalTime = %v, want existing later timestamp", got)
+	}
+}
+
+func TestApplyPullRecordsCollection(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	early := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)
+	late := early.Add(time.Hour)
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	input := ApplyPullInput{
+		TenantID:  "tenant-1",
+		RunID:     uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+		MappingID: mappingID,
+		Provider:  "github",
+		Records: []PullRecord{
+			{ExternalUpdatedAt: ptrext.Of(early), Payload: []byte(`{"title":"missing key"}`)},
+			{ExternalKey: "ISS-1", Deleted: true, ExternalUpdatedAt: ptrext.Of(late), Payload: []byte(`{"title":"deleted"}`)},
+		},
+	}
+	mapping := Mapping{ID: mappingID, LocalObjectType: "ticket", ExternalObjectType: "issue"}
+	tx := ptrext.Of(fakeTx{
+		rows:  []fakeRow{{err: pgx.ErrNoRows}},
+		execs: []pgconn.CommandTag{pgconn.NewCommandTag("INSERT 0 1")},
+	})
+
+	stats, highWatermark, err := applyPullRecords(ctx, tx, input, mapping)
+	if err != nil {
+		t.Fatalf("applyPullRecords returned error: %v", err)
+	}
+	if stats != (ApplyStats{RecordsSeen: 2, RecordsFailed: 1}) {
+		t.Fatalf("stats = %+v", stats)
+	}
+	if highWatermark == nil || !ptrext.Indirect(highWatermark).Equal(late) {
+		t.Fatalf("highWatermark = %v, want %s", highWatermark, late)
+	}
+	if tx.rowIdx != 1 || tx.execIdx != 1 {
+		t.Fatalf("rows=%d execs=%d, want one lookup and one failure insert", tx.rowIdx, tx.execIdx)
+	}
+}
+
+func TestApplyPullChildrenCollection(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	early := time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC)
+	late := early.Add(time.Hour)
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	input := ApplyPullInput{
+		TenantID:  "tenant-1",
+		RunID:     uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+		MappingID: mappingID,
+		Provider:  "github",
+		Children: []PullChildRecord{
+			{Type: "label", ParentExternalKey: "ISS-1", ExternalKey: "triaged", ExternalUpdatedAt: ptrext.Of(early)},
+			{Type: ChildTypeComment, ParentExternalKey: "ISS-1", Payload: []byte(`{"body":"missing key"}`), ExternalUpdatedAt: ptrext.Of(late)},
+			{Type: ChildTypeComment, ParentExternalKey: "ISS-1", ExternalKey: "comment-1", Payload: []byte(`{"body":"saved"}`), ExternalUpdatedAt: ptrext.Of(early)},
+		},
+	}
+	mapping := Mapping{ID: mappingID, ExternalObjectType: "issue"}
+	tx := ptrext.Of(fakeTx{
+		rows: []fakeRow{
+			fakeObjectLinkRow(linkID, "cr-1", "ISS-1", SyncStateSynced, false),
+		},
+		execs: []pgconn.CommandTag{
+			pgconn.NewCommandTag("INSERT 0 1"),
+			pgconn.NewCommandTag("INSERT 0 1"),
+		},
+	})
+
+	stats, highWatermark, err := applyPullChildren(ctx, tx, input, mapping)
+	if err != nil {
+		t.Fatalf("applyPullChildren returned error: %v", err)
+	}
+	if stats != (ApplyStats{RecordsSeen: 3, RecordsChanged: 1, RecordsFailed: 1}) {
+		t.Fatalf("stats = %+v", stats)
+	}
+	if highWatermark == nil || !ptrext.Indirect(highWatermark).Equal(late) {
+		t.Fatalf("highWatermark = %v, want %s", highWatermark, late)
+	}
+	if tx.rowIdx != 1 || tx.execIdx != 2 {
+		t.Fatalf("rows=%d execs=%d, want one parent lookup and two writes", tx.rowIdx, tx.execIdx)
+	}
+}
+
+func TestCustomerRequestIssueMappingSelectionHelpers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 8, 4, 0, 0, 0, time.UTC)
+	tenantID := "tenant-1"
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	connectionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	createInput := CustomerRequestIssueCreateRunInput{
+		TenantID:     tenantID,
+		RequestID:    requestID,
+		ConnectionID: ptrext.Of(connectionID),
+		MappingID:    ptrext.Of(mappingID),
+	}
+	pullInput := CustomerRequestIssuePullRunInput{
+		TenantID:     tenantID,
+		RequestID:    requestID,
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+		ExternalKey:  " ISS-1 ",
+	}
+
+	t.Run("create mapping selection handles zero one and many matches", func(t *testing.T) {
+		t.Parallel()
+
+		zeroTx := ptrext.Of(fakeTx{queryRows: []fakeRows{{}}})
+		if _, err := selectCustomerRequestIssueCreateMapping(ctx, zeroTx, createInput); !errors.Is(err, ErrMappingNotFound) {
+			t.Fatalf("zero match error = %v, want ErrMappingNotFound", err)
+		}
+
+		oneTx := ptrext.Of(fakeTx{queryRows: []fakeRows{{rows: []fakeRow{
+			fakeMappingRow(mappingID, tenantID, connectionID, DirectionBidirectional, now),
+		}}}})
+		mapping, err := selectCustomerRequestIssueCreateMapping(ctx, oneTx, createInput)
+		if err != nil || mapping.ID != mappingID || mapping.Direction != DirectionBidirectional {
+			t.Fatalf("mapping=%+v err=%v, want single match", mapping, err)
+		}
+
+		otherMappingID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+		manyTx := ptrext.Of(fakeTx{queryRows: []fakeRows{{rows: []fakeRow{
+			fakeMappingRow(mappingID, tenantID, connectionID, DirectionPush, now),
+			fakeMappingRow(otherMappingID, tenantID, connectionID, DirectionBidirectional, now),
+		}}}})
+		if _, err := selectCustomerRequestIssueCreateMapping(ctx, manyTx, createInput); !errors.Is(err, ErrConflict) {
+			t.Fatalf("many match error = %v, want ErrConflict", err)
+		}
+	})
+
+	t.Run("create mapping selection propagates query and scan errors", func(t *testing.T) {
+		t.Parallel()
+
+		queryErr := errors.New("query failed")
+		queryTx := ptrext.Of(fakeTx{queryErrs: []error{queryErr}})
+		if _, err := selectCustomerRequestIssueCreateMapping(ctx, queryTx, createInput); !strings.Contains(err.Error(), queryErr.Error()) {
+			t.Fatalf("query error = %v, want wrapped queryErr", err)
+		}
+
+		scanErr := errors.New("scan failed")
+		scanTx := ptrext.Of(fakeTx{queryRows: []fakeRows{{rows: []fakeRow{{err: scanErr}}}}})
+		if _, err := selectCustomerRequestIssueCreateMapping(ctx, scanTx, createInput); !errors.Is(err, scanErr) {
+			t.Fatalf("scan error = %v, want scanErr", err)
+		}
+	})
+
+	t.Run("pull mapping selection validates input and maps rows", func(t *testing.T) {
+		t.Parallel()
+
+		if _, err := selectCustomerRequestIssuePullMapping(ctx, ptrext.Of(fakeTx{}), CustomerRequestIssuePullRunInput{}); !errors.Is(err, ErrMappingNotFound) {
+			t.Fatalf("invalid pull input error = %v, want ErrMappingNotFound", err)
+		}
+
+		noRowsTx := ptrext.Of(fakeTx{rows: []fakeRow{{err: pgx.ErrNoRows}}})
+		if _, err := selectCustomerRequestIssuePullMapping(ctx, noRowsTx, pullInput); !errors.Is(err, ErrMappingNotFound) {
+			t.Fatalf("no-row pull mapping error = %v, want ErrMappingNotFound", err)
+		}
+
+		successTx := ptrext.Of(fakeTx{rows: []fakeRow{
+			fakeMappingRow(mappingID, tenantID, connectionID, DirectionPull, now),
+		}})
+		mapping, err := selectCustomerRequestIssuePullMapping(ctx, successTx, pullInput)
+		if err != nil || mapping.ID != mappingID || mapping.Direction != DirectionPull {
+			t.Fatalf("mapping=%+v err=%v, want pull mapping", mapping, err)
+		}
+	})
+}
+
+func TestCustomerRequestIssueRunGuards(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 8, 4, 0, 0, 0, time.UTC)
+	tenantID := "tenant-1"
+	requestID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	connectionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+
+	t.Run("locks customer requests and maps missing rows", func(t *testing.T) {
+		t.Parallel()
+
+		if err := lockCustomerRequestForIssueCreate(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: pgx.ErrNoRows}}}), tenantID, requestID); !errors.Is(err, ErrLocalObjectNotFound) {
+			t.Fatalf("missing lock error = %v, want ErrLocalObjectNotFound", err)
+		}
+		if err := lockCustomerRequestForIssueCreate(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{values: []any{requestID}}}}), tenantID, requestID); err != nil {
+			t.Fatalf("lockCustomerRequestForIssueCreate returned error: %v", err)
+		}
+	})
+
+	t.Run("requires an existing external issue link", func(t *testing.T) {
+		t.Parallel()
+
+		if err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{values: []any{false}}}}), tenantID, requestID, mappingID, " ISS-1 "); !errors.Is(err, ErrLocalObjectNotFound) {
+			t.Fatalf("missing issue link error = %v, want ErrLocalObjectNotFound", err)
+		}
+		if err := requireCustomerRequestIssueExternalLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{values: []any{true}}}}), tenantID, requestID, mappingID, " ISS-1 "); err != nil {
+			t.Fatalf("requireCustomerRequestIssueExternalLink returned error: %v", err)
+		}
+	})
+
+	t.Run("rejects existing issue links and concurrent create runs", func(t *testing.T) {
+		t.Parallel()
+
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{values: []any{true, false}}}}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("existing issue link error = %v, want ErrConflict", err)
+		}
+		if err := rejectExistingCustomerRequestIssueLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{values: []any{false, false}}}}), tenantID, requestID, mappingID); err != nil {
+			t.Fatalf("rejectExistingCustomerRequestIssueLink returned error: %v", err)
+		}
+		if err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{values: []any{true}}}}), tenantID, requestID, mappingID); !errors.Is(err, ErrConflict) {
+			t.Fatalf("concurrent run error = %v, want ErrConflict", err)
+		}
+		if err := rejectConcurrentCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{values: []any{false}}}}), tenantID, requestID, mappingID); err != nil {
+			t.Fatalf("rejectConcurrentCustomerRequestIssueCreateRun returned error: %v", err)
+		}
+	})
+
+	t.Run("loads existing manual issue runs", func(t *testing.T) {
+		t.Parallel()
+
+		createRun, err := existingCustomerRequestIssueCreateRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{
+			fakeRunRow(runID, tenantID, connectionID, ptrext.Of(mappingID), DirectionPush, TriggerManual, RunStatusQueued, now),
+		}}), tenantID, requestID, mappingID)
+		if err != nil || createRun.ID != runID {
+			t.Fatalf("createRun=%+v err=%v, want existing create run", createRun, err)
+		}
+
+		pullRun, err := existingCustomerRequestIssuePullRun(ctx, ptrext.Of(fakeTx{rows: []fakeRow{
+			fakeRunRow(runID, tenantID, connectionID, ptrext.Of(mappingID), DirectionPull, TriggerManual, RunStatusQueued, now),
+		}}), tenantID, requestID, mappingID, " ISS-1 ")
+		if err != nil || pullRun.ID != runID {
+			t.Fatalf("pullRun=%+v err=%v, want existing pull run", pullRun, err)
+		}
+	})
+
+	t.Run("normalizes customer request issue run metadata", func(t *testing.T) {
+		t.Parallel()
+
+		createMetadata := customerRequestIssueCreateRunMetadata(requestID)
+		pullMetadata := customerRequestIssuePullRunMetadata(requestID, " ISS-1 ")
+		if payloadString(createMetadata, "source") != "customer_request_issue_create" ||
+			payloadString(createMetadata, "local_object_id") != requestID.String() {
+			t.Fatalf("create metadata = %s", createMetadata)
+		}
+		if payloadString(pullMetadata, "source") != "customer_request_issue_link" ||
+			payloadString(pullMetadata, "external_key") != "ISS-1" {
+			t.Fatalf("pull metadata = %s", pullMetadata)
+		}
+	})
+}
+
+func TestEventIssuePullMappingHelpers(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 7, 8, 4, 0, 0, 0, time.UTC)
+	tenantID := "tenant-1"
+	connectionID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	mappingID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	eventID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	event := SyncEvent{
+		ID:           eventID,
+		TenantID:     tenantID,
+		ConnectionID: connectionID,
+		MappingID:    ptrext.Of(mappingID),
+		Status:       EventStatusReceived,
+	}
+
+	t.Run("resolves explicit event mappings", func(t *testing.T) {
+		t.Parallel()
+
+		noRowsTx := ptrext.Of(fakeTx{rows: []fakeRow{{err: pgx.ErrNoRows}}})
+		if _, err := resolveEventIssuePullMapping(ctx, noRowsTx, event); !errors.Is(err, ErrMappingNotFound) {
+			t.Fatalf("explicit mapping no-row error = %v, want ErrMappingNotFound", err)
+		}
+
+		successTx := ptrext.Of(fakeTx{rows: []fakeRow{
+			fakeMappingRow(mappingID, tenantID, connectionID, DirectionBidirectional, now),
+		}})
+		mapping, err := resolveEventIssuePullMapping(ctx, successTx, event)
+		if err != nil || mapping.ID != mappingID {
+			t.Fatalf("mapping=%+v err=%v, want explicit mapping", mapping, err)
+		}
+	})
+
+	t.Run("resolves default event mappings", func(t *testing.T) {
+		t.Parallel()
+
+		defaultEvent := event
+		defaultEvent.MappingID = nil
+		successTx := ptrext.Of(fakeTx{rows: []fakeRow{
+			fakeMappingRow(mappingID, tenantID, connectionID, DirectionPull, now),
+		}})
+		mapping, err := resolveEventIssuePullMapping(ctx, successTx, defaultEvent)
+		if err != nil || mapping.Direction != DirectionPull {
+			t.Fatalf("mapping=%+v err=%v, want default mapping", mapping, err)
+		}
+	})
+
+	t.Run("marks events ignored", func(t *testing.T) {
+		t.Parallel()
+
+		ignoredTx := ptrext.Of(fakeTx{rows: []fakeRow{
+			fakeEventRow(eventID, tenantID, connectionID, nil, EventStatusIgnored, now),
+		}})
+		ignored, err := markEventIgnored(ctx, ignoredTx, tenantID, eventID, strings.Repeat("x", 2100))
+		if err != nil || ignored.Status != EventStatusIgnored || ignored.ID != eventID {
+			t.Fatalf("ignored=%+v err=%v, want ignored event", ignored, err)
+		}
+
+		scanErr := errors.New("scan failed")
+		if _, err := markEventIgnored(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: scanErr}}}), tenantID, eventID, "no mapping"); !strings.Contains(err.Error(), scanErr.Error()) {
+			t.Fatalf("markEventIgnored error = %v, want wrapped scanErr", err)
 		}
 	})
 }
@@ -535,6 +1432,40 @@ func TestApplyPushRecordBranches(t *testing.T) {
 		}
 	})
 
+	t.Run("provider error with an external key records the pushed link and failure", func(t *testing.T) {
+		t.Parallel()
+
+		linkID := uuid.MustParse("88888888-8888-8888-8888-888888888888")
+		tx := ptrext.Of(fakeTx{
+			rows: []fakeRow{
+				{values: []any{true}},
+				{err: pgx.ErrNoRows},
+				{err: pgx.ErrNoRows},
+				{values: []any{linkID}},
+			},
+			execs: []pgconn.CommandTag{
+				pgconn.NewCommandTag("UPDATE 0"),
+				pgconn.NewCommandTag("INSERT 0 1"),
+				pgconn.NewCommandTag("INSERT 0 1"),
+			},
+		})
+		outcome, err := applyPushRecord(ctx, tx, input, mapping, record, PushResult{
+			LocalObjectID:   record.LocalObjectID,
+			ExternalKey:     "ISS-1",
+			ExternalURL:     "https://example.test/1",
+			ExternalVersion: now.Format(time.RFC3339Nano),
+			ErrorKind:       "provider_unavailable",
+			ErrorMessage:    "write accepted but response was degraded",
+			Retryable:       true,
+		})
+		if err != nil {
+			t.Fatalf("applyPushRecord returned error: %v", err)
+		}
+		if outcome.changed != 1 || outcome.failed != 1 || tx.rowIdx != 4 || tx.execIdx != 3 {
+			t.Fatalf("outcome=%+v rows=%d execs=%d, want link write plus failure", outcome, tx.rowIdx, tx.execIdx)
+		}
+	})
+
 	t.Run("missing external key records a validation failure", func(t *testing.T) {
 		t.Parallel()
 
@@ -574,7 +1505,7 @@ func TestApplyPushRecordBranches(t *testing.T) {
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{rows: []fakeRow{
 			{values: []any{true}},
-			{values: []any{linkID, "other-local", "ISS-1", "https://example.test/1", "v1", SyncStateSynced}},
+			{values: []any{linkID, "other-local", "ISS-1", "https://example.test/1", "v1", SyncStateSynced, false}},
 			{values: []any{1}},
 		}})
 		outcome, err := applyPushRecord(ctx, tx, input, mapping, record, PushResult{
@@ -684,7 +1615,7 @@ func TestRepoLinkValidationHelpers(t *testing.T) {
 		linkID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 		tx := ptrext.Of(fakeTx{rows: []fakeRow{
 			{err: pgx.ErrNoRows},
-			{values: []any{linkID, requestID.String(), "ISS-1", "https://example.test/1", "v1", SyncStateSynced}},
+			{values: []any{linkID, requestID.String(), "ISS-1", "https://example.test/1", "v1", SyncStateSynced, false}},
 		}})
 		link, err := findLinkByExternal(ctx, tx, input.TenantID, mapping.ID, mapping.ExternalObjectType, "ISS-1")
 		if link != nil || err != nil {
@@ -728,7 +1659,7 @@ func TestRepoLinkMutationHelpers(t *testing.T) {
 		ExternalURL:       "https://example.test/1",
 		ExternalVersion:   now.Format(time.RFC3339Nano),
 		ExternalUpdatedAt: ptrext.Of(now),
-		Payload:           []byte(`{"title":"Bug","state":"open"}`),
+		Payload:           []byte(`{"title":"Bug","state":"closed","assignee":"octo"}`),
 	}
 	pushRecord := PushRecord{
 		LocalObjectID:  requestID.String(),
@@ -783,6 +1714,10 @@ func TestRepoLinkMutationHelpers(t *testing.T) {
 		}})
 		if err := upsertCustomerRequestIssueLink(ctx, tx, pullInput, mapping, pullRecord, requestID.String(), linkID, pullRecord.Payload); err != nil {
 			t.Fatalf("upsert issue link returned error: %v", err)
+		}
+		if len(tx.execArgs) == 0 || len(tx.execArgs[0]) != 11 ||
+			tx.execArgs[0][8] != true || tx.execArgs[0][9] != "closed" || tx.execArgs[0][10] != "octo" {
+			t.Fatalf("issue link update args = %#v; want pull external fields", tx.execArgs)
 		}
 		if err := upsertCursor(ctx, tx, ApplyPullInput{
 			TenantID:    pullInput.TenantID,
@@ -848,10 +1783,33 @@ func TestRepoLinkMutationHelpers(t *testing.T) {
 		if err := upsertCustomerRequestIssueLinkFromPush(ctx, tx, pushInput, pushRecord, pushResult, requestID, linkID); err != nil {
 			t.Fatalf("upsert from push returned error: %v", err)
 		}
+		if len(tx.execArgs) == 0 || len(tx.execArgs[0]) != 11 || tx.execArgs[0][8] != false {
+			t.Fatalf("push issue link update args = %#v; want external fields untouched", tx.execArgs)
+		}
 		if tx.execIdx != 1 {
 			t.Fatalf("exec count = %d, want 1", tx.execIdx)
 		}
 	})
+}
+
+func TestRepoIssueExternalProjectionHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got := issueExternalStatusCategory([]byte(`{"state":"open"}`)); got != "open" {
+		t.Fatalf("open status category = %q", got)
+	}
+	if got := issueExternalStatusCategory([]byte(`{"state":"closed"}`)); got != "closed" {
+		t.Fatalf("closed status category = %q", got)
+	}
+	if got := issueExternalStatusCategory([]byte(`{"state":"reopened"}`)); got != "unknown" {
+		t.Fatalf("unknown status category = %q", got)
+	}
+	if got := issueExternalAssignee([]byte(`{"assignee":" octo "}`)); got != "octo" {
+		t.Fatalf("single assignee = %q", got)
+	}
+	if got := issueExternalAssignee([]byte(`{"assignees":[" octo ","hubot",""]}`)); got != "octo, hubot" {
+		t.Fatalf("multi assignee = %q", got)
+	}
 }
 
 func TestRepoApplyHelperErrorBranches(t *testing.T) {
@@ -941,6 +1899,21 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		}
 	})
 
+	t.Run("push result against local tombstone records failure", func(t *testing.T) {
+		t.Parallel()
+
+		outcome, err := applyPushRecord(ctx, ptrext.Of(fakeTx{
+			rows: []fakeRow{
+				{values: []any{true}},
+				{values: []any{linkID, requestID.String(), "ISS-1", "https://example.test/1", "v1", SyncStateDeleted, true}},
+			},
+			execs: []pgconn.CommandTag{pgxconnTag("INSERT 0 1")},
+		}), pushInput, mapping, pushRecord, pushResult)
+		if err != nil || outcome.failed != 1 {
+			t.Fatalf("outcome=%+v err=%v, want local tombstone failure", outcome, err)
+		}
+	})
+
 	t.Run("push downstream errors propagate from record apply", func(t *testing.T) {
 		t.Parallel()
 
@@ -978,7 +1951,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		outcome, err := applyPushRecord(ctx, ptrext.Of(fakeTx{rows: []fakeRow{
 			{values: []any{true}},
 			{err: pgx.ErrNoRows},
-			{values: []any{linkID, requestID.String(), "ISS-2", "https://example.test/2", "v1", SyncStateSynced}},
+			{values: []any{linkID, requestID.String(), "ISS-2", "https://example.test/2", "v1", SyncStateSynced, false}},
 			{values: []any{1}},
 		}}), pushInput, mapping, pushRecord, pushResult)
 		if err != nil || outcome.conflicts != 1 {
@@ -1018,7 +1991,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		if _, err := findLinkByLocal(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput.TenantID, mapping.ID, mapping.LocalObjectType, pullRecord.LocalObjectID); err == nil {
 			t.Fatal("findLinkByLocal error returned nil")
 		}
-		if _, err := insertExternalLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput, mapping, pullRecord, pullRecord.LocalObjectID); err == nil {
+		if _, err := insertExternalLink(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput, mapping, pullRecord, pullRecord.LocalObjectID, pullRecord.Payload); err == nil {
 			t.Fatal("insertExternalLink error returned nil")
 		}
 		if _, err := createConflict(ctx, ptrext.Of(fakeTx{rows: []fakeRow{{err: errBoom}}}), pullInput, mapping, objectLinkRow{ID: linkID, LocalObjectID: pullRecord.LocalObjectID, ExternalKey: pullRecord.ExternalKey}, pullRecord, "version_mismatch", pullRecord.Payload); err == nil {
@@ -1105,7 +2078,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 		outcome, err := applyPullRecord(ctx, ptrext.Of(fakeTx{rows: []fakeRow{
 			{values: []any{true}},
 			{err: pgx.ErrNoRows},
-			{values: []any{linkID, pullRecord.LocalObjectID, "ISS-2", "https://example.test/2", "v1", SyncStateSynced}},
+			{values: []any{linkID, pullRecord.LocalObjectID, "ISS-2", "https://example.test/2", "v1", SyncStateSynced, false}},
 			{values: []any{1}},
 		}}), pullInput, mapping, pullRecord)
 		if err != nil || outcome.conflicts != 1 {
@@ -1115,7 +2088,7 @@ func TestRepoApplyHelperErrorBranches(t *testing.T) {
 			rows: []fakeRow{
 				{values: []any{true}},
 				{err: pgx.ErrNoRows},
-				{values: []any{linkID, pullRecord.LocalObjectID, pullRecord.ExternalKey, "https://example.test/old", "v1", SyncStatePending}},
+				{values: []any{linkID, pullRecord.LocalObjectID, pullRecord.ExternalKey, "https://example.test/old", "v1", SyncStatePending, false}},
 			},
 			execs: []pgconn.CommandTag{pgxconnTag("UPDATE 1"), pgxconnTag("INSERT 0 1")},
 		}), pullInput, mapping, pullRecord)
@@ -1406,11 +2379,15 @@ func TestRepoMethodsReturnErrorWhenContextCanceled(t *testing.T) {
 }
 
 type fakeTx struct {
-	rows     []fakeRow
-	execs    []pgconn.CommandTag
-	execErrs []error
-	rowIdx   int
-	execIdx  int
+	rows      []fakeRow
+	queryRows []fakeRows
+	execs     []pgconn.CommandTag
+	queryErrs []error
+	execErrs  []error
+	execArgs  [][]any
+	rowIdx    int
+	queryIdx  int
+	execIdx   int
 }
 
 func (tx *fakeTx) Begin(context.Context) (pgx.Tx, error) { return tx, nil }
@@ -1423,11 +2400,13 @@ func (tx *fakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFr
 
 func (tx *fakeTx) SendBatch(context.Context, *pgx.Batch) pgx.BatchResults { return nil }
 func (tx *fakeTx) LargeObjects() pgx.LargeObjects                         { return pgx.LargeObjects{} }
+
 func (tx *fakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDescription, error) {
 	return nil, nil
 }
 
-func (tx *fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (tx *fakeTx) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	tx.execArgs = append(tx.execArgs, args)
 	if tx.execIdx < len(tx.execErrs) && tx.execErrs[tx.execIdx] != nil {
 		err := tx.execErrs[tx.execIdx]
 		tx.execIdx++
@@ -1443,7 +2422,18 @@ func (tx *fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, erro
 }
 
 func (tx *fakeTx) Query(context.Context, string, ...any) (pgx.Rows, error) {
-	return nil, errors.New("unexpected Query call in fakeTx")
+	if tx.queryIdx < len(tx.queryErrs) && tx.queryErrs[tx.queryIdx] != nil {
+		err := tx.queryErrs[tx.queryIdx]
+		tx.queryIdx++
+		return nil, err
+	}
+	if tx.queryIdx >= len(tx.queryRows) {
+		tx.queryIdx++
+		return nil, errors.New("unexpected Query call in fakeTx")
+	}
+	rows := tx.queryRows[tx.queryIdx]
+	tx.queryIdx++
+	return ptrext.Of(rows), nil
 }
 
 func (tx *fakeTx) QueryRow(context.Context, string, ...any) pgx.Row {
@@ -1457,6 +2447,89 @@ func (tx *fakeTx) QueryRow(context.Context, string, ...any) pgx.Row {
 }
 
 func (tx *fakeTx) Conn() *pgx.Conn { return nil }
+
+func fakeObjectLinkRow(id uuid.UUID, localObjectID, externalKey, syncState string, localDeleted bool) fakeRow {
+	return fakeRow{values: []any{
+		id, localObjectID, externalKey, "https://example.test/" + externalKey, "v1", syncState, localDeleted,
+	}}
+}
+
+func fakeMappingRow(id uuid.UUID, tenantID string, connectionID uuid.UUID, direction string, now time.Time) fakeRow {
+	return fakeRow{values: []any{
+		id, tenantID, connectionID, "customer_request", "issue", direction,
+		[]byte(`{}`), []byte(`{}`), "manual", "mirror", true, 1, now, now,
+	}}
+}
+
+func fakeRunRow(id uuid.UUID, tenantID string, connectionID uuid.UUID, mappingID *uuid.UUID, direction, trigger, status string, now time.Time) fakeRow {
+	return fakeRow{values: []any{
+		id, tenantID, connectionID, mappingID, direction, trigger, status,
+		nil, nil, 0, now, nil, nil, []byte(`{}`), []byte(`{}`), []byte(`{}`),
+		0, 0, 0, 0, "", "", "admin", now, now,
+	}}
+}
+
+func fakeEventRow(id uuid.UUID, tenantID string, connectionID uuid.UUID, mappingID *uuid.UUID, status string, now time.Time) fakeRow {
+	return fakeRow{values: []any{
+		id, tenantID, connectionID, mappingID, "github", "issue_comment", "delivery-1",
+		"dedupe-1", EventSignatureVerified, status, payloadDigest([]byte("payload")),
+		[]byte(`{"action":"created"}`), now, nil, "", nil, "", now, now,
+	}}
+}
+
+type fakeRows struct {
+	rows   []fakeRow
+	err    error
+	idx    int
+	closed bool
+}
+
+func (r *fakeRows) Close() {
+	r.closed = true
+}
+
+func (r *fakeRows) Err() error {
+	return r.err
+}
+
+func (r *fakeRows) CommandTag() pgconn.CommandTag {
+	return pgconn.NewCommandTag("SELECT 0")
+}
+
+func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription {
+	return nil
+}
+
+func (r *fakeRows) Next() bool {
+	if r.idx >= len(r.rows) {
+		r.Close()
+		return false
+	}
+	r.idx++
+	return true
+}
+
+func (r *fakeRows) Scan(dest ...any) error {
+	if r.idx == 0 || r.idx > len(r.rows) {
+		return errors.New("fake rows scan without current row")
+	}
+	return r.rows[r.idx-1].Scan(dest...)
+}
+
+func (r *fakeRows) Values() ([]any, error) {
+	if r.idx == 0 || r.idx > len(r.rows) {
+		return nil, errors.New("fake rows values without current row")
+	}
+	return r.rows[r.idx-1].values, nil
+}
+
+func (r *fakeRows) RawValues() [][]byte {
+	return nil
+}
+
+func (r *fakeRows) Conn() *pgx.Conn {
+	return nil
+}
 
 type fakeRow struct {
 	values []any
@@ -1508,8 +2581,33 @@ func timePtr(value time.Time) *time.Time {
 	return ptrext.Of(value)
 }
 
+func requireScannedProviderInstallationID(t *testing.T, got *uuid.UUID, want uuid.UUID) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("provider installation id = nil; want %s", want)
+	}
+	if ptrext.Indirect(got) != want {
+		t.Fatalf("provider installation id = %s; want %s", ptrext.Indirect(got), want)
+	}
+}
+
 func pgxconnTag(value string) pgconn.CommandTag {
 	return pgconn.NewCommandTag(value)
+}
+
+func issueRunFakeRow(
+	runID uuid.UUID,
+	tenantID string,
+	connectionID uuid.UUID,
+	mappingID uuid.UUID,
+	now time.Time,
+	direction string,
+) fakeRow {
+	return fakeRow{values: []any{
+		runID, tenantID, connectionID, ptrext.Of(mappingID), direction, TriggerManual, RunStatusQueued,
+		nil, nil, 0, nil, nil, nil, []byte(`{}`), []byte(`{}`),
+		[]byte(`{"local_object_id":"99999999-9999-9999-9999-999999999999"}`), 0, 0, 0, 0, "", "", "admin", now, now,
+	}}
 }
 
 func newCanceledPoolRepo(t *testing.T) *Repo {

@@ -15,6 +15,8 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	externalsynccore "github.com/Phixsura/attune/internal/externalsync"
+	_ "github.com/Phixsura/attune/internal/externalsync/adapter/githubissue"
+	_ "github.com/Phixsura/attune/internal/externalsync/adapter/jiraissue"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -37,13 +39,15 @@ func TestCreateConnectionDefaultsEnabledWhenRequestOmitsField(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fake := ptrext.Of(fakeHandlerService{})
 			handler := ptrext.Of(Handler{service: fake})
+			installationID := uuid.New()
 
 			result, err := handler.CreateConnection(handlerTestContext(), ptrext.Of(attunev1.CreateExternalConnectionRequest{
-				Provider:   "github",
-				Name:       "GitHub",
-				AuthType:   "token",
-				Credential: "secret",
-				Enabled:    tt.enabled,
+				Provider:               "github",
+				Name:                   "GitHub",
+				AuthType:               "token",
+				Credential:             "secret",
+				Enabled:                tt.enabled,
+				ProviderInstallationId: installationID.String(),
 			}))
 			if err != nil {
 				t.Fatalf("CreateConnection returned error: %v", err)
@@ -51,10 +55,31 @@ func TestCreateConnectionDefaultsEnabledWhenRequestOmitsField(t *testing.T) {
 			if fake.createInput.Enabled != tt.wantEnabled {
 				t.Fatalf("service Enabled = %t; want %t", fake.createInput.Enabled, tt.wantEnabled)
 			}
+			if fake.createInput.ProviderInstallationID == nil ||
+				ptrext.Indirect(fake.createInput.ProviderInstallationID) != installationID {
+				t.Fatalf("service provider installation id = %v; want %s", fake.createInput.ProviderInstallationID, installationID)
+			}
 			if result.Body.GetEnabled() != tt.wantEnabled {
 				t.Fatalf("response Enabled = %t; want %t", result.Body.GetEnabled(), tt.wantEnabled)
 			}
+			if result.Body.GetProviderInstallationId() != installationID.String() {
+				t.Fatalf("response provider installation id = %q; want %s", result.Body.GetProviderInstallationId(), installationID)
+			}
 		})
+	}
+}
+
+func TestCreateConnectionRejectsInvalidProviderInstallationID(t *testing.T) {
+	handler := ptrext.Of(Handler{service: ptrext.Of(fakeHandlerService{})})
+
+	if _, err := handler.CreateConnection(handlerTestContext(), ptrext.Of(attunev1.CreateExternalConnectionRequest{
+		Provider:               "github",
+		Name:                   "GitHub",
+		AuthType:               "token",
+		Credential:             "secret",
+		ProviderInstallationId: "not-a-uuid",
+	})); err == nil {
+		t.Fatal("CreateConnection returned nil error for invalid provider installation id")
 	}
 }
 
@@ -64,6 +89,26 @@ func TestRunDirectionFromProtoLeavesUnspecifiedForMappingDefault(t *testing.T) {
 	}
 	if got := runDirectionFromProto(attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH); got != repo.DirectionPush {
 		t.Fatalf("push run direction = %q; want push", got)
+	}
+}
+
+func TestListProvidersReturnsRegisteredEntries(t *testing.T) {
+	handler := ptrext.Of(Handler{})
+
+	result, err := handler.ListProviders(handlerTestContext(), ptrext.Of(attunev1.ListExternalSyncProvidersRequest{}))
+	if err != nil {
+		t.Fatalf("ListProviders returned error: %v", err)
+	}
+
+	got := result.Body.GetProviders()
+	if len(got) != 2 {
+		t.Fatalf("providers len = %d; want 2", len(got))
+	}
+	if got[0].GetProvider() != "github" || got[0].GetDisplay() != "GitHub" {
+		t.Fatalf("providers[0] = %#v; want github/GitHub", got[0])
+	}
+	if got[1].GetProvider() != "jira" || got[1].GetDisplay() != "Jira" {
+		t.Fatalf("providers[1] = %#v; want jira/Jira", got[1])
 	}
 }
 
@@ -201,6 +246,115 @@ func TestQualifyConnectionReturnsChecks(t *testing.T) {
 	if !result.Body.GetReady() || len(result.Body.GetChecks()) != 1 ||
 		result.Body.GetChecks()[0].GetStatus() != attunev1.ExternalSyncQualificationCheckStatus_EXTERNAL_SYNC_QUALIFICATION_CHECK_STATUS_OK {
 		t.Fatalf("qualification response = %#v; want one ok check", result.Body)
+	}
+}
+
+func TestCreateProviderInstallationMapsRequest(t *testing.T) {
+	fake := ptrext.Of(fakeHandlerService{})
+	handler := ptrext.Of(Handler{service: fake})
+
+	result, err := handler.CreateProviderInstallation(handlerTestContext(), ptrext.Of(attunev1.CreateExternalProviderInstallationRequest{
+		Provider:               "github",
+		DisplayName:            "GitHub App",
+		InstallationKind:       repo.InstallationKindGitHubApp,
+		ExternalInstallationId: "12345",
+		PermissionsJson:        `{"metadata":"read","issues":"write"}`,
+		ResourceSelection:      repo.ResourceSelectionSelected,
+		Resources: []*attunev1.ExternalProviderInstallationResourceInput{{
+			ResourceType:    repo.ResourceTypeRepository,
+			ResourceKey:     "acme/app",
+			DisplayName:     "acme/app",
+			Selected:        true,
+			PermissionsJson: `{}`,
+		}},
+	}))
+	if err != nil {
+		t.Fatalf("CreateProviderInstallation returned error: %v", err)
+	}
+	if fake.createInstallationInput.Provider != "github" ||
+		fake.createInstallationInput.ExternalInstallationID != "12345" ||
+		len(fake.createInstallationInput.Resources) != 1 ||
+		fake.createInstallationInput.Resources[0].ResourceKey != "acme/app" {
+		t.Fatalf("create input = %#v; want mapped installation request", fake.createInstallationInput)
+	}
+	if result.Body.GetProvider() != "github" || result.Body.GetDisplayName() != "GitHub App" {
+		t.Fatalf("response = %#v; want provider installation", result.Body)
+	}
+}
+
+func TestQualifyProviderInstallationReturnsGradeAndChecks(t *testing.T) {
+	installationID := uuid.New()
+	fake := ptrext.Of(fakeHandlerService{
+		qualifyInstallation: svc.ProviderInstallationQualificationResult{
+			Installation: repo.ProviderInstallation{
+				ID:                  installationID,
+				TenantID:            "tenant-1",
+				Provider:            "github",
+				DisplayName:         "GitHub App",
+				InstallationKind:    repo.InstallationKindGitHubApp,
+				Status:              repo.InstallationStatusActive,
+				Permissions:         []byte(`{"metadata":"read","issues":"write"}`),
+				CapabilityProfile:   []byte(`{"grade":"full_app"}`),
+				ResourceSelection:   repo.ResourceSelectionSelected,
+				QualificationStatus: svc.QualificationStatusOK,
+			},
+			Ready: true,
+			Grade: svc.ProviderInstallationGradeFullApp,
+			Checks: []svc.QualificationCheck{{
+				Name:       "permission_profile",
+				Status:     svc.QualificationStatusOK,
+				Summary:    "GitHub installation exposes required issue-sync permissions",
+				DetailJSON: `{}`,
+			}},
+		},
+	})
+	handler := ptrext.Of(Handler{service: fake})
+
+	result, err := handler.QualifyProviderInstallation(handlerTestContext(), ptrext.Of(attunev1.QualifyExternalProviderInstallationRequest{
+		Id: installationID.String(),
+	}))
+	if err != nil {
+		t.Fatalf("QualifyProviderInstallation returned error: %v", err)
+	}
+	if fake.qualifyInstallationID != installationID ||
+		!result.Body.GetReady() ||
+		result.Body.GetGrade() != svc.ProviderInstallationGradeFullApp ||
+		len(result.Body.GetChecks()) != 1 {
+		t.Fatalf("qualification response = %#v; fake id %s", result.Body, fake.qualifyInstallationID)
+	}
+}
+
+func TestSelectProviderInstallationResourcesParsesResourceIDs(t *testing.T) {
+	installationID := uuid.New()
+	resourceID := uuid.New()
+	fake := ptrext.Of(fakeHandlerService{
+		resourceRows: []repo.ProviderInstallationResource{{
+			ID:             resourceID,
+			TenantID:       "tenant-1",
+			InstallationID: installationID,
+			Provider:       "github",
+			ResourceType:   repo.ResourceTypeRepository,
+			ResourceKey:    "acme/app",
+			DisplayName:    "acme/app",
+			Selected:       true,
+			Status:         repo.ResourceStatusActive,
+			Permissions:    []byte(`{}`),
+		}},
+	})
+	handler := ptrext.Of(Handler{service: fake})
+
+	result, err := handler.SelectProviderInstallationResources(handlerTestContext(), ptrext.Of(attunev1.SelectExternalProviderInstallationResourcesRequest{
+		Id:          installationID.String(),
+		ResourceIds: []string{resourceID.String()},
+	}))
+	if err != nil {
+		t.Fatalf("SelectProviderInstallationResources returned error: %v", err)
+	}
+	if fake.selectResourcesInput.InstallationID != installationID ||
+		!reflect.DeepEqual(fake.selectResourcesInput.ResourceIDs, []uuid.UUID{resourceID}) ||
+		len(result.Body.GetResources()) != 1 ||
+		!result.Body.GetResources()[0].GetSelected() {
+		t.Fatalf("select response/input = %#v / %#v", result.Body, fake.selectResourcesInput)
 	}
 }
 
@@ -1021,10 +1175,24 @@ func TestHandlerRequestAndListRunEndpointsReturnRows(t *testing.T) {
 	fake := newRunEndpointFakeService(now, ids)
 	handler := ptrext.Of(Handler{service: fake})
 
+	assertHandlerRequestRunEndpoint(t, handler, fake, ids)
+	assertHandlerListRunsEndpoint(t, handler, fake, ids)
+}
+
+func assertHandlerRequestRunEndpoint(
+	t *testing.T,
+	handler *Handler,
+	fake *fakeHandlerService,
+	ids handlerRunEndpointIDs,
+) {
+	t.Helper()
+
 	requested, err := handler.RequestRun(handlerTestContext(), ptrext.Of(attunev1.RequestExternalSyncRunRequest{
-		ConnectionId: ids.connectionID.String(),
-		MappingId:    ids.mappingID.String(),
-		Direction:    attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH,
+		ConnectionId:  ids.connectionID.String(),
+		MappingId:     ids.mappingID.String(),
+		Direction:     attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH,
+		LocalObjectId: "cr-1",
+		ExternalKey:   "42",
 	}))
 	if err != nil {
 		t.Fatalf("RequestRun returned error: %v", err)
@@ -1038,9 +1206,24 @@ func TestHandlerRequestAndListRunEndpointsReturnRows(t *testing.T) {
 	if fake.requestRunInput.MappingID == nil || ptrext.Indirect(fake.requestRunInput.MappingID) != ids.mappingID {
 		t.Fatalf("request mapping id = %#v; want %s", fake.requestRunInput.MappingID, ids.mappingID)
 	}
+	if fake.requestRunInput.LocalObjectID != "cr-1" || fake.requestRunInput.ExternalKey != "42" {
+		t.Fatalf("request selector = %q/%q; want local/external selector", fake.requestRunInput.LocalObjectID, fake.requestRunInput.ExternalKey)
+	}
 	if requested.Body.GetDirection() != attunev1.ExternalSyncDirection_EXTERNAL_SYNC_DIRECTION_PUSH {
 		t.Fatalf("request direction = %v; want push", requested.Body.GetDirection())
 	}
+	if requested.Body.GetInputMetadataJson() != `{"local_object_id":"cr-1"}` {
+		t.Fatalf("request input metadata = %s; want response metadata", requested.Body.GetInputMetadataJson())
+	}
+}
+
+func assertHandlerListRunsEndpoint(
+	t *testing.T,
+	handler *Handler,
+	fake *fakeHandlerService,
+	ids handlerRunEndpointIDs,
+) {
+	t.Helper()
 
 	runs, err := handler.ListRuns(handlerTestContext(), ptrext.Of(attunev1.ListExternalSyncRunsRequest{
 		ConnectionId: ids.connectionID.String(),
@@ -1285,16 +1468,17 @@ func newHandlerRunEndpointIDs() handlerRunEndpointIDs {
 func newRunEndpointFakeService(now time.Time, ids handlerRunEndpointIDs) *fakeHandlerService {
 	return ptrext.Of(fakeHandlerService{
 		requestRun: ptrext.Of(repo.SyncRun{
-			ID:           ids.runID,
-			TenantID:     "tenant-1",
-			ConnectionID: ids.connectionID,
-			MappingID:    ptrext.Of(ids.mappingID),
-			Direction:    repo.DirectionPush,
-			Trigger:      repo.TriggerManual,
-			Status:       repo.RunStatusQueued,
-			ActorID:      "admin-1",
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			ID:            ids.runID,
+			TenantID:      "tenant-1",
+			ConnectionID:  ids.connectionID,
+			MappingID:     ptrext.Of(ids.mappingID),
+			Direction:     repo.DirectionPush,
+			Trigger:       repo.TriggerManual,
+			Status:        repo.RunStatusQueued,
+			ActorID:       "admin-1",
+			InputMetadata: []byte(`{"local_object_id":"cr-1"}`),
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		}),
 		listRunsResult: repo.ListRunsResult{
 			Runs: []repo.SyncRun{{
@@ -1400,6 +1584,15 @@ type fakeHandlerService struct {
 	recordTimelineErr        error
 	listEventsErr            error
 	listConnectionsRows      []repo.Connection
+	installationRows         []repo.ProviderInstallation
+	resourceRows             []repo.ProviderInstallationResource
+	createInstallationInput  svc.CreateProviderInstallationInput
+	createdInstallation      *repo.ProviderInstallation
+	deletedInstallationID    uuid.UUID
+	qualifyInstallationID    uuid.UUID
+	qualifyInstallation      svc.ProviderInstallationQualificationResult
+	listResourcesID          uuid.UUID
+	selectResourcesInput     svc.SelectProviderInstallationResourcesInput
 	createInput              svc.CreateConnectionInput
 	updateInput              svc.UpdateConnectionInput
 	updateConnection         *repo.Connection
@@ -1461,6 +1654,67 @@ func (s *fakeHandlerService) ListConnections(context.Context, string) ([]repo.Co
 	return s.listConnectionsRows, nil
 }
 
+func (s *fakeHandlerService) ListProviderInstallations(context.Context, string) ([]repo.ProviderInstallation, error) {
+	return s.installationRows, nil
+}
+
+func (s *fakeHandlerService) CreateProviderInstallation(_ context.Context, in svc.CreateProviderInstallationInput) (*repo.ProviderInstallation, []repo.ProviderInstallationResource, error) {
+	s.createInstallationInput = in
+	if s.createdInstallation != nil {
+		return s.createdInstallation, s.resourceRows, nil
+	}
+	now := time.Date(2026, 7, 8, 1, 2, 3, 0, time.UTC)
+	return ptrext.Of(repo.ProviderInstallation{
+		ID:                     uuid.New(),
+		TenantID:               in.TenantID,
+		Provider:               in.Provider,
+		DisplayName:            in.DisplayName,
+		InstallationKind:       in.InstallationKind,
+		Status:                 repo.InstallationStatusActive,
+		ExternalInstallationID: in.ExternalInstallationID,
+		Permissions:            []byte(in.PermissionsJSON),
+		CapabilityProfile:      []byte(in.CapabilityProfileJSON),
+		ResourceSelection:      in.ResourceSelection,
+		QualificationStatus:    repo.TestStatusUntested,
+		CreatedBy:              in.Actor.ID,
+		UpdatedBy:              in.Actor.ID,
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}), s.resourceRows, nil
+}
+
+func (s *fakeHandlerService) DeleteProviderInstallation(_ context.Context, _ string, id uuid.UUID, _ svc.Actor, _ auditlogsvc.Actor) error {
+	s.deletedInstallationID = id
+	if id == uuid.Nil {
+		return repo.ErrInstallationNotFound
+	}
+	return nil
+}
+
+func (s *fakeHandlerService) QualifyProviderInstallation(_ context.Context, _ string, id uuid.UUID, _ svc.Actor, _ auditlogsvc.Actor) (svc.ProviderInstallationQualificationResult, error) {
+	s.qualifyInstallationID = id
+	if s.qualifyInstallation.Installation.ID == uuid.Nil {
+		return svc.ProviderInstallationQualificationResult{}, repo.ErrInstallationNotFound
+	}
+	return s.qualifyInstallation, nil
+}
+
+func (s *fakeHandlerService) ListProviderInstallationResources(_ context.Context, _ string, installationID uuid.UUID) ([]repo.ProviderInstallationResource, error) {
+	s.listResourcesID = installationID
+	if installationID == uuid.Nil {
+		return nil, repo.ErrInstallationNotFound
+	}
+	return s.resourceRows, nil
+}
+
+func (s *fakeHandlerService) SelectProviderInstallationResources(_ context.Context, in svc.SelectProviderInstallationResourcesInput) ([]repo.ProviderInstallationResource, error) {
+	s.selectResourcesInput = in
+	if in.InstallationID == uuid.Nil {
+		return nil, repo.ErrInstallationNotFound
+	}
+	return s.resourceRows, nil
+}
+
 func (s *fakeHandlerService) CreateConnection(_ context.Context, in svc.CreateConnectionInput) (*repo.Connection, error) {
 	s.createInput = in
 	if s.createErr != nil {
@@ -1472,20 +1726,21 @@ func (s *fakeHandlerService) CreateConnection(_ context.Context, in svc.CreateCo
 		status = repo.ConnectionStatusActive
 	}
 	return ptrext.Of(repo.Connection{
-		ID:             uuid.New(),
-		TenantID:       in.TenantID,
-		Provider:       in.Provider,
-		Name:           in.Name,
-		Enabled:        in.Enabled,
-		Status:         status,
-		AuthType:       in.AuthType,
-		BaseURL:        in.BaseURL,
-		ProviderConfig: []byte(in.ProviderConfigJSON),
-		Scopes:         in.Scopes,
-		CreatedBy:      in.Actor.ID,
-		UpdatedBy:      in.Actor.ID,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                     uuid.New(),
+		TenantID:               in.TenantID,
+		ProviderInstallationID: in.ProviderInstallationID,
+		Provider:               in.Provider,
+		Name:                   in.Name,
+		Enabled:                in.Enabled,
+		Status:                 status,
+		AuthType:               in.AuthType,
+		BaseURL:                in.BaseURL,
+		ProviderConfig:         []byte(in.ProviderConfigJSON),
+		Scopes:                 in.Scopes,
+		CreatedBy:              in.Actor.ID,
+		UpdatedBy:              in.Actor.ID,
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	}), nil
 }
 

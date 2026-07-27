@@ -12,7 +12,7 @@ export const protobufPackage = "attune.v1";
 export interface InboundSource {
   id: string;
   tenantId: string;
-  /** "webhook" | "email" | future channels */
+  /** "webhook" | "email" | "slack" | "zendesk" | "intercom" | future channels */
   channel: string;
   name: string;
   slug: string;
@@ -29,6 +29,36 @@ export interface InboundSource {
   createdAt: string;
   /** RFC3339 */
   updatedAt: string;
+  /** Sync progress stats (populated for poll-mode channels like Zendesk). */
+  ticketsSynced?: string | undefined;
+  lastSyncedTicketId?: string | undefined;
+  backfillDone?:
+    | boolean
+    | undefined;
+  /**
+   * Operator-editable Intercom settings (GET detail only) — lets the
+   * Console edit form prefill stored values instead of guessing.
+   * Credentials are never included.
+   */
+  intercomSettings?: IntercomSettings | undefined;
+}
+
+/**
+ * IntercomSettings is the decrypted, operator-visible slice of a stored
+ * Intercom config: everything editable, nothing secret. Region and
+ * workspace_id are surfaced read-only for display.
+ */
+export interface IntercomSettings {
+  region: string;
+  /** "now" | "full" */
+  startFrom: string;
+  /** empty = all states */
+  filterStates: string[];
+  filterTags: string[];
+  filterExcludeTags: string[];
+  /** 0 = server default */
+  maxDetailFetches: number;
+  workspaceId: string;
 }
 
 export interface ListInboundSourcesRequest {
@@ -54,6 +84,32 @@ export interface CreateInboundSourceRequest {
   webhookConfig?: WebhookCreateConfig | undefined;
   emailConfig?: EmailCreateConfig | undefined;
   slackConfig?: SlackConnConfig | undefined;
+  zendeskConfig?: ZendeskConnConfig | undefined;
+  intercomConfig?: IntercomConnConfig | undefined;
+}
+
+/**
+ * UpdateInboundSourceRequest edits a source's mutable settings in
+ * place. Sync state (watermark, cursor, stats) is always preserved.
+ * Field semantics inside intercom_config: absent optional scalars
+ * (start_from, max_detail_fetches) keep their stored values; the
+ * repeated filter lists are always replaced with the provided set (an
+ * empty list clears the filter — prefill from the GET detail's
+ * intercom_settings to keep them). Credentials are replace-only: an
+ * empty access_token keeps the stored one, a non-empty value is
+ * re-validated against the provider before being persisted.
+ */
+export interface UpdateInboundSourceRequest {
+  id: string;
+  name?:
+    | string
+    | undefined;
+  /**
+   * Intercom: region is immutable (it selects the API host the stored
+   * watermark was minted against); filters, start_from, budget, and the
+   * access token are editable.
+   */
+  intercomConfig?: IntercomConnConfig | undefined;
 }
 
 /**
@@ -135,16 +191,25 @@ export interface DeleteInboundSourceResponse {
  * the upstream rejects credentials or channel access.
  */
 export interface TestInboundConnectionRequest {
-  /** currently "email" or "slack" */
+  /** currently "email", "slack", "zendesk", or "intercom" */
   channel: string;
   emailConfig?: EmailConnConfig | undefined;
   slackConfig?: SlackConnConfig | undefined;
+  zendeskConfig?: ZendeskConnConfig | undefined;
+  intercomConfig?: IntercomConnConfig | undefined;
 }
 
 export interface TestInboundConnectionResponse {
   ok: boolean;
   error?: string | undefined;
-  latencyMs?: string | undefined;
+  latencyMs?:
+    | string
+    | undefined;
+  /**
+   * Human-readable identity of the connected upstream (Intercom
+   * workspace name; other channels may fill it later).
+   */
+  workspaceName?: string | undefined;
 }
 
 export interface EmailConnConfig {
@@ -179,10 +244,72 @@ export interface DiscoverSlackChannelsResponse {
 }
 
 /**
+ * ZendeskConnConfig carries the Zendesk connection parameters for create
+ * and test-connection flows. Auth supports "api_token" (email + API
+ * token, sunsetting 2027-04-30) and "oauth" (OAuth 2.0 client
+ * credentials).
+ */
+export interface ZendeskConnConfig {
+  subdomain: string;
+  /** "api_token" | "oauth" */
+  authMode: string;
+  /** api_token auth fields. */
+  email?: string | undefined;
+  apiToken?: string | undefined;
+  startFrom?:
+    | string
+    | undefined;
+  /** OAuth paste-mode fields (replaces old client-credential fields). */
+  oauthAccessToken?: string | undefined;
+  oauthRefreshToken?:
+    | string
+    | undefined;
+  /** for refresh grant */
+  oauthClientIdV2?:
+    | string
+    | undefined;
+  /** for refresh grant */
+  oauthClientSecretV2?:
+    | string
+    | undefined;
+  /** Advanced config. */
+  filterTags: string[];
+  filterExcludeTags: string[];
+  filterStatuses: string[];
+  maxCommentFetches?: number | undefined;
+}
+
+/**
+ * IntercomConnConfig carries the Intercom connection parameters for
+ * create and test-connection flows. Auth is a private-app Access Token
+ * (Bearer) — Intercom's documented model for same-workspace server
+ * integrations; OAuth applies to public/multi-workspace apps (#32).
+ */
+export interface IntercomConnConfig {
+  /** "us" | "eu" | "au" */
+  region: string;
+  /** write-only, never returned */
+  accessToken: string;
+  /** "now" (default) | "full" */
+  startFrom?:
+    | string
+    | undefined;
+  /** open/closed/snoozed; empty = all */
+  filterStates: string[];
+  maxDetailFetches?:
+    | number
+    | undefined;
+  /** conversation must carry ALL */
+  filterTags: string[];
+  /** skip if it carries ANY */
+  filterExcludeTags: string[];
+}
+
+/**
  * InboundSourceService manages a tenant's inbound source rows (#66
  * channel-agnostic inbound framework). Sources back the webhook,
- * email IMAP, and Slack adapters; future channels (RSS, scrape, MQ,
- * …) hang off the same shape.
+ * email IMAP, Slack, Zendesk, and Intercom adapters; future channels
+ * (RSS, scrape, MQ, …) hang off the same shape.
  */
 export interface InboundSourceService {
   /** GET /fb/v1/console/inbound/sources */
@@ -190,11 +317,18 @@ export interface InboundSourceService {
   /** GET /fb/v1/console/inbound/sources/{id} */
   GetInboundSource(request: GetInboundSourceRequest): Promise<InboundSource>;
   /**
-   * POST /fb/v1/console/inbound/sources — create webhook, email, or Slack source.
+   * POST /fb/v1/console/inbound/sources — create webhook, email, Slack, or Zendesk source.
    * Webhook responses include a one-time secret reveal (url + secret +
    * example); the raw secret is never returned again.
    */
   CreateInboundSource(request: CreateInboundSourceRequest): Promise<CreateInboundSourceResponse>;
+  /**
+   * PATCH /fb/v1/console/inbound/sources/{id} — update mutable settings
+   * (name + channel-specific config) without recreating the source: a
+   * delete/recreate would reset the sync watermark (full re-backfill)
+   * and orphan existing feedback's inbound_source_id linkage.
+   */
+  UpdateInboundSource(request: UpdateInboundSourceRequest): Promise<InboundSource>;
   /**
    * POST /fb/v1/console/inbound/sources/{id}/rotate-secret — webhook only.
    * Returns 409 with rotation_in_grace_window error if a prior rotation
@@ -208,8 +342,9 @@ export interface InboundSourceService {
   /** DELETE /fb/v1/console/inbound/sources/{id} */
   DeleteInboundSource(request: DeleteInboundSourceRequest): Promise<DeleteInboundSourceResponse>;
   /**
-   * POST /fb/v1/console/inbound/sources/test-connection — email or
-   * Slack only, no state changes. Validates the configured auth path.
+   * POST /fb/v1/console/inbound/sources/test-connection — email,
+   * Slack, or Zendesk only, no state changes. Validates the configured
+   * auth path.
    */
   TestInboundConnection(request: TestInboundConnectionRequest): Promise<TestInboundConnectionResponse>;
   /**

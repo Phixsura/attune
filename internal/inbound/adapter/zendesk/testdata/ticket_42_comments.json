@@ -1,0 +1,33 @@
+{
+  "comments": [
+    {
+      "id": 1001,
+      "body": "I reset my password but the new one doesn't work. Getting a 500 error on the login page.",
+      "public": true,
+      "author_id": 100,
+      "created_at": "2026-07-20T10:00:00Z"
+    },
+    {
+      "id": 1002,
+      "body": "Internal note: checked logs, seeing auth service timeout.",
+      "public": false,
+      "author_id": 300,
+      "created_at": "2026-07-20T11:00:00Z"
+    },
+    {
+      "id": 1003,
+      "body": "Hi Alice, we've identified an issue with the auth service. Could you try again in 30 minutes?",
+      "public": true,
+      "author_id": 300,
+      "created_at": "2026-07-20T12:00:00Z"
+    },
+    {
+      "id": 1004,
+      "body": "Still not working. Same 500 error. This is blocking my entire team.",
+      "public": true,
+      "author_id": 100,
+      "created_at": "2026-07-21T09:00:00Z"
+    }
+  ],
+  "links": { "next": "" }
+}

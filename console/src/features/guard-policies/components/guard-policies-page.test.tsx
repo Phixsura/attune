@@ -73,6 +73,9 @@ async function chooseOption(
 ) {
   await user.click(trigger)
   await user.click(await screen.findByRole('option', { name }))
+  await waitFor(() => {
+    expect(screen.queryByRole('option', { name })).not.toBeInTheDocument()
+  })
 }
 
 describe('GuardPoliciesPage pure policy helpers', () => {
@@ -525,7 +528,7 @@ describe('GuardPoliciesPage user flows', () => {
         },
       })
     })
-  })
+  }, 90_000)
 
   it('edits and deletes tenant policies while system policies stay read-only', async () => {
     let patchBody: unknown

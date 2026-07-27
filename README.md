@@ -16,7 +16,7 @@ Listening is passive. Attunement is active alignment.
 [user signals]
      │
      ▼
-HTTP webhook · email IMAP · Slack channel ingest · API client   ·   HMAC / cookie auth · rate-limited · deduped
+HTTP webhook · email IMAP · Slack channel · Zendesk tickets · Intercom conversations · API client   ·   HMAC / cookie auth · rate-limited · deduped
      │
      ▼
 ┌──────────────────────────────────────────────────────┐
@@ -89,6 +89,18 @@ Or build from source:
 go build ./cmd/attune
 go run ./cmd/attune server                                  # start HTTP server
 ```
+
+For a disposable source-tree Console stack that avoids stale ports and
+misconfigured Compose state, run:
+
+```bash
+make dev-stack
+```
+
+The launcher builds the current Console bundle, starts a temporary local
+PostgreSQL cluster, boots the current Go server, runs `demo bootstrap`, and
+prints the Console URL plus local admin credentials. Use the printed URL rather
+than a previously opened localhost tab if the browser reports `Failed to fetch`.
 
 ### Sending feedback
 
@@ -194,7 +206,7 @@ internal/
     console/                 Console API (auth, feedback, settings, inbound source mgmt)
   inbound/                   #66 channel-agnostic ingest framework
     adapter/                 Per-channel inbound adapters
-      webhook/  email/
+      webhook/  email/  slack/  zendesk/  intercom/
     inboundtest/             Conformance suite + shared fakes
   notify/                    Outbound webhooks + Transport framework
     adapter/                 Per-destination senders
@@ -272,7 +284,10 @@ On `git commit` it runs, on your **staged** changes only:
 | `biome` on staged `console/src` | yes¹ | ¹only if `console/node_modules` is installed |
 
 The console step is best-effort — **Go-only contributors never need Node.** To get
-local biome on console changes, install its deps once: `pnpm -C console install`.
+local biome on console changes, install its deps once with Node 22:
+`corepack pnpm -C console install`. Full local preflight uses
+`scripts/with-supported-node.sh` so Node-based CI gates match the CI Node 22
+runtime even when another Node version is first on `PATH`.
 
 **Bypass** (emergencies only): `git -c core.hooksPath=/dev/null commit …`
 

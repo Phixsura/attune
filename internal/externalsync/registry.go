@@ -51,15 +51,17 @@ type ObjectSchema struct {
 
 // PullRequest is the normalized input for provider pull sync.
 type PullRequest struct {
-	Connection Connection
-	MappingID  string
-	StreamKey  string
-	Cursor     []byte
+	Connection    Connection
+	MappingID     string
+	StreamKey     string
+	Cursor        []byte
+	InputMetadata []byte
 }
 
 // PullResult is the normalized output for provider pull sync.
 type PullResult struct {
 	Records    []ExternalRecord
+	Children   []ExternalChildRecord
 	StreamKey  string
 	NextCursor []byte
 }
@@ -85,6 +87,18 @@ type ExternalRecord struct {
 	UpdatedAt     time.Time
 	Deleted       bool
 	Payload       []byte
+}
+
+// ExternalChildRecord is a provider-neutral child object returned by Pull.
+type ExternalChildRecord struct {
+	ParentKey string
+	Type      string
+	Key       string
+	URL       string
+	Version   string
+	UpdatedAt time.Time
+	Deleted   bool
+	Payload   []byte
 }
 
 // LocalRecord is the provider-neutral representation supplied to Push.

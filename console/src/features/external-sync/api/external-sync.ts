@@ -4,15 +4,19 @@ import {
   type BatchResolveExternalSyncConflictsRequest,
   type BatchResolveExternalSyncConflictsResponse,
   type CreateExternalConnectionRequest,
+  type CreateExternalProviderInstallationRequest,
   type DiscoverExternalConnectionSchemaResponse,
   type ExternalConnection,
   type ExternalObjectMapping,
   type ExternalObjectSchema,
+  type ExternalProviderInstallation,
+  type ExternalProviderInstallationResource,
   type ExternalSyncConflict,
   ExternalSyncConflictResolution,
   ExternalSyncDirection,
   type ExternalSyncEvent,
   type ExternalSyncHealthResponse,
+  type ExternalSyncProvider as ExternalSyncProviderItem,
   type ExternalSyncRecordFailure,
   type ExternalSyncRecordTimelineEntry,
   type ExternalSyncRecordTimelineResponse,
@@ -21,11 +25,15 @@ import {
   type GetExternalSyncRecordTimelineRequest,
   type ListExternalConnectionsResponse,
   type ListExternalObjectMappingsResponse,
+  type ListExternalProviderInstallationResourcesResponse,
+  type ListExternalProviderInstallationsResponse,
   type ListExternalSyncEventsResponse,
+  type ListExternalSyncProvidersResponse,
   type ListExternalSyncRunsResponse,
   type PreviewExternalObjectMappingRequest,
   type PreviewExternalObjectMappingResponse,
   type QualifyExternalConnectionResponse,
+  type QualifyExternalProviderInstallationResponse,
   type ReplayExternalSyncEventResponse,
   type RequestExternalSyncBackfillRequest,
   type RequestExternalSyncBackfillResponse,
@@ -33,6 +41,7 @@ import {
   type ResetExternalSyncCursorRequest,
   type ResetExternalSyncCursorResponse,
   type ResumeExternalConnectionRequest,
+  type SelectExternalProviderInstallationResourcesResponse,
   type TestExternalConnectionResponse,
   type UpdateExternalConnectionRequest,
   type UpdateExternalObjectMappingRequest,
@@ -44,22 +53,29 @@ export type {
   BatchResolveExternalSyncConflictsRequest,
   BatchResolveExternalSyncConflictsResponse,
   CreateExternalConnectionRequest,
+  CreateExternalProviderInstallationRequest,
   DiscoverExternalConnectionSchemaResponse,
   ExternalConnection,
   ExternalObjectMapping,
   ExternalObjectSchema,
+  ExternalProviderInstallation,
+  ExternalProviderInstallationResource,
   ExternalSyncConflict,
   ExternalSyncEvent,
   ExternalSyncHealthResponse,
+  ExternalSyncProviderItem as ExternalSyncProvider,
   ExternalSyncRecordFailure,
   ExternalSyncRecordTimelineEntry,
   ExternalSyncRecordTimelineResponse,
   ExternalSyncRun,
   ExternalSyncRunDetail,
   GetExternalSyncRecordTimelineRequest,
+  ListExternalProviderInstallationResourcesResponse,
+  ListExternalProviderInstallationsResponse,
   PreviewExternalObjectMappingRequest,
   PreviewExternalObjectMappingResponse,
   QualifyExternalConnectionResponse,
+  QualifyExternalProviderInstallationResponse,
   ReplayExternalSyncEventResponse,
   RequestExternalSyncBackfillRequest,
   RequestExternalSyncBackfillResponse,
@@ -67,6 +83,7 @@ export type {
   ResetExternalSyncCursorRequest,
   ResetExternalSyncCursorResponse,
   ResumeExternalConnectionRequest,
+  SelectExternalProviderInstallationResourcesResponse,
   TestExternalConnectionResponse,
   UpdateExternalConnectionRequest,
   UpdateExternalObjectMappingRequest,
@@ -88,7 +105,16 @@ export type ExternalSyncEventsFilter = {
 export const externalSyncQueryKeys = {
   root: ['console', 'external-sync'] as const,
   health: () => [...externalSyncQueryKeys.root, 'health'] as const,
+  providerInstallations: () => [...externalSyncQueryKeys.root, 'provider-installations'] as const,
+  providerInstallationResources: (installationId?: string) =>
+    [
+      ...externalSyncQueryKeys.root,
+      'provider-installations',
+      installationId ?? 'none',
+      'resources',
+    ] as const,
   connections: () => [...externalSyncQueryKeys.root, 'connections'] as const,
+  providers: () => [...externalSyncQueryKeys.root, 'providers'] as const,
   connectionSchema: (connectionId?: string) =>
     [...externalSyncQueryKeys.root, 'connections', connectionId ?? 'none', 'schema'] as const,
   mappings: (connectionId?: string) =>
@@ -115,6 +141,44 @@ export const externalSyncConnectionsQuery = () =>
       const resp = await api<ListExternalConnectionsResponse>(`${base}/connections`, { signal })
       return resp.connections
     },
+    staleTime: 20_000,
+  })
+
+export const externalSyncProvidersQuery = () =>
+  queryOptions({
+    queryKey: externalSyncQueryKeys.providers(),
+    queryFn: async ({ signal }) => {
+      const resp = await api<ListExternalSyncProvidersResponse>(`${base}/providers`, { signal })
+      return resp.providers
+    },
+    staleTime: 60_000,
+  })
+
+export const externalProviderInstallationsQuery = () =>
+  queryOptions({
+    queryKey: externalSyncQueryKeys.providerInstallations(),
+    queryFn: async ({ signal }) => {
+      const resp = await api<ListExternalProviderInstallationsResponse>(
+        `${base}/provider-installations`,
+        { signal },
+      )
+      return resp.installations
+    },
+    staleTime: 20_000,
+  })
+
+export const externalProviderInstallationResourcesQuery = (installationId?: string) =>
+  queryOptions({
+    queryKey: externalSyncQueryKeys.providerInstallationResources(installationId),
+    queryFn: async ({ signal }) => {
+      if (!installationId) return []
+      const resp = await api<ListExternalProviderInstallationResourcesResponse>(
+        `${base}/provider-installations/${installationId}/resources`,
+        { signal },
+      )
+      return resp.resources
+    },
+    enabled: Boolean(installationId),
     staleTime: 20_000,
   })
 
@@ -199,6 +263,33 @@ export const externalSyncEventsQuery = (limit = 25, filter: ExternalSyncEventsFi
 
 export function createExternalConnection(body: CreateExternalConnectionRequest) {
   return api<ExternalConnection>(`${base}/connections`, { method: 'POST', body })
+}
+
+export function createExternalProviderInstallation(
+  body: CreateExternalProviderInstallationRequest,
+) {
+  return api<ExternalProviderInstallation>(`${base}/provider-installations`, {
+    method: 'POST',
+    body,
+  })
+}
+
+export function deleteExternalProviderInstallation(id: string) {
+  return api<void>(`${base}/provider-installations/${id}`, { method: 'DELETE' })
+}
+
+export function qualifyExternalProviderInstallation(id: string) {
+  return api<QualifyExternalProviderInstallationResponse>(
+    `${base}/provider-installations/${id}:qualify`,
+    { method: 'POST' },
+  )
+}
+
+export function selectExternalProviderInstallationResources(id: string, resourceIds: string[]) {
+  return api<SelectExternalProviderInstallationResourcesResponse>(
+    `${base}/provider-installations/${id}/resources:select`,
+    { method: 'POST', body: { resourceIds } },
+  )
 }
 
 export function updateExternalConnection(body: UpdateExternalConnectionRequest) {

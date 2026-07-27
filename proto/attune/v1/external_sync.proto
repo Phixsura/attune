@@ -11,6 +11,36 @@ service ExternalSyncService {
   rpc ListExternalConnections(ListExternalConnectionsRequest) returns (ListExternalConnectionsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/external-sync/connections"};
   }
+  rpc ListExternalSyncProviders(ListExternalSyncProvidersRequest) returns (ListExternalSyncProvidersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/providers"};
+  }
+  rpc ListExternalProviderInstallations(ListExternalProviderInstallationsRequest) returns (ListExternalProviderInstallationsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/provider-installations"};
+  }
+  rpc CreateExternalProviderInstallation(CreateExternalProviderInstallationRequest) returns (ExternalProviderInstallation) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/provider-installations"
+      body: "*"
+    };
+  }
+  rpc DeleteExternalProviderInstallation(DeleteExternalProviderInstallationRequest) returns (DeleteExternalProviderInstallationResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/external-sync/provider-installations/{id}"};
+  }
+  rpc QualifyExternalProviderInstallation(QualifyExternalProviderInstallationRequest) returns (QualifyExternalProviderInstallationResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/provider-installations/{id}:qualify"
+      body: "*"
+    };
+  }
+  rpc ListExternalProviderInstallationResources(ListExternalProviderInstallationResourcesRequest) returns (ListExternalProviderInstallationResourcesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/external-sync/provider-installations/{id}/resources"};
+  }
+  rpc SelectExternalProviderInstallationResources(SelectExternalProviderInstallationResourcesRequest) returns (SelectExternalProviderInstallationResourcesResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/external-sync/provider-installations/{id}/resources:select"
+      body: "*"
+    };
+  }
   rpc CreateExternalConnection(CreateExternalConnectionRequest) returns (ExternalConnection) {
     option (google.api.http) = {
       post: "/fb/v1/console/external-sync/connections"
@@ -210,6 +240,127 @@ message ExternalConnection {
   string created_at = 16;
   string updated_at = 17;
   bool webhook_secret_configured = 18;
+  string provider_installation_id = 19;
+}
+
+message ExternalSyncProvider {
+  string provider = 1;
+  string display = 2;
+}
+
+message ExternalProviderInstallation {
+  string id = 1;
+  string tenant_id = 2;
+  string provider = 3;
+  string display_name = 4;
+  string installation_kind = 5;
+  string status = 6;
+  string external_installation_id = 7;
+  string account_login = 8;
+  string account_id = 9;
+  string account_url = 10;
+  string base_url = 11;
+  string permissions_json = 12;
+  string capability_profile_json = 13;
+  string resource_selection = 14;
+  string qualification_status = 15;
+  string last_qualified_at = 16;
+  string last_error = 17;
+  string created_by = 18;
+  string updated_by = 19;
+  string created_at = 20;
+  string updated_at = 21;
+}
+
+message ExternalProviderInstallationResource {
+  string id = 1;
+  string tenant_id = 2;
+  string installation_id = 3;
+  string provider = 4;
+  string resource_type = 5;
+  string external_resource_id = 6;
+  string resource_key = 7;
+  string display_name = 8;
+  string html_url = 9;
+  bool selected = 10;
+  string status = 11;
+  string permissions_json = 12;
+  string last_seen_at = 13;
+  string created_at = 14;
+  string updated_at = 15;
+}
+
+message ExternalProviderInstallationResourceInput {
+  string resource_type = 1;
+  string external_resource_id = 2;
+  string resource_key = 3 [(google.api.field_behavior) = REQUIRED];
+  string display_name = 4;
+  string html_url = 5;
+  bool selected = 6;
+  string status = 7;
+  string permissions_json = 8;
+}
+
+message ListExternalSyncProvidersRequest {}
+
+message ListExternalSyncProvidersResponse {
+  repeated ExternalSyncProvider providers = 1;
+}
+
+message ListExternalProviderInstallationsRequest {}
+
+message ListExternalProviderInstallationsResponse {
+  repeated ExternalProviderInstallation installations = 1;
+}
+
+message CreateExternalProviderInstallationRequest {
+  string provider = 1 [(google.api.field_behavior) = REQUIRED];
+  string display_name = 2 [(google.api.field_behavior) = REQUIRED];
+  string installation_kind = 3 [(google.api.field_behavior) = REQUIRED];
+  string external_installation_id = 4;
+  string account_login = 5;
+  string account_id = 6;
+  string account_url = 7;
+  string base_url = 8;
+  string permissions_json = 9;
+  string capability_profile_json = 10;
+  string resource_selection = 11;
+  repeated ExternalProviderInstallationResourceInput resources = 12;
+}
+
+message DeleteExternalProviderInstallationRequest {
+  string id = 1;
+}
+
+message DeleteExternalProviderInstallationResponse {}
+
+message QualifyExternalProviderInstallationRequest {
+  string id = 1;
+}
+
+message QualifyExternalProviderInstallationResponse {
+  string installation_id = 1;
+  bool ready = 2;
+  string grade = 3;
+  repeated ExternalSyncQualificationCheck checks = 4;
+  ExternalProviderInstallation installation = 5;
+}
+
+message ListExternalProviderInstallationResourcesRequest {
+  string id = 1;
+}
+
+message ListExternalProviderInstallationResourcesResponse {
+  repeated ExternalProviderInstallationResource resources = 1;
+}
+
+message SelectExternalProviderInstallationResourcesRequest {
+  string id = 1;
+  repeated string resource_ids = 2;
+}
+
+message SelectExternalProviderInstallationResourcesResponse {
+  repeated ExternalProviderInstallationResource resources = 1;
 }
 
 message ExternalObjectMapping {
@@ -260,6 +411,7 @@ message ExternalSyncRun {
   string created_at = 21;
   string updated_at = 22;
   bool in_flight = 23;
+  string input_metadata_json = 24;
 }
 
 message ExternalSyncAttempt {
@@ -395,6 +547,7 @@ message CreateExternalConnectionRequest {
   repeated string scopes = 7;
   optional bool enabled = 8;
   string webhook_secret = 9;
+  string provider_installation_id = 10;
 }
 
 message UpdateExternalConnectionRequest {
@@ -499,6 +652,8 @@ message RequestExternalSyncRunRequest {
   string connection_id = 1 [(google.api.field_behavior) = REQUIRED];
   string mapping_id = 2;
   ExternalSyncDirection direction = 3;
+  string local_object_id = 4;
+  string external_key = 5;
 }
 
 message ListExternalSyncRunsRequest {

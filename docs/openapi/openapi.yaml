@@ -2097,6 +2097,36 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/customer-requests/{id}/issue-links:create-github:
+        post:
+            tags:
+                - CustomerRequestService
+            operationId: CustomerRequestService_CreateCustomerRequestGitHubIssue
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateCustomerRequestGitHubIssueRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreateCustomerRequestGitHubIssueResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/customer-requests/{id}/notes:
         post:
             tags:
@@ -3150,6 +3180,173 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ResetExternalSyncCursorResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalProviderInstallations
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalProviderInstallationsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_CreateExternalProviderInstallation
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateExternalProviderInstallationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ExternalProviderInstallation'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}:
+        delete:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_DeleteExternalProviderInstallation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteExternalProviderInstallationResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}/resources:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalProviderInstallationResources
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalProviderInstallationResourcesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}/resources:select:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_SelectExternalProviderInstallationResources
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SelectExternalProviderInstallationResourcesRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SelectExternalProviderInstallationResourcesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/provider-installations/{id}:qualify:
+        post:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_QualifyExternalProviderInstallation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/QualifyExternalProviderInstallationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/QualifyExternalProviderInstallationResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/external-sync/providers:
+        get:
+            tags:
+                - ExternalSyncService
+            operationId: ExternalSyncService_ListExternalSyncProviders
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListExternalSyncProvidersResponse'
                 default:
                     description: Default error response
                     content:
@@ -4339,7 +4536,7 @@ paths:
             tags:
                 - InboundSourceService
             description: |-
-                POST /fb/v1/console/inbound/sources — create webhook, email, or Slack source.
+                POST /fb/v1/console/inbound/sources — create webhook, email, Slack, or Zendesk source.
                  Webhook responses include a one-time secret reveal (url + secret +
                  example); the raw secret is never returned again.
             operationId: InboundSourceService_CreateInboundSource
@@ -4395,8 +4592,9 @@ paths:
             tags:
                 - InboundSourceService
             description: |-
-                POST /fb/v1/console/inbound/sources/test-connection — email or
-                 Slack only, no state changes. Validates the configured auth path.
+                POST /fb/v1/console/inbound/sources/test-connection — email,
+                 Slack, or Zendesk only, no state changes. Validates the configured
+                 auth path.
             operationId: InboundSourceService_TestInboundConnection
             requestBody:
                 content:
@@ -4460,6 +4658,40 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/DeleteInboundSourceResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        patch:
+            tags:
+                - InboundSourceService
+            description: |-
+                PATCH /fb/v1/console/inbound/sources/{id} — update mutable settings
+                 (name + channel-specific config) without recreating the source: a
+                 delete/recreate would reset the sync watermark (full re-backfill)
+                 and orphan existing feedback's inbound_source_id linkage.
+            operationId: InboundSourceService_UpdateInboundSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateInboundSourceRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InboundSource'
                 default:
                     description: Default error response
                     content:
@@ -11164,6 +11396,28 @@ components:
                     type: string
                 enabled:
                     type: boolean
+        CreateCustomerRequestGitHubIssueRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
+        CreateCustomerRequestGitHubIssueResponse:
+            type: object
+            properties:
+                detail:
+                    $ref: '#/components/schemas/CustomerRequestDetail'
+                runId:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
         CreateCustomerRequestRequest:
             required:
                 - title
@@ -11254,6 +11508,41 @@ components:
                     type: boolean
                 webhookSecret:
                     type: string
+                providerInstallationId:
+                    type: string
+        CreateExternalProviderInstallationRequest:
+            required:
+                - provider
+                - displayName
+                - installationKind
+            type: object
+            properties:
+                provider:
+                    type: string
+                displayName:
+                    type: string
+                installationKind:
+                    type: string
+                externalInstallationId:
+                    type: string
+                accountLogin:
+                    type: string
+                accountId:
+                    type: string
+                accountUrl:
+                    type: string
+                baseUrl:
+                    type: string
+                permissionsJson:
+                    type: string
+                capabilityProfileJson:
+                    type: string
+                resourceSelection:
+                    type: string
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallationResourceInput'
         CreateGuardPolicyRequest:
             type: object
             properties:
@@ -11275,6 +11564,10 @@ components:
                     $ref: '#/components/schemas/EmailCreateConfig'
                 slackConfig:
                     $ref: '#/components/schemas/SlackConnConfig'
+                zendeskConfig:
+                    $ref: '#/components/schemas/ZendeskConnConfig'
+                intercomConfig:
+                    $ref: '#/components/schemas/IntercomConnConfig'
             description: |-
                 CreateInboundSourceRequest — one of webhook_config / email_config is
                  required based on channel. The framework selects the relevant payload;
@@ -11775,6 +12068,95 @@ components:
                     type: string
                 accountProfile:
                     $ref: '#/components/schemas/CustomerRequestAccountProfile'
+        CustomerRequestDeliveryArtifact:
+            type: object
+            properties:
+                id:
+                    type: string
+                provider:
+                    type: string
+                artifactType:
+                    type: string
+                externalKey:
+                    type: string
+                externalUrl:
+                    type: string
+                title:
+                    type: string
+                status:
+                    type: string
+                statusCategory:
+                    type: string
+                assignee:
+                    type: string
+                syncState:
+                    enum:
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_MANUAL
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_PENDING
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_SYNCED
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_STALE
+                        - CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED
+                    type: string
+                    format: enum
+                health:
+                    enum:
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_UNSPECIFIED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+                    type: string
+                    format: enum
+                lastSeenAt:
+                    type: string
+                source:
+                    type: string
+                syncError:
+                    type: string
+        CustomerRequestDeliveryGraph:
+            type: object
+            properties:
+                artifacts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestDeliveryArtifact'
+                relationships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CustomerRequestDeliveryRelationship'
+                health:
+                    enum:
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_UNSPECIFIED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_MANUAL
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_PENDING
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_STALE
+                        - CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED
+                    type: string
+                    format: enum
+                healthExplanation:
+                    type: string
+                updatedAt:
+                    type: string
+        CustomerRequestDeliveryRelationship:
+            type: object
+            properties:
+                id:
+                    type: string
+                sourceArtifactId:
+                    type: string
+                targetArtifactId:
+                    type: string
+                relationshipType:
+                    type: string
+                provider:
+                    type: string
+                createdAt:
+                    type: string
         CustomerRequestDetail:
             type: object
             properties:
@@ -11814,6 +12196,8 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/CustomerRequestNote'
+                deliveryGraph:
+                    $ref: '#/components/schemas/CustomerRequestDeliveryGraph'
         CustomerRequestDuplicate:
             type: object
             properties:
@@ -12196,6 +12580,9 @@ components:
             type: object
             properties: {}
         DeleteExternalConnectionResponse:
+            type: object
+            properties: {}
+        DeleteExternalProviderInstallationResponse:
             type: object
             properties: {}
         DeleteGdprSubjectRequest:
@@ -12862,6 +13249,8 @@ components:
                     type: string
                 webhookSecretConfigured:
                     type: boolean
+                providerInstallationId:
+                    type: string
         ExternalDocs:
             type: object
             properties:
@@ -12929,6 +13318,105 @@ components:
                     type: array
                     items:
                         type: string
+        ExternalProviderInstallation:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                provider:
+                    type: string
+                displayName:
+                    type: string
+                installationKind:
+                    type: string
+                status:
+                    type: string
+                externalInstallationId:
+                    type: string
+                accountLogin:
+                    type: string
+                accountId:
+                    type: string
+                accountUrl:
+                    type: string
+                baseUrl:
+                    type: string
+                permissionsJson:
+                    type: string
+                capabilityProfileJson:
+                    type: string
+                resourceSelection:
+                    type: string
+                qualificationStatus:
+                    type: string
+                lastQualifiedAt:
+                    type: string
+                lastError:
+                    type: string
+                createdBy:
+                    type: string
+                updatedBy:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ExternalProviderInstallationResource:
+            type: object
+            properties:
+                id:
+                    type: string
+                tenantId:
+                    type: string
+                installationId:
+                    type: string
+                provider:
+                    type: string
+                resourceType:
+                    type: string
+                externalResourceId:
+                    type: string
+                resourceKey:
+                    type: string
+                displayName:
+                    type: string
+                htmlUrl:
+                    type: string
+                selected:
+                    type: boolean
+                status:
+                    type: string
+                permissionsJson:
+                    type: string
+                lastSeenAt:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+        ExternalProviderInstallationResourceInput:
+            required:
+                - resourceKey
+            type: object
+            properties:
+                resourceType:
+                    type: string
+                externalResourceId:
+                    type: string
+                resourceKey:
+                    type: string
+                displayName:
+                    type: string
+                htmlUrl:
+                    type: string
+                selected:
+                    type: boolean
+                status:
+                    type: string
+                permissionsJson:
+                    type: string
         ExternalSyncAttempt:
             type: object
             properties:
@@ -13090,6 +13578,13 @@ components:
                 quarantinedConnections:
                     type: integer
                     format: int32
+        ExternalSyncProvider:
+            type: object
+            properties:
+                provider:
+                    type: string
+                display:
+                    type: string
         ExternalSyncQualificationCheck:
             type: object
             properties:
@@ -13249,6 +13744,8 @@ components:
                     type: string
                 inFlight:
                     type: boolean
+                inputMetadataJson:
+                    type: string
         ExternalSyncRunDetail:
             type: object
             properties:
@@ -14088,6 +14585,20 @@ components:
                     type: string
                 updatedAt:
                     type: string
+                ticketsSynced:
+                    type: string
+                    description: Sync progress stats (populated for poll-mode channels like Zendesk).
+                lastSyncedTicketId:
+                    type: string
+                backfillDone:
+                    type: boolean
+                intercomSettings:
+                    allOf:
+                        - $ref: '#/components/schemas/IntercomSettings'
+                    description: |-
+                        Operator-editable Intercom settings (GET detail only) — lets the
+                         Console edit form prefill stored values instead of guessing.
+                         Credentials are never included.
             description: InboundSource never carries the secret — it is write-only once stored.
         IngestRequest:
             required:
@@ -14130,6 +14641,66 @@ components:
                     type: string
                     description: Enrichment lifecycle state at ingest time (always "pending" here).
             description: IngestResponse is returned on 200.
+        IntercomConnConfig:
+            required:
+                - region
+                - accessToken
+            type: object
+            properties:
+                region:
+                    type: string
+                accessToken:
+                    type: string
+                startFrom:
+                    type: string
+                filterStates:
+                    type: array
+                    items:
+                        type: string
+                maxDetailFetches:
+                    type: integer
+                    format: int32
+                filterTags:
+                    type: array
+                    items:
+                        type: string
+                filterExcludeTags:
+                    type: array
+                    items:
+                        type: string
+            description: |-
+                IntercomConnConfig carries the Intercom connection parameters for
+                 create and test-connection flows. Auth is a private-app Access Token
+                 (Bearer) — Intercom's documented model for same-workspace server
+                 integrations; OAuth applies to public/multi-workspace apps (#32).
+        IntercomSettings:
+            type: object
+            properties:
+                region:
+                    type: string
+                startFrom:
+                    type: string
+                filterStates:
+                    type: array
+                    items:
+                        type: string
+                filterTags:
+                    type: array
+                    items:
+                        type: string
+                filterExcludeTags:
+                    type: array
+                    items:
+                        type: string
+                maxDetailFetches:
+                    type: integer
+                    format: int32
+                workspaceId:
+                    type: string
+            description: |-
+                IntercomSettings is the decrypted, operator-visible slice of a stored
+                 Intercom config: everything editable, nothing secret. Region and
+                 workspace_id are surfaced read-only for display.
         InviteMemberRequest:
             required:
                 - email
@@ -14345,7 +14916,6 @@ components:
             required:
                 - id
                 - provider
-                - externalUrl
             type: object
             properties:
                 id:
@@ -14359,6 +14929,12 @@ components:
                 title:
                     type: string
                 status:
+                    type: string
+                connectionId:
+                    type: string
+                mappingId:
+                    type: string
+                issueNumber:
                     type: string
         LinkCustomerToCustomerRequestRequest:
             required:
@@ -14556,6 +15132,20 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ExternalObjectMapping'
+        ListExternalProviderInstallationResourcesResponse:
+            type: object
+            properties:
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallationResource'
+        ListExternalProviderInstallationsResponse:
+            type: object
+            properties:
+                installations:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallation'
         ListExternalSyncEventsResponse:
             type: object
             properties:
@@ -14565,6 +15155,13 @@ components:
                         $ref: '#/components/schemas/ExternalSyncEvent'
                 nextBeforeId:
                     type: string
+        ListExternalSyncProvidersResponse:
+            type: object
+            properties:
+                providers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncProvider'
         ListExternalSyncRunsResponse:
             type: object
             properties:
@@ -15845,6 +16442,26 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/ExternalSyncQualificationCheck'
+        QualifyExternalProviderInstallationRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        QualifyExternalProviderInstallationResponse:
+            type: object
+            properties:
+                installationId:
+                    type: string
+                ready:
+                    type: boolean
+                grade:
+                    type: string
+                checks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalSyncQualificationCheck'
+                installation:
+                    $ref: '#/components/schemas/ExternalProviderInstallation'
         QualityAction:
             type: object
             properties:
@@ -16352,6 +16969,10 @@ components:
                         - EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL
                     type: string
                     format: enum
+                localObjectId:
+                    type: string
+                externalKey:
+                    type: string
         RequestNotificationDelivery:
             type: object
             properties:
@@ -17114,6 +17735,22 @@ components:
         SeedDefaultsResponse:
             type: object
             properties: {}
+        SelectExternalProviderInstallationResourcesRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                resourceIds:
+                    type: array
+                    items:
+                        type: string
+        SelectExternalProviderInstallationResourcesResponse:
+            type: object
+            properties:
+                resources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ExternalProviderInstallationResource'
         SemanticDescriptor:
             type: object
             properties:
@@ -17539,6 +18176,10 @@ components:
                     $ref: '#/components/schemas/EmailConnConfig'
                 slackConfig:
                     $ref: '#/components/schemas/SlackConnConfig'
+                zendeskConfig:
+                    $ref: '#/components/schemas/ZendeskConnConfig'
+                intercomConfig:
+                    $ref: '#/components/schemas/IntercomConnConfig'
             description: |-
                 TestInboundConnectionRequest validates an IMAP config without
                  persisting it. Returns ok=false + error message rather than 5xx when
@@ -17552,6 +18193,11 @@ components:
                     type: string
                 latencyMs:
                     type: string
+                workspaceName:
+                    type: string
+                    description: |-
+                        Human-readable identity of the connected upstream (Intercom
+                         workspace name; other channels may fill it later).
         TestLLMChannelRequest:
             type: object
             properties:
@@ -17861,6 +18507,32 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/GuardPolicy'
+        UpdateInboundSourceRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                intercomConfig:
+                    allOf:
+                        - $ref: '#/components/schemas/IntercomConnConfig'
+                    description: |-
+                        Intercom: region is immutable (it selects the API host the stored
+                         watermark was minted against); filters, start_from, budget, and the
+                         access token are editable.
+            description: |-
+                UpdateInboundSourceRequest edits a source's mutable settings in
+                 place. Sync state (watermark, cursor, stats) is always preserved.
+                 Field semantics inside intercom_config: absent optional scalars
+                 (start_from, max_detail_fetches) keep their stored values; the
+                 repeated filter lists are always replaced with the provided set (an
+                 empty list clears the filter — prefill from the GET detail's
+                 intercom_settings to keep them). Credentials are replace-only: an
+                 empty access_token keeps the stored one, a non-empty value is
+                 re-validated against the provider before being persisted.
         UpdateLLMChannelRequest:
             required:
                 - name
@@ -18418,6 +19090,53 @@ components:
                     type: string
                 toStateId:
                     type: string
+        ZendeskConnConfig:
+            required:
+                - subdomain
+                - authMode
+            type: object
+            properties:
+                subdomain:
+                    type: string
+                authMode:
+                    type: string
+                email:
+                    type: string
+                    description: api_token auth fields.
+                apiToken:
+                    type: string
+                startFrom:
+                    type: string
+                oauthAccessToken:
+                    type: string
+                    description: OAuth paste-mode fields (replaces old client-credential fields).
+                oauthRefreshToken:
+                    type: string
+                oauthClientIdV2:
+                    type: string
+                oauthClientSecretV2:
+                    type: string
+                filterTags:
+                    type: array
+                    items:
+                        type: string
+                    description: Advanced config.
+                filterExcludeTags:
+                    type: array
+                    items:
+                        type: string
+                filterStatuses:
+                    type: array
+                    items:
+                        type: string
+                maxCommentFetches:
+                    type: integer
+                    format: int32
+            description: |-
+                ZendeskConnConfig carries the Zendesk connection parameters for create
+                 and test-connection flows. Auth supports "api_token" (email + API
+                 token, sunsetting 2027-04-30) and "oauth" (OAuth 2.0 client
+                 credentials).
         ErrorResponse:
             required:
                 - code
@@ -18491,8 +19210,8 @@ tags:
       description: |-
         InboundSourceService manages a tenant's inbound source rows (#66
          channel-agnostic inbound framework). Sources back the webhook,
-         email IMAP, and Slack adapters; future channels (RSS, scrape, MQ,
-         …) hang off the same shape.
+         email IMAP, Slack, Zendesk, and Intercom adapters; future channels
+         (RSS, scrape, MQ, …) hang off the same shape.
     - name: JobService
       description: JobService provides status tracking for async batch operations (#30).
     - name: LLMConfigService

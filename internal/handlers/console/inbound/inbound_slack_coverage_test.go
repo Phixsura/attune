@@ -30,6 +30,7 @@ type covSlackTx struct {
 	execCalls int
 	execErr   error
 	lastSQL   string
+	lastArgs  []any
 	rowErr    error
 }
 
@@ -61,9 +62,10 @@ func (t *covSlackTx) Prepare(context.Context, string, string) (*pgconn.Statement
 	return nil, nil
 }
 
-func (t *covSlackTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (t *covSlackTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	t.execCalls++
 	t.lastSQL = sql
+	t.lastArgs = args
 	if t.execErr != nil {
 		return pgconn.CommandTag{}, t.execErr
 	}

@@ -7,8 +7,8 @@ import "google/api/field_behavior.proto";
 
 // InboundSourceService manages a tenant's inbound source rows (#66
 // channel-agnostic inbound framework). Sources back the webhook,
-// email IMAP, and Slack adapters; future channels (RSS, scrape, MQ,
-// …) hang off the same shape.
+// email IMAP, Slack, Zendesk, and Intercom adapters; future channels
+// (RSS, scrape, MQ, …) hang off the same shape.
 service InboundSourceService {
   // GET /fb/v1/console/inbound/sources
   rpc ListInboundSources(ListInboundSourcesRequest) returns (ListInboundSourcesResponse) {
@@ -18,12 +18,22 @@ service InboundSourceService {
   rpc GetInboundSource(GetInboundSourceRequest) returns (InboundSource) {
     option (google.api.http) = {get: "/fb/v1/console/inbound/sources/{id}"};
   }
-  // POST /fb/v1/console/inbound/sources — create webhook, email, or Slack source.
+  // POST /fb/v1/console/inbound/sources — create webhook, email, Slack, or Zendesk source.
   // Webhook responses include a one-time secret reveal (url + secret +
   // example); the raw secret is never returned again.
   rpc CreateInboundSource(CreateInboundSourceRequest) returns (CreateInboundSourceResponse) {
     option (google.api.http) = {
       post: "/fb/v1/console/inbound/sources"
+      body: "*"
+    };
+  }
+  // PATCH /fb/v1/console/inbound/sources/{id} — update mutable settings
+  // (name + channel-specific config) without recreating the source: a
+  // delete/recreate would reset the sync watermark (full re-backfill)
+  // and orphan existing feedback's inbound_source_id linkage.
+  rpc UpdateInboundSource(UpdateInboundSourceRequest) returns (InboundSource) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/inbound/sources/{id}"
       body: "*"
     };
   }
@@ -54,8 +64,9 @@ service InboundSourceService {
   rpc DeleteInboundSource(DeleteInboundSourceRequest) returns (DeleteInboundSourceResponse) {
     option (google.api.http) = {delete: "/fb/v1/console/inbound/sources/{id}"};
   }
-  // POST /fb/v1/console/inbound/sources/test-connection — email or
-  // Slack only, no state changes. Validates the configured auth path.
+  // POST /fb/v1/console/inbound/sources/test-connection — email,
+  // Slack, or Zendesk only, no state changes. Validates the configured
+  // auth path.
   rpc TestInboundConnection(TestInboundConnectionRequest) returns (TestInboundConnectionResponse) {
     option (google.api.http) = {
       post: "/fb/v1/console/inbound/sources/test-connection"
@@ -77,7 +88,7 @@ service InboundSourceService {
 message InboundSource {
   string id = 1;
   string tenant_id = 2;
-  string channel = 3;  // "webhook" | "email" | future channels
+  string channel = 3;  // "webhook" | "email" | "slack" | "zendesk" | "intercom" | future channels
   string name = 4;
   string slug = 5;
   bool enabled = 6;
@@ -86,6 +97,27 @@ message InboundSource {
   string last_error = 9;              // empty if healthy
   string created_at = 10;             // RFC3339
   string updated_at = 11;             // RFC3339
+  // Sync progress stats (populated for poll-mode channels like Zendesk).
+  optional int64 tickets_synced = 12;
+  optional int64 last_synced_ticket_id = 13;
+  optional bool backfill_done = 14;
+  // Operator-editable Intercom settings (GET detail only) — lets the
+  // Console edit form prefill stored values instead of guessing.
+  // Credentials are never included.
+  optional IntercomSettings intercom_settings = 15;
+}
+
+// IntercomSettings is the decrypted, operator-visible slice of a stored
+// Intercom config: everything editable, nothing secret. Region and
+// workspace_id are surfaced read-only for display.
+message IntercomSettings {
+  string region = 1;
+  string start_from = 2;               // "now" | "full"
+  repeated string filter_states = 3;   // empty = all states
+  repeated string filter_tags = 4;
+  repeated string filter_exclude_tags = 5;
+  int32 max_detail_fetches = 6;        // 0 = server default
+  string workspace_id = 7;
 }
 
 message ListInboundSourcesRequest {}
@@ -107,6 +139,26 @@ message CreateInboundSourceRequest {
   optional WebhookCreateConfig webhook_config = 3;
   optional EmailCreateConfig email_config = 4;
   optional SlackConnConfig slack_config = 5;
+  optional ZendeskConnConfig zendesk_config = 6;
+  optional IntercomConnConfig intercom_config = 7;
+}
+
+// UpdateInboundSourceRequest edits a source's mutable settings in
+// place. Sync state (watermark, cursor, stats) is always preserved.
+// Field semantics inside intercom_config: absent optional scalars
+// (start_from, max_detail_fetches) keep their stored values; the
+// repeated filter lists are always replaced with the provided set (an
+// empty list clears the filter — prefill from the GET detail's
+// intercom_settings to keep them). Credentials are replace-only: an
+// empty access_token keeps the stored one, a non-empty value is
+// re-validated against the provider before being persisted.
+message UpdateInboundSourceRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string name = 2;
+  // Intercom: region is immutable (it selects the API host the stored
+  // watermark was minted against); filters, start_from, budget, and the
+  // access token are editable.
+  optional IntercomConnConfig intercom_config = 3;
 }
 
 // CreateInboundSourceResponse always carries the persisted InboundSource.
@@ -179,15 +231,20 @@ message DeleteInboundSourceResponse {}
 // persisting it. Returns ok=false + error message rather than 5xx when
 // the upstream rejects credentials or channel access.
 message TestInboundConnectionRequest {
-  string channel = 1 [(google.api.field_behavior) = REQUIRED];  // currently "email" or "slack"
+  string channel = 1 [(google.api.field_behavior) = REQUIRED];  // currently "email", "slack", "zendesk", or "intercom"
   optional EmailConnConfig email_config = 2;
   optional SlackConnConfig slack_config = 3;
+  optional ZendeskConnConfig zendesk_config = 4;
+  optional IntercomConnConfig intercom_config = 5;
 }
 
 message TestInboundConnectionResponse {
   bool ok = 1;
   optional string error = 2;
   optional int64 latency_ms = 3;
+  // Human-readable identity of the connected upstream (Intercom
+  // workspace name; other channels may fill it later).
+  optional string workspace_name = 4;
 }
 
 message EmailConnConfig {
@@ -218,4 +275,45 @@ message DiscoverSlackChannelsRequest {
 
 message DiscoverSlackChannelsResponse {
   repeated SlackChannel channels = 1;
+}
+
+// ZendeskConnConfig carries the Zendesk connection parameters for create
+// and test-connection flows. Auth supports "api_token" (email + API
+// token, sunsetting 2027-04-30) and "oauth" (OAuth 2.0 client
+// credentials).
+message ZendeskConnConfig {
+  string subdomain = 1 [(google.api.field_behavior) = REQUIRED];
+  string auth_mode = 2 [(google.api.field_behavior) = REQUIRED];  // "api_token" | "oauth"
+  // api_token auth fields.
+  optional string email = 3;
+  optional string api_token = 4;
+  // Fields 5-6 reserved: were oauth_client_id/oauth_client_secret in MVP;
+  // replaced by paste-mode token fields below.
+  reserved 5, 6;
+  reserved "oauth_client_id", "oauth_client_secret";
+  optional string start_from = 7;
+  // OAuth paste-mode fields (replaces old client-credential fields).
+  optional string oauth_access_token = 8;
+  optional string oauth_refresh_token = 9;
+  optional string oauth_client_id_v2 = 10;   // for refresh grant
+  optional string oauth_client_secret_v2 = 11; // for refresh grant
+  // Advanced config.
+  repeated string filter_tags = 12;
+  repeated string filter_exclude_tags = 13;
+  repeated string filter_statuses = 14;
+  optional int32 max_comment_fetches = 15;
+}
+
+// IntercomConnConfig carries the Intercom connection parameters for
+// create and test-connection flows. Auth is a private-app Access Token
+// (Bearer) — Intercom's documented model for same-workspace server
+// integrations; OAuth applies to public/multi-workspace apps (#32).
+message IntercomConnConfig {
+  string region = 1 [(google.api.field_behavior) = REQUIRED];        // "us" | "eu" | "au"
+  string access_token = 2 [(google.api.field_behavior) = REQUIRED];  // write-only, never returned
+  optional string start_from = 3;      // "now" (default) | "full"
+  repeated string filter_states = 4;   // open/closed/snoozed; empty = all
+  optional int32 max_detail_fetches = 5;
+  repeated string filter_tags = 6;         // conversation must carry ALL
+  repeated string filter_exclude_tags = 7; // skip if it carries ANY
 }

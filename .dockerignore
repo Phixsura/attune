@@ -2,13 +2,19 @@
 # build the Console SPA in its own Node stage.
 .git
 .github
+.agents
 .claude
+.cache
+.idea
+.superpowers
 console/node_modules
 console/dist
 console/coverage
+console/test-results
 console/*.tsbuildinfo
 console/pnpm-workspace.yaml
 sdk/node/node_modules
+sdk/node/examples/**/node_modules
 sdk/node/dist
 sdk/node/coverage
 sdk/node/*.tsbuildinfo

@@ -466,6 +466,33 @@ func TestHandlerMergeIssueAndSync(t *testing.T) {
 	if h.fake.last.(svc.LinkIssueInput).Provider != "github" {
 		t.Fatalf("LinkIssueInput = %+v, want provider", h.fake.last)
 	}
+
+	connectionID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	mappingID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	runID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	h.fake.createIssueResult = ptrext.Of(svc.CreateGitHubIssueResult{
+		Detail:       h.fake.detail,
+		RunID:        runID,
+		ConnectionID: connectionID,
+		MappingID:    mappingID,
+	})
+	created, err := h.handler.CreateGitHubIssue(h.ctx, &attunev1.CreateCustomerRequestGitHubIssueRequest{
+		Id:           h.requestID.String(),
+		ConnectionId: ptrext.Of(connectionID.String()),
+		MappingId:    ptrext.Of(mappingID.String()),
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubIssue() error = %v", err)
+	}
+	createInput := h.fake.last.(svc.CreateGitHubIssueInput)
+	if createInput.ConnectionID == nil || ptrext.Indirect(createInput.ConnectionID) != connectionID ||
+		createInput.MappingID == nil || ptrext.Indirect(createInput.MappingID) != mappingID {
+		t.Fatalf("CreateGitHubIssueInput = %+v, want selected connection and mapping", createInput)
+	}
+	if created.Body.GetRunId() != runID.String() || created.Body.GetMappingId() != mappingID.String() {
+		t.Fatalf("CreateGitHubIssue() body = %+v, want run and mapping ids", created.Body)
+	}
+
 	if _, err := h.handler.UnlinkIssue(h.ctx, &attunev1.UnlinkCustomerRequestIssueRequest{Id: h.requestID.String(), IssueLinkId: h.linkID.String()}); err != nil {
 		t.Fatalf("UnlinkIssue() error = %v", err)
 	}
@@ -484,6 +511,30 @@ func TestHandlerMergeIssueAndSync(t *testing.T) {
 	}
 	if h.fake.last.(svc.IssueSyncInput).SyncState != repo.IssueSyncStateStale {
 		t.Fatalf("IssueSyncInput = %+v, want stale sync state", h.fake.last)
+	}
+}
+
+func TestHandlerLinkIssuePassesManagedTarget(t *testing.T) {
+	h := newHandlerHarness()
+	connectionID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
+	mappingID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+
+	if _, err := h.handler.LinkIssue(h.ctx, &attunev1.LinkCustomerRequestIssueRequest{
+		Id:           h.requestID.String(),
+		Provider:     "github",
+		ConnectionId: ptrext.Of(connectionID.String()),
+		MappingId:    ptrext.Of(mappingID.String()),
+		IssueNumber:  ptrext.Of("212"),
+	}); err != nil {
+		t.Fatalf("LinkIssue() error = %v", err)
+	}
+
+	linkInput := h.fake.last.(svc.LinkIssueInput)
+	if linkInput.Provider != "github" ||
+		linkInput.ConnectionID == nil || ptrext.Indirect(linkInput.ConnectionID) != connectionID ||
+		linkInput.MappingID == nil || ptrext.Indirect(linkInput.MappingID) != mappingID ||
+		linkInput.IssueNumber != "212" {
+		t.Fatalf("LinkIssueInput = %+v, want managed GitHub issue fields", linkInput)
 	}
 }
 
@@ -663,6 +714,13 @@ func TestHandlerNilServiceGuards(t *testing.T) {
 			name: "link issue",
 			call: func() error {
 				_, err := handler.LinkIssue(ctx, &attunev1.LinkCustomerRequestIssueRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "create github issue",
+			call: func() error {
+				_, err := handler.CreateGitHubIssue(ctx, &attunev1.CreateCustomerRequestGitHubIssueRequest{Id: requestID})
 				return err
 			},
 		},
@@ -979,6 +1037,39 @@ func TestHandlerRejectsInvalidMergeAndIssueFields(t *testing.T) {
 			code:   attunev1.ErrorCode_BAD_ID,
 		},
 		{
+			name: "create github issue invalid request id",
+			call: func() error {
+				_, err := h.handler.CreateGitHubIssue(h.ctx, &attunev1.CreateCustomerRequestGitHubIssueRequest{Id: "bad-id"})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "create github issue invalid connection id",
+			call: func() error {
+				_, err := h.handler.CreateGitHubIssue(h.ctx, &attunev1.CreateCustomerRequestGitHubIssueRequest{
+					Id:           requestID,
+					ConnectionId: ptrext.Of("bad-connection"),
+				})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
+			name: "create github issue invalid mapping id",
+			call: func() error {
+				_, err := h.handler.CreateGitHubIssue(h.ctx, &attunev1.CreateCustomerRequestGitHubIssueRequest{
+					Id:        requestID,
+					MappingId: ptrext.Of("bad-mapping"),
+				})
+				return err
+			},
+			status: http.StatusBadRequest,
+			code:   attunev1.ErrorCode_BAD_ID,
+		},
+		{
 			name: "unlink issue invalid request id",
 			call: func() error {
 				_, err := h.handler.UnlinkIssue(h.ctx, &attunev1.UnlinkCustomerRequestIssueRequest{Id: "bad-id", IssueLinkId: linkID})
@@ -1136,6 +1227,13 @@ func TestHandlerMapsServiceErrorsFromOperations(t *testing.T) {
 			name: "link issue",
 			call: func() error {
 				_, err := h.handler.LinkIssue(h.ctx, &attunev1.LinkCustomerRequestIssueRequest{Id: requestID})
+				return err
+			},
+		},
+		{
+			name: "create github issue",
+			call: func() error {
+				_, err := h.handler.CreateGitHubIssue(h.ctx, &attunev1.CreateCustomerRequestGitHubIssueRequest{Id: requestID})
 				return err
 			},
 		},
@@ -1509,11 +1607,12 @@ func TestQueryBindRejectsInvalidValues(t *testing.T) {
 }
 
 type fakeCustomerRequestService struct {
-	list    repo.ListResult
-	detail  *svc.Detail
-	scoring repo.ScoringSettings
-	err     error
-	last    any
+	list              repo.ListResult
+	detail            *svc.Detail
+	createIssueResult *svc.CreateGitHubIssueResult
+	scoring           repo.ScoringSettings
+	err               error
+	last              any
 }
 
 type fakeSavedViewService struct {
@@ -1718,6 +1817,22 @@ func (f *fakeCustomerRequestService) LinkIssue(_ context.Context, in svc.LinkIss
 	return f.detail, nil
 }
 
+func (f *fakeCustomerRequestService) CreateGitHubIssue(_ context.Context, in svc.CreateGitHubIssueInput) (*svc.CreateGitHubIssueResult, error) {
+	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.createIssueResult != nil {
+		return f.createIssueResult, nil
+	}
+	return ptrext.Of(svc.CreateGitHubIssueResult{
+		Detail:       f.detail,
+		RunID:        uuid.MustParse("77777777-7777-7777-7777-777777777777"),
+		ConnectionID: uuid.MustParse("55555555-5555-5555-5555-555555555555"),
+		MappingID:    uuid.MustParse("66666666-6666-6666-6666-666666666666"),
+	}), nil
+}
+
 func (f *fakeCustomerRequestService) UnlinkIssue(_ context.Context, tenantID string, requestID, issueLinkID uuid.UUID, actor auditlogsvc.Actor) (*svc.Detail, error) {
 	f.last = svc.LinkIssueInput{TenantID: tenantID, RequestID: requestID, ExternalKey: issueLinkID.String(), Actor: actor}
 	if f.err != nil {
@@ -1748,11 +1863,14 @@ func customerRequestHandlerContext() *dispatcher.RequestContext[*session.AuthCtx
 func sampleServiceDetail(requestID, ownerID, linkID uuid.UUID) *svc.Detail {
 	now := time.Date(2026, 7, 7, 1, 2, 3, 0, time.UTC)
 	profile := sampleAccountProfile(now)
+	summary := sampleSummary(requestID, ownerID, now)
+	issueLinks := sampleIssueLinks(linkID, now)
 	return ptrext.Of(svc.Detail{
 		Request: repo.Detail{
-			Summary:         sampleSummary(requestID, ownerID, now),
+			Summary:         summary,
 			Feedback:        sampleFeedback(now),
-			IssueLinks:      sampleIssueLinks(linkID, now),
+			IssueLinks:      issueLinks,
+			DeliveryGraph:   sampleDeliveryGraph(summary, issueLinks, now),
 			CustomerLinks:   sampleCustomerLinks(linkID, now, profile),
 			Votes:           sampleVotes(linkID, now, profile),
 			Notes:           []repo.Note{{ID: linkID, Body: "Coordinate rollout", CreatedBy: "tester", CreatedAt: now}},
@@ -1761,6 +1879,57 @@ func sampleServiceDetail(requestID, ownerID, linkID uuid.UUID) *svc.Detail {
 		},
 		AuditEntries: []svc.AuditEntry{{ID: 1, Action: "created", ActorType: "admin", ActorID: "tester", Summary: "Created", CreatedAt: now}},
 	})
+}
+
+func sampleDeliveryGraph(
+	summary repo.Summary,
+	issueLinks []repo.IssueLink,
+	now time.Time,
+) repo.DeliveryGraph {
+	rootID := "request:" + summary.ID.String()
+	issueID := "issue_link:" + issueLinks[0].ID.String()
+	return repo.DeliveryGraph{
+		Artifacts: []repo.DeliveryArtifact{
+			{
+				ID:           rootID,
+				Provider:     "attune",
+				ArtifactType: "customer_request",
+				ExternalKey:  summary.DisplayID,
+				Title:        summary.Title,
+				Status:       string(summary.Status),
+				Health:       summary.DeliveryHealth,
+				LastSeenAt:   ptrext.Of(now),
+				Source:       "customer_request",
+			},
+			{
+				ID:             issueID,
+				Provider:       issueLinks[0].Provider,
+				ArtifactType:   "issue",
+				ExternalKey:    issueLinks[0].ExternalKey,
+				ExternalURL:    issueLinks[0].ExternalURL,
+				Title:          issueLinks[0].Title,
+				Status:         issueLinks[0].Status,
+				StatusCategory: issueLinks[0].ExternalStatusCategory,
+				Assignee:       issueLinks[0].ExternalAssignee,
+				SyncState:      issueLinks[0].SyncState,
+				Health:         repo.DeliveryHealthFailed,
+				LastSeenAt:     ptrext.Of(now),
+				Source:         "customer_request_issue_link",
+				SyncError:      issueLinks[0].SyncError,
+			},
+		},
+		Relationships: []repo.DeliveryRelationship{{
+			ID:               "rel:" + rootID + ":" + issueID,
+			SourceArtifactID: rootID,
+			TargetArtifactID: issueID,
+			RelationshipType: "tracked_by",
+			Provider:         issueLinks[0].Provider,
+			CreatedAt:        now,
+		}},
+		Health:            repo.DeliveryHealthFailed,
+		HealthExplanation: "1 linked artifacts: 1 failed.",
+		UpdatedAt:         ptrext.Of(now),
+	}
 }
 
 func sampleSummary(requestID, ownerID uuid.UUID, now time.Time) repo.Summary {
@@ -1880,18 +2049,51 @@ func sampleVotes(linkID uuid.UUID, now time.Time, profile repo.AccountProfile) [
 
 func assertDetailProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
 	t.Helper()
+	assertDetailSummaryProto(t, detail)
+	assertDetailIssueProto(t, detail)
+	assertDetailDeliveryGraphProto(t, detail)
+	assertDetailSupportListsProto(t, detail)
+}
+
+func assertDetailSummaryProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
 	if detail.GetRequest().GetDisplayId() != "CR-7" {
 		t.Fatalf("DisplayId = %q, want CR-7", detail.GetRequest().GetDisplayId())
 	}
 	if detail.GetRequest().GetOwner().GetEmail() != "owner@example.com" {
 		t.Fatalf("Owner email = %q, want owner@example.com", detail.GetRequest().GetOwner().GetEmail())
 	}
+}
+
+func assertDetailIssueProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
 	if len(detail.GetFeedback()) != 1 || detail.GetFeedback()[0].GetImportance() != attunev1.CustomerRequestImportance_CUSTOMER_REQUEST_IMPORTANCE_CRITICAL {
 		t.Fatalf("Feedback = %+v, want critical feedback evidence", detail.GetFeedback())
 	}
 	if len(detail.GetIssueLinks()) != 1 || detail.GetIssueLinks()[0].GetSyncState() != attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED {
 		t.Fatalf("IssueLinks = %+v, want failed issue", detail.GetIssueLinks())
 	}
+}
+
+func assertDetailDeliveryGraphProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
+	graph := detail.GetDeliveryGraph()
+	if graph.GetHealth() != attunev1.CustomerRequestDeliveryHealth_CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED {
+		t.Fatalf("DeliveryGraph health = %v, want failed", graph.GetHealth())
+	}
+	if len(graph.GetArtifacts()) != 2 || len(graph.GetRelationships()) != 1 {
+		t.Fatalf("DeliveryGraph = %+v, want two artifacts and one relationship", graph)
+	}
+	if graph.GetArtifacts()[1].GetArtifactType() != "issue" || graph.GetArtifacts()[1].GetSyncError() != "rate limited" {
+		t.Fatalf("DeliveryGraph issue artifact = %+v, want issue with sync error", graph.GetArtifacts()[1])
+	}
+	if graph.GetRelationships()[0].GetRelationshipType() != "tracked_by" {
+		t.Fatalf("DeliveryGraph relationship = %+v, want tracked_by", graph.GetRelationships()[0])
+	}
+}
+
+func assertDetailSupportListsProto(t *testing.T, detail *attunev1.CustomerRequestDetail) {
+	t.Helper()
 	if len(detail.GetCustomers()) != 1 || detail.GetCustomers()[0].GetAccountProfile().GetAccountKey() != "acme" {
 		t.Fatalf("Customers = %+v, want account profile", detail.GetCustomers())
 	}

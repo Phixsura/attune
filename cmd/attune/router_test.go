@@ -120,6 +120,7 @@ func TestBuildRouterMinimalServerSurface(t *testing.T) {
 		chi.NewRouter(),
 		nil,
 		nil,
+		nil, // inboundManager
 		nil,
 		nil,
 		nil,

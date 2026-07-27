@@ -105,6 +105,12 @@ service CustomerRequestService {
       body: "*"
     };
   }
+  rpc CreateCustomerRequestGitHubIssue(CreateCustomerRequestGitHubIssueRequest) returns (CreateCustomerRequestGitHubIssueResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/customer-requests/{id}/issue-links:create-github"
+      body: "*"
+    };
+  }
   rpc UnlinkCustomerRequestIssue(UnlinkCustomerRequestIssueRequest) returns (CustomerRequestDetail) {
     option (google.api.http) = {delete: "/fb/v1/console/customer-requests/{id}/issue-links/{issue_link_id}"};
   }
@@ -260,6 +266,40 @@ message CustomerRequestIssueLink {
   string sync_error = 15;
 }
 
+message CustomerRequestDeliveryArtifact {
+  string id = 1;
+  string provider = 2;
+  string artifact_type = 3;
+  string external_key = 4;
+  string external_url = 5;
+  string title = 6;
+  string status = 7;
+  string status_category = 8;
+  string assignee = 9;
+  CustomerRequestIssueSyncState sync_state = 10;
+  CustomerRequestDeliveryHealth health = 11;
+  string last_seen_at = 12;
+  string source = 13;
+  string sync_error = 14;
+}
+
+message CustomerRequestDeliveryRelationship {
+  string id = 1;
+  string source_artifact_id = 2;
+  string target_artifact_id = 3;
+  string relationship_type = 4;
+  string provider = 5;
+  string created_at = 6;
+}
+
+message CustomerRequestDeliveryGraph {
+  repeated CustomerRequestDeliveryArtifact artifacts = 1;
+  repeated CustomerRequestDeliveryRelationship relationships = 2;
+  CustomerRequestDeliveryHealth health = 3;
+  string health_explanation = 4;
+  string updated_at = 5;
+}
+
 message CustomerRequestCustomerLink {
   string id = 1;
   string subject_key = 2;
@@ -335,6 +375,7 @@ message CustomerRequestDetail {
   repeated CustomerRequestDuplicate duplicates = 8;
   repeated CustomerRequestAccountProfile account_profiles = 9;
   repeated CustomerRequestNote notes = 10;
+  CustomerRequestDeliveryGraph delivery_graph = 11;
 }
 
 message CustomerRequestScoringSettings {
@@ -552,10 +593,26 @@ message MergeCustomerRequestsRequest {
 message LinkCustomerRequestIssueRequest {
   string id = 1 [(google.api.field_behavior) = REQUIRED];
   string provider = 2 [(google.api.field_behavior) = REQUIRED];
-  string external_url = 3 [(google.api.field_behavior) = REQUIRED];
+  string external_url = 3;
   optional string external_key = 4;
   optional string title = 5;
   optional string status = 6;
+  optional string connection_id = 7;
+  optional string mapping_id = 8;
+  optional string issue_number = 9;
+}
+
+message CreateCustomerRequestGitHubIssueRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string connection_id = 2;
+  optional string mapping_id = 3;
+}
+
+message CreateCustomerRequestGitHubIssueResponse {
+  CustomerRequestDetail detail = 1;
+  string run_id = 2;
+  string connection_id = 3;
+  string mapping_id = 4;
 }
 
 message UnlinkCustomerRequestIssueRequest {

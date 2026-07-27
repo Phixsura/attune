@@ -167,6 +167,21 @@ func (m *Manager) ShutdownAll(ctx context.Context) error {
 	return m.shutdownStarted(ctx)
 }
 
+// Triggerable is an optional interface for adapters that support on-demand
+// sync. The Manager delegates TriggerSync calls to any adapter that implements it.
+type Triggerable interface {
+	TriggerSync(sourceID string)
+}
+
+// TriggerSync dispatches a sync-now request to any adapter that implements Triggerable.
+func (m *Manager) TriggerSync(sourceID string) {
+	for _, a := range m.adapters {
+		if t, ok := a.(Triggerable); ok {
+			t.TriggerSync(sourceID)
+		}
+	}
+}
+
 // shutdownStarted — each adapter gets its own deadline (DefaultShutdownTimeout
 // or what ShutdownTimeouter declares). A wedged adapter does not steal the
 // budget from the next one.

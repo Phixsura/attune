@@ -15,6 +15,7 @@ set -euo pipefail
 SDK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_ROOT="$(cd "$SDK_DIR/../.." && pwd)"
 PICK_FREE_PORT="$REPO_ROOT/scripts/pick-free-port.mjs"
+PNPM=(corepack pnpm)
 
 CONTAINER="attune-sdk-e2e-$$"
 DB_PORT="$(node "$PICK_FREE_PORT" random)"
@@ -29,6 +30,7 @@ WORK="$(mktemp -d)"
 BIN="$WORK/attune"
 CONFIG="$WORK/config.yaml"
 SRV_LOG="$WORK/server.log"
+SDK_BUILD_LOG="$WORK/sdk-build.log"
 SRV_PID=""
 WEBHOOK_LOG="$WORK/webhook.log"
 WEBHOOK_PID=""
@@ -70,6 +72,7 @@ AUDIT_PUBLIC_KEY="$("$BIN" audit export-public-key --signing-key "$AUDIT_SIGNING
 
 log "write throwaway config (keyset generated fresh)"
 KEYSET="$("$BIN" secrets generate-keyset 2>/dev/null)"
+INDENTED_KEYSET="$(printf '%s\n' "$KEYSET" | sed 's/^/    /')"
 cat > "$CONFIG" <<EOF
 port: ${SRV_PORT}
 database:
@@ -89,7 +92,7 @@ ingest:
     - "${BROWSER_ALLOWED_ORIGIN}"
 secrets:
   tink_keyset: |
-    ${KEYSET}
+${INDENTED_KEYSET}
 EOF
 
 log "boot server (auto-migrates)"
@@ -142,14 +145,18 @@ TKEY="$("$BIN" --config "$CONFIG" keys issue --tenant sdke2e2 --label "$MARKER-t
 [ -n "$TKEY" ] || { echo "failed to issue tenant-2 key"; exit 1; }
 
 log "build the SDK package (dist/)"
-( cd "$SDK_DIR" && pnpm exec tsdown >/dev/null )
+if ! ( cd "$SDK_DIR" && "${PNPM[@]}" exec tsdown >"$SDK_BUILD_LOG" 2>&1 ); then
+  echo "SDK package build failed; log:"
+  tail -80 "$SDK_BUILD_LOG"
+  exit 1
+fi
 
 log "run live vitest e2e suite against ${BASE_URL}"
 (
   cd "$SDK_DIR"
   ATTUNE_E2E_BASE_URL="$BASE_URL" ATTUNE_E2E_API_KEY="$KEY" \
     ATTUNE_E2E_RESTRICTED_KEY="$RKEY" ATTUNE_E2E_TENANT2_KEY="$TKEY" ATTUNE_E2E_MARKER="$MARKER" \
-    pnpm exec vitest run test/e2e
+    "${PNPM[@]}" exec vitest run test/e2e
 )
 
 log "verify rows persisted in Postgres"

@@ -51,6 +51,7 @@ describe('TagCombobox', () => {
     await waitFor(() => {
       expect(screen.getByRole('combobox')).toBeInTheDocument()
     })
+    expect(screen.getByRole('dialog', { name: '添加 标签' })).toBeInTheDocument()
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     expect(screen.getAllByRole('option')).toHaveLength(3)
 
@@ -123,6 +124,10 @@ describe('TagCombobox', () => {
     await user.type(screen.getByRole('combobox'), 'bug')
 
     expect(screen.getByText('标签「bug」已添加到当前反馈')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '标签「bug」已添加到当前反馈' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
     expect(screen.queryByText('创建「bug」')).not.toBeInTheDocument()
 
     await user.keyboard('{Enter}')
@@ -171,6 +176,10 @@ describe('TagCombobox', () => {
     const input = screen.getByRole('combobox')
     await user.type(input, 'missing')
     expect(screen.getByText('无匹配标签')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '无匹配标签' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
 
     await user.keyboard('{ArrowDown}{ArrowUp}{Home}{End}{Enter}')
 

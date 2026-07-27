@@ -129,6 +129,14 @@ func TestExternalSyncRepoRunAndEventMethodsReturnPoolErrors(t *testing.T) {
 			})
 			return err
 		}},
+		{name: "CreateCustomerRequestIssueRun", call: func() error {
+			_, err := r.CreateCustomerRequestIssueRun(ctx, CustomerRequestIssueCreateRunInput{
+				TenantID:  tenantID,
+				RequestID: uuid.MustParse("bbbbbbbb-1000-4000-8000-000000000011"),
+				ActorID:   "user-1",
+			})
+			return err
+		}},
 		{name: "ListRuns", call: func() error {
 			_, err := r.ListRuns(ctx, ListRunsFilter{TenantID: tenantID, BeforeID: ptrext.Of(runID), Limit: 25})
 			return err
