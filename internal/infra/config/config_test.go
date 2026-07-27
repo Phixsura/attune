@@ -103,6 +103,44 @@ func TestLoadPathRejectsSlackAPIBaseURLWithoutHost(t *testing.T) {
 	require.Contains(t, err.Error(), "config: slack.api_base_url must include a host")
 }
 
+func TestLoadPathParsesIntercomAPIBaseURL(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nintercom:\n  api_base_url: \"http://127.0.0.1:9911\"\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, "http://127.0.0.1:9911", cfg.IntercomAPIBaseURL)
+}
+
+func TestLoadPathRejectsInvalidIntercomAPIBaseURL(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nintercom:\n  api_base_url: \"ftp://intercom.example.com\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: intercom.api_base_url must use http or https")
+}
+
+func TestLoadPathRejectsMalformedIntercomAPIBaseURL(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nintercom:\n  api_base_url: \"://bad\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: intercom.api_base_url must be a valid URL")
+}
+
+func TestLoadPathRejectsIntercomAPIBaseURLWithoutHost(t *testing.T) {
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nintercom:\n  api_base_url: \"https:///api\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: intercom.api_base_url must include a host")
+}
+
+func TestLoadPathRejectsIntercomAPIBaseURLInProduction(t *testing.T) {
+	// The override bypasses the client's *.intercom.io host allowlist —
+	// production must refuse it outright.
+	raw := "profile: production\n" + validConfigYAML(t, validTinkKeyset(t)) +
+		"\nintercom:\n  api_base_url: \"https://mock.example.com\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "config: intercom.api_base_url must not be set with profile: production")
+}
+
 func TestLoadPathRejectsMalformedSlackAPIBaseURL(t *testing.T) {
 	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nslack:\n  api_base_url: \"://bad\"\n"
 	_, err := LoadPath(writeConfig(t, raw))

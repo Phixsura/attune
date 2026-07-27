@@ -200,6 +200,9 @@ export function usePromoteFeedbackToCustomerRequest() {
       api<CustomerRequestDetail>(`${BASE}:promote-feedback`, { method: 'POST', body }),
     onSuccess: (detail) => {
       void qc.invalidateQueries({ queryKey: customerRequestKeys.all })
+      // Link state feeds the recurrence card's dedup guard — refresh it
+      // so an already-promoted cluster stops offering a second promote.
+      void qc.invalidateQueries({ queryKey: ['console', 'feedback', 'similar'] })
       if (detail.request?.id) {
         qc.setQueryData(customerRequestKeys.detail(detail.request.id), detail)
       }
@@ -227,7 +230,12 @@ export function useLinkCustomerRequestFeedback(id: string) {
         method: 'POST',
         body: { id, ...body },
       }),
-    onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+    onSuccess: (detail) => {
+      updateCustomerRequestCache(qc, detail)
+      // Refresh the recurrence card's dedup state (anchor/neighbor
+      // linked_requests) so the link action flips to its linked state.
+      void qc.invalidateQueries({ queryKey: ['console', 'feedback', 'similar'] })
+    },
   })
 }
 
@@ -239,7 +247,12 @@ export function useUnlinkCustomerRequestFeedback(id: string) {
         `${BASE}/${encodeURIComponent(id)}/feedback/${encodeURIComponent(feedbackId)}`,
         { method: 'DELETE' },
       ),
-    onSuccess: (detail) => updateCustomerRequestCache(qc, detail),
+    onSuccess: (detail) => {
+      updateCustomerRequestCache(qc, detail)
+      // Symmetric with link/promote: unlinking frees the anchor, so the
+      // recurrence card must flip back out of its terminal state.
+      void qc.invalidateQueries({ queryKey: ['console', 'feedback', 'similar'] })
+    },
   })
 }
 

@@ -115,6 +115,40 @@ func (r *Repo) UpdateConfig(ctx context.Context, id string, config []byte) error
 	return err
 }
 
+// SwapConfig is the compare-and-swap variant of UpdateConfig: the write
+// only lands when the stored blob still equals expected. Poll-mode
+// adapters use it so a tick-end stats write can never clobber an
+// operator edit (token rotation, filter change) that landed mid-tick.
+// Returns false (no error) on a lost race so the caller can re-read and
+// re-merge.
+func (r *Repo) SwapConfig(ctx context.Context, id string, expected, updated []byte) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE inbound_sources
+		    SET config = $3,
+		        updated_at = now()
+		  WHERE id = $1 AND config = $2`,
+		id, expected, updated,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// UpdateName renames a source. The slug is deliberately left unchanged:
+// it is a stable routing/identity token (webhook URLs embed it) and a
+// rename must not break existing integrations.
+func (r *Repo) UpdateName(ctx context.Context, id, name string) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE inbound_sources
+		    SET name = $2,
+		        updated_at = now()
+		  WHERE id = $1`,
+		id, name,
+	)
+	return err
+}
+
 func (r *Repo) scanOne(ctx context.Context, sql string, args ...any) (inbound.Source, error) {
 	row := r.pool.QueryRow(ctx, sql, args...)
 	s, err := scanRow(row)

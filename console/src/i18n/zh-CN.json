@@ -3056,6 +3056,7 @@
       "sync_now": "立即同步",
       "recent_title": "最近同步",
       "tickets_synced": "已同步工单",
+      "conversations_synced": "已同步会话",
       "backfill_status": "回填状态",
       "backfill_done": "已完成",
       "backfill_in_progress": "进行中..."
@@ -3066,7 +3067,8 @@
       "webhook": "Webhook",
       "email": "邮箱",
       "slack": "Slack",
-      "zendesk": "Zendesk"
+      "zendesk": "Zendesk",
+      "intercom": "Intercom"
     },
     "table": {
       "name": "名称",
@@ -3086,7 +3088,8 @@
       "rotate": "轮换 secret",
       "pause": "暂停",
       "resume": "恢复",
-      "delete": "删除"
+      "delete": "删除",
+      "edit": "编辑设置"
     },
     "create": {
       "title": "添加入站源",
@@ -3095,6 +3098,7 @@
       "email_help": "通过 IMAP 拉取用户邮件反馈。",
       "slack_help": "通过 Slack Bot token 发现并接入频道消息。",
       "zendesk_help": "从 Zendesk 工单中提取产品信号。",
+      "intercom_help": "从 Intercom 客服对话中提取产品信号。",
       "name_field": "名称",
       "name_placeholder": "如：App 反馈、Support 邮箱",
       "name_help": "名称会被规范化成 URL-safe slug，后续不可改。",
@@ -3154,6 +3158,31 @@
         "max_comment_fetches_help": "每次同步最多获取多少个工单的评论（默认 50）",
         "test_button": "测试连接",
         "test_ok": "连接成功 · {{ms}} ms"
+      },
+      "intercom": {
+        "region": "数据区域",
+        "region_us": "美国（api.intercom.io）",
+        "region_eu": "欧洲（api.eu.intercom.io）",
+        "region_au": "澳大利亚（api.au.intercom.io）",
+        "region_help": "选择 workspace 所在的数据托管区域，跨区域调用会失败。",
+        "access_token": "Access Token",
+        "access_token_help": "在 Developer Hub 创建私有应用后获取，服务端加密存储。",
+        "access_token_link": "查看获取方式 →",
+        "start_from": "起始同步",
+        "start_from_now": "从当前开始",
+        "start_from_full": "完整回填",
+        "advanced_label": "高级选项",
+        "filter_tags": "包含标签",
+        "filter_tags_help": "逗号分隔，只同步含全部这些标签的会话",
+        "filter_exclude_tags": "排除标签",
+        "filter_exclude_tags_help": "逗号分隔，跳过含任一这些标签的会话",
+        "filter_states": "会话状态过滤",
+        "filter_states_help": "不勾选表示同步全部状态的会话",
+        "max_detail_fetches": "每轮会话详情预算",
+        "max_detail_fetches_help": "每次同步最多拉取多少个会话的完整线程（默认 50）",
+        "test_button": "测试连接",
+        "test_ok": "连接成功 · {{ms}} ms",
+        "test_ok_workspace": "已连接到 {{workspace}} · {{ms}} ms"
       }
     },
     "reveal": {
@@ -3170,6 +3199,13 @@
       "body": "旧的 secret 在 24 小时内仍可用，便于你逐步切换下游配置。轮换会得到一个全新的 secret，仅显示一次。",
       "confirm": "轮换"
     },
+    "edit": {
+      "title": "编辑 Intercom 来源",
+      "body": "就地修改名称、标签过滤和详情预算；同步进度与已关联反馈保持不变。区域不可修改。",
+      "saved": "来源设置已保存",
+      "rotate_token": "轮换 Access Token（可选）",
+      "rotate_token_help": "留空则保留当前 token；填写后将先校验再替换"
+    },
     "delete": {
       "title": "删除这个入站源？",
       "body": "删除后 webhook URL 立刻失效，已入库的反馈不受影响。该操作不可恢复。",
@@ -3180,6 +3216,7 @@
       "created_with_name": "已创建「{{name}}」",
       "sync_requested": "已请求立即同步",
       "zendesk_connected": "已连接到 {{subdomain}}.zendesk.com",
+      "intercom_connected": "已连接到 Intercom（{{region}} 区域）",
       "rotated": "已轮换",
       "rotation_in_grace": "上次轮换还在 24 小时宽限期内，请稍后再试",
       "paused": "已暂停",
@@ -3450,6 +3487,18 @@
       "portal_submission_promote_title": "回流到客户需求",
       "portal_submission_promote_body": "把这条投稿推进到 Customer Request，继续做优先级、合并和跟踪。",
       "portal_submission_promote_action": "转为客户需求",
+      "support_promote_title": "客户需求候选",
+      "support_promote_signal_fin": "AI 客服未能解决该会话（升级/差评），这是强产品痛点信号。",
+      "support_promote_signal_priority": "该会话被支持团队标记为高优先级，建议沉淀为客户需求。",
+      "support_promote_signal_default": "这条支持渠道反馈可以沉淀为客户需求，自动携带客户与收入上下文。",
+      "support_promote_from": "来自 {{who}}。",
+      "support_promote_action": "转为客户需求",
+      "support_promote_recurring": "该问题已在其他反馈中出现 {{count}} 次：",
+      "support_promote_action_bundle": "打包 {{count}} 条转为客户需求",
+      "support_promote_existing": "相似反馈已关联到 {{cr}}「{{title}}」，建议直接关联而不是新建重复需求。",
+      "support_promote_link_action": "关联到 {{cr}}",
+      "support_promote_linked": "已关联到 {{cr}}",
+      "support_promote_already_tracked": "该反馈已被 {{cr}}「{{title}}」跟踪，无需重复转化。",
       "attachments": "附件",
       "attrs": "AI 分类",
       "ai_state": "AI 状态",

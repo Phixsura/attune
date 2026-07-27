@@ -95,6 +95,7 @@ var validActions = map[string]struct{}{
 	"inbound_source.create":                           {},
 	"inbound_source.delete":                           {},
 	"inbound_source.pause":                            {},
+	"inbound_source.update":                           {},
 	"inbound_source.resume":                           {},
 	"inbound_source.rotate_secret":                    {},
 	"inbound_source.sync_now":                         {},

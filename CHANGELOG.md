@@ -9,6 +9,125 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Added Intercom inbound adapter (#230): polls Intercom's conversations
+  search API with an `updated_at` watermark to extract product signals
+  from support conversations.
+  - Shared `internal/infra/intercomclient/` HTTP client (reusable by #32
+    bidirectional sync), pinned to Intercom API version 2.16.
+  - US / EU / AU regional host selection with per-region host allowlist.
+  - Watermark-based incremental sync in `LastUID` with a mid-window
+    continuation cursor: UTC-day-floored/padded search windows (both
+    bounds — Intercom search timestamps are date-indexed) + client-side
+    second-precision filtering. Early stops (budget, rate floor,
+    transient failure) step the watermark back one second so
+    boundary-second conversations are never lost; a per-source
+    processed-set makes the boundary re-cover free; the persisted
+    cursor lets days with more covered conversations than one tick can
+    list drain instead of relisting from the day floor forever. Items
+    updated at/after tick start drain the window and drop the cursor —
+    a continuation is never persisted past a deferred item — and a
+    rejected continuation cursor falls back to a fresh window scan in
+    the same tick (cross-tick cursor lifetime is undocumented).
+  - Failure taxonomy that cannot wedge the source: transient detail /
+    ingest failures (5xx, network, DB down) retry next tick without
+    advancing the watermark; deterministic conditions (empty
+    conversations, validation rejects, oversized/undecodable responses)
+    skip or degrade to the summary shape and advance — a poison-pill
+    item slows the source down (transient ticks now count toward
+    backoff, measured from last attempt) but never stalls it. Adapter
+    poll state (backoff, processed-set, lag) is keyed by source ID
+    (slugs are only unique per tenant), and the poll-lag gauge keeps
+    its value on degraded ticks instead of reporting zero.
+  - Out-of-order search results (the ascending sort is undocumented in
+    the 2.16 schema, though production-proven) stop the tick without
+    advancing the watermark instead of silently skipping older items.
+  - Full-thread extraction via one `display_as=plaintext` detail call per
+    conversation; `[customer]`/`[agent]`/`[bot]` role tagging; internal
+    notes and redacted parts excluded; bot parts dropped first under the
+    4,500-byte budget, then structural truncation (first 3 + last 2
+    customer messages, rune-safe cuts). Seed bodies are HTML-stripped
+    (search results carry HTML even when parts are plaintext); operator
+    permalinks use the regional app host (EU/AU workspaces).
+  - Contact identity (`intercom_contact_external_id`, email, name) and
+    company metadata carried in SourceMeta as customer-profile join keys;
+    Intercom inbox permalink as the operator backlink.
+  - Replay-safe idempotency key `intercom_{workspace}_{id}_{updatedAt}` —
+    conversation updates produce new feedback rows, replays dedup.
+  - 429 handling via `X-RateLimit-Reset`; per-conversation detail
+    failures degrade gracefully (skip, never disable the source);
+    exponential backoff on consecutive failures.
+  - Conversation state filtering (open/closed/snoozed), tag
+    include/exclude filtering (filtered conversations never consume
+    detail budget), and per-tick detail budget (Console advanced UI);
+    sync-now, sync stats, and recent-preview reuse the existing
+    machinery.
+  - Custom attributes (`intercom_custom_attributes` JSON passthrough)
+    and the customer-side conversation start URL
+    (`intercom_source_url`) captured in SourceMeta.
+  - Company revenue context: `GetCompany` resolves `monthly_spend`,
+    `plan`, `size`, and `industry` (per-tick cached), emitted as
+    `intercom_company_*` SourceMeta keys.
+  - Automatic customer/account attribution at promote: promoting
+    inbound-channel feedback derives customer links and account
+    profiles (revenue, tier, size) from source_meta inside the promote
+    transaction — a promoted Intercom conversation lands with its
+    customer, company, and revenue-weighted decision score already
+    populated. Channel-agnostic: Zendesk requester/organization keys
+    ride the same derivation. Account/contact identities are
+    workspace-scoped (two workspaces' "company 5" never merge), values
+    are clamped to the DB limits, and fractional revenue rounds to
+    cents.
+  - Teammate resolution: assignee IDs resolve to display names via
+    `ListAdmins` (lazy, one call per poll tick, only when a qualifying
+    conversation is assigned) → `intercom_teammate_name` SourceMeta.
+  - Request-candidate surfacing: intercom/zendesk feedback detail now
+    shows a "客户需求候选" card with a signal-aware prompt (Fin
+    escalation / negative feedback strongest, support priority second)
+    and a one-click promote that pre-fills the customer-request flow.
+  - Recurring-signal detection: new `GET /feedback/{id}/similar`
+    endpoint surfaces semantically-similar feedback (pgvector, ≥0.78
+    similarity); snapshots of the same workspace-scoped conversation/
+    ticket collapse to one neighbor so evolution capture never inflates
+    the recurrence count, and cancelled requests never surface as dedup
+    targets. The candidate card shows "该问题已在其他反馈中出现 N 次"
+    with the top neighbors and upgrades the promote action to bundle
+    the untracked cluster as evidence in one click.
+  - Duplicate-request prevention: the endpoint returns the anchor's own
+    linked requests (resolved even when embeddings are unavailable)
+    plus each neighbor's; an already-tracked anchor renders a terminal
+    "已被 CR-N 跟踪" state with no promote action, already-tracked
+    neighbors are excluded from the bundle, and link/promote mutations
+    invalidate the recurrence query so the card state stays live.
+  - Fin AI-agent resolution telemetry (`intercom_ai_resolution_state`,
+    rating, last answer type); escalated / negative-feedback Fin
+    conversations produce a `complaint` enrichment hint.
+  - Proactive rate self-throttling: tracks `X-RateLimit-Remaining` and
+    gracefully stops a tick before Intercom starts returning 429s.
+  - Test-connection returns the connected workspace name
+    (`TestInboundConnectionResponse.workspace_name`, channel-generic).
+  - `intercom.api_base_url` config knob points the adapter at a mock
+    API for local stacks (Slack `api_base_url` parity; refused under
+    `profile: production` since it bypasses the host allowlist);
+    `make dev-stack --intercom-stub <url>` wires it plus loopback
+    egress, and `scripts/intercom-stub.mjs` ships a deterministic
+    Intercom API stub for full-pipeline E2E.
+  - SSRF-hardened via `nethardening.Policy`, wired in
+    `applyRuntimeHardening`.
+  - In-place source editing: `PATCH /fb/v1/console/inbound/sources/{id}`
+    (`UpdateInboundSource`) renames a source and edits Intercom settings
+    (tag filters, states, detail budget, `start_from`) or rotates the
+    access token without delete/recreate — the sync watermark, cursor,
+    and existing feedback linkage survive. Region is immutable; a new
+    token is auth-tested and pinned to the stored workspace before it
+    replaces the old one; absent optional fields keep their stored
+    values. The GET detail response now carries `intercom_settings`
+    (never credentials) so the Console edit dialog prefills stored
+    filters instead of resetting them; config persistence runs under
+    the secretlock writable-key guard, and the poller's tick-end stats
+    write re-reads and merges (CAS with retry) so a concurrent edit or
+    token rotation is never clobbered. Audited as
+    `inbound_source.update`.
+
 - Added Zendesk inbound adapter (#229): polls Zendesk's incremental ticket
   export API to extract product signals from support tickets.
   - Shared `internal/infra/zendeskclient/` HTTP client (reusable by #31).
@@ -95,6 +214,90 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   package from the module graph.
 
 ### Fixed
+
+- Fixed the Intercom watermark permanently skipping conversations whose
+  search-index entry appeared late: `conversations/search` is eventually
+  consistent with no index-order guarantee, so a conversation updated at
+  T could enter the index after a later-updated conversation had already
+  advanced the watermark past T. The client-side skip boundary now sits
+  a 120s lookback below the watermark (the same defense as Airbyte's
+  `lookback_window`); re-covered snapshots dedup for free via the
+  per-source processed-set and the ingest idempotency key, and the
+  former one-second watermark step-back is superseded.
+
+- GDPR subject export (Art. 15) now includes the customer-request
+  identity rows the delete path anonymizes: the export bundle gains
+  `customer_request_customer_links.jsonl` and
+  `customer_request_votes.jsonl` (matched by subject key, or by the
+  tenant-scoped subject hash for rows a previous erasure anonymized),
+  with counts in the manifest — export and erasure now cover the same
+  identity scope.
+
+- Closed a promote/erasure race that could resurrect an erased subject's
+  identity: the promote-time attribution read now takes `FOR SHARE` on
+  the feedback row, serializing against GDPR erasure's `FOR UPDATE`
+  locks so a concurrent promote either sees the row deleted or commits
+  its link before the erasure's anonymize pass scrubs it.
+
+- Transient contact-resolution failures during Intercom ingestion now
+  retry the conversation next tick instead of ingesting under the
+  seed-author fallback identity — snapshot subject keys no longer drift
+  between email and contact-ID forms when the contacts API hiccups
+  (identity drift would make an email-keyed GDPR request miss rows).
+  Permanent failures (plan-gated contacts API) still degrade gracefully.
+
+- Promote-time auto-attribution now copies the feedback row's own GDPR
+  subject key into the customer link verbatim instead of re-deriving one
+  from metadata: for email-less contacts the derived key
+  (`intercom:<ws>:<external-id>`) diverged from the row's
+  (`contact:<id>`), so an erasure keyed on the feedback subject would
+  never reach the attribution rows. Metadata derivation remains the
+  fallback for rows without a subject key.
+
+- Structural transcript truncation (Intercom and Zendesk) now keeps the
+  agent replies inside the kept conversation ranges (head through the
+  3rd customer message, tail from the 2nd-from-last onward) instead of
+  dropping every agent message, and the `[... N messages omitted ...]`
+  marker counts all omitted messages rather than only customer ones.
+  Zendesk's byte-truncation fallback is now rune-safe — a mid-rune cut
+  produced invalid UTF-8 that PostgreSQL rejects with an error outside
+  the deterministic-reject list, wedging the export cursor.
+
+- Intercom HTML entity unescaping no longer depends on the body carrying
+  a tag: tag-free bodies with `&amp;`-style entities now read the same
+  as marked-up ones.
+
+- Fixed the inbound recent-preview endpoint returning 500 on live
+  PostgreSQL: `created_at` (timestamptz) was scanned into a string; it
+  now scans into `time.Time` and serializes RFC3339. The preview also
+  surfaces `intercom_conversation_id`/`intercom_state` metadata.
+
+- GDPR erasure now covers customer-request attribution: deleting a data
+  subject anonymizes their `customer_request_customer_links` and
+  `customer_request_votes` rows in place (email/name/note scrubbed, the
+  per-tenant subject hash keeps request aggregates like vote and
+  customer counts intact). These tables carry the subject's identity via
+  manual linking and promote-time auto-attribution but have no FK to
+  `user_feedback`, so the feedback purge never reached them. Delete
+  audits report the anonymized row counts.
+
+- Fixed three Zendesk adapter defects (parity with the Intercom
+  hardening):
+  - Transient ingest failures (DB down) no longer advance the export
+    cursor past the failed ticket — the incremental export never
+    re-lists a passed snapshot, so the previous skip-and-continue lost
+    those tickets forever. Deterministic validation rejects still skip.
+  - Tickets beyond the per-tick comment budget are no longer ingested
+    comment-less (which locked the degraded snapshot in under its
+    idempotency key) — the page stops at the budget boundary and the
+    remainder lands next tick with full comments; a per-source
+    processed-set makes the re-fetched head free. Transient comment
+    failures likewise retry next tick instead of degrading.
+  - Backoff now measures from the last attempt (was: last success,
+    which never engaged for never-succeeded sources and self-disabled
+    after one interval), counts degraded ticks as failures, and keys
+    all in-memory poll state by source ID instead of tenant-scoped
+    slug; the poll-lag gauge keeps its value on degraded ticks.
 
 - OIDC Console login now syncs the authenticated IdP user into
   `tenant_members` before issuing the session, and tenant membership lookups

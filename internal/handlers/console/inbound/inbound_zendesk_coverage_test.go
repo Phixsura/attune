@@ -664,3 +664,33 @@ func TestEnrichWithSyncStats_EmptyConfig(t *testing.T) {
 	h.enrichWithSyncStats(src, out)
 	require.Nil(t, out.TicketsSynced)
 }
+
+func TestEnrichWithSyncStats_IntercomConversations(t *testing.T) {
+	t.Parallel()
+	secrets := inboundtest.FakeSecrets{}
+	enc, _ := secrets.Encrypt([]byte(`{"sync_stats":{"conversations_synced":42,"backfill_done":false}}`))
+	h := ptrext.Of(Handler{pool: nil, secrets: secrets})
+	out := &attunev1.InboundSource{}
+	h.enrichWithSyncStats(inbound.Source{Config: enc}, out)
+	require.NotNil(t, out.TicketsSynced)
+	require.Equal(t, int64(42), ptrext.Indirect(out.TicketsSynced))
+	// Intercom has no last-ticket concept — never emit present-but-zero.
+	require.Nil(t, out.LastSyncedTicketId)
+	require.NotNil(t, out.BackfillDone)
+	require.False(t, ptrext.Indirect(out.BackfillDone))
+}
+
+func TestEnrichWithSyncStats_BackfillDoneEmptyWindow(t *testing.T) {
+	t.Parallel()
+	// "Backfill done, nothing found" must be distinguishable from
+	// "not started": backfill_done surfaces even at 0 synced.
+	secrets := inboundtest.FakeSecrets{}
+	enc, _ := secrets.Encrypt([]byte(`{"sync_stats":{"conversations_synced":0,"backfill_done":true}}`))
+	h := ptrext.Of(Handler{pool: nil, secrets: secrets})
+	out := &attunev1.InboundSource{}
+	h.enrichWithSyncStats(inbound.Source{Config: enc}, out)
+	require.NotNil(t, out.BackfillDone)
+	require.True(t, ptrext.Indirect(out.BackfillDone))
+	require.NotNil(t, out.TicketsSynced)
+	require.Equal(t, int64(0), ptrext.Indirect(out.TicketsSynced))
+}

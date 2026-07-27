@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/domain"
@@ -32,7 +33,17 @@ var ErrIdempotencyConflict = errors.New("idempotency key reused with a different
 // internally pools connections, so a single shared FeedbackRepo serves
 // every caller.
 type FeedbackRepo struct {
-	pool *pgxpool.Pool
+	pool dbPool
+}
+
+// dbPool is the slice of *pgxpool.Pool the repo actually uses — an
+// interface so unit tests can inject fakes for paths whose behavior is
+// otherwise only reachable on a live database (PR #122 pattern).
+type dbPool interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 type queryer interface {

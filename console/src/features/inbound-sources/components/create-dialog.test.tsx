@@ -373,6 +373,115 @@ describe('CreateInboundSourceDialog', () => {
     })
   })
 
+  it('submits an Intercom create payload with region and token', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/test-connection', async ({ request }) => {
+        const body = (await request.json()) as {
+          intercomConfig?: { region?: string; accessToken?: string }
+        }
+        expect(body.intercomConfig).toMatchObject({
+          region: 'us',
+          accessToken: 'ic-token-abc',
+        })
+        return HttpResponse.json({ ok: true, latencyMs: 42 })
+      }),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Intercom/ }))
+    await user.type(screen.getByLabelText('名称'), 'Intercom conversations')
+    await user.type(screen.getByLabelText('Access Token'), 'ic-token-abc')
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+
+    expect(await screen.findByText(/连接成功/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '新建' }))
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'intercom',
+          name: 'Intercom conversations',
+          intercomConfig: expect.objectContaining({
+            region: 'us',
+            accessToken: 'ic-token-abc',
+            startFrom: 'now',
+            maxDetailFetches: 50,
+          }),
+        }),
+      )
+    })
+  })
+
+  it('shows the connected workspace name after a successful Intercom test', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/test-connection', () =>
+        HttpResponse.json({ ok: true, latencyMs: 12, workspaceName: 'Acme Workspace' }),
+      ),
+    )
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog
+        open
+        onOpenChange={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        pending={false}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Intercom/ }))
+    await user.type(screen.getByLabelText('Access Token'), 'tok')
+    await user.click(screen.getByRole('button', { name: '测试连接' }))
+
+    expect(await screen.findByText(/已连接到 Acme Workspace/)).toBeInTheDocument()
+  })
+
+  it('submits Intercom tag filters from the advanced section', async () => {
+    server.use(
+      http.post('/fb/v1/console/inbound/sources/test-connection', () =>
+        HttpResponse.json({ ok: true, latencyMs: 10 }),
+      ),
+    )
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Intercom/ }))
+    await user.type(screen.getByLabelText('名称'), 'Filtered Intercom')
+    await user.type(screen.getByLabelText('Access Token'), 'tok')
+    await user.click(screen.getByText('高级选项'))
+    await user.type(screen.getByLabelText('包含标签'), 'feature-request, billing')
+    await user.type(screen.getByLabelText('排除标签'), 'spam')
+    await user.click(screen.getByRole('button', { name: '新建' }))
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          channel: 'intercom',
+          intercomConfig: expect.objectContaining({
+            filterTags: ['feature-request', 'billing'],
+            filterExcludeTags: ['spam'],
+          }),
+        }),
+      )
+    })
+  })
+
+  it('keeps the Intercom create button disabled without an access token', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined)
+    const { user } = renderWithProviders(
+      <CreateInboundSourceDialog open onOpenChange={vi.fn()} onSubmit={onSubmit} pending={false} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /Intercom/ }))
+    await user.type(screen.getByLabelText('名称'), 'No token yet')
+    expect(screen.getByRole('button', { name: '新建' })).toBeDisabled()
+    await user.type(screen.getByLabelText('Access Token'), 'tok')
+    expect(screen.getByRole('button', { name: '新建' })).toBeEnabled()
+  })
+
   it('resets transient state when switching back to webhook and when the dialog closes', async () => {
     const onOpenChange = vi.fn()
     const { user } = renderWithProviders(

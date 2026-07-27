@@ -62,6 +62,11 @@ import {
   useUpdateReplyDraft,
 } from '@/features/feedback/api/regenerate-reply-draft'
 import { useRetryEnrichment } from '@/features/feedback/api/retry-enrichment'
+import {
+  type LinkedRequestRef,
+  type SimilarFeedbackItem,
+  similarFeedbackQuery,
+} from '@/features/feedback/api/similar-feedback'
 import { ConfidenceIndicator } from '@/features/feedback/components/confidence-indicator'
 import { FeedbackTagSection } from '@/features/feedback/components/feedback-tags'
 import { LanguageBadge, languagesDiffer } from '@/features/feedback/components/language-badge'
@@ -458,6 +463,13 @@ function DetailBody({
               feedbackId={String(data.id)}
               canPromoteCustomerRequest={canPromoteCustomerRequest}
               submission={portalSubmission}
+            />
+          ) : null}
+
+          {supportChannelCandidate(data.source, data.sourceMeta) && canPromoteCustomerRequest ? (
+            <SupportPromoteCard
+              feedbackId={String(data.id)}
+              candidate={supportChannelCandidate(data.source, data.sourceMeta)}
             />
           ) : null}
 
@@ -1943,6 +1955,234 @@ function portalSubmissionMeta(
   }
 }
 
+type SupportCandidate = {
+  channel: string
+  customer: string
+  company: string
+  signal: 'fin_escalated' | 'priority' | 'default'
+}
+
+// supportChannelCandidate decides whether a support-channel feedback row
+// should surface a "promote to customer request" candidate card, and
+// with what urgency signal. Fin escalations and priority conversations
+// are the strongest request-candidate indicators.
+function supportChannelCandidate(
+  source: string,
+  sourceMeta: FeedbackDetail['sourceMeta'],
+): SupportCandidate | null {
+  if (source !== 'intercom' && source !== 'zendesk') return null
+  if (!isPortalRecord(sourceMeta)) return null
+  const prefix = `${source}_`
+  const text = (key: string): string => {
+    const v = sourceMeta[prefix + key]
+    if (typeof v === 'string') return v.trim()
+    if (typeof v === 'number') return String(v)
+    return ''
+  }
+  const customer =
+    text('contact_name') ||
+    text('requester_name') ||
+    text('contact_email') ||
+    text('requester_email')
+  const company = text('company_name') || text('organization_name')
+  let signal: SupportCandidate['signal'] = 'default'
+  if (
+    text('ai_resolution_state') === 'escalated' ||
+    text('ai_resolution_state') === 'negative_feedback'
+  ) {
+    signal = 'fin_escalated'
+  } else if (
+    text('priority') === 'priority' ||
+    text('priority') === 'urgent' ||
+    text('priority') === 'high'
+  ) {
+    signal = 'priority'
+  }
+  return { channel: source, customer, company, signal }
+}
+
+// promoteIDList joins the anchor feedback with its UNTRACKED recurrence
+// neighbors so one click promotes the whole recurring signal as
+// evidence. Neighbors already linked to a customer request are excluded
+// — bundling them into a new request would double-track them.
+function promoteIDList(feedbackId: string, similar: SimilarFeedbackItem[]): string {
+  const ids = [
+    feedbackId,
+    ...similar.filter((s) => !s.linked_requests?.length).map((s) => String(s.id)),
+  ]
+  return [...new Set(ids)].join(',')
+}
+
+// existingRequestFor picks the customer request already tracking this
+// cluster — the dedup target. The anchor's own links win outright (if
+// THIS feedback is already tracked, never offer a duplicate promote);
+// otherwise the highest-similarity neighbor with a link wins, and within
+// one row's links the most-recently-updated request is first (backend
+// order).
+function existingRequestFor(
+  anchorLinks: LinkedRequestRef[],
+  similar: SimilarFeedbackItem[],
+): LinkedRequestRef | null {
+  if (anchorLinks[0]) return anchorLinks[0]
+  for (const item of similar) {
+    const ref = item.linked_requests?.[0]
+    if (ref) return ref
+  }
+  return null
+}
+
+function SupportPromoteCard({
+  feedbackId,
+  candidate,
+}: {
+  feedbackId: string
+  candidate: SupportCandidate | null
+}) {
+  const { t } = useTranslation()
+  const enabled = !!candidate && isPositiveIntString(feedbackId)
+  const similar = useQuery({ ...similarFeedbackQuery(feedbackId), enabled })
+  const anchorLinks = similar.data?.anchor_linked_requests ?? []
+  const anchorAlreadyLinked = anchorLinks.length > 0
+  const existingRequest = existingRequestFor(anchorLinks, similar.data?.items ?? [])
+  const linkExisting = useLinkCustomerRequestFeedback(existingRequest?.id ?? '')
+  if (!candidate || !enabled) return null
+  const signalKey =
+    candidate.signal === 'fin_escalated'
+      ? 'feedback.detail.support_promote_signal_fin'
+      : candidate.signal === 'priority'
+        ? 'feedback.detail.support_promote_signal_priority'
+        : 'feedback.detail.support_promote_signal_default'
+  const who = [candidate.customer, candidate.company].filter(Boolean).join(' · ')
+  const neighbors = similar.data?.items ?? []
+  const promoteIDs = promoteIDList(feedbackId, neighbors)
+
+  // Hold the card until the dedup data arrives — rendering the promote
+  // action during the pending window would flash past the terminal
+  // state for an already-tracked anchor.
+  if (similar.isPending) {
+    return (
+      <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-4">
+        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+          {t('feedback.detail.support_promote_title')}
+        </div>
+        <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-3.5 animate-spin" />
+          {t('common.loading')}
+        </div>
+      </div>
+    )
+  }
+
+  // Terminal state: this feedback is already tracked by a customer
+  // request — the card's job (get the signal tracked) is done. Offering
+  // any promote here would create the duplicate the card exists to
+  // prevent; the linked-requests section above shows the tracking CR.
+  if (anchorAlreadyLinked) {
+    return (
+      <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          {t('feedback.detail.support_promote_title')}
+        </div>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          {t('feedback.detail.support_promote_already_tracked', {
+            cr: `CR-${anchorLinks[0].cr_no}`,
+            title: anchorLinks[0].title,
+          })}
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="rounded-lg border border-primary/15 bg-primary/5 px-4 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+            {t('feedback.detail.support_promote_title')}
+          </div>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            {t(signalKey)}
+            {who ? ` ${t('feedback.detail.support_promote_from', { who })}` : ''}
+          </p>
+          {neighbors.length > 0 ? (
+            <div className="mt-2 space-y-1">
+              <p className="text-xs font-medium text-primary">
+                {t('feedback.detail.support_promote_recurring', { count: neighbors.length })}
+              </p>
+              <ul className="space-y-0.5">
+                {neighbors.slice(0, 3).map((item) => (
+                  <li key={item.id} className="truncate text-xs text-muted-foreground">
+                    #{item.id} · {item.title}
+                    <span className="ml-1 text-[10px] tabular-nums">
+                      {Math.round(item.similarity * 100)}%
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {existingRequest ? (
+            <p className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-500">
+              {t('feedback.detail.support_promote_existing', {
+                cr: `CR-${existingRequest.cr_no}`,
+                title: existingRequest.title,
+              })}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 flex-col items-stretch gap-2">
+          {existingRequest ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={linkExisting.isPending}
+              onClick={() =>
+                linkExisting.mutate(
+                  {
+                    feedbackId,
+                    importance: CustomerRequestImportance.CUSTOMER_REQUEST_IMPORTANCE_NORMAL,
+                  },
+                  {
+                    onSuccess: () =>
+                      toast.success(
+                        t('feedback.detail.support_promote_linked', {
+                          cr: `CR-${existingRequest.cr_no}`,
+                        }),
+                      ),
+                    onError: (err) =>
+                      toast.error(err instanceof Error ? err.message : t('common.error')),
+                  },
+                )
+              }
+            >
+              {linkExisting.isPending ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              {t('feedback.detail.support_promote_link_action', {
+                cr: `CR-${existingRequest.cr_no}`,
+              })}
+            </Button>
+          ) : null}
+          <Button asChild size="sm" variant={existingRequest ? 'outline' : 'default'}>
+            <Link
+              to="/feedback/customer-requests"
+              search={{
+                request_id: undefined,
+                merge_target_id: undefined,
+                promote_feedback_ids: promoteIDs,
+                feedback_id: feedbackId,
+              }}
+            >
+              {promoteIDs.includes(',')
+                ? t('feedback.detail.support_promote_action_bundle', {
+                    count: promoteIDs.split(',').length,
+                  })
+                : t('feedback.detail.support_promote_action')}
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PortalSubmissionSection({
   feedbackId,
   canPromoteCustomerRequest,
@@ -2120,11 +2360,13 @@ export const feedbackDetailSheetTestables = {
   customerRequestStatusLabel,
   detailSummaryState,
   detailWorkbenchCue,
+  existingRequestFor,
   isCompleteReplyDraftWorkflow,
   isPortalRecord,
   isPositiveIntString,
   isReplyDraftHardBlocker,
   latestRevisionByOrigin,
+  promoteIDList,
   portalSubmissionContactFieldLabel,
   portalSubmissionEntries,
   portalSubmissionKindLabel,
@@ -2134,6 +2376,7 @@ export const feedbackDetailSheetTestables = {
   relativeTime,
   replyDraftTimelineItems,
   revisionByID,
+  supportChannelCandidate,
   terminalFailureReasonClassLabel,
   terminalFailureSnapshotPresent,
   workbenchModeLabel,

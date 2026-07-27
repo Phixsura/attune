@@ -318,6 +318,87 @@ describe('FeedbackDetailSheet', () => {
       customFields: { z: 1, a: null },
     })
     expect(feedbackDetailSheetTestables.portalSubmissionMeta({ portal_submission: {} })).toBeNull()
+
+    // Support-channel promote candidates: Fin escalation is the strongest
+    // signal, priority second, plain support feedback still qualifies.
+    expect(
+      feedbackDetailSheetTestables.supportChannelCandidate('intercom', {
+        intercom_contact_name: 'Alice Zhang',
+        intercom_company_name: 'Customer Co',
+        intercom_ai_resolution_state: 'escalated',
+      }),
+    ).toMatchObject({ channel: 'intercom', customer: 'Alice Zhang', signal: 'fin_escalated' })
+    expect(
+      feedbackDetailSheetTestables.supportChannelCandidate('intercom', {
+        intercom_priority: 'priority',
+      }),
+    ).toMatchObject({ signal: 'priority' })
+    expect(
+      feedbackDetailSheetTestables.supportChannelCandidate('zendesk', {
+        zendesk_requester_name: 'Carol Wu',
+        zendesk_organization_name: 'Acme Corp',
+      }),
+    ).toMatchObject({
+      channel: 'zendesk',
+      customer: 'Carol Wu',
+      company: 'Acme Corp',
+      signal: 'default',
+    })
+    expect(feedbackDetailSheetTestables.supportChannelCandidate('webhook', {})).toBeNull()
+    expect(feedbackDetailSheetTestables.supportChannelCandidate('intercom', undefined)).toBeNull()
+
+    // Recurrence bundle: already-tracked neighbors are excluded so a new
+    // promote never double-tracks them; ids dedup.
+    expect(
+      feedbackDetailSheetTestables.promoteIDList('11', [
+        { id: 42, title: 'a', source: 'intercom', similarity: 0.9, created_at: '' },
+        {
+          id: 43,
+          title: 'b',
+          source: 'intercom',
+          similarity: 0.85,
+          created_at: '',
+          linked_requests: [{ id: 'u1', cr_no: 7, title: 'CR', status: 'open' }],
+        },
+        { id: 11, title: 'self', source: 'intercom', similarity: 1, created_at: '' },
+      ]),
+    ).toBe('11,42')
+
+    // Dedup target: the anchor's own links win over neighbor links.
+    const anchorRef = { id: 'u-a', cr_no: 9, title: 'Anchor CR', status: 'open' }
+    const neighborRef = { id: 'u-n', cr_no: 7, title: 'Neighbor CR', status: 'open' }
+    expect(
+      feedbackDetailSheetTestables.existingRequestFor(
+        [anchorRef],
+        [
+          {
+            id: 42,
+            title: 'a',
+            source: 'intercom',
+            similarity: 0.9,
+            created_at: '',
+            linked_requests: [neighborRef],
+          },
+        ],
+      ),
+    ).toBe(anchorRef)
+    expect(
+      feedbackDetailSheetTestables.existingRequestFor(
+        [],
+        [
+          { id: 41, title: 'x', source: 'intercom', similarity: 0.95, created_at: '' },
+          {
+            id: 42,
+            title: 'a',
+            source: 'intercom',
+            similarity: 0.9,
+            created_at: '',
+            linked_requests: [neighborRef],
+          },
+        ],
+      ),
+    ).toBe(neighborRef)
+    expect(feedbackDetailSheetTestables.existingRequestFor([], [])).toBeNull()
     expect(feedbackDetailSheetTestables.portalSubmissionEntries({ b: 2, a: 1 })).toEqual([
       ['a', 1],
       ['b', 2],

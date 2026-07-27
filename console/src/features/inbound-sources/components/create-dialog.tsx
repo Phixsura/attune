@@ -3,6 +3,7 @@ import {
   Headphones,
   Loader2,
   Mail,
+  MessageCircle,
   MessageSquare,
   Webhook,
   XCircle,
@@ -38,7 +39,7 @@ import {
 import { cn } from '@/lib/utils'
 import type { SlackChannel } from '@/proto/attune/v1/inbound_source'
 
-type Channel = 'webhook' | 'email' | 'slack' | 'zendesk'
+type Channel = 'webhook' | 'email' | 'slack' | 'zendesk' | 'intercom'
 
 interface EmailFields {
   host: string
@@ -100,11 +101,37 @@ const defaultZendesk: ZendeskFields = {
   maxCommentFetches: 50,
 }
 
-// CreateInboundSourceDialog — four-channel wizard. The user picks
-// webhook, email, slack, or zendesk at the top; the form body swaps
-// between the channel-specific field sets. Email, Slack, and Zendesk
-// branches expose a "Test connection" action, and Slack also supports
-// channel discovery before create.
+interface IntercomFields {
+  region: 'us' | 'eu' | 'au'
+  accessToken: string
+  startFrom: string
+  filterStates: string[]
+  filterTags: string
+  filterExcludeTags: string
+  maxDetailFetches: number
+}
+
+const defaultIntercom: IntercomFields = {
+  region: 'us',
+  accessToken: '',
+  startFrom: 'now',
+  filterStates: [],
+  filterTags: '',
+  filterExcludeTags: '',
+  maxDetailFetches: 50,
+}
+
+const splitTagList = (raw: string): string[] =>
+  raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+// CreateInboundSourceDialog — five-channel wizard. The user picks
+// webhook, email, slack, zendesk, or intercom at the top; the form body
+// swaps between the channel-specific field sets. Email, Slack, Zendesk,
+// and Intercom branches expose a "Test connection" action, and Slack
+// also supports channel discovery before create.
 export function CreateInboundSourceDialog({
   open,
   onOpenChange,
@@ -126,6 +153,7 @@ export function CreateInboundSourceDialog({
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([])
   const [slackDiscoverNote, setSlackDiscoverNote] = useState<string | null>(null)
   const [zd, setZd] = useState<ZendeskFields>(defaultZendesk)
+  const [ic, setIc] = useState<IntercomFields>(defaultIntercom)
   const [testResult, setTestResult] = useState<TestInboundConnectionResult | null>(null)
 
   const reset = () => {
@@ -134,6 +162,7 @@ export function CreateInboundSourceDialog({
     setEmail(defaultEmail)
     setSlack(defaultSlack)
     setZd(defaultZendesk)
+    setIc(defaultIntercom)
     setSlackChannels([])
     setSlackDiscoverNote(null)
     setTestResult(null)
@@ -184,6 +213,21 @@ export function CreateInboundSourceDialog({
         },
       }
     }
+    if (channel === 'intercom') {
+      return {
+        channel: 'intercom',
+        name: name.trim(),
+        intercomConfig: {
+          region: ic.region,
+          accessToken: ic.accessToken.trim(),
+          startFrom: ic.startFrom,
+          filterStates: ic.filterStates,
+          filterTags: splitTagList(ic.filterTags),
+          filterExcludeTags: splitTagList(ic.filterExcludeTags),
+          maxDetailFetches: ic.maxDetailFetches,
+        },
+      }
+    }
     return {
       channel: 'email',
       name: name.trim(),
@@ -219,6 +263,9 @@ export function CreateInboundSourceDialog({
       if (zd.authMode === 'api_token') return !!(zd.email.trim() && zd.apiToken.trim())
       if (zd.authMode === 'oauth') return !!zd.oauthAccessToken.trim()
       return false
+    }
+    if (channel === 'intercom') {
+      return !!ic.accessToken.trim()
     }
     return true // webhook: name only
   }
@@ -306,6 +353,28 @@ export function CreateInboundSourceDialog({
         },
       )
     }
+    if (channel === 'intercom') {
+      test.mutate(
+        {
+          channel: 'intercom',
+          intercomConfig: {
+            region: ic.region,
+            accessToken: ic.accessToken.trim(),
+            filterStates: [] as string[],
+            filterTags: [] as string[],
+            filterExcludeTags: [] as string[],
+          },
+        },
+        {
+          onSuccess: (res) => setTestResult(res),
+          onError: (err) =>
+            setTestResult({
+              ok: false,
+              error: err instanceof Error ? err.message : t('common.error'),
+            }),
+        },
+      )
+    }
   }
 
   const handleDiscoverSlack = () => {
@@ -362,7 +431,7 @@ export function CreateInboundSourceDialog({
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label>{t('inbound_sources.create.channel_label')}</Label>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <ChannelOption
                   selected={channel === 'webhook'}
                   onClick={() => {
@@ -404,6 +473,16 @@ export function CreateInboundSourceDialog({
                   icon={<Headphones className="h-4 w-4" />}
                   label={t('inbound_sources.channel.zendesk')}
                   help={t('inbound_sources.create.zendesk_help')}
+                />
+                <ChannelOption
+                  selected={channel === 'intercom'}
+                  onClick={() => {
+                    setChannel('intercom')
+                    setTestResult(null)
+                  }}
+                  icon={<MessageCircle className="h-4 w-4" />}
+                  label={t('inbound_sources.channel.intercom')}
+                  help={t('inbound_sources.create.intercom_help')}
                 />
               </div>
             </div>
@@ -455,6 +534,20 @@ export function CreateInboundSourceDialog({
                 values={zd}
                 onChange={(next) => {
                   setZd(next)
+                  setTestResult(null)
+                }}
+                pending={pending}
+                onTest={handleTest}
+                testing={test.isPending}
+                testResult={testResult}
+              />
+            )}
+
+            {channel === 'intercom' && (
+              <IntercomFieldset
+                values={ic}
+                onChange={(next) => {
+                  setIc(next)
                   setTestResult(null)
                 }}
                 pending={pending}
@@ -1072,6 +1165,211 @@ function ZendeskFieldset({
               <>
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 {t('inbound_sources.create.zendesk.test_ok', { ms: testResult.latencyMs ?? '?' })}
+              </>
+            ) : (
+              <>
+                <XCircle className="h-3.5 w-3.5" />
+                {testResult.error || t('common.error')}
+              </>
+            )}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function IntercomFieldset({
+  values,
+  onChange,
+  pending,
+  onTest,
+  testing,
+  testResult,
+}: {
+  values: IntercomFields
+  onChange: (next: IntercomFields) => void
+  pending: boolean
+  onTest: () => void
+  testing: boolean
+  testResult: TestInboundConnectionResult | null
+}) {
+  const { t } = useTranslation()
+  const set = <K extends keyof IntercomFields>(k: K, v: IntercomFields[K]) =>
+    onChange({ ...values, [k]: v })
+  return (
+    <div className="space-y-3 rounded-md border border-border p-3">
+      <div className="space-y-2">
+        <Label htmlFor="is-ic-region">{t('inbound_sources.create.intercom.region')}</Label>
+        <Select
+          value={values.region}
+          onValueChange={(v) => set('region', v as IntercomFields['region'])}
+        >
+          <SelectTrigger id="is-ic-region" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="us">{t('inbound_sources.create.intercom.region_us')}</SelectItem>
+            <SelectItem value="eu">{t('inbound_sources.create.intercom.region_eu')}</SelectItem>
+            <SelectItem value="au">{t('inbound_sources.create.intercom.region_au')}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {t('inbound_sources.create.intercom.region_help')}
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="is-ic-token">{t('inbound_sources.create.intercom.access_token')}</Label>
+        <Input
+          id="is-ic-token"
+          aria-describedby="is-ic-token-help"
+          type="password"
+          autoComplete="off"
+          value={values.accessToken}
+          onChange={(e) => set('accessToken', e.target.value)}
+          disabled={pending}
+          required
+        />
+        <p id="is-ic-token-help" className="text-xs text-muted-foreground">
+          {t('inbound_sources.create.intercom.access_token_help')}{' '}
+          <a
+            href="https://developers.intercom.com/docs/build-an-integration/learn-more/authentication"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            {t('inbound_sources.create.intercom.access_token_link')}
+          </a>
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="is-ic-start-from">{t('inbound_sources.create.intercom.start_from')}</Label>
+        <Select value={values.startFrom} onValueChange={(v) => set('startFrom', v)}>
+          <SelectTrigger id="is-ic-start-from" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="now">
+              {t('inbound_sources.create.intercom.start_from_now')}
+            </SelectItem>
+            <SelectItem value="full">
+              {t('inbound_sources.create.intercom.start_from_full')}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <details className="space-y-3">
+        <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+          {t('inbound_sources.create.intercom.advanced_label')}
+        </summary>
+        <div className="space-y-3 pt-2">
+          <div className="space-y-2">
+            <Label htmlFor="is-ic-filter-tags">
+              {t('inbound_sources.create.intercom.filter_tags')}
+            </Label>
+            <Input
+              id="is-ic-filter-tags"
+              value={values.filterTags}
+              onChange={(e) => set('filterTags', e.target.value)}
+              disabled={pending}
+              placeholder="feature-request, billing"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.intercom.filter_tags_help')}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-ic-exclude-tags">
+              {t('inbound_sources.create.intercom.filter_exclude_tags')}
+            </Label>
+            <Input
+              id="is-ic-exclude-tags"
+              value={values.filterExcludeTags}
+              onChange={(e) => set('filterExcludeTags', e.target.value)}
+              disabled={pending}
+              placeholder="spam, test"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.intercom.filter_exclude_tags_help')}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label>{t('inbound_sources.create.intercom.filter_states')}</Label>
+            <div className="flex flex-wrap gap-3">
+              {['open', 'closed', 'snoozed'].map((s) => (
+                <label key={s} className="flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={values.filterStates.includes(s)}
+                    onChange={(e) => {
+                      const next = e.target.checked
+                        ? [...values.filterStates, s]
+                        : values.filterStates.filter((v) => v !== s)
+                      set('filterStates', next)
+                    }}
+                    disabled={pending}
+                  />
+                  {s}
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.intercom.filter_states_help')}
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="is-ic-detail-budget">
+              {t('inbound_sources.create.intercom.max_detail_fetches')}
+            </Label>
+            <Input
+              id="is-ic-detail-budget"
+              type="number"
+              min={1}
+              max={200}
+              value={values.maxDetailFetches}
+              onChange={(e) => set('maxDetailFetches', Number(e.target.value) || 50)}
+              disabled={pending}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('inbound_sources.create.intercom.max_detail_fetches_help')}
+            </p>
+          </div>
+        </div>
+      </details>
+
+      <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onTest}
+          disabled={testing || pending || !values.accessToken.trim()}
+        >
+          {testing ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+          {t('inbound_sources.create.intercom.test_button')}
+        </Button>
+        {testResult && (
+          <span
+            role="alert"
+            className={cn(
+              'inline-flex items-center gap-1 text-xs',
+              testResult.ok ? 'text-green-700 dark:text-green-500' : 'text-destructive',
+            )}
+          >
+            {testResult.ok ? (
+              <>
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {testResult.workspaceName
+                  ? t('inbound_sources.create.intercom.test_ok_workspace', {
+                      workspace: testResult.workspaceName,
+                      ms: testResult.latencyMs ?? '?',
+                    })
+                  : t('inbound_sources.create.intercom.test_ok', {
+                      ms: testResult.latencyMs ?? '?',
+                    })}
               </>
             ) : (
               <>

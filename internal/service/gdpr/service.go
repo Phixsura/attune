@@ -329,42 +329,40 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 		"generated_at":    data.GeneratedAt.UTC().Format(time.RFC3339),
 		"schema_version":  "gdpr-export-v1",
 		"counts": map[string]int{
-			"feedback":                data.Counts.FeedbackCount,
-			"feedback_tags":           data.Counts.TagAssignmentCount,
-			"feedback_audit_log":      data.Counts.FeedbackAuditCount,
-			"llm_audit":               data.Counts.LLMAuditCount,
-			"reply_drafts":            data.Counts.ReplyDraftCount,
-			"reply_draft_revisions":   data.Counts.ReplyDraftRevisionCount,
-			"reply_draft_events":      data.Counts.ReplyDraftEventCount,
-			"reply_delivery_attempts": data.Counts.ReplyDeliveryAttemptCount,
+			"feedback":                        data.Counts.FeedbackCount,
+			"feedback_tags":                   data.Counts.TagAssignmentCount,
+			"feedback_audit_log":              data.Counts.FeedbackAuditCount,
+			"llm_audit":                       data.Counts.LLMAuditCount,
+			"reply_drafts":                    data.Counts.ReplyDraftCount,
+			"reply_draft_revisions":           data.Counts.ReplyDraftRevisionCount,
+			"reply_draft_events":              data.Counts.ReplyDraftEventCount,
+			"reply_delivery_attempts":         data.Counts.ReplyDeliveryAttemptCount,
+			"customer_request_customer_links": data.Counts.CustomerLinkCount,
+			"customer_request_votes":          data.Counts.VoteCount,
 		},
 	}
 	if err := writeJSONFile(zw, "manifest.json", manifest); err != nil {
 		return nil, err
 	}
-	if err := writeJSONLinesFile(zw, "feedback.jsonl", data.FeedbackRows); err != nil {
-		return nil, err
+	sections := []struct {
+		name string
+		rows []json.RawMessage
+	}{
+		{"feedback.jsonl", data.FeedbackRows},
+		{"feedback_tags.jsonl", data.FeedbackTagRows},
+		{"feedback_audit_log.jsonl", data.FeedbackAuditRows},
+		{"llm_audit.jsonl", data.LLMAuditRows},
+		{"reply_drafts.jsonl", data.ReplyDraftRows},
+		{"reply_draft_revisions.jsonl", data.ReplyDraftRevisionRows},
+		{"reply_draft_events.jsonl", data.ReplyDraftEventRows},
+		{"reply_delivery_attempts.jsonl", data.ReplyDeliveryAttemptRows},
+		{"customer_request_customer_links.jsonl", data.CustomerLinkRows},
+		{"customer_request_votes.jsonl", data.VoteRows},
 	}
-	if err := writeJSONLinesFile(zw, "feedback_tags.jsonl", data.FeedbackTagRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "feedback_audit_log.jsonl", data.FeedbackAuditRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "llm_audit.jsonl", data.LLMAuditRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_drafts.jsonl", data.ReplyDraftRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_draft_revisions.jsonl", data.ReplyDraftRevisionRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_draft_events.jsonl", data.ReplyDraftEventRows); err != nil {
-		return nil, err
-	}
-	if err := writeJSONLinesFile(zw, "reply_delivery_attempts.jsonl", data.ReplyDeliveryAttemptRows); err != nil {
-		return nil, err
+	for _, sec := range sections {
+		if err := writeJSONLinesFile(zw, sec.name, sec.rows); err != nil {
+			return nil, err
+		}
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
@@ -383,6 +381,9 @@ func auditCounts(counts gdprrepo.Counts) map[string]int {
 		"reply_draft_revisions":   counts.ReplyDraftRevisionCount,
 		"reply_draft_events":      counts.ReplyDraftEventCount,
 		"reply_delivery_attempts": counts.ReplyDeliveryAttemptCount,
+		// Anonymized in place (identity scrubbed, aggregates kept).
+		"customer_request_customer_links": counts.CustomerLinkCount,
+		"customer_request_votes":          counts.VoteCount,
 	}
 }
 

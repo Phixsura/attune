@@ -236,14 +236,7 @@ func buildConsoleRouter(
 	auditLog.SetSavedViewService(auditViewSvc)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
-	feedback := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
-	replyDraftRepo := replydraftrepo.NewDraftTaskRepo(pool)
-	feedback.SetDrafter(replydraftsvc.NewReplyDrafter(replyDraftRepo, llm))
-	feedback.SetReplyDraftWorkflow(replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil))
-	// Per-tenant backstop on the synchronous Regenerate endpoint: generous
-	// enough never to bother a human triaging (60/min, burst 20), tight enough
-	// to bound a scripted loop's LLM spend on top of the per-row cooldown.
-	feedback.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
+	feedback := buildFeedbackHandler(feedbackRepo, tenantRepo, pool, secrets, llm)
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
 	enrichConfig := buildEnrichConfigHandler(tenantRepo, feedbackRepo, llm)
@@ -527,6 +520,28 @@ type preflightRunnerFunc func(ctx context.Context, env *preflight.Environment, n
 
 func (f preflightRunnerFunc) RunChecks(ctx context.Context, env *preflight.Environment, names []string) preflight.Report {
 	return f(ctx, env, names)
+}
+
+// buildFeedbackHandler assembles the feedback handler with its optional
+// capabilities: reply drafting, the Regenerate rate backstop (60/min,
+// burst 20 — generous for humans, bounding for scripted loops on top of
+// the per-row cooldown), and the recurrence signal behind
+// GET /feedback/{id}/similar.
+func buildFeedbackHandler(
+	feedbackRepo *feedback.FeedbackRepo,
+	tenantRepo *tenant.TenantRepo,
+	pool *pgxpool.Pool,
+	secrets *secretstore.TinkStore,
+	llm llmclient.LLMClient,
+) *consolefeedback.FeedbackHandler {
+	h := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
+	replyDraftRepo := replydraftrepo.NewDraftTaskRepo(pool)
+	h.SetDrafter(replydraftsvc.NewReplyDrafter(replyDraftRepo, llm))
+	h.SetReplyDraftWorkflow(replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil))
+	h.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
+	h.SetSimilarFinder(feedbackRepo)
+	h.SetRequestLinkReader(feedbackRepo)
+	return h
 }
 
 func buildGDPRHandler(

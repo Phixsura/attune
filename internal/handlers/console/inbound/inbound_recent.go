@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -47,6 +50,12 @@ type recentFeedbackItem struct {
 	CreatedAt      string         `json:"created_at"`
 }
 
+// recentQuery is a test seam over pool.Query — the scan loop is testable
+// with fake rows, but the success hand-off needs an injectable query.
+var recentQuery = func(ctx context.Context, pool *pgxpool.Pool, sql string, args ...any) (pgx.Rows, error) {
+	return pool.Query(ctx, sql, args...)
+}
+
 func (h *Handler) queryRecentFeedback(ctx context.Context, sourceID string) ([]recentFeedbackItem, error) {
 	if h.pool == nil {
 		return nil, nil
@@ -56,22 +65,34 @@ func (h *Handler) queryRecentFeedback(ctx context.Context, sourceID string) ([]r
 	           WHERE inbound_source_id = $1
 	           ORDER BY created_at DESC
 	           LIMIT 5`
-	rows, err := h.pool.Query(ctx, q, sourceID)
+	rows, err := recentQuery(ctx, h.pool, q, sourceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanRecentItems(rows)
+}
 
+// scanRecentItems materializes the preview rows, projecting source_meta
+// through a channel-key allow-list (operator preview needs thread
+// identity, not the whole metadata blob).
+func scanRecentItems(rows pgx.Rows) ([]recentFeedbackItem, error) {
 	var items []recentFeedbackItem
 	for rows.Next() {
 		var item recentFeedbackItem
 		var meta map[string]any
-		if err := rows.Scan(&item.ID, &item.ContentPreview, &item.Source, &meta, &item.CreatedAt); err != nil { // ptrext:allow pgx-scan
+		var createdAt time.Time
+		if err := rows.Scan(&item.ID, &item.ContentPreview, &item.Source, &meta, &createdAt); err != nil { // ptrext:allow pgx-scan
 			return nil, err
 		}
+		item.CreatedAt = createdAt.UTC().Format(time.RFC3339)
 		if meta != nil {
 			item.SourceMeta = map[string]any{}
-			for _, k := range []string{"zendesk_ticket_id", "zendesk_status", "zendesk_priority", "slack_channel_name"} {
+			for _, k := range []string{
+				"zendesk_ticket_id", "zendesk_status", "zendesk_priority",
+				"slack_channel_name",
+				"intercom_conversation_id", "intercom_state",
+			} {
 				if v, ok := meta[k]; ok {
 					item.SourceMeta[k] = v
 				}

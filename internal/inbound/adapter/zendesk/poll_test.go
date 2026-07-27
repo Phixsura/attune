@@ -113,7 +113,10 @@ func buildTestAdapter(fake *fakeAPIClient, deps inbound.Deps) *adapter {
 		newClient: func(_ string, _ credential) apiClient {
 			return fake
 		},
-		lastSuccessAt: map[string]time.Time{},
+		lastSuccessAt:    map[string]time.Time{},
+		lastAttemptAt:    map[string]time.Time{},
+		failureCount:     map[string]int{},
+		processedTickets: map[string]map[string]struct{}{},
 	})
 	a.deps = deps
 	return a
@@ -521,14 +524,39 @@ func TestPollSource_CommentBudget(t *testing.T) {
 	a := buildTestAdapter(fake, deps)
 	a.pollSource(context.Background(), src)
 
-	// All 60 tickets should be ingested.
-	if len(ingest.Calls) != 60 {
-		t.Fatalf("expected 60 ingest calls, got %d", len(ingest.Calls))
+	// Tick 1: exactly the budget's worth of tickets ingested WITH
+	// comments; the remainder waits for the next tick instead of being
+	// permanently ingested comment-less under its idempotency key.
+	if len(ingest.Calls) != defaultMaxCommentFetches {
+		t.Fatalf("tick 1: expected %d ingest calls, got %d", defaultMaxCommentFetches, len(ingest.Calls))
 	}
-
-	// Only defaultMaxCommentFetches comment API calls should have been made.
 	if fake.commentCallCount != defaultMaxCommentFetches {
 		t.Errorf("comment API calls = %d, want %d (defaultMaxCommentFetches)", fake.commentCallCount, defaultMaxCommentFetches)
+	}
+	// The cursor must NOT have advanced past the unprocessed tail.
+	if blob, ok := sources.configUpdates["src-budget"]; ok {
+		decoded, err := secrets.Decrypt(blob)
+		if err != nil {
+			t.Fatalf("decrypt persisted config: %v", err)
+		}
+		var persisted Config
+		if err := json.Unmarshal(decoded, &persisted); err != nil { // ptrext:allow json-unmarshal
+			t.Fatalf("unmarshal persisted config: %v", err)
+		}
+		if persisted.SyncCursor != "" {
+			t.Errorf("cursor %q advanced past unprocessed tickets", persisted.SyncCursor)
+		}
+	}
+
+	// Tick 2 re-fetches the page: the processed head skips for free and
+	// the remaining 10 tickets get their comments.
+	src2, _ := sources.Get(context.Background(), "src-budget")
+	a.pollSource(context.Background(), src2)
+	if len(ingest.Calls) != 60 {
+		t.Fatalf("tick 2: expected all 60 tickets ingested, got %d", len(ingest.Calls))
+	}
+	if fake.commentCallCount != 60 {
+		t.Errorf("total comment API calls = %d, want 60 (no wasted re-fetch of the processed head)", fake.commentCallCount)
 	}
 }
 
@@ -966,6 +994,7 @@ func TestShouldSkipBackoff(t *testing.T) {
 
 	a := ptrext.Of(adapter{
 		lastSuccessAt: map[string]time.Time{},
+		lastAttemptAt: map[string]time.Time{},
 		failureCount:  map[string]int{},
 		syncNow:       make(chan string, 1),
 	})
@@ -977,22 +1006,29 @@ func TestShouldSkipBackoff(t *testing.T) {
 
 	// 2 failures → no skip.
 	a.failureCount["src-1"] = 2
-	a.lastSuccessAt["src-1"] = fixedTime.Add(-30 * time.Second)
+	a.lastAttemptAt["src-1"] = fixedTime.Add(-30 * time.Second)
 	if a.shouldSkipBackoff("src-1") {
 		t.Error("expected false with 2 failures")
 	}
 
-	// 3 failures + recent last success → skip.
+	// 3 failures + recent last attempt → skip.
 	a.failureCount["src-1"] = 3
-	a.lastSuccessAt["src-1"] = fixedTime.Add(-10 * time.Second)
+	a.lastAttemptAt["src-1"] = fixedTime.Add(-10 * time.Second)
 	if !a.shouldSkipBackoff("src-1") {
-		t.Error("expected true with 3 failures and recent poll")
+		t.Error("expected true with 3 failures and recent attempt")
 	}
 
-	// 3 failures + old last success → no skip (interval elapsed).
-	a.lastSuccessAt["src-1"] = fixedTime.Add(-5 * time.Minute)
+	// 3 failures + old last attempt → no skip (interval elapsed).
+	a.lastAttemptAt["src-1"] = fixedTime.Add(-5 * time.Minute)
 	if a.shouldSkipBackoff("src-1") {
-		t.Error("expected false with 3 failures and old poll")
+		t.Error("expected false with 3 failures and old attempt")
+	}
+
+	// Never-succeeded sources still back off (poison-token case).
+	a.failureCount["never"] = 5
+	a.lastAttemptAt["never"] = fixedTime.Add(-time.Second)
+	if !a.shouldSkipBackoff("never") {
+		t.Error("never-succeeded source with failures must back off")
 	}
 }
 
@@ -1101,4 +1137,230 @@ func (m *multiPageFakeClient) ShowOrganizations(_ context.Context, _ []int64) ([
 
 func (m *multiPageFakeClient) RefreshOAuthToken(_ context.Context, _, _, _ string) (oauthToken, error) {
 	return oauthToken{}, nil
+}
+
+// --- Follow-up regression coverage (intercom-parity fixes) ------------
+
+// TestPollSource_TransientIngestErrorHoldsCursor: a DB-down style ingest
+// failure must stop the tick WITHOUT advancing the export cursor — the
+// incremental export never re-lists a passed snapshot, so advancing
+// would permanently lose the ticket.
+func TestPollSource_TransientIngestErrorHoldsCursor(t *testing.T) {
+	fixedTime := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	origNow := nowFn
+	nowFn = func() time.Time { return fixedTime }
+	t.Cleanup(func() { nowFn = origNow })
+
+	secrets := inboundtest.FakeSecrets{}
+	tokenEnc, _ := secrets.Encrypt([]byte("token"))
+	cfg := Config{
+		Version: ConfigVersion, AuthMode: AuthModeAPIToken,
+		Subdomain: "acme", Email: "a@a.com",
+		APITokenEncrypted: tokenEnc, StartFrom: "full",
+	}
+
+	sources := newFakeSourcesWithConfig()
+	ingest := &inboundtest.FakeIngest{} // ptrext:allow mutex-identity
+	ingest.NextErr = errors.New("db down")
+	metrics := ptrext.Of(inboundtest.FakeMetrics{})
+	deps := inbound.Deps{
+		Mux:     ptrext.Of(inboundtest.FakeMux{}),
+		Ingest:  inbound.IngestFunc(ingest.Ingest),
+		Sources: sources,
+		Secrets: secrets,
+		Metrics: metrics,
+	}
+
+	src := inbound.Source{
+		ID: "src-dbdown", TenantID: "t1", Channel: channelName,
+		Name: "DBDown", Slug: "dbdown",
+		Config: buildTestConfig(t, cfg, secrets), Enabled: true,
+	}
+	sources.Put("t1", src)
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		ticketPage: ticketPage{
+			Tickets: []ticket{
+				{ID: 1, Subject: "T1", Description: "D", Status: "open", GeneratedTimestamp: 100, RequesterID: 10},
+			},
+			AfterCursor: "past-t1",
+			EndOfStream: true,
+		},
+		usersResult: []zendeskUser{{ID: 10, Name: "U", Email: "u@u.com"}},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	// The cursor must not have been persisted past the failed ticket.
+	if blob, ok := sources.configUpdates["src-dbdown"]; ok {
+		decoded, err := secrets.Decrypt(blob)
+		if err != nil {
+			t.Fatalf("decrypt persisted config: %v", err)
+		}
+		var persisted Config
+		if err := json.Unmarshal(decoded, &persisted); err != nil { // ptrext:allow json-unmarshal
+			t.Fatalf("unmarshal persisted config: %v", err)
+		}
+		if persisted.SyncCursor == "past-t1" {
+			t.Error("cursor advanced past a transiently-failed ticket — it would be lost forever")
+		}
+	}
+	// Degradation surfaces on the source state and counts toward backoff.
+	stored, _ := sources.Get(context.Background(), "src-dbdown")
+	if stored.State.LastError == "" {
+		t.Error("transient ingest failure must surface in LastError")
+	}
+	if a.failureCount[src.ID] == 0 {
+		t.Error("transient tick must bump the failure counter for backoff")
+	}
+
+	// Recovery: ingest works next tick → the same page is re-fetched
+	// and the ticket lands.
+	ingest.NextErr = nil
+	src2, _ := sources.Get(context.Background(), "src-dbdown")
+	a.pollSource(context.Background(), src2)
+	if len(ingest.Calls) != 1 {
+		t.Fatalf("expected the ticket ingested on retry, got %d calls", len(ingest.Calls))
+	}
+}
+
+// TestPollSource_TransientCommentErrorRetries: a transient comment
+// failure must retry the ticket next tick instead of permanently
+// ingesting a comment-less snapshot under its idempotency key.
+func TestPollSource_TransientCommentErrorRetries(t *testing.T) {
+	fixedTime := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	origNow := nowFn
+	nowFn = func() time.Time { return fixedTime }
+	t.Cleanup(func() { nowFn = origNow })
+
+	secrets := inboundtest.FakeSecrets{}
+	tokenEnc, _ := secrets.Encrypt([]byte("token"))
+	cfg := Config{
+		Version: ConfigVersion, AuthMode: AuthModeAPIToken,
+		Subdomain: "acme", Email: "a@a.com",
+		APITokenEncrypted: tokenEnc, StartFrom: "full",
+	}
+
+	sources := newFakeSourcesWithConfig()
+	ingest := &inboundtest.FakeIngest{} // ptrext:allow mutex-identity
+	metrics := ptrext.Of(inboundtest.FakeMetrics{})
+	deps := inbound.Deps{
+		Mux:     ptrext.Of(inboundtest.FakeMux{}),
+		Ingest:  inbound.IngestFunc(ingest.Ingest),
+		Sources: sources,
+		Secrets: secrets,
+		Metrics: metrics,
+	}
+
+	src := inbound.Source{
+		ID: "src-ctrans", TenantID: "t1", Channel: channelName,
+		Name: "CTrans", Slug: "ctrans",
+		Config: buildTestConfig(t, cfg, secrets), Enabled: true,
+	}
+	sources.Put("t1", src)
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		ticketPage: ticketPage{
+			Tickets: []ticket{
+				{ID: 1, Subject: "T1", Description: "D", Status: "open", GeneratedTimestamp: 100, RequesterID: 10},
+			},
+			AfterCursor: "c1",
+			EndOfStream: true,
+		},
+		commentsErr: apiError{Method: "comments", Status: 502, Code: "bad_gateway"},
+		usersResult: []zendeskUser{{ID: 10, Name: "U", Email: "u@u.com"}},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	if len(ingest.Calls) != 0 {
+		t.Fatalf("transient comment failure must not ingest a comment-less snapshot, got %d calls", len(ingest.Calls))
+	}
+
+	// Comments recover → the full ticket lands with its thread (the
+	// first comment mirrors the description and is skipped by design).
+	fake.commentsErr = nil
+	fake.commentsByTicket = map[int64][]comment{
+		1: {
+			{ID: 5, Body: "D", Public: true, AuthorID: 10},
+			{ID: 6, Body: "Follow-up reply", Public: true, AuthorID: 10},
+		},
+	}
+	src2, _ := sources.Get(context.Background(), "src-ctrans")
+	a.pollSource(context.Background(), src2)
+	if len(ingest.Calls) != 1 {
+		t.Fatalf("expected ticket ingested after comment recovery, got %d", len(ingest.Calls))
+	}
+	if !strings.Contains(ingest.Calls[0].In.Content, "Follow-up reply") {
+		t.Errorf("recovered ingest missing comments: %q", ingest.Calls[0].In.Content)
+	}
+}
+
+// TestPollSource_DeterministicIngestErrorSkipsTicket: validation rejects
+// reproduce forever — the ticket is skipped and the cursor advances.
+func TestPollSource_DeterministicIngestErrorSkipsTicket(t *testing.T) {
+	fixedTime := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
+	origNow := nowFn
+	nowFn = func() time.Time { return fixedTime }
+	t.Cleanup(func() { nowFn = origNow })
+
+	secrets := inboundtest.FakeSecrets{}
+	tokenEnc, _ := secrets.Encrypt([]byte("token"))
+	cfg := Config{
+		Version: ConfigVersion, AuthMode: AuthModeAPIToken,
+		Subdomain: "acme", Email: "a@a.com",
+		APITokenEncrypted: tokenEnc, StartFrom: "full",
+	}
+
+	sources := newFakeSourcesWithConfig()
+	ingest := &inboundtest.FakeIngest{} // ptrext:allow mutex-identity
+	ingest.NextErr = errors.New("content is required")
+	metrics := ptrext.Of(inboundtest.FakeMetrics{})
+	deps := inbound.Deps{
+		Mux:     ptrext.Of(inboundtest.FakeMux{}),
+		Ingest:  inbound.IngestFunc(ingest.Ingest),
+		Sources: sources,
+		Secrets: secrets,
+		Metrics: metrics,
+	}
+
+	src := inbound.Source{
+		ID: "src-reject", TenantID: "t1", Channel: channelName,
+		Name: "Reject", Slug: "reject",
+		Config: buildTestConfig(t, cfg, secrets), Enabled: true,
+	}
+	sources.Put("t1", src)
+
+	fake := &fakeAPIClient{ // ptrext:allow test-fixture
+		ticketPage: ticketPage{
+			Tickets: []ticket{
+				{ID: 1, Subject: "T1", Description: "D", Status: "open", GeneratedTimestamp: 100, RequesterID: 10},
+			},
+			AfterCursor: "c-next",
+			EndOfStream: true,
+		},
+		usersResult: []zendeskUser{{ID: 10, Name: "U", Email: "u@u.com"}},
+	}
+
+	a := buildTestAdapter(fake, deps)
+	a.pollSource(context.Background(), src)
+
+	// The deterministic reject must not wedge the cursor.
+	blob, ok := sources.configUpdates["src-reject"]
+	if !ok {
+		t.Fatal("expected persisted config with advanced cursor")
+	}
+	decoded, err := secrets.Decrypt(blob)
+	if err != nil {
+		t.Fatalf("decrypt persisted config: %v", err)
+	}
+	var persisted Config
+	if err := json.Unmarshal(decoded, &persisted); err != nil { // ptrext:allow json-unmarshal
+		t.Fatalf("unmarshal persisted config: %v", err)
+	}
+	if persisted.SyncCursor != "c-next" {
+		t.Errorf("SyncCursor = %q, want c-next (deterministic reject skips, never wedges)", persisted.SyncCursor)
+	}
 }

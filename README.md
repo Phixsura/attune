@@ -16,7 +16,7 @@ Listening is passive. Attunement is active alignment.
 [user signals]
      │
      ▼
-HTTP webhook · email IMAP · Slack channel · Zendesk tickets · API client   ·   HMAC / cookie auth · rate-limited · deduped
+HTTP webhook · email IMAP · Slack channel · Zendesk tickets · Intercom conversations · API client   ·   HMAC / cookie auth · rate-limited · deduped
      │
      ▼
 ┌──────────────────────────────────────────────────────┐
@@ -206,7 +206,7 @@ internal/
     console/                 Console API (auth, feedback, settings, inbound source mgmt)
   inbound/                   #66 channel-agnostic ingest framework
     adapter/                 Per-channel inbound adapters
-      webhook/  email/  slack/  zendesk/
+      webhook/  email/  slack/  zendesk/  intercom/
     inboundtest/             Conformance suite + shared fakes
   notify/                    Outbound webhooks + Transport framework
     adapter/                 Per-destination senders

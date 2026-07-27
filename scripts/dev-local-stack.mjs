@@ -70,6 +70,9 @@ export function parseArgs(argv) {
       case '--tenant-name':
         options.tenantName = requiredValue(argv, ++index, arg)
         break
+      case '--intercom-stub':
+        options.intercomStubURL = requiredValue(argv, ++index, arg)
+        break
       default:
         throw new Error(`unknown option ${arg}`)
     }
@@ -83,9 +86,19 @@ export function renderConfig({
   consoleAdmin,
   consoleSessionKey,
   dsn,
+  intercomStubURL,
   keyset,
   serverPort,
 }) {
+  const intercomBlock = intercomStubURL
+    ? `
+intercom:
+  api_base_url: "${intercomStubURL}"
+
+security:
+  allow_loopback_egress: true
+`
+    : ''
   return `profile: dev
 port: ${serverPort}
 
@@ -98,7 +111,7 @@ console:
   bootstrap_admin:
     email: "${consoleAdmin.email}"
     password: "${consoleAdmin.password}"
-
+${intercomBlock}
 secrets:
   tink_keyset: |
 ${indent(keyset.trimEnd(), 4)}
@@ -123,6 +136,8 @@ Options:
   --admin-password <pass>   Console admin password, default ${DEFAULTS.adminPassword}
   --no-console-build        Reuse the current console/dist bundle
   --no-demo-bootstrap       Start without running "attune demo bootstrap"
+  --intercom-stub <url>     Point the Intercom adapter at a local stub API
+                            (also enables loopback egress for the dial)
   --keep-workdir            Keep temp config, data, and logs after exit
   -h, --help                Print this help
 `
@@ -230,6 +245,7 @@ async function main(argv) {
         consoleAdmin: { email: options.adminEmail, password: options.adminPassword },
         consoleSessionKey,
         dsn,
+        intercomStubURL: options.intercomStubURL,
         keyset,
         serverPort,
       }),
