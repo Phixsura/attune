@@ -283,6 +283,128 @@ func TestApplyDelta_SkipsDisabledSource(t *testing.T) {
 	_ = result
 }
 
+func TestApplyDelta_RemoveMembers(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+
+	sourceID := uuid.New()
+	mr.sources[sourceID] = &repo.Source{
+		ID: sourceID, TenantID: "t1", Provider: "amplitude", Enabled: true,
+	}
+
+	// First add members.
+	_, err := svc.ApplyDelta(context.Background(), "t1", sourceID, cohortsync.SyncPayload{
+		ExternalCohortID: "cohort-1",
+		CohortName:       "C",
+		Deltas: []cohortsync.MemberDelta{
+			{ExternalUserID: "u1", Action: "add"},
+			{ExternalUserID: "u2", Action: "add"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("add failed: %v", err)
+	}
+
+	// Then remove one member.
+	result, err := svc.ApplyDelta(context.Background(), "t1", sourceID, cohortsync.SyncPayload{
+		ExternalCohortID: "cohort-1",
+		CohortName:       "C",
+		Deltas: []cohortsync.MemberDelta{
+			{ExternalUserID: "u1", Action: "remove"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("remove failed: %v", err)
+	}
+	if result.Removed != 1 {
+		t.Errorf("Removed = %d, want 1", result.Removed)
+	}
+}
+
+func TestApplyFullSnapshot(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+
+	sourceID := uuid.New()
+	mr.sources[sourceID] = &repo.Source{
+		ID: sourceID, TenantID: "t1", Provider: "mixpanel", Enabled: true,
+	}
+
+	result, err := svc.ApplyFullSnapshot(context.Background(), "t1", sourceID, cohortsync.SyncPayload{
+		ExternalCohortID: "enterprise",
+		CohortName:       "Enterprise",
+		IsFullSnapshot:   true,
+		Deltas: []cohortsync.MemberDelta{
+			{ExternalUserID: "u1", Action: "add"},
+			{ExternalUserID: "u2", Action: "add"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ApplyFullSnapshot failed: %v", err)
+	}
+	if result.Added != 2 {
+		t.Errorf("Added = %d, want 2", result.Added)
+	}
+	if result.Cohort.Name != "Enterprise" {
+		t.Errorf("Cohort.Name = %q, want Enterprise", result.Cohort.Name)
+	}
+}
+
+func TestApplyFullSnapshot_SkipsDisabledCohort(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+
+	sourceID := uuid.New()
+	mr.sources[sourceID] = &repo.Source{
+		ID: sourceID, TenantID: "t1", Provider: "mixpanel", Enabled: true,
+	}
+
+	// Pre-seed a disabled cohort.
+	cohortID := uuid.New()
+	mr.cohorts[cohortID] = &repo.Cohort{
+		ID: cohortID, TenantID: "t1", CohortSourceID: sourceID,
+		ExternalCohortID: "disabled-cohort", Name: "Disabled", Enabled: false,
+	}
+
+	result, err := svc.ApplyFullSnapshot(context.Background(), "t1", sourceID, cohortsync.SyncPayload{
+		ExternalCohortID: "disabled-cohort",
+		CohortName:       "Disabled",
+		IsFullSnapshot:   true,
+		Deltas:           []cohortsync.MemberDelta{{ExternalUserID: "u1", Action: "add"}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyFullSnapshot failed: %v", err)
+	}
+	// Should be skipped.
+	for _, run := range mr.runs {
+		if run.Status != "skipped" {
+			t.Errorf("expected skipped run, got status=%q", run.Status)
+		}
+	}
+	_ = result
+}
+
+func TestApplyFullSnapshot_RejectsRunning(t *testing.T) {
+	mr := newMockRepo()
+	mr.hasRunning = true
+	svc := New(mr, mockStore{keyID: "k"})
+
+	sourceID := uuid.New()
+	mr.sources[sourceID] = &repo.Source{
+		ID: sourceID, TenantID: "t1", Provider: "mixpanel", Enabled: true,
+	}
+
+	_, err := svc.ApplyFullSnapshot(context.Background(), "t1", sourceID, cohortsync.SyncPayload{
+		ExternalCohortID: "c1",
+		CohortName:       "C",
+		IsFullSnapshot:   true,
+		Deltas:           []cohortsync.MemberDelta{{ExternalUserID: "u1", Action: "add"}},
+	})
+	if err == nil {
+		t.Fatal("expected conflict error for running sync")
+	}
+}
+
 func TestSplitDeltas(t *testing.T) {
 	deltas := []cohortsync.MemberDelta{
 		{ExternalUserID: "u1", Action: "add"},

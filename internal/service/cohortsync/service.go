@@ -535,8 +535,9 @@ func (s *Service) skipDisabledCohortRun(ctx context.Context, tenantID string, co
 
 func (s *Service) failRun(ctx context.Context, runID uuid.UUID, cause error) error {
 	msg := cause.Error()
-	if len(msg) > 2000 {
-		msg = msg[:2000]
+	if utf8.RuneCountInString(msg) > 2000 {
+		runes := []rune(msg)
+		msg = string(runes[:2000])
 	}
 	finishErr := s.repo.FinishRun(ctx, runID, "failed", 0, 0, 0, msg)
 	if finishErr != nil {

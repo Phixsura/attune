@@ -11,6 +11,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console"
+	consolecohortsync "github.com/Phixsura/attune/internal/handlers/console/cohortsync"
 	consolecustomerrequest "github.com/Phixsura/attune/internal/handlers/console/customerrequest"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
@@ -36,6 +37,7 @@ import (
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	auditlogviewrepo "github.com/Phixsura/attune/internal/repo/auditlogview"
 	breakglassrepo "github.com/Phixsura/attune/internal/repo/breakglass"
+	cohortsyncrepo "github.com/Phixsura/attune/internal/repo/cohortsync"
 	customerrequestrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	customerrequestviewrepo "github.com/Phixsura/attune/internal/repo/customerrequestview"
 	digestsubrepo "github.com/Phixsura/attune/internal/repo/digestsubscription"
@@ -71,6 +73,7 @@ import (
 	auditlogviewsvc "github.com/Phixsura/attune/internal/service/auditlogview"
 	authmodesvc "github.com/Phixsura/attune/internal/service/authmode"
 	breakglasssvc "github.com/Phixsura/attune/internal/service/breakglass"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	customerrequestsvc "github.com/Phixsura/attune/internal/service/customerrequest"
 	customerrequestviewsvc "github.com/Phixsura/attune/internal/service/customerrequestview"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -418,6 +421,7 @@ func buildSearchHandler(
 func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo, secrets *secretstore.TinkStore) {
 	attachOutboxHandler(router, pool, auditLogSvc)
 	attachExternalSyncHandler(router, pool, auditLogSvc, secrets)
+	attachCohortSyncHandler(router, pool, auditLogSvc, secrets)
 	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
@@ -433,6 +437,15 @@ func attachExternalSyncHandler(router *console.Router, pool *pgxpool.Pool, audit
 	svc := externalsyncsvc.New(externalsyncrepo.New(pool), secrets)
 	svc.SetAuditLogger(audit)
 	router.SetExternalSyncHandler(console.NewExternalSyncHandler(svc))
+}
+
+func attachCohortSyncHandler(router *console.Router, pool *pgxpool.Pool, audit *auditlogsvc.Service, secrets *secretstore.TinkStore) {
+	if secrets == nil {
+		return
+	}
+	svc := cohortsyncservice.New(cohortsyncrepo.New(pool), secrets)
+	svc.SetAuditLogger(audit)
+	router.SetCohortSyncHandler(consolecohortsync.NewHandler(svc))
 }
 
 // attachOutboxHandler wires the notify dead-queue console handler (#33). Kept

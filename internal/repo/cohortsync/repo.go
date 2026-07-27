@@ -319,6 +319,15 @@ func (r *Repo) UpsertMemberships(ctx context.Context, tenantID string, cohortID 
 	if len(members) == 0 {
 		return 0, nil
 	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin upsert membership tx: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
 	batch := pgx.Batch{}
 	for _, m := range members {
 		props := m.UserProperties
@@ -335,14 +344,23 @@ func (r *Repo) UpsertMemberships(ctx context.Context, tenantID string, cohortID 
 			       left_at = NULL, expires_at = NULL, last_seen_at = NOW()`,
 			tenantID, cohortID, m.ExternalUserID, m.Email, m.DisplayName, props)
 	}
-	br := r.pool.SendBatch(ctx, &batch) // ptrext:allow batch-send
-	defer func() { _ = br.Close() }()
+	br := tx.SendBatch(ctx, &batch) // ptrext:allow batch-send
 	for range members {
 		_, batchErr := br.Exec()
 		if batchErr != nil {
-			return touched, fmt.Errorf("upsert membership: %w", batchErr)
+			_ = br.Close()
+			err = fmt.Errorf("upsert membership: %w", batchErr)
+			return touched, err
 		}
 		touched++
+	}
+	if closeErr := br.Close(); closeErr != nil {
+		err = fmt.Errorf("close upsert batch: %w", closeErr)
+		return touched, err
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		err = fmt.Errorf("commit upsert membership tx: %w", commitErr)
+		return 0, err
 	}
 	return touched, nil
 }
