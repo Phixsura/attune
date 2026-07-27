@@ -318,6 +318,13 @@ func (r *Repo) Delete(ctx context.Context, tenantID, subjectKey string) (*Delete
 		return nil, err
 	}
 
+	// Cohort memberships: delete by external_user_id matching the subject key.
+	// This runs before feedback deletion to remove PII (email, display_name)
+	// stored by the cohort sync subsystem (#233).
+	if _, err := tx.Exec(ctx, `DELETE FROM cohort_memberships WHERE tenant_id = $1 AND external_user_id = $2`, tenantID, subjectKey); err != nil {
+		return nil, fmt.Errorf("delete cohort memberships: %w", err)
+	}
+
 	counts, err := deleteLockedSubject(ctx, tx, tenantID, info.feedbackIDs)
 	if err != nil {
 		return nil, err
@@ -352,6 +359,11 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 			return nil, ErrRequestNotFound
 		}
 		return nil, fmt.Errorf("load gdpr delete request: %w", err)
+	}
+
+	// Cohort memberships: see Delete() comment.
+	if _, err := tx.Exec(ctx, `DELETE FROM cohort_memberships WHERE tenant_id = $1 AND external_user_id = $2`, tenantID, subjectKey); err != nil {
+		return nil, fmt.Errorf("delete cohort memberships: %w", err)
 	}
 
 	info, err := subjectInfoTx(ctx, tx, tenantID, subjectKey)

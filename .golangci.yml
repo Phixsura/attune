@@ -133,6 +133,35 @@ linters:
               desc: "framework is below handlers"
             - pkg: github.com/Phixsura/attune/internal/notify
               desc: "outbound and notify are sibling subsystems"
+        # 5. cohortsync-boundary: nothing under service / handlers / repo /
+        #    infra may import internal/cohortsync/adapter/*. Adapters
+        #    self-register via init(); cmd/attune is the only legal
+        #    blank-import site. Mirrors inbound-boundary for cohortsync.
+        cohortsync-boundary:
+          list-mode: lax
+          files:
+            - "**/internal/service/**"
+            - "**/internal/handlers/**"
+            - "**/internal/repo/**"
+            - "**/internal/infra/**"
+            - "**/internal/cohortsync/*.go"
+          deny:
+            - pkg: github.com/Phixsura/attune/internal/cohortsync/adapter
+              desc: "cohortsync adapters self-register; only cmd/attune may blank-import (#233)"
+        # 6. cohortsync-framework-isolation: the framework root defines
+        #    Provider as the adapter interface; no imports from service /
+        #    repo / handlers.
+        cohortsync-framework-isolation:
+          list-mode: lax
+          files:
+            - "**/internal/cohortsync/*.go"
+          deny:
+            - pkg: github.com/Phixsura/attune/internal/service
+              desc: "cohortsync framework must not import service layer"
+            - pkg: github.com/Phixsura/attune/internal/repo
+              desc: "cohortsync framework must not import repo layer"
+            - pkg: github.com/Phixsura/attune/internal/handlers
+              desc: "cohortsync framework must not import handlers layer"
     revive:
       rules:
         - name: blank-imports

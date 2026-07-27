@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- Amplitude and Mixpanel cohort sync — import named cohorts as push
+  destinations; filter feedback and customer requests by cohort membership;
+  sync health visible in Console; stale membership handled via soft-delete
+  with configurable TTL; GDPR erasure cascades to cohort memberships (#233).
+
 ### Security
 
 - Removed `golang.org/x/crypto` from the root dependency graph and raised the
