@@ -6,6 +6,7 @@ package cohortsyncwebhook
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
@@ -162,8 +163,9 @@ func (h *Handler) authenticateSource(ctx context.Context, w http.ResponseWriter,
 	}
 
 	// Verify basic auth: the api key is the username, password is empty.
+	// Use constant-time comparison to prevent timing attacks.
 	username, _, _ := r.BasicAuth()
-	if username == "" || username != string(credential) {
+	if username == "" || subtle.ConstantTimeCompare([]byte(username), credential) != 1 {
 		logext.Warnf(ctx, "[%s] auth failed,tenant_id:%s,source_id:%s", where, tenantID, sourceID.String())
 		dispatcher.Reject(ctx, w, http.StatusUnauthorized, attunev1.ErrorCode_UNAUTHORIZED, "authentication failed")
 		return nil, nil, false
@@ -174,6 +176,10 @@ func (h *Handler) authenticateSource(ctx context.Context, w http.ResponseWriter,
 
 func parsePath(ctx context.Context, w http.ResponseWriter, r *http.Request) (string, uuid.UUID, bool) {
 	tenantID := chi.URLParam(r, "tenant_id")
+	if tenantID == "" {
+		dispatcher.Reject(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "tenant_id is required")
+		return "", uuid.Nil, false
+	}
 	sourceIDStr := chi.URLParam(r, "source_id")
 	sourceID, err := uuid.Parse(sourceIDStr)
 	if err != nil {

@@ -11,12 +11,12 @@ import (
 
 func TestMembershipUpsertEmptySlice(t *testing.T) {
 	r := New(nil) // pool not used for empty input
-	added, updated, err := r.UpsertMemberships(context.Background(), "t1", uuid.New(), nil)
+	touched, err := r.UpsertMemberships(context.Background(), "t1", uuid.New(), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if added != 0 || updated != 0 {
-		t.Errorf("got added=%d updated=%d, want 0,0", added, updated)
+	if touched != 0 {
+		t.Errorf("got touched=%d, want 0", touched)
 	}
 }
 

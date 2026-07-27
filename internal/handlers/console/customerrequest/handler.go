@@ -648,6 +648,9 @@ func BindListRequest(r *http.Request, req *attunev1.ListCustomerRequestsRequest)
 	if cursor := strings.TrimSpace(q.Get("cursor")); cursor != "" {
 		req.Cursor = ptrext.Of(cursor)
 	}
+	if cohortID := strings.TrimSpace(q.Get("cohort_id")); cohortID != "" {
+		req.CohortId = ptrext.Of(cohortID)
+	}
 	return bindListFeedbackID(q, req)
 }
 

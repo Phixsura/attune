@@ -34,6 +34,7 @@ var listFeedbackReservedQuery = map[string]struct{}{
 	"enriched_from":        {},
 	"enriched_to":          {},
 	"quality_signal":       {},
+	"cohort_id":            {},
 }
 
 func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
@@ -56,6 +57,7 @@ func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 	req.EnrichedFrom = queryStr(q, "enriched_from")
 	req.EnrichedTo = queryStr(q, "enriched_to")
 	req.QualitySignal = queryStr(q, "quality_signal")
+	req.CohortId = queryStr(q, "cohort_id")
 	for k, vs := range q {
 		if _, ok := listFeedbackReservedQuery[k]; ok {
 			continue

@@ -47,8 +47,9 @@ type Repo interface {
 	ListAllCohorts(ctx context.Context, tenantID string) ([]repo.Cohort, error)
 	UpdateCohort(ctx context.Context, in repo.Cohort) (*repo.Cohort, error)
 	UpdateCohortSyncResult(ctx context.Context, tenantID string, cohortID uuid.UUID, memberCount int, lastError string) error
-	UpsertMemberships(ctx context.Context, tenantID string, cohortID uuid.UUID, members []repo.MembershipUpsert) (added, updated int, err error)
+	UpsertMemberships(ctx context.Context, tenantID string, cohortID uuid.UUID, members []repo.MembershipUpsert) (touched int, err error)
 	MarkDeparted(ctx context.Context, tenantID string, cohortID uuid.UUID, staleTTLDays int, olderThan time.Time) (int64, error)
+	MarkMembersDeparted(ctx context.Context, tenantID string, cohortID uuid.UUID, staleTTLDays int, externalUserIDs []string) (int64, error)
 	CleanExpired(ctx context.Context) (int64, error)
 	CountActiveMembers(ctx context.Context, tenantID string, cohortID uuid.UUID) (int, error)
 	InsertRun(ctx context.Context, run repo.SyncRun) (*repo.SyncRun, error)
@@ -295,24 +296,21 @@ func (s *Service) ApplyDelta(ctx context.Context, tenantID string, sourceID uuid
 	}
 
 	adds, removes := splitDeltas(payload.Deltas)
-	added, _, err := s.repo.UpsertMemberships(ctx, tenantID, cohort.ID, adds)
+	added, err := s.repo.UpsertMemberships(ctx, tenantID, cohort.ID, adds)
 	if err != nil {
 		return nil, s.failRun(ctx, run.ID, err)
 	}
 
 	var removed int64
 	if len(removes) > 0 {
+		removeIDs := make([]string, 0, len(removes))
 		for _, rm := range removes {
-			departed, markErr := s.repo.MarkDeparted(ctx, tenantID, cohort.ID, cohort.StaleTTLDays, time.Now().Add(time.Second))
-			if markErr != nil {
-				return nil, s.failRun(ctx, run.ID, markErr)
-			}
-			_ = departed
-			_ = rm
+			removeIDs = append(removeIDs, rm.ExternalUserID)
 		}
-		// For remove deltas, we use a simpler approach: upsert with left_at set.
-		// Actually, the proper approach: upsert to mark them departed individually.
-		removed = int64(len(removes))
+		removed, err = s.repo.MarkMembersDeparted(ctx, tenantID, cohort.ID, cohort.StaleTTLDays, removeIDs)
+		if err != nil {
+			return nil, s.failRun(ctx, run.ID, err)
+		}
 	}
 
 	memberCount, err := s.repo.CountActiveMembers(ctx, tenantID, cohort.ID)
@@ -374,7 +372,7 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 	}
 
 	adds, _ := splitDeltas(payload.Deltas)
-	added, _, err := s.repo.UpsertMemberships(ctx, tenantID, cohort.ID, adds)
+	added, err := s.repo.UpsertMemberships(ctx, tenantID, cohort.ID, adds)
 	if err != nil {
 		return nil, s.failRun(ctx, run.ID, err)
 	}

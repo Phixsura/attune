@@ -126,13 +126,17 @@ func (m *mockRepo) UpdateCohortSyncResult(_ context.Context, _ string, _ uuid.UU
 	return nil
 }
 
-func (m *mockRepo) UpsertMemberships(_ context.Context, _ string, _ uuid.UUID, members []repo.MembershipUpsert) (int, int, error) {
+func (m *mockRepo) UpsertMemberships(_ context.Context, _ string, _ uuid.UUID, members []repo.MembershipUpsert) (int, error) {
 	m.memberAdded += len(members)
-	return len(members), 0, nil
+	return len(members), nil
 }
 
 func (m *mockRepo) MarkDeparted(_ context.Context, _ string, _ uuid.UUID, _ int, _ time.Time) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockRepo) MarkMembersDeparted(_ context.Context, _ string, _ uuid.UUID, _ int, ids []string) (int64, error) {
+	return int64(len(ids)), nil
 }
 
 func (m *mockRepo) CleanExpired(_ context.Context) (int64, error) { return 0, nil }

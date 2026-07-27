@@ -282,10 +282,15 @@ func (r *Repo) UpdateCohortSyncResult(ctx context.Context, tenantID string, coho
 
 // ---------- Memberships ----------
 
-// UpsertMemberships bulk-inserts or re-activates memberships. Returns counts.
-func (r *Repo) UpsertMemberships(ctx context.Context, tenantID string, cohortID uuid.UUID, members []MembershipUpsert) (added, updated int, err error) {
+// UpsertMemberships bulk-inserts or re-activates memberships.
+// Returns the total number of rows touched (inserts + re-activations).
+// PostgreSQL's INSERT ON CONFLICT DO UPDATE always reports RowsAffected=1,
+// so we cannot distinguish new inserts from updates without a RETURNING
+// + xmax trick that adds complexity. The total-touched count is accurate
+// enough for sync run display stats.
+func (r *Repo) UpsertMemberships(ctx context.Context, tenantID string, cohortID uuid.UUID, members []MembershipUpsert) (touched int, err error) {
 	if len(members) == 0 {
-		return 0, 0, nil
+		return 0, nil
 	}
 	batch := pgx.Batch{}
 	for _, m := range members {
@@ -306,18 +311,17 @@ func (r *Repo) UpsertMemberships(ctx context.Context, tenantID string, cohortID 
 	br := r.pool.SendBatch(ctx, &batch) // ptrext:allow batch-send
 	defer func() { _ = br.Close() }()
 	for range members {
-		tag, batchErr := br.Exec()
+		_, batchErr := br.Exec()
 		if batchErr != nil {
-			return added, updated, fmt.Errorf("upsert membership: %w", batchErr)
+			return touched, fmt.Errorf("upsert membership: %w", batchErr)
 		}
-		if tag.RowsAffected() > 0 {
-			added++
-		}
+		touched++
 	}
-	return added, updated, nil
+	return touched, nil
 }
 
 // MarkDeparted sets left_at + expires_at on active members not seen since olderThan.
+// Used for full-snapshot reconciliation (mark absent members as departed).
 func (r *Repo) MarkDeparted(ctx context.Context, tenantID string, cohortID uuid.UUID, staleTTLDays int, olderThan time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE cohort_memberships
@@ -330,6 +334,27 @@ func (r *Repo) MarkDeparted(ctx context.Context, tenantID string, cohortID uuid.
 		tenantID, cohortID, olderThan, staleTTLDays)
 	if err != nil {
 		return 0, fmt.Errorf("mark departed: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// MarkMembersDeparted sets left_at + expires_at on specific members by external_user_id.
+// Used for incremental remove deltas (Amplitude remove, Mixpanel remove_members).
+func (r *Repo) MarkMembersDeparted(ctx context.Context, tenantID string, cohortID uuid.UUID, staleTTLDays int, externalUserIDs []string) (int64, error) {
+	if len(externalUserIDs) == 0 {
+		return 0, nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE cohort_memberships
+		   SET left_at = NOW(),
+		       expires_at = NOW() + make_interval(days => $4)
+		 WHERE tenant_id = $1
+		   AND cohort_id = $2
+		   AND left_at IS NULL
+		   AND external_user_id = ANY($3)`,
+		tenantID, cohortID, externalUserIDs, staleTTLDays)
+	if err != nil {
+		return 0, fmt.Errorf("mark members departed: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
