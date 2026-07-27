@@ -193,6 +193,7 @@ func applyListOptionalOpts(req *attunev1.ListFeedbackRequest, opts *feedback.Con
 	opts.WorkflowCategory = req.WorkflowCategory
 	opts.EnrichmentStatus = req.EnrichmentStatus
 	opts.TerminalFailedOnly = req.TerminalFailedOnly
+	opts.CohortID = req.CohortId
 }
 
 func applyListQualityOpts(req *attunev1.ListFeedbackRequest, opts *feedback.ConsoleListOpts) error {

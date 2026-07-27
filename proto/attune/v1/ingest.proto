@@ -331,6 +331,7 @@ message ListFeedbackRequest {
   optional string quality_signal = 17;
   optional string source = 18;
   optional string type = 19;
+  optional string cohort_id = 20;
 }
 
 message ListFeedbackResponse {

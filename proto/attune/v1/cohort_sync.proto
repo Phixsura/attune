@@ -1,0 +1,194 @@
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
+
+// CohortSyncService manages tenant-scoped cohort source connections,
+// cohort definitions, and sync run history.
+service CohortSyncService {
+  rpc ListCohortSources(ListCohortSourcesRequest) returns (ListCohortSourcesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/sources"};
+  }
+  rpc CreateCohortSource(CreateCohortSourceRequest) returns (CohortSource) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/cohort-sync/sources"
+      body: "*"
+    };
+  }
+  rpc UpdateCohortSource(UpdateCohortSourceRequest) returns (CohortSource) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/cohort-sync/sources/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteCohortSource(DeleteCohortSourceRequest) returns (DeleteCohortSourceResponse) {
+    option (google.api.http) = {delete: "/fb/v1/console/cohort-sync/sources/{id}"};
+  }
+  rpc TestCohortSource(TestCohortSourceRequest) returns (TestCohortSourceResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/cohort-sync/sources/{id}:test"
+      body: "*"
+    };
+  }
+  rpc ListCohorts(ListCohortsRequest) returns (ListCohortsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/cohorts"};
+  }
+  rpc UpdateCohort(UpdateCohortRequest) returns (Cohort) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/cohort-sync/cohorts/{id}"
+      body: "*"
+    };
+  }
+  rpc SyncCohort(SyncCohortRequest) returns (SyncCohortResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/cohort-sync/cohorts/{id}:sync"
+      body: "*"
+    };
+  }
+  rpc ListCohortSyncRuns(ListCohortSyncRunsRequest) returns (ListCohortSyncRunsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/cohorts/{cohort_id}/runs"};
+  }
+  rpc GetCohortSyncHealth(GetCohortSyncHealthRequest) returns (CohortSyncHealth) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/health"};
+  }
+}
+
+// ---------- Sources ----------
+
+message CohortSource {
+  string id = 1;
+  string provider = 2;
+  string name = 3;
+  string auth_type = 4;
+  string base_url = 5;
+  bool enabled = 6;
+  string status = 7;
+  optional google.protobuf.Timestamp last_sync_at = 8;
+  string last_error = 9;
+  string webhook_url = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+message ListCohortSourcesRequest {}
+
+message ListCohortSourcesResponse {
+  repeated CohortSource sources = 1;
+}
+
+message CreateCohortSourceRequest {
+  string provider = 1;
+  string name = 2;
+  string auth_type = 3;
+  string credential = 4;
+  optional string webhook_secret = 5;
+  optional string base_url = 6;
+  optional string provider_config_json = 7;
+  bool enabled = 8;
+}
+
+message UpdateCohortSourceRequest {
+  string id = 1;
+  optional string name = 2;
+  optional bool enabled = 3;
+  optional string credential = 4;
+  optional string base_url = 5;
+  optional string provider_config_json = 6;
+}
+
+message DeleteCohortSourceRequest {
+  string id = 1;
+}
+
+message DeleteCohortSourceResponse {}
+
+message TestCohortSourceRequest {
+  string id = 1;
+}
+
+message TestCohortSourceResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+// ---------- Cohorts ----------
+
+message Cohort {
+  string id = 1;
+  string cohort_source_id = 2;
+  string external_cohort_id = 3;
+  string name = 4;
+  string description = 5;
+  int32 stale_ttl_days = 6;
+  int32 member_count = 7;
+  bool enabled = 8;
+  optional google.protobuf.Timestamp last_synced_at = 9;
+  string last_error = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+}
+
+message ListCohortsRequest {
+  optional string source_id = 1;
+}
+
+message ListCohortsResponse {
+  repeated Cohort cohorts = 1;
+}
+
+message UpdateCohortRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string description = 3;
+  optional int32 stale_ttl_days = 4;
+  optional bool enabled = 5;
+}
+
+message SyncCohortRequest {
+  string id = 1;
+}
+
+message SyncCohortResponse {
+  CohortSyncRun run = 1;
+}
+
+// ---------- Sync Runs ----------
+
+message CohortSyncRun {
+  string id = 1;
+  string cohort_id = 2;
+  string trigger = 3;
+  string status = 4;
+  int32 members_added = 5;
+  int32 members_removed = 6;
+  int32 members_total = 7;
+  string error_message = 8;
+  google.protobuf.Timestamp started_at = 9;
+  optional google.protobuf.Timestamp finished_at = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message ListCohortSyncRunsRequest {
+  string cohort_id = 1;
+  optional int32 limit = 2;
+}
+
+message ListCohortSyncRunsResponse {
+  repeated CohortSyncRun runs = 1;
+}
+
+// ---------- Health ----------
+
+message GetCohortSyncHealthRequest {}
+
+message CohortSyncHealth {
+  int32 source_count = 1;
+  int32 active_sources = 2;
+  int32 error_sources = 3;
+  int32 cohort_count = 4;
+  int32 total_active_members = 5;
+}

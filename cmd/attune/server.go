@@ -42,6 +42,7 @@ import (
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	cohortsyncrepo "github.com/Phixsura/attune/internal/repo/cohortsync"
 	enrichmentruntimerepo "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -58,6 +59,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -257,6 +259,9 @@ func startRuntimeWorkers(
 	externalSyncService := externalsyncsvc.New(externalsyncrepo.New(pool), secrets)
 	externalSyncWorker := externalsyncsvc.NewWorker(externalSyncService)
 	safego(ctx, "external_sync", func() { externalSyncWorker.Run(ctx) })
+
+	cohortSyncService := cohortsyncservice.New(cohortsyncrepo.New(pool), secrets)
+	safego(ctx, "cohort_sync_cleanup", func() { cohortSyncService.RunCleanupLoop(ctx, cohortsyncservice.DefaultCleanupInterval) })
 	safego(ctx, "outbox_lag_refresher", func() { runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo) })
 	safego(ctx, "audit_pruner", func() {
 		runAuditPruner(ctx, pool, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)

@@ -89,6 +89,7 @@ func (h *Handler) List(
 		Limit:         int(req.GetLimit()),
 		Cursor:        req.GetCursor(),
 		FeedbackID:    req.GetFeedbackId(),
+		CohortID:      req.CohortId,
 	})
 	if err != nil {
 		return h.listError(ctx, err)
