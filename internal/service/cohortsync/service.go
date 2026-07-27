@@ -98,6 +98,7 @@ type CreateSourceInput struct {
 	Name           string
 	AuthType       string
 	Credential     string
+	PullCredential string // Provider's API key + secret (e.g. "api_key:secret_key")
 	WebhookSecret  string
 	BaseURL        string
 	ProviderConfig string
@@ -145,22 +146,32 @@ func (s *Service) CreateSource(ctx context.Context, in CreateSourceInput) (*repo
 		}
 	}
 
+	var pullCred secretstore.EncryptedValue
+	if pc := strings.TrimSpace(in.PullCredential); pc != "" {
+		pullCred, err = s.store.EncryptValue([]byte(pc), sourcePullAAD(in.TenantID, id, in.Provider))
+		if err != nil {
+			return nil, fmt.Errorf("encrypt cohort pull credential: %w", err)
+		}
+	}
+
 	row, err := s.repo.CreateSource(ctx, repo.Source{
-		ID:                      id,
-		TenantID:                in.TenantID,
-		Provider:                in.Provider,
-		Name:                    in.Name,
-		AuthType:                in.AuthType,
-		CredentialKeyID:         encrypted.KeyID,
-		CredentialCiphertext:    encrypted.Ciphertext,
-		BaseURL:                 in.BaseURL,
-		ProviderConfig:          []byte(cfg),
-		WebhookSecretKeyID:      webhookSecret.KeyID,
-		WebhookSecretCiphertext: webhookSecret.Ciphertext,
-		Enabled:                 in.Enabled,
-		Status:                  sourceStatus(in.Enabled),
-		CreatedBy:               in.Actor.ID,
-		UpdatedBy:               in.Actor.ID,
+		ID:                       id,
+		TenantID:                 in.TenantID,
+		Provider:                 in.Provider,
+		Name:                     in.Name,
+		AuthType:                 in.AuthType,
+		CredentialKeyID:          encrypted.KeyID,
+		CredentialCiphertext:     encrypted.Ciphertext,
+		BaseURL:                  in.BaseURL,
+		ProviderConfig:           []byte(cfg),
+		WebhookSecretKeyID:       webhookSecret.KeyID,
+		WebhookSecretCiphertext:  webhookSecret.Ciphertext,
+		PullCredentialKeyID:      pullCred.KeyID,
+		PullCredentialCiphertext: pullCred.Ciphertext,
+		Enabled:                  in.Enabled,
+		Status:                   sourceStatus(in.Enabled),
+		CreatedBy:                in.Actor.ID,
+		UpdatedBy:                in.Actor.ID,
 	})
 	if err != nil {
 		return nil, err
@@ -201,6 +212,7 @@ type UpdateSourceInput struct {
 	Name           *string
 	Enabled        *bool
 	Credential     *string
+	PullCredential *string
 	BaseURL        *string
 	ProviderConfig *string
 	Actor          Actor
@@ -248,6 +260,20 @@ func (s *Service) UpdateSource(ctx context.Context, in UpdateSourceInput) (*repo
 		next.CredentialKeyID = encrypted.KeyID
 		next.CredentialCiphertext = encrypted.Ciphertext
 	}
+	if in.PullCredential != nil {
+		pc := strings.TrimSpace(ptrext.Indirect(in.PullCredential))
+		if pc != "" {
+			enc, err := s.store.EncryptValue([]byte(pc), sourcePullAAD(next.TenantID, next.ID, next.Provider))
+			if err != nil {
+				return nil, fmt.Errorf("encrypt pull credential: %w", err)
+			}
+			next.PullCredentialKeyID = enc.KeyID
+			next.PullCredentialCiphertext = enc.Ciphertext
+		} else {
+			next.PullCredentialKeyID = ""
+			next.PullCredentialCiphertext = nil
+		}
+	}
 	if next.Name == "" {
 		return nil, fmt.Errorf("%w: name is required", ErrValidation)
 	}
@@ -273,9 +299,9 @@ func (s *Service) TestSource(ctx context.Context, tenantID string, id uuid.UUID,
 		result := cohortsync.CheckResult{OK: false, Error: cohortsync.UnavailableError(source.Provider).Error()}
 		return result, cohortsync.UnavailableError(source.Provider)
 	}
-	credential, err := s.DecryptCredential(ptrext.Indirect(source))
+	pullCred, err := s.DecryptPullCredential(ptrext.Indirect(source))
 	if err != nil {
-		return cohortsync.CheckResult{}, err
+		return cohortsync.CheckResult{OK: false, Error: "pull credential not configured"}, nil
 	}
 	result, checkErr := provider.Check(ctx, cohortsync.Connection{
 		ID:             source.ID.String(),
@@ -285,7 +311,7 @@ func (s *Service) TestSource(ctx context.Context, tenantID string, id uuid.UUID,
 		AuthType:       source.AuthType,
 		BaseURL:        source.BaseURL,
 		ProviderConfig: source.ProviderConfig,
-		Credential:     credential,
+		Credential:     pullCred,
 	})
 	if checkErr != nil && result.Error == "" {
 		result.Error = redact(checkErr.Error())
@@ -302,6 +328,17 @@ func (s *Service) DecryptCredential(source repo.Source) ([]byte, error) {
 		KeyID:      source.CredentialKeyID,
 		Ciphertext: source.CredentialCiphertext,
 	}, sourceAAD(source.TenantID, source.ID, source.Provider))
+}
+
+// DecryptPullCredential decrypts the pull credential (provider API key + secret).
+func (s *Service) DecryptPullCredential(source repo.Source) ([]byte, error) {
+	if source.PullCredentialKeyID == "" || len(source.PullCredentialCiphertext) == 0 {
+		return nil, fmt.Errorf("%w: pull credential is not configured", ErrValidation)
+	}
+	return s.store.DecryptValue(secretstore.EncryptedValue{
+		KeyID:      source.PullCredentialKeyID,
+		Ciphertext: source.PullCredentialCiphertext,
+	}, sourcePullAAD(source.TenantID, source.ID, source.Provider))
 }
 
 // ---------- Cohort management ----------
@@ -540,9 +577,9 @@ func (s *Service) SyncNow(ctx context.Context, tenantID string, cohortID uuid.UU
 		return nil, cohortsync.UnavailableError(source.Provider)
 	}
 
-	credential, err := s.DecryptCredential(ptrext.Indirect(source))
+	pullCred, err := s.DecryptPullCredential(ptrext.Indirect(source))
 	if err != nil {
-		return nil, fmt.Errorf("decrypt cohort credential: %w", err)
+		return nil, fmt.Errorf("decrypt pull credential: %w", err)
 	}
 
 	payload, err := provider.PullCohort(ctx, cohortsync.Connection{
@@ -553,7 +590,7 @@ func (s *Service) SyncNow(ctx context.Context, tenantID string, cohortID uuid.UU
 		AuthType:       source.AuthType,
 		BaseURL:        source.BaseURL,
 		ProviderConfig: source.ProviderConfig,
-		Credential:     credential,
+		Credential:     pullCred,
 	}, cohort.ExternalCohortID)
 	if err != nil {
 		errMsg := redact(err.Error())
@@ -749,6 +786,10 @@ func sourceAAD(tenantID string, id uuid.UUID, provider string) []byte {
 
 func sourceWebhookAAD(tenantID string, id uuid.UUID, provider string) []byte {
 	return []byte("cohort_sources:" + tenantID + ":" + id.String() + ":" + provider + ":webhook_secret")
+}
+
+func sourcePullAAD(tenantID string, id uuid.UUID, provider string) []byte {
+	return []byte("cohort_sources:" + tenantID + ":" + id.String() + ":" + provider + ":pull_credential")
 }
 
 func (s *Service) record(ctx context.Context, actor auditlogsvc.Actor, tenantID, action, targetType, targetID, summary string, before, after any) {

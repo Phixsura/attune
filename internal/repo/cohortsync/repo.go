@@ -34,16 +34,8 @@ func New(pool *pgxpool.Pool) *Repo {
 // CreateSource inserts a new cohort source.
 func (r *Repo) CreateSource(ctx context.Context, in Source) (*Source, error) {
 	row := in
-	// Ensure byte slices are non-nil so pgx sends empty bytes, not SQL NULL,
-	// for NOT NULL BYTEA columns with DEFAULT ''.
-	cred := row.CredentialCiphertext
-	if cred == nil {
-		cred = []byte{}
-	}
-	wsCipher := row.WebhookSecretCiphertext
-	if wsCipher == nil {
-		wsCipher = []byte{}
-	}
+	cred := nilGuardBytes(row.CredentialCiphertext)
+	wsCipher := nilGuardBytes(row.WebhookSecretCiphertext)
 	cfg := row.ProviderConfig
 	if cfg == nil {
 		cfg = []byte("{}")
@@ -51,13 +43,16 @@ func (r *Repo) CreateSource(ctx context.Context, in Source) (*Source, error) {
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO cohort_sources (id, tenant_id, provider, name, auth_type,
 		       credential_key_id, credential_ciphertext, base_url, provider_config,
-		       webhook_secret_key_id, webhook_secret_ciphertext, enabled, status,
+		       webhook_secret_key_id, webhook_secret_ciphertext,
+		       pull_credential_key_id, pull_credential_ciphertext, enabled, status,
 		       created_by, updated_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 		RETURNING created_at, updated_at`,
 		row.ID, row.TenantID, row.Provider, row.Name, row.AuthType,
 		row.CredentialKeyID, cred, row.BaseURL, cfg,
-		row.WebhookSecretKeyID, wsCipher, row.Enabled, row.Status,
+		row.WebhookSecretKeyID, wsCipher,
+		row.PullCredentialKeyID, nilGuardBytes(row.PullCredentialCiphertext),
+		row.Enabled, row.Status,
 		row.CreatedBy, row.UpdatedBy,
 	).Scan(&row.CreatedAt, &row.UpdatedAt) // ptrext:allow scan-out-param
 	if err != nil {
@@ -71,7 +66,8 @@ func (r *Repo) GetSource(ctx context.Context, tenantID string, id uuid.UUID) (*S
 	row, err := scanSource(r.pool.QueryRow(ctx, `
 		SELECT id, tenant_id, provider, name, auth_type,
 		       credential_key_id, credential_ciphertext, base_url, provider_config,
-		       webhook_secret_key_id, webhook_secret_ciphertext, enabled, status,
+		       webhook_secret_key_id, webhook_secret_ciphertext,
+		       pull_credential_key_id, pull_credential_ciphertext, enabled, status,
 		       last_sync_at, last_error, created_by, updated_by, created_at, updated_at
 		  FROM cohort_sources
 		 WHERE tenant_id = $1 AND id = $2`, tenantID, id))
@@ -89,7 +85,8 @@ func (r *Repo) ListSources(ctx context.Context, tenantID string) ([]Source, erro
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tenant_id, provider, name, auth_type,
 		       credential_key_id, credential_ciphertext, base_url, provider_config,
-		       webhook_secret_key_id, webhook_secret_ciphertext, enabled, status,
+		       webhook_secret_key_id, webhook_secret_ciphertext,
+		       pull_credential_key_id, pull_credential_ciphertext, enabled, status,
 		       last_sync_at, last_error, created_by, updated_by, created_at, updated_at
 		  FROM cohort_sources
 		 WHERE tenant_id = $1
@@ -130,12 +127,14 @@ func (r *Repo) UpdateSource(ctx context.Context, in Source) (*Source, error) {
 		   SET name = $3, enabled = $4, status = $5, base_url = $6,
 		       provider_config = $7, credential_key_id = $8, credential_ciphertext = $9,
 		       webhook_secret_key_id = $10, webhook_secret_ciphertext = $11,
-		       last_error = $12, updated_by = $13, updated_at = NOW()
+		       pull_credential_key_id = $12, pull_credential_ciphertext = $13,
+		       last_error = $14, updated_by = $15, updated_at = NOW()
 		 WHERE tenant_id = $1 AND id = $2
 		RETURNING updated_at`,
 		row.TenantID, row.ID, row.Name, row.Enabled, row.Status, row.BaseURL,
 		cfg, row.CredentialKeyID, cred,
 		row.WebhookSecretKeyID, wsCipher,
+		row.PullCredentialKeyID, nilGuardBytes(row.PullCredentialCiphertext),
 		row.LastError, row.UpdatedBy,
 	).Scan(&row.UpdatedAt) // ptrext:allow scan-out-param
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -547,12 +546,21 @@ type scannable interface {
 	Scan(dest ...any) error
 }
 
+func nilGuardBytes(b []byte) []byte {
+	if b == nil {
+		return []byte{}
+	}
+	return b
+}
+
 func scanSource(s scannable) (Source, error) {
 	var row Source
 	err := s.Scan(
 		&row.ID, &row.TenantID, &row.Provider, &row.Name, &row.AuthType,
 		&row.CredentialKeyID, &row.CredentialCiphertext, &row.BaseURL, &row.ProviderConfig,
-		&row.WebhookSecretKeyID, &row.WebhookSecretCiphertext, &row.Enabled, &row.Status,
+		&row.WebhookSecretKeyID, &row.WebhookSecretCiphertext,
+		&row.PullCredentialKeyID, &row.PullCredentialCiphertext,
+		&row.Enabled, &row.Status,
 		&row.LastSyncAt, &row.LastError, &row.CreatedBy, &row.UpdatedBy,
 		&row.CreatedAt, &row.UpdatedAt,
 	) // ptrext:allow scan-out-param

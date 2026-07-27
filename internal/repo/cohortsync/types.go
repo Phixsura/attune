@@ -18,25 +18,27 @@ var (
 
 // Source is one provider connection (Amplitude project, Mixpanel project).
 type Source struct {
-	ID                      uuid.UUID
-	TenantID                string
-	Provider                string
-	Name                    string
-	AuthType                string
-	CredentialKeyID         string
-	CredentialCiphertext    []byte
-	BaseURL                 string
-	ProviderConfig          []byte
-	WebhookSecretKeyID      string
-	WebhookSecretCiphertext []byte
-	Enabled                 bool
-	Status                  string
-	LastSyncAt              *time.Time
-	LastError               string
-	CreatedBy               string
-	UpdatedBy               string
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
+	ID                       uuid.UUID
+	TenantID                 string
+	Provider                 string
+	Name                     string
+	AuthType                 string
+	CredentialKeyID          string
+	CredentialCiphertext     []byte
+	BaseURL                  string
+	ProviderConfig           []byte
+	WebhookSecretKeyID       string
+	WebhookSecretCiphertext  []byte
+	PullCredentialKeyID      string
+	PullCredentialCiphertext []byte
+	Enabled                  bool
+	Status                   string
+	LastSyncAt               *time.Time
+	LastError                string
+	CreatedBy                string
+	UpdatedBy                string
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 // Cohort is one synced cohort definition.

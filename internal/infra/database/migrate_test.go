@@ -242,7 +242,7 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 118, count, "should match current migration count")
+	require.Equal(t, 119, count, "should match current migration count")
 }
 
 func firstEffectiveLine(body []byte) string {
