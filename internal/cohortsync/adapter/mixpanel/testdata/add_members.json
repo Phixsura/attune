@@ -1,0 +1,8 @@
+{
+  "action": "add_members",
+  "cohort_name": "Enterprise Accounts",
+  "cohort_id": "cohort-xyz",
+  "members": [
+    {"email": "carol@example.com", "mixpanel_distinct_id": "uid-3", "first_name": "Carol", "last_name": "Doe"}
+  ]
+}
