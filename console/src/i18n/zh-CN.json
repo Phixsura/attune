@@ -140,7 +140,8 @@
     "mcp_clients": "MCP 客户端",
     "system_readiness": "系统就绪",
     "reliability": "可靠性总览",
-    "security": "安全设置"
+    "security": "安全设置",
+    "cohort_sync": "人群同步"
   },
   "public_visibility": {
     "subtitle": "统一管理公开入口、审核队列和公开字段边界。",
