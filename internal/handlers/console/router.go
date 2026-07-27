@@ -3253,6 +3253,33 @@ func (r *Router) mountCohortSync(m chi.Router) {
 			r.cohortSync.CreateSource,
 			dispatcher.WithAuth(sessionAuth[attunev1.CreateCohortSourceRequest]),
 		))
+		cs.Patch("/sources/{id}", dispatcher.Bind(
+			"console.CohortSyncHandler.UpdateSource",
+			dispatcher.Combine(
+				func() *attunev1.UpdateCohortSourceRequest {
+					return ptrext.Of(attunev1.UpdateCohortSourceRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.UpdateCohortSourceRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateCohortSourceRequest, v string) {
+					req.Id = v
+				}),
+			),
+			r.cohortSync.UpdateSource,
+			dispatcher.WithAuth(sessionAuth[attunev1.UpdateCohortSourceRequest]),
+		))
+		cs.Post("/sources/{id}:test", dispatcher.Bind(
+			"console.CohortSyncHandler.TestSource",
+			dispatcher.Path(
+				func() *attunev1.TestCohortSourceRequest {
+					return ptrext.Of(attunev1.TestCohortSourceRequest{})
+				},
+				dispatcher.Param("id", func(req *attunev1.TestCohortSourceRequest, v string) {
+					req.Id = v
+				}),
+			),
+			r.cohortSync.TestSource,
+			dispatcher.WithAuth(sessionAuth[attunev1.TestCohortSourceRequest]),
+		))
 		cs.Delete("/sources/{id}", dispatcher.Bind(
 			"console.CohortSyncHandler.DeleteSource",
 			dispatcher.Path(

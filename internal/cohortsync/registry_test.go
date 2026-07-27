@@ -11,6 +11,11 @@ import (
 type stubProvider struct{ name string }
 
 func (p stubProvider) Provider() string { return p.name }
+
+func (p stubProvider) Check(_ context.Context, _ Connection) (CheckResult, error) {
+	return CheckResult{OK: true}, nil
+}
+
 func (p stubProvider) ParseWebhook([]byte, map[string]string, []byte) (SyncPayload, error) {
 	return SyncPayload{}, nil
 }

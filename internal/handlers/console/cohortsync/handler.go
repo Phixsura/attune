@@ -14,6 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/Phixsura/attune/internal/cohortsync"
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -26,6 +27,8 @@ import (
 
 type service interface {
 	CreateSource(ctx context.Context, in svc.CreateSourceInput) (*repo.Source, error)
+	UpdateSource(ctx context.Context, in svc.UpdateSourceInput) (*repo.Source, error)
+	TestSource(ctx context.Context, tenantID string, id uuid.UUID, auditActor auditlogsvc.Actor) (cohortsync.CheckResult, error)
 	GetSource(ctx context.Context, tenantID string, id uuid.UUID) (*repo.Source, error)
 	ListSources(ctx context.Context, tenantID string) ([]repo.Source, error)
 	DeleteSource(ctx context.Context, tenantID string, id uuid.UUID, actor svc.Actor, auditActor auditlogsvc.Actor) error
@@ -104,6 +107,55 @@ func (h *Handler) DeleteSource(
 		return mapError[*attunev1.DeleteCohortSourceResponse](ctx, "DeleteSource", err)
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.DeleteCohortSourceResponse{}))
+}
+
+// UpdateSource updates a cohort source.
+func (h *Handler) UpdateSource(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.UpdateCohortSourceRequest,
+) (dispatcher.Result[*attunev1.CohortSource], error) {
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CohortSource](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid source id")
+	}
+	updated, err := h.service.UpdateSource(ctx, svc.UpdateSourceInput{
+		TenantID:       ctx.Auth.TenantID,
+		ID:             id,
+		Name:           req.Name,
+		Enabled:        req.Enabled,
+		Credential:     req.Credential,
+		BaseURL:        req.BaseUrl,
+		ProviderConfig: req.ProviderConfigJson,
+		Actor:          svc.Actor{Type: ctx.Auth.UserType, ID: ctx.Auth.UserID},
+		AuditActor:     auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()),
+	})
+	if err != nil {
+		return mapError[*attunev1.CohortSource](ctx, "UpdateSource", err)
+	}
+	return dispatcher.OK(sourceToProto(ptrext.Indirect(updated)))
+}
+
+// TestSource tests connectivity of a cohort source.
+func (h *Handler) TestSource(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.TestCohortSourceRequest,
+) (dispatcher.Result[*attunev1.TestCohortSourceResponse], error) {
+	id, err := uuid.Parse(req.GetId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.TestCohortSourceResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid source id")
+	}
+	result, testErr := h.service.TestSource(ctx, ctx.Auth.TenantID, id,
+		auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()))
+	errMsg := ""
+	if testErr != nil {
+		errMsg = result.Error
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.TestCohortSourceResponse{
+		Ok:    result.OK,
+		Error: errMsg,
+	}))
 }
 
 // ListCohorts returns cohorts, optionally filtered by source.

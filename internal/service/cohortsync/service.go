@@ -194,6 +194,108 @@ func (s *Service) DeleteSource(ctx context.Context, tenantID string, id uuid.UUI
 	return nil
 }
 
+// UpdateSourceInput is the input for updating a cohort source.
+type UpdateSourceInput struct {
+	TenantID       string
+	ID             uuid.UUID
+	Name           *string
+	Enabled        *bool
+	Credential     *string
+	BaseURL        *string
+	ProviderConfig *string
+	Actor          Actor
+	AuditActor     auditlogsvc.Actor
+}
+
+// UpdateSource updates mutable fields of a cohort source.
+func (s *Service) UpdateSource(ctx context.Context, in UpdateSourceInput) (*repo.Source, error) {
+	current, err := s.repo.GetSource(ctx, in.TenantID, in.ID)
+	if err != nil {
+		return nil, err
+	}
+	next := ptrext.Indirect(current)
+	if in.Name != nil {
+		next.Name = strings.TrimSpace(ptrext.Indirect(in.Name))
+	}
+	if in.Enabled != nil {
+		next.Enabled = ptrext.Indirect(in.Enabled)
+		next.Status = sourceStatus(next.Enabled)
+	}
+	if in.BaseURL != nil {
+		next.BaseURL = strings.TrimSpace(ptrext.Indirect(in.BaseURL))
+		if next.BaseURL != "" {
+			if err := cohortsync.ValidateProviderURL(next.BaseURL); err != nil {
+				return nil, fmt.Errorf("%w: base_url: %s", ErrValidation, err.Error())
+			}
+		}
+	}
+	if in.ProviderConfig != nil {
+		cfg, err := normalizeJSONObject(ptrext.Indirect(in.ProviderConfig))
+		if err != nil {
+			return nil, err
+		}
+		next.ProviderConfig = []byte(cfg)
+	}
+	if in.Credential != nil {
+		cred := strings.TrimSpace(ptrext.Indirect(in.Credential))
+		if cred == "" {
+			return nil, fmt.Errorf("%w: credential is required", ErrValidation)
+		}
+		encrypted, err := s.store.EncryptValue([]byte(cred), sourceAAD(next.TenantID, next.ID, next.Provider))
+		if err != nil {
+			return nil, fmt.Errorf("encrypt cohort credential: %w", err)
+		}
+		next.CredentialKeyID = encrypted.KeyID
+		next.CredentialCiphertext = encrypted.Ciphertext
+	}
+	if next.Name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	next.UpdatedBy = in.Actor.ID
+	updated, err := s.repo.UpdateSource(ctx, next)
+	if err != nil {
+		return nil, err
+	}
+	s.record(ctx, in.AuditActor, in.TenantID, "cohort_source.update",
+		"cohort_source", updated.ID.String(), "Updated cohort source",
+		sourceAudit(current), sourceAudit(updated))
+	return updated, nil
+}
+
+// TestSource verifies connectivity to the provider by calling the adapter's Check method.
+func (s *Service) TestSource(ctx context.Context, tenantID string, id uuid.UUID, auditActor auditlogsvc.Actor) (cohortsync.CheckResult, error) {
+	source, err := s.repo.GetSource(ctx, tenantID, id)
+	if err != nil {
+		return cohortsync.CheckResult{}, err
+	}
+	provider, ok := cohortsync.Lookup(source.Provider)
+	if !ok {
+		result := cohortsync.CheckResult{OK: false, Error: cohortsync.UnavailableError(source.Provider).Error()}
+		return result, cohortsync.UnavailableError(source.Provider)
+	}
+	credential, err := s.DecryptCredential(ptrext.Indirect(source))
+	if err != nil {
+		return cohortsync.CheckResult{}, err
+	}
+	result, checkErr := provider.Check(ctx, cohortsync.Connection{
+		ID:             source.ID.String(),
+		TenantID:       source.TenantID,
+		Provider:       source.Provider,
+		Name:           source.Name,
+		AuthType:       source.AuthType,
+		BaseURL:        source.BaseURL,
+		ProviderConfig: source.ProviderConfig,
+		Credential:     credential,
+	})
+	if checkErr != nil && result.Error == "" {
+		result.Error = redact(checkErr.Error())
+	}
+	s.record(ctx, auditActor, tenantID, "cohort_source.update",
+		"cohort_source", id.String(), "Tested cohort source", nil,
+		map[string]any{"provider": source.Provider, "ok": result.OK, "error": result.Error})
+	return result, checkErr
+}
+
 // DecryptCredential decrypts the stored credential for a source.
 func (s *Service) DecryptCredential(source repo.Source) ([]byte, error) {
 	return s.store.DecryptValue(secretstore.EncryptedValue{

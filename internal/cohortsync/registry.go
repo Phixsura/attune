@@ -49,10 +49,19 @@ type SyncPayload struct {
 	Deltas           []MemberDelta
 }
 
+// CheckResult is returned by provider connectivity probes.
+type CheckResult struct {
+	OK    bool
+	Error string
+}
+
 // Provider is the adapter interface for a cohort analytics provider.
 type Provider interface {
 	// Provider returns the stable provider token (e.g. "amplitude").
 	Provider() string
+
+	// Check verifies connectivity and credential validity against the provider.
+	Check(ctx context.Context, conn Connection) (CheckResult, error)
 
 	// ParseWebhook normalizes a raw HTTP request body into a SyncPayload.
 	// The handler reads the body and passes it as bytes (not *http.Request)

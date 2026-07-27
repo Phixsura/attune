@@ -32,6 +32,29 @@ func init() {
 // Provider returns the stable provider token.
 func (a *Adapter) Provider() string { return providerID }
 
+// Check verifies Mixpanel API credentials by calling the Engage API with limit=0.
+func (a *Adapter) Check(ctx context.Context, conn core.Connection) (core.CheckResult, error) {
+	baseURL := conn.BaseURL
+	if baseURL == "" {
+		baseURL = "https://mixpanel.com"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/2.0/engage?page_size=0", nil)
+	if err != nil {
+		return core.CheckResult{OK: false, Error: err.Error()}, err
+	}
+	req.SetBasicAuth(string(conn.Credential), "")
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return core.CheckResult{OK: false, Error: err.Error()}, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode == http.StatusOK {
+		return core.CheckResult{OK: true}, nil
+	}
+	msg := fmt.Sprintf("mixpanel API returned %d", resp.StatusCode)
+	return core.CheckResult{OK: false, Error: msg}, fmt.Errorf("%s", msg)
+}
+
 // webhookPayload is the JSON shape Mixpanel sends to custom webhook destinations.
 type webhookPayload struct {
 	Action            string          `json:"action"`
