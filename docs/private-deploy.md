@@ -1244,3 +1244,18 @@ the user ID used in Amplitude/Mixpanel.
 When a user leaves a cohort, their membership is soft-deleted with a
 configurable TTL (default 30 days). After the TTL expires, a daily
 cleanup job removes the row. Adjust the TTL per-cohort in Console.
+
+### Adding a new cohort sync provider
+
+To add a third cohort analytics provider (e.g. PostHog):
+
+1. Create `internal/cohortsync/adapter/<provider>/adapter.go`
+2. Implement the `cohortsync.Provider` interface:
+   - `Provider()` — return the provider token (lowercase, e.g. "posthog")
+   - `Check(ctx, conn)` — verify credentials via a lightweight API call
+   - `ParseWebhook(body, headers, secret)` — normalize incoming webhook
+   - `PullCohort(ctx, conn, cohortID)` — fetch full membership
+3. Register via `init()`: `core.Register("posthog", "PostHog", factory)`
+4. Add blank import in `cmd/attune/main.go`
+5. Extend `chk_cohort_sources_provider` CHECK constraint (migration)
+6. Add fixture test data in `adapter/<provider>/testdata/`
