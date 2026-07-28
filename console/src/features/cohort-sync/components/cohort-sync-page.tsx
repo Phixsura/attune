@@ -63,7 +63,7 @@ export function CohortSyncPage() {
       setCreateOpen(false)
       setCreatedSource(source)
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+    onError: (err) => toast.error(friendlyError(err, t)),
   })
 
   const updateM = useMutation({
@@ -80,7 +80,7 @@ export function CohortSyncPage() {
       toast.success(t('common.save'))
       setEditSource(null)
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+    onError: (err) => toast.error(friendlyError(err, t)),
   })
 
   const deleteM = useMutation({
@@ -90,7 +90,7 @@ export function CohortSyncPage() {
       toast.success(t('common.delete'))
       setDeleteSource(null)
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+    onError: (err) => toast.error(friendlyError(err, t)),
   })
 
   const testM = useMutation({
@@ -103,7 +103,7 @@ export function CohortSyncPage() {
         toast.error(t('cohort_sync.source.test_fail', { error: result.error }))
       }
     },
-    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+    onError: (err) => toast.error(friendlyError(err, t)),
   })
 
   if (sourcesQ.isLoading || cohortsQ.isLoading || healthQ.isLoading) {
@@ -252,6 +252,17 @@ export function CohortSyncPage() {
       )}
     </>
   )
+}
+
+/** Map common backend error messages to user-friendly i18n text. */
+function friendlyError(err: unknown, t: (key: string) => string): string {
+  const msg = err instanceof Error ? err.message : ''
+  if (msg.includes('source name already exists')) return t('cohort_sync.errors.name_taken')
+  if (msg.includes('credential is required')) return t('cohort_sync.errors.credential_required')
+  if (msg.includes('a sync is already running')) return t('cohort_sync.errors.sync_running')
+  if (msg.includes('cannot delete source while sync is running'))
+    return t('cohort_sync.errors.delete_while_running')
+  return msg || t('common.error')
 }
 
 export { cohortSyncHealthQuery, listCohortSourcesQuery, listCohortsQuery }
