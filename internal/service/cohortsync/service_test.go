@@ -1463,3 +1463,228 @@ func TestSyncNow_SourceNotFound(t *testing.T) {
 		t.Fatalf("expected ErrSourceNotFound, got %v", err)
 	}
 }
+
+// --- Additional passthrough and simple method tests for coverage ---
+
+func TestListSources(t *testing.T) {
+	mr := newMockRepo()
+	id := uuid.New()
+	mr.sources[id] = &repo.Source{ID: id, TenantID: "t1", Provider: "amplitude", Name: "S1"}
+	svc := New(mr, mockStore{keyID: "k"})
+	sources, err := svc.ListSources(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("ListSources failed: %v", err)
+	}
+	if len(sources) != 1 {
+		t.Errorf("len = %d, want 1", len(sources))
+	}
+}
+
+func TestListCohorts_BySource(t *testing.T) {
+	mr := newMockRepo()
+	sourceID := uuid.New()
+	cID := uuid.New()
+	mr.cohorts[cID] = &repo.Cohort{ID: cID, TenantID: "t1", CohortSourceID: sourceID, Name: "C1"}
+	svc := New(mr, mockStore{keyID: "k"})
+	cohorts, err := svc.ListCohorts(context.Background(), "t1", sourceID)
+	if err != nil {
+		t.Fatalf("ListCohorts failed: %v", err)
+	}
+	if len(cohorts) != 1 {
+		t.Errorf("len = %d, want 1", len(cohorts))
+	}
+}
+
+func TestListAllCohorts_Returns(t *testing.T) {
+	mr := newMockRepo()
+	cID := uuid.New()
+	mr.cohorts[cID] = &repo.Cohort{ID: cID, TenantID: "t1", Name: "All"}
+	svc := New(mr, mockStore{keyID: "k"})
+	cohorts, err := svc.ListAllCohorts(context.Background(), "t1")
+	if err != nil {
+		t.Fatalf("ListAllCohorts failed: %v", err)
+	}
+	if len(cohorts) != 1 {
+		t.Errorf("len = %d, want 1", len(cohorts))
+	}
+}
+
+func TestCleanExpired_Delegates(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+	_, err := svc.CleanExpired(context.Background())
+	if err != nil {
+		t.Fatalf("CleanExpired failed: %v", err)
+	}
+}
+
+func TestListRuns_Delegates(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+	_, err := svc.ListRuns(context.Background(), "t1", uuid.New(), 10)
+	if err != nil {
+		t.Fatalf("ListRuns failed: %v", err)
+	}
+}
+
+func TestRecordEvent_Delegates(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+	_, err := svc.RecordEvent(context.Background(), repo.SyncEvent{TenantID: "t1"})
+	if err != nil {
+		t.Fatalf("RecordEvent failed: %v", err)
+	}
+}
+
+func TestUpdateEventStatus_Delegates(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+	err := svc.UpdateEventStatus(context.Background(), uuid.New(), "processed", nil, "")
+	if err != nil {
+		t.Fatalf("UpdateEventStatus failed: %v", err)
+	}
+}
+
+func TestDecryptCredential(t *testing.T) {
+	svc := New(newMockRepo(), mockStore{keyID: "k"})
+	src := repo.Source{
+		ID: uuid.New(), TenantID: "t1", Provider: "amplitude",
+		CredentialKeyID: "k", CredentialCiphertext: []byte("secret"),
+	}
+	val, err := svc.DecryptCredential(src)
+	if err != nil {
+		t.Fatalf("DecryptCredential failed: %v", err)
+	}
+	if string(val) != "secret" {
+		t.Errorf("got %q, want secret", string(val))
+	}
+}
+
+func TestUpdateCohort_Success(t *testing.T) {
+	mr := newMockRepo()
+	cID := uuid.New()
+	mr.cohorts[cID] = &repo.Cohort{
+		ID: cID, TenantID: "t1", Name: "Old", StaleTTLDays: 30, Enabled: true,
+	}
+	svc := New(mr, mockStore{keyID: "k"})
+	svc.SetAuditLogger(&mockAudit{})
+	name := "New"
+	ttl := 60
+	updated, err := svc.UpdateCohort(context.Background(), UpdateCohortInput{
+		TenantID: "t1", ID: cID, Name: &name, StaleTTLDays: &ttl,
+		Actor:      Actor{Type: "admin", ID: "u1"},
+		AuditActor: auditlogsvc.Actor{Type: "admin", ID: "u1"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateCohort failed: %v", err)
+	}
+	if updated.Name != "New" {
+		t.Errorf("Name = %q, want New", updated.Name)
+	}
+}
+
+func TestUpdateCohort_EmptyName(t *testing.T) {
+	mr := newMockRepo()
+	cID := uuid.New()
+	mr.cohorts[cID] = &repo.Cohort{
+		ID: cID, TenantID: "t1", Name: "X", StaleTTLDays: 30, Enabled: true,
+	}
+	svc := New(mr, mockStore{keyID: "k"})
+	empty := ""
+	_, err := svc.UpdateCohort(context.Background(), UpdateCohortInput{
+		TenantID: "t1", ID: cID, Name: &empty,
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestCreateSource_WithWebhookSecret(t *testing.T) {
+	mr := newMockRepo()
+	svc := New(mr, mockStore{keyID: "k"})
+	src, err := svc.CreateSource(context.Background(), CreateSourceInput{
+		TenantID:       "t1",
+		Provider:       "amplitude",
+		Name:           "WithSecret",
+		AuthType:       "api_key",
+		Credential:     "cred",
+		WebhookSecret:  "ws",
+		BaseURL:        "https://custom.amp.io",
+		ProviderConfig: `{"foo":"bar"}`,
+		Enabled:        true,
+		Actor:          Actor{Type: "admin", ID: "u1"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSource failed: %v", err)
+	}
+	if src.Name != "WithSecret" {
+		t.Errorf("Name = %q", src.Name)
+	}
+	if src.WebhookSecretKeyID != "k" {
+		t.Errorf("WebhookSecretKeyID = %q, want k", src.WebhookSecretKeyID)
+	}
+	if src.BaseURL != "https://custom.amp.io" {
+		t.Errorf("BaseURL = %q", src.BaseURL)
+	}
+}
+
+func TestCreateSource_InvalidProvider(t *testing.T) {
+	svc := New(newMockRepo(), mockStore{keyID: "k"})
+	_, err := svc.CreateSource(context.Background(), CreateSourceInput{
+		TenantID: "t1", Provider: "INVALID!!!", Name: "X", AuthType: "api_key", Credential: "c",
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestCreateSource_EmptyCredential(t *testing.T) {
+	svc := New(newMockRepo(), mockStore{keyID: "k"})
+	_, err := svc.CreateSource(context.Background(), CreateSourceInput{
+		TenantID: "t1", Provider: "amplitude", Name: "X", AuthType: "api_key", Credential: "",
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestCreateSource_InvalidBaseURL(t *testing.T) {
+	svc := New(newMockRepo(), mockStore{keyID: "k"})
+	_, err := svc.CreateSource(context.Background(), CreateSourceInput{
+		TenantID: "t1", Provider: "amplitude", Name: "X", AuthType: "api_key",
+		Credential: "c", BaseURL: "not-a-url",
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestCreateSource_InvalidConfig(t *testing.T) {
+	svc := New(newMockRepo(), mockStore{keyID: "k"})
+	_, err := svc.CreateSource(context.Background(), CreateSourceInput{
+		TenantID: "t1", Provider: "amplitude", Name: "X", AuthType: "api_key",
+		Credential: "c", ProviderConfig: "not json",
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected ErrValidation, got %v", err)
+	}
+}
+
+func TestApplyFullSnapshot_EmptySnapshotRejected(t *testing.T) {
+	mr := newMockRepo()
+	sourceID := uuid.New()
+	mr.sources[sourceID] = &repo.Source{ID: sourceID, TenantID: "t1", Provider: "mixpanel", Enabled: true}
+	cohortID := uuid.New()
+	mr.cohorts[cohortID] = &repo.Cohort{
+		ID: cohortID, TenantID: "t1", CohortSourceID: sourceID,
+		ExternalCohortID: "c1", Name: "C1", MemberCount: 50,
+		StaleTTLDays: 30, Enabled: true,
+	}
+	svc := New(mr, mockStore{keyID: "k"})
+	_, err := svc.ApplyFullSnapshot(context.Background(), "t1", sourceID, cohortsync.SyncPayload{
+		ExternalCohortID: "c1", IsFullSnapshot: true, Deltas: nil,
+	}, "manual")
+	if !errors.Is(err, ErrValidation) {
+		t.Errorf("expected ErrValidation for empty snapshot, got %v", err)
+	}
+}
