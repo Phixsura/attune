@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { formatDistanceToNow } from 'date-fns'
+import { zhCN } from 'date-fns/locale'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -154,10 +156,25 @@ export function CohortSyncPage() {
                 label={t('cohort_sync.health.members')}
                 value={String(health.totalActiveMembers)}
               />
+              {health.lastSyncAt && (
+                <PageHeroMetric
+                  label={t('cohort_sync.health.last_sync')}
+                  value={formatDistanceToNow(new Date(health.lastSyncAt), {
+                    addSuffix: true,
+                    locale: zhCN,
+                  })}
+                />
+              )}
             </>
           )
         }
       />
+
+      {health && health.errorSources > 0 && (
+        <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {t('cohort_sync.health.error_banner', { count: health.errorSources })}
+        </div>
+      )}
 
       <div className="mt-6 space-y-8">
         <SourcesTab

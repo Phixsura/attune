@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react'
+import { ExternalLink, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
@@ -99,7 +99,7 @@ export function SourceFormDialog({
           </DialogHeader>
 
           <div className="mt-4 space-y-4">
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="cs-provider">{t('cohort_sync.source.provider')}</Label>
               <Select
                 value={provider}
@@ -116,7 +116,7 @@ export function SourceFormDialog({
               </Select>
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="cs-name">{t('cohort_sync.source.name')}</Label>
               <Input
                 id="cs-name"
@@ -127,7 +127,7 @@ export function SourceFormDialog({
               />
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="cs-credential">
                 {t('cohort_sync.source.credential')}
                 {mode === 'edit' && (
@@ -149,10 +149,27 @@ export function SourceFormDialog({
               <p className="mt-1 text-xs text-muted-foreground">
                 {t('cohort_sync.source.credential_help')}
               </p>
+              <p className="text-xs text-muted-foreground">
+                {t('cohort_sync.source.credential_note')}
+              </p>
             </div>
 
-            <div>
-              <Label htmlFor="cs-pull-credential">{t('cohort_sync.source.pull_credential')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="cs-pull-credential">
+                {t('cohort_sync.source.pull_credential')}{' '}
+                <a
+                  href={
+                    provider === 'amplitude'
+                      ? 'https://www.docs.developers.amplitude.com/analytics/apis/cohort-api/'
+                      : 'https://docs.mixpanel.com/docs/cohort-sync/overview'
+                  }
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                >
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              </Label>
               <Input
                 id="cs-pull-credential"
                 type="password"
@@ -168,7 +185,7 @@ export function SourceFormDialog({
               </p>
             </div>
 
-            <div>
+            <div className="space-y-1.5">
               <Label htmlFor="cs-base-url">
                 {t('cohort_sync.source.base_url')}{' '}
                 <span className="text-xs text-muted-foreground">({t('common.optional')})</span>

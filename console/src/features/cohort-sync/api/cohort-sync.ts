@@ -21,11 +21,22 @@ import type {
 
 const base = '/fb/v1/console/cohort-sync'
 
+/** Structured query key factory for precise cache invalidation. */
+export const cohortSyncKeys = {
+  all: ['cohort-sync'] as const,
+  sources: () => [...cohortSyncKeys.all, 'sources'] as const,
+  cohorts: (sourceId?: string) => [...cohortSyncKeys.all, 'cohorts', sourceId] as const,
+  members: (cohortId: string) => [...cohortSyncKeys.all, 'members', cohortId] as const,
+  runs: (cohortId: string) => [...cohortSyncKeys.all, 'runs', cohortId] as const,
+  events: (sourceId: string) => [...cohortSyncKeys.all, 'events', sourceId] as const,
+  health: () => [...cohortSyncKeys.all, 'health'] as const,
+}
+
 // ---------- Sources ----------
 
 export function listCohortSourcesQuery() {
   return queryOptions({
-    queryKey: ['cohort-sync', 'sources'],
+    queryKey: cohortSyncKeys.sources(),
     queryFn: ({ signal }) =>
       api<ListCohortSourcesResponse>(`${base}/sources`, { signal }).then((r) => r.sources ?? []),
     staleTime: 20_000,
@@ -62,7 +73,7 @@ export async function testCohortSource(id: string): Promise<TestCohortSourceResp
 
 export function listCohortsQuery(sourceId?: string) {
   return queryOptions({
-    queryKey: ['cohort-sync', 'cohorts', sourceId],
+    queryKey: cohortSyncKeys.cohorts(sourceId),
     queryFn: ({ signal }) => {
       const qs = sourceId ? `?source_id=${sourceId}` : ''
       return api<ListCohortsResponse>(`${base}/cohorts${qs}`, { signal }).then(
@@ -95,7 +106,7 @@ export async function syncCohort(id: string): Promise<SyncCohortResponse> {
 
 export function listCohortMembersQuery(cohortId: string, limit = 50) {
   return queryOptions({
-    queryKey: ['cohort-sync', 'members', cohortId],
+    queryKey: cohortSyncKeys.members(cohortId),
     queryFn: ({ signal }) =>
       api<ListCohortMembersResponse>(`${base}/cohorts/${cohortId}/members?limit=${limit}`, {
         signal,
@@ -108,7 +119,7 @@ export function listCohortMembersQuery(cohortId: string, limit = 50) {
 
 export function listCohortSyncEventsQuery(sourceId: string, limit = 20) {
   return queryOptions({
-    queryKey: ['cohort-sync', 'events', sourceId],
+    queryKey: cohortSyncKeys.events(sourceId),
     queryFn: ({ signal }) =>
       api<ListCohortSyncEventsResponse>(`${base}/sources/${sourceId}/events?limit=${limit}`, {
         signal,
@@ -122,7 +133,7 @@ export function listCohortSyncEventsQuery(sourceId: string, limit = 20) {
 
 export function listCohortSyncRunsQuery(cohortId: string, limit = 20) {
   return queryOptions({
-    queryKey: ['cohort-sync', 'runs', cohortId],
+    queryKey: cohortSyncKeys.runs(cohortId),
     queryFn: ({ signal }) =>
       api<ListCohortSyncRunsResponse>(`${base}/cohorts/${cohortId}/runs?limit=${limit}`, {
         signal,
@@ -136,7 +147,7 @@ export function listCohortSyncRunsQuery(cohortId: string, limit = 20) {
 
 export function cohortSyncHealthQuery() {
   return queryOptions({
-    queryKey: ['cohort-sync', 'health'],
+    queryKey: cohortSyncKeys.health(),
     queryFn: ({ signal }) => api<CohortSyncHealth>(`${base}/health`, { signal }),
   })
 }

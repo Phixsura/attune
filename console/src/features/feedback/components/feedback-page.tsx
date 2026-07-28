@@ -1535,27 +1535,27 @@ function FilterBar({
             </SelectContent>
           </Select>
         )}
-        {cohorts.length > 0 && (
-          <Select
-            value={cohortFilter || '__all'}
-            onValueChange={(v) => onCohortChange(v === '__all' ? '' : v)}
+        <Select
+          value={cohortFilter || '__all'}
+          onValueChange={(v) => onCohortChange(v === '__all' ? '' : v)}
+          disabled={cohorts.length === 0}
+        >
+          <SelectTrigger
+            className="h-10 w-full bg-background"
+            aria-label={t('cohort_sync.filter.all')}
+            title={cohorts.length === 0 ? t('cohort_sync.filter.empty_hint') : undefined}
           >
-            <SelectTrigger
-              className="h-10 w-full bg-background"
-              aria-label={t('cohort_sync.filter.all')}
-            >
-              <SelectValue placeholder={t('cohort_sync.filter.all')} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all">{t('cohort_sync.filter.all')}</SelectItem>
-              {cohorts.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+            <SelectValue placeholder={t('cohort_sync.filter.all')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t('cohort_sync.filter.all')}</SelectItem>
+            {cohorts.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {activeStates.length > 0 && (
           <Select
             value={workflowFilter || '__all'}

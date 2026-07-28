@@ -4769,7 +4769,8 @@
         "amplitude_add": "添加地址",
         "amplitude_remove": "移除地址",
         "default": "Webhook 地址"
-      }
+      },
+      "credential_note": "此密钥由您自行设定，用于 attune 验证来自提供商的请求"
     },
     "cohort": {
       "no_cohorts": "尚未同步任何人群",
@@ -4808,10 +4809,13 @@
     "health": {
       "sources": "来源",
       "cohorts": "人群",
-      "members": "活跃成员"
+      "members": "活跃成员",
+      "error_banner": "有 {{count}} 个来源出现错误，请检查错误详情",
+      "last_sync": "最后同步"
     },
     "filter": {
-      "all": "全部人群"
+      "all": "全部人群",
+      "empty_hint": "尚未同步人群。前往集成 > 人群同步进行配置。"
     },
     "onboarding": {
       "title": "快速上手",
