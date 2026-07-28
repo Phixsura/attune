@@ -1637,6 +1637,35 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/sources/{sourceId}/events:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_ListCohortSyncEvents
+            parameters:
+                - name: sourceId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCohortSyncEventsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/customer-requests:
         get:
             tags:
@@ -11298,6 +11327,32 @@ components:
                     type: array
                     items:
                         type: string
+        CohortSyncEvent:
+            type: object
+            properties:
+                id:
+                    type: string
+                cohortSourceId:
+                    type: string
+                provider:
+                    type: string
+                eventType:
+                    type: string
+                status:
+                    type: string
+                membersCount:
+                    type: integer
+                    format: int32
+                failureReason:
+                    type: string
+                runId:
+                    type: string
+                receivedAt:
+                    type: string
+                    format: date-time
+                createdAt:
+                    type: string
+                    format: date-time
         CohortSyncHealth:
             type: object
             properties:
@@ -15174,6 +15229,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/CohortSource'
+        ListCohortSyncEventsResponse:
+            type: object
+            properties:
+                events:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CohortSyncEvent'
         ListCohortSyncRunsResponse:
             type: object
             properties:

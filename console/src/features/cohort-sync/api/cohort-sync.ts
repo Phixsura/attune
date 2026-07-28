@@ -4,11 +4,13 @@ import type {
   Cohort,
   CohortMembership,
   CohortSource,
+  CohortSyncEvent,
   CohortSyncHealth,
   CohortSyncRun,
   CreateCohortSourceRequest,
   ListCohortMembersResponse,
   ListCohortSourcesResponse,
+  ListCohortSyncEventsResponse,
   ListCohortSyncRunsResponse,
   ListCohortsResponse,
   SyncCohortResponse,
@@ -102,6 +104,20 @@ export function listCohortMembersQuery(cohortId: string, limit = 50) {
   })
 }
 
+// ---------- Events ----------
+
+export function listCohortSyncEventsQuery(sourceId: string, limit = 20) {
+  return queryOptions({
+    queryKey: ['cohort-sync', 'events', sourceId],
+    queryFn: ({ signal }) =>
+      api<ListCohortSyncEventsResponse>(`${base}/sources/${sourceId}/events?limit=${limit}`, {
+        signal,
+      }).then((r) => r.events ?? []),
+    enabled: !!sourceId,
+    staleTime: 30_000,
+  })
+}
+
 // ---------- Sync Runs ----------
 
 export function listCohortSyncRunsQuery(cohortId: string, limit = 20) {
@@ -129,6 +145,7 @@ export type {
   Cohort,
   CohortMembership,
   CohortSource,
+  CohortSyncEvent,
   CohortSyncHealth,
   CohortSyncRun,
   CreateCohortSourceRequest,

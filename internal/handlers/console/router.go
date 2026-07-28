@@ -3361,6 +3361,19 @@ func (r *Router) mountCohortSyncSources(cs chi.Router) {
 		r.cohortSync.DeleteSource,
 		dispatcher.WithAuth(sessionAuth[attunev1.DeleteCohortSourceRequest]),
 	))
+	cs.Get("/sources/{source_id}/events", dispatcher.Bind(
+		"console.CohortSyncHandler.ListEvents",
+		dispatcher.Query(
+			func() *attunev1.ListCohortSyncEventsRequest {
+				return ptrext.Of(attunev1.ListCohortSyncEventsRequest{})
+			},
+			dispatcher.Param("source_id", func(req *attunev1.ListCohortSyncEventsRequest, v string) {
+				req.SourceId = v
+			}),
+		),
+		r.cohortSync.ListEvents,
+		dispatcher.WithAuth(sessionAuth[attunev1.ListCohortSyncEventsRequest]),
+	))
 }
 
 func (r *Router) mountCohortSyncCohorts(cs chi.Router) {

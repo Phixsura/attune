@@ -703,6 +703,11 @@ func (s *Service) UpdateEventStatus(ctx context.Context, id uuid.UUID, status st
 	return s.repo.UpdateEventStatus(ctx, id, status, runID, failureReason)
 }
 
+// ListEvents returns recent webhook events for a source.
+func (s *Service) ListEvents(ctx context.Context, tenantID string, sourceID uuid.UUID, limit int) ([]repo.SyncEvent, error) {
+	return s.repo.ListEvents(ctx, tenantID, sourceID, limit)
+}
+
 // ---------- helpers ----------
 
 func (s *Service) ensureCohort(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*repo.Cohort, error) {

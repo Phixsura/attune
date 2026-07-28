@@ -159,6 +159,28 @@ export interface ListCohortMembersResponse {
   members: CohortMembership[];
 }
 
+export interface CohortSyncEvent {
+  id: string;
+  cohortSourceId: string;
+  provider: string;
+  eventType: string;
+  status: string;
+  membersCount: number;
+  failureReason: string;
+  runId?: string | undefined;
+  receivedAt?: Date | undefined;
+  createdAt?: Date | undefined;
+}
+
+export interface ListCohortSyncEventsRequest {
+  sourceId: string;
+  limit?: number | undefined;
+}
+
+export interface ListCohortSyncEventsResponse {
+  events: CohortSyncEvent[];
+}
+
 export interface GetCohortSyncHealthRequest {
 }
 
@@ -190,5 +212,6 @@ export interface CohortSyncService {
   SyncCohort(request: SyncCohortRequest): Promise<SyncCohortResponse>;
   ListCohortSyncRuns(request: ListCohortSyncRunsRequest): Promise<ListCohortSyncRunsResponse>;
   ListCohortMembers(request: ListCohortMembersRequest): Promise<ListCohortMembersResponse>;
+  ListCohortSyncEvents(request: ListCohortSyncEventsRequest): Promise<ListCohortSyncEventsResponse>;
   GetCohortSyncHealth(request: GetCohortSyncHealthRequest): Promise<CohortSyncHealth>;
 }

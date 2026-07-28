@@ -4825,6 +4825,12 @@
       "next1": "复制上方 Webhook 地址",
       "next2": "在 Amplitude / Mixpanel 中添加 attune 为同步目标，粘贴地址",
       "next3": "点击「测试连接」验证配置是否正确"
+    },
+    "events": {
+      "title": "Webhook 事件",
+      "no_events": "暂无 webhook 事件",
+      "time": "时间",
+      "type": "类型"
     }
   }
 }

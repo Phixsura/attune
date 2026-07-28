@@ -1,6 +1,7 @@
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { ExternalLink, Loader2, Pencil, Power, PowerOff, Trash2, Zap } from 'lucide-react'
+import { ExternalLink, History, Loader2, Pencil, Power, PowerOff, Trash2, Zap } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,7 @@ import {
 } from '@/components/ui/table'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { CohortSource } from '../api/cohort-sync'
+import { SourceEventsSheet } from './source-events-sheet'
 import { WebhookUrlsDisplay } from './webhook-urls-display'
 
 export function SourcesTab({
@@ -35,6 +37,7 @@ export function SourcesTab({
   onCreateClick: () => void
 }) {
   const { t } = useTranslation()
+  const [eventsSource, setEventsSource] = useState<CohortSource | null>(null)
 
   if (sources.length === 0) {
     return (
@@ -77,38 +80,48 @@ export function SourcesTab({
   }
 
   return (
-    <Card className="border-border/60 shadow-none">
-      <CardHeader>
-        <CardTitle className="text-base">{t('cohort_sync.tabs.sources')}</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t('cohort_sync.source.name')}</TableHead>
-              <TableHead>{t('cohort_sync.source.provider')}</TableHead>
-              <TableHead>{t('cohort_sync.source.status_label')}</TableHead>
-              <TableHead>{t('cohort_sync.source.last_sync')}</TableHead>
-              <TableHead>{t('cohort_sync.source.webhook_urls')}</TableHead>
-              <TableHead className="text-right">{t('common.edit')}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sources.map((source) => (
-              <SourceRow
-                key={source.id}
-                source={source}
-                testing={testingId === source.id}
-                onTest={() => onTest(source)}
-                onEdit={() => onEdit(source)}
-                onDelete={() => onDelete(source)}
-                onToggleEnabled={() => onToggleEnabled(source)}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+    <>
+      <Card className="border-border/60 shadow-none">
+        <CardHeader>
+          <CardTitle className="text-base">{t('cohort_sync.tabs.sources')}</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t('cohort_sync.source.name')}</TableHead>
+                <TableHead>{t('cohort_sync.source.provider')}</TableHead>
+                <TableHead>{t('cohort_sync.source.status_label')}</TableHead>
+                <TableHead>{t('cohort_sync.source.last_sync')}</TableHead>
+                <TableHead>{t('cohort_sync.source.webhook_urls')}</TableHead>
+                <TableHead className="text-right">{t('common.edit')}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sources.map((source) => (
+                <SourceRow
+                  key={source.id}
+                  source={source}
+                  testing={testingId === source.id}
+                  onTest={() => onTest(source)}
+                  onEdit={() => onEdit(source)}
+                  onDelete={() => onDelete(source)}
+                  onToggleEnabled={() => onToggleEnabled(source)}
+                  onShowEvents={() => setEventsSource(source)}
+                />
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+      {eventsSource && (
+        <SourceEventsSheet
+          source={eventsSource}
+          open={!!eventsSource}
+          onOpenChange={(v) => !v && setEventsSource(null)}
+        />
+      )}
+    </>
   )
 }
 
@@ -119,6 +132,7 @@ function SourceRow({
   onEdit,
   onDelete,
   onToggleEnabled,
+  onShowEvents,
 }: {
   source: CohortSource
   testing: boolean
@@ -126,6 +140,7 @@ function SourceRow({
   onEdit: () => void
   onDelete: () => void
   onToggleEnabled: () => void
+  onShowEvents: () => void
 }) {
   const { t } = useTranslation()
 
@@ -188,6 +203,14 @@ function SourceRow({
           <TooltipContent>
             {source.enabled ? t('cohort_sync.cohort.disable') : t('cohort_sync.cohort.enable')}
           </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="sm" onClick={onShowEvents}>
+              <History className="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t('cohort_sync.events.title')}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>

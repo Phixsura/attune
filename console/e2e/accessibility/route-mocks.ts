@@ -350,6 +350,10 @@ async function handleRoute(
     await fulfillJson(route, { members: [] })
     return true
   }
+  if (method === 'GET' && path.match(/\/cohort-sync\/sources\/[^/]+\/events$/)) {
+    await fulfillJson(route, { events: [] })
+    return true
+  }
   if (method === 'GET' && path.match(/\/cohort-sync\/cohorts\/[^/]+\/runs$/)) {
     await fulfillJson(route, { runs: [] })
     return true

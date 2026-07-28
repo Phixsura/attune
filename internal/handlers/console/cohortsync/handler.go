@@ -37,6 +37,7 @@ type service interface {
 	ListCohorts(ctx context.Context, tenantID string, sourceID uuid.UUID) ([]repo.Cohort, error)
 	UpdateCohort(ctx context.Context, in svc.UpdateCohortInput) (*repo.Cohort, error)
 	ListMembers(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.Membership, error)
+	ListEvents(ctx context.Context, tenantID string, sourceID uuid.UUID, limit int) ([]repo.SyncEvent, error)
 	SyncNow(ctx context.Context, tenantID string, cohortID uuid.UUID, actor svc.Actor, auditActor auditlogsvc.Actor) (*svc.SyncRunResult, error)
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
 	Health(ctx context.Context, tenantID string) (svc.HealthSummary, error)
@@ -297,6 +298,31 @@ func (h *Handler) ListMembers(
 	return dispatcher.OK(ptrext.Of(attunev1.ListCohortMembersResponse{Members: items}))
 }
 
+// ListEvents returns recent webhook events for a source.
+func (h *Handler) ListEvents(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.ListCohortSyncEventsRequest,
+) (dispatcher.Result[*attunev1.ListCohortSyncEventsResponse], error) {
+	sourceID, err := uuid.Parse(req.GetSourceId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.ListCohortSyncEventsResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid source_id")
+	}
+	limit := int(req.GetLimit())
+	if limit <= 0 {
+		limit = 50
+	}
+	events, err := h.service.ListEvents(ctx, ctx.Auth.TenantID, sourceID, limit)
+	if err != nil {
+		return internalError[*attunev1.ListCohortSyncEventsResponse](ctx, "ListEvents", err)
+	}
+	items := make([]*attunev1.CohortSyncEvent, 0, len(events))
+	for i := range events {
+		items = append(items, eventToProto(events[i]))
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.ListCohortSyncEventsResponse{Events: items}))
+}
+
 // SyncCohort triggers an on-demand pull for a cohort.
 func (h *Handler) SyncCohort(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
@@ -443,6 +469,25 @@ func cohortToProto(c repo.Cohort, sourceMap map[uuid.UUID]sourceInfo) *attunev1.
 	if si, ok := sourceMap[c.CohortSourceID]; ok {
 		out.SourceName = si.Name
 		out.SourceProvider = si.Provider
+	}
+	return out
+}
+
+func eventToProto(e repo.SyncEvent) *attunev1.CohortSyncEvent {
+	out := ptrext.Of(attunev1.CohortSyncEvent{
+		Id:             e.ID.String(),
+		CohortSourceId: e.CohortSourceID.String(),
+		Provider:       e.Provider,
+		EventType:      e.EventType,
+		Status:         e.Status,
+		MembersCount:   int32(e.MembersCount),
+		FailureReason:  e.FailureReason,
+		ReceivedAt:     timestamppb.New(e.ReceivedAt),
+		CreatedAt:      timestamppb.New(e.CreatedAt),
+	})
+	if e.RunID != nil {
+		runID := e.RunID.String()
+		out.RunId = ptrext.Of(runID)
 	}
 	return out
 }

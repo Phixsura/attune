@@ -61,6 +61,9 @@ service CohortSyncService {
   rpc ListCohortMembers(ListCohortMembersRequest) returns (ListCohortMembersResponse) {
     option (google.api.http) = {get: "/fb/v1/console/cohort-sync/cohorts/{cohort_id}/members"};
   }
+  rpc ListCohortSyncEvents(ListCohortSyncEventsRequest) returns (ListCohortSyncEventsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/sources/{source_id}/events"};
+  }
   rpc GetCohortSyncHealth(GetCohortSyncHealthRequest) returns (CohortSyncHealth) {
     option (google.api.http) = {get: "/fb/v1/console/cohort-sync/health"};
   }
@@ -221,6 +224,30 @@ message ListCohortMembersRequest {
 
 message ListCohortMembersResponse {
   repeated CohortMembership members = 1;
+}
+
+// ---------- Events ----------
+
+message CohortSyncEvent {
+  string id = 1;
+  string cohort_source_id = 2;
+  string provider = 3;
+  string event_type = 4;
+  string status = 5;
+  int32 members_count = 6;
+  string failure_reason = 7;
+  optional string run_id = 8;
+  google.protobuf.Timestamp received_at = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ListCohortSyncEventsRequest {
+  string source_id = 1;
+  optional int32 limit = 2;
+}
+
+message ListCohortSyncEventsResponse {
+  repeated CohortSyncEvent events = 1;
 }
 
 // ---------- Health ----------
