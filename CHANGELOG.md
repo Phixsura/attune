@@ -9,10 +9,23 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
-- Amplitude and Mixpanel cohort sync — import named cohorts as push
-  destinations; filter feedback and customer requests by cohort membership;
-  sync health visible in Console; stale membership handled via soft-delete
-  with configurable TTL; GDPR erasure cascades to cohort memberships (#233).
+- Amplitude and Mixpanel cohort sync (#233):
+  - **Backend**: 15 proto RPCs, Tink-encrypted dual credentials (webhook +
+    pull), per-provider webhook receivers with auth-before-body-read, SHA-256
+    dedup with failed-event retry, atomic single-transaction membership apply,
+    stale-run recovery via advisory-locked background worker, SSRF-hardened
+    egress, empty-snapshot safety check, 7 Prometheus metrics with duration
+    histogram, 2 alert rules, source name uniqueness constraint.
+  - **Console UI**: 10 components matching established PageHero / Card /
+    Table / Toast / Dialog / Sheet patterns; source CRUD with create/edit/
+    delete/test/enable-disable; cohort detail sheet with member preview and
+    sync run history; webhook event audit trail; onboarding empty state with
+    setup steps and provider doc links; post-creation success dialog with
+    webhook URLs; cohort search and TTL-aware staleness indicators; error
+    classification with remediation hints; 93 i18n keys (zh-CN); 8 Vitest
+    test cases.
+  - **Cross-cutting**: feedback + customer request cohort filter dropdowns,
+    control tower health badge, GDPR erasure cascade, audit log integration.
 
 - Added Intercom inbound adapter (#230): polls Intercom's conversations
   search API with an `updated_at` watermark to extract product signals
