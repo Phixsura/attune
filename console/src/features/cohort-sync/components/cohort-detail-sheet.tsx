@@ -162,9 +162,7 @@ export function CohortDetailSheet({
                 onClick={() => toggleMutation.mutate()}
                 disabled={toggleMutation.isPending}
               >
-                {cohort.enabled
-                  ? t('cohort_sync.source.status.disabled')
-                  : t('cohort_sync.source.enabled')}
+                {cohort.enabled ? t('cohort_sync.cohort.disable') : t('cohort_sync.cohort.enable')}
               </Button>
             </>
           )}
@@ -198,7 +196,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function MembersTable({ members }: { members: CohortMembership[] }) {
   const { t } = useTranslation()
   if (members.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t('cohort_sync.cohort.no_cohorts')}</p>
+    return <p className="text-sm text-muted-foreground">{t('cohort_sync.cohort.no_members')}</p>
   }
   return (
     <div className="max-h-60 overflow-y-auto rounded-md border">
@@ -231,16 +229,16 @@ function MembersTable({ members }: { members: CohortMembership[] }) {
 function RunsTable({ runs }: { runs: CohortSyncRun[] }) {
   const { t } = useTranslation()
   if (runs.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t('cohort_sync.cohort.no_cohorts')}</p>
+    return <p className="text-sm text-muted-foreground">{t('cohort_sync.cohort.runs')} —</p>
   }
   return (
     <div className="max-h-60 overflow-y-auto rounded-md border">
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>{t('cohort_sync.run.trigger.webhook')}</TableHead>
-            <TableHead>{t('cohort_sync.run.status.succeeded')}</TableHead>
-            <TableHead>+/-</TableHead>
+            <TableHead>{t('cohort_sync.run.trigger_label')}</TableHead>
+            <TableHead>{t('cohort_sync.run.status_label')}</TableHead>
+            <TableHead>{t('cohort_sync.run.changes')}</TableHead>
             <TableHead>{t('cohort_sync.run.error')}</TableHead>
           </TableRow>
         </TableHeader>

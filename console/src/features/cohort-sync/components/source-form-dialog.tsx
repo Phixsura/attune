@@ -123,7 +123,7 @@ export function SourceFormDialog({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 disabled={pending}
-                placeholder="My Amplitude Project"
+                placeholder={t('cohort_sync.source.name_placeholder')}
               />
             </div>
 

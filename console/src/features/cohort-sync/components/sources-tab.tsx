@@ -57,7 +57,7 @@ export function SourcesTab({
             <TableRow>
               <TableHead>{t('cohort_sync.source.name')}</TableHead>
               <TableHead>{t('cohort_sync.source.provider')}</TableHead>
-              <TableHead>{t('cohort_sync.source.status.active')}</TableHead>
+              <TableHead>{t('cohort_sync.source.status_label')}</TableHead>
               <TableHead>{t('cohort_sync.source.last_sync')}</TableHead>
               <TableHead>{t('cohort_sync.source.webhook_urls')}</TableHead>
               <TableHead className="text-right">{t('common.edit')}</TableHead>
@@ -156,9 +156,7 @@ function SourceRow({
             </Button>
           </TooltipTrigger>
           <TooltipContent>
-            {source.enabled
-              ? t('cohort_sync.source.status.disabled')
-              : t('cohort_sync.source.enabled')}
+            {source.enabled ? t('cohort_sync.cohort.disable') : t('cohort_sync.cohort.enable')}
           </TooltipContent>
         </Tooltip>
         <Tooltip>

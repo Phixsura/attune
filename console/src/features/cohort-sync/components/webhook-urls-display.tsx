@@ -3,8 +3,6 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 
-const amplitudeLabels = ['Create URL', 'Add URL', 'Remove URL']
-
 export function WebhookUrlsDisplay({
   urls,
   provider,
@@ -15,6 +13,11 @@ export function WebhookUrlsDisplay({
   compact?: boolean
 }) {
   const { t } = useTranslation()
+  const amplitudeKeys = [
+    'cohort_sync.source.webhook_url_labels.amplitude_create',
+    'cohort_sync.source.webhook_url_labels.amplitude_add',
+    'cohort_sync.source.webhook_url_labels.amplitude_remove',
+  ]
 
   if (urls.length === 0) return <span className="text-xs text-muted-foreground">—</span>
 
@@ -29,7 +32,9 @@ export function WebhookUrlsDisplay({
           key={url}
           url={url}
           label={
-            provider === 'amplitude' ? amplitudeLabels[i] : t('cohort_sync.source.webhook_urls')
+            provider === 'amplitude'
+              ? t(amplitudeKeys[i] ?? 'cohort_sync.source.webhook_url_labels.default')
+              : t('cohort_sync.source.webhook_url_labels.default')
           }
         />
       ))}
