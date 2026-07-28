@@ -1331,6 +1331,35 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/cohorts/{cohortId}/members:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_ListCohortMembers
+            parameters:
+                - name: cohortId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCohortMembersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/cohort-sync/cohorts/{cohortId}/runs:
         get:
             tags:
@@ -1361,6 +1390,29 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/cohort-sync/cohorts/{id}:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_GetCohort
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Cohort'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
         patch:
             tags:
                 - CohortSyncService
@@ -1480,6 +1532,29 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/cohort-sync/sources/{id}:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_GetCohortSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CohortSource'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
         delete:
             tags:
                 - CohortSyncService
@@ -11168,6 +11243,27 @@ components:
                 updatedAt:
                     type: string
                     format: date-time
+                sourceName:
+                    type: string
+                sourceProvider:
+                    type: string
+        CohortMembership:
+            type: object
+            properties:
+                id:
+                    type: string
+                externalUserId:
+                    type: string
+                email:
+                    type: string
+                displayName:
+                    type: string
+                joinedAt:
+                    type: string
+                    format: date-time
+                lastSeenAt:
+                    type: string
+                    format: date-time
         CohortSource:
             type: object
             properties:
@@ -11198,6 +11294,10 @@ components:
                 updatedAt:
                     type: string
                     format: date-time
+                webhookUrls:
+                    type: array
+                    items:
+                        type: string
         CohortSyncHealth:
             type: object
             properties:
@@ -11214,6 +11314,15 @@ components:
                     type: integer
                     format: int32
                 totalActiveMembers:
+                    type: integer
+                    format: int32
+                lastSyncAt:
+                    type: string
+                    format: date-time
+                syncsLast24h:
+                    type: integer
+                    format: int32
+                disabledSources:
                     type: integer
                     format: int32
         CohortSyncRun:
@@ -15051,6 +15160,13 @@ components:
                 totalCount:
                     type: integer
                     format: int32
+        ListCohortMembersResponse:
+            type: object
+            properties:
+                members:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CohortMembership'
         ListCohortSourcesResponse:
             type: object
             properties:

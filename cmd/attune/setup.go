@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -419,7 +420,7 @@ func buildSearchHandler(
 func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo, secrets *secretstore.TinkStore, cohortSyncSvc *cohortsyncservice.Service) {
 	attachOutboxHandler(router, pool, auditLogSvc)
 	attachExternalSyncHandler(router, pool, auditLogSvc, secrets)
-	attachCohortSyncHandler(router, cohortSyncSvc, auditLogSvc)
+	attachCohortSyncHandler(router, cfg, cohortSyncSvc, auditLogSvc)
 	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
@@ -437,12 +438,13 @@ func attachExternalSyncHandler(router *console.Router, pool *pgxpool.Pool, audit
 	router.SetExternalSyncHandler(console.NewExternalSyncHandler(svc))
 }
 
-func attachCohortSyncHandler(router *console.Router, svc *cohortsyncservice.Service, audit *auditlogsvc.Service) {
+func attachCohortSyncHandler(router *console.Router, cfg *config.Config, svc *cohortsyncservice.Service, audit *auditlogsvc.Service) {
 	if svc == nil {
 		return
 	}
 	svc.SetAuditLogger(audit)
-	router.SetCohortSyncHandler(consolecohortsync.NewHandler(svc))
+	webhookBaseURL := strings.TrimRight(cfg.ConsoleBaseURL, "/")
+	router.SetCohortSyncHandler(consolecohortsync.NewHandler(svc, webhookBaseURL))
 }
 
 // attachOutboxHandler wires the notify dead-queue console handler (#33). Kept

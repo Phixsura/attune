@@ -13,6 +13,9 @@ service CohortSyncService {
   rpc ListCohortSources(ListCohortSourcesRequest) returns (ListCohortSourcesResponse) {
     option (google.api.http) = {get: "/fb/v1/console/cohort-sync/sources"};
   }
+  rpc GetCohortSource(GetCohortSourceRequest) returns (CohortSource) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/sources/{id}"};
+  }
   rpc CreateCohortSource(CreateCohortSourceRequest) returns (CohortSource) {
     option (google.api.http) = {
       post: "/fb/v1/console/cohort-sync/sources"
@@ -37,6 +40,9 @@ service CohortSyncService {
   rpc ListCohorts(ListCohortsRequest) returns (ListCohortsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/cohort-sync/cohorts"};
   }
+  rpc GetCohort(GetCohortRequest) returns (Cohort) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/cohorts/{id}"};
+  }
   rpc UpdateCohort(UpdateCohortRequest) returns (Cohort) {
     option (google.api.http) = {
       patch: "/fb/v1/console/cohort-sync/cohorts/{id}"
@@ -51,6 +57,9 @@ service CohortSyncService {
   }
   rpc ListCohortSyncRuns(ListCohortSyncRunsRequest) returns (ListCohortSyncRunsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/cohort-sync/cohorts/{cohort_id}/runs"};
+  }
+  rpc ListCohortMembers(ListCohortMembersRequest) returns (ListCohortMembersResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/cohort-sync/cohorts/{cohort_id}/members"};
   }
   rpc GetCohortSyncHealth(GetCohortSyncHealthRequest) returns (CohortSyncHealth) {
     option (google.api.http) = {get: "/fb/v1/console/cohort-sync/health"};
@@ -72,12 +81,17 @@ message CohortSource {
   string webhook_url = 10;
   google.protobuf.Timestamp created_at = 11;
   google.protobuf.Timestamp updated_at = 12;
+  repeated string webhook_urls = 13;
 }
 
 message ListCohortSourcesRequest {}
 
 message ListCohortSourcesResponse {
   repeated CohortSource sources = 1;
+}
+
+message GetCohortSourceRequest {
+  string id = 1;
 }
 
 message CreateCohortSourceRequest {
@@ -132,6 +146,8 @@ message Cohort {
   string last_error = 10;
   google.protobuf.Timestamp created_at = 11;
   google.protobuf.Timestamp updated_at = 12;
+  string source_name = 13;
+  string source_provider = 14;
 }
 
 message ListCohortsRequest {
@@ -140,6 +156,10 @@ message ListCohortsRequest {
 
 message ListCohortsResponse {
   repeated Cohort cohorts = 1;
+}
+
+message GetCohortRequest {
+  string id = 1;
 }
 
 message UpdateCohortRequest {
@@ -183,6 +203,26 @@ message ListCohortSyncRunsResponse {
   repeated CohortSyncRun runs = 1;
 }
 
+// ---------- Members ----------
+
+message CohortMembership {
+  string id = 1;
+  string external_user_id = 2;
+  string email = 3;
+  string display_name = 4;
+  google.protobuf.Timestamp joined_at = 5;
+  google.protobuf.Timestamp last_seen_at = 6;
+}
+
+message ListCohortMembersRequest {
+  string cohort_id = 1;
+  optional int32 limit = 2;
+}
+
+message ListCohortMembersResponse {
+  repeated CohortMembership members = 1;
+}
+
 // ---------- Health ----------
 
 message GetCohortSyncHealthRequest {}
@@ -193,4 +233,7 @@ message CohortSyncHealth {
   int32 error_sources = 3;
   int32 cohort_count = 4;
   int32 total_active_members = 5;
+  optional google.protobuf.Timestamp last_sync_at = 6;
+  int32 syncs_last_24h = 7;
+  int32 disabled_sources = 8;
 }

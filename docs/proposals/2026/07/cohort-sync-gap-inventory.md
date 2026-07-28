@@ -1,0 +1,666 @@
+# Cohort Sync Production-Level Gap Inventory
+
+**Source**: 4-dimension deep investigation (5 Opus agents, 91 raw findings)
+**Date**: 2026-07-28
+
+## Summary: 91 findings
+
+| Severity | Count |
+|----------|-------|
+| 🚫 BLOCKER | 3 |
+| 🔴 CRITICAL | 12 |
+| 🟠 HIGH | 30 |
+| 🟡 MEDIUM | 32 |
+| ⚪ LOW | 14 |
+
+## 🚫 BLOCKER (3)
+
+### UI-01: No i18n: all strings are hardcoded English
+**✅ backend ready** · ~120 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx, console/src/features/cohort-sync/components/cohort-sync-page.tsx
+
+**Current**: Every user-visible string in cohort-sync-ui.tsx is a hardcoded English literal (e.g. 'Cohort Sync', 'Loading cohort sync...', 'Add Source', 'Test', 'Delete', 'Sync Now', 'Sources', 'Cohorts', 'No cohort sources configured.', etc.). Zero calls to useTranslation() or t().
+
+**Desired**: All user-visible text uses useTranslation() + t('cohort_sync.*') keys, matching how external-sync uses t('external_sync.*') and inbound-sources uses t('inbound_sources.*'). Corresponding i18n JSON entries must be added to the locale files.
+
+### UI-06: Delete uses window.confirm() instead of Dialog
+**✅ backend ready** · ~50 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Source deletion uses window.confirm(): if (window.confirm(`Delete source "${source.name}"?`)) { deleteMutation.mutate() }. This is a native browser dialog, not a styled Dialog component.
+
+**Desired**: Use a proper <Dialog> with DialogHeader/DialogTitle/DialogDescription/DialogFooter, matching the DeleteInboundSourceDialog pattern (inbound-sources/components/delete-dialog.tsx). The destructive button should use variant='destructive' and show a Loader2 spinner while pending. The dialog should show the source name in a mono font block. Never use window.confirm() in the attune console.
+
+### UI-02: Webhook URL is relative path -- operator cannot copy a complete URL
+**❌ needs backend** · ~40 lines · internal/handlers/console/cohortsync/handler.go, console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: webhookURL() in handler.go (line 306) returns a relative path like '/v1/cohort-sync/amplitude/<tenant>/<source>/add'. The UI renders this raw relative path in a <code> block (cohort-sync-ui.tsx line 179). There is no copy-to-clipboard button. The operator must manually prepend their public host, which they must know from memory. The docs say 'https://<attune-host>/v1/...' with placeholders.
+
+**Desired**: The backend should either (a) include the configured public host in the webhook URL, or (b) the console should prepend window.location.origin (or a known config value). A copy-to-clipboard button should be present next to each URL. For Amplitude, all three URLs (create/add/remove) should be individually copyable since the operator needs to paste them into three separate fields.
+
+
+## 🔴 CRITICAL (12)
+
+### UI-02: No PageHero: uses raw h2 + p instead of PageHero component
+**✅ backend ready** · ~40 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The page header is a plain div with <h2 className='text-lg font-semibold'>Cohort Sync</h2> and a <p> subtitle. No eyebrow, no metrics strip.
+
+**Desired**: Use <PageHero eyebrow={t('shell.groups.integrations')} title={t('nav.cohort_sync')} subtitle={...} actions={...} metrics={...} /> matching external-sync-page.tsx (line 598-677) and inbound-sources-page.tsx (line 186-219). Metrics should show source count, active, errors, cohort count, total members from CohortSyncHealth.
+
+### UI-04: Loading state uses ad-hoc text instead of <Loading /> component
+**✅ backend ready** · ~5 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Loading is rendered as a plain div with 'Loading cohort sync...' text and no spinner: <div className='flex items-center justify-center p-12'><div className='text-sm text-muted-foreground'>Loading cohort sync...</div></div>
+
+**Desired**: Use the shared <Loading /> component from @/components/loading which renders a Loader2 spinner with the i18n 'app.loading' text and proper role='status' aria-live='polite' attributes. Both external-sync and inbound-sources use <Loading /> for all loading states.
+
+### UI-05: Empty state uses ad-hoc dashed border instead of <EmptyState /> component
+**✅ backend ready** · ~20 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Both sources and cohorts empty states are ad-hoc: <div className='rounded-md border border-dashed p-8 text-center'>. No icon, no action button, no branded gradient background.
+
+**Desired**: Use the shared <EmptyState icon={...} title={...} description={...} action={...} /> component from @/components/empty-state. External-sync uses EmptyState with GitBranch/RefreshCcw icons; inbound-sources uses InboxIcon. The EmptyState component provides a branded icon container with gradient and shadow, consistent typography, and an optional CTA button.
+
+### UI-07: No toast notifications for mutations
+**✅ backend ready** · ~30 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: None of the mutations (create source, delete source, test source, sync cohort) show toast notifications on success or error. The create dialog shows a raw error below the footer: {mutation.error && <p className='text-sm text-destructive'>...}. Delete, test, and sync mutations silently succeed or fail.
+
+**Desired**: All mutations use toast.success() on success and toast.error() on error, imported from 'sonner'. This matches every other integration page: external-sync uses toast.success(t('external_sync.toast.created')) on create, toast.error(errorMessage(err)) on error; inbound-sources uses toast.success(t('inbound_sources.toast.created')) etc. Error messages should use err instanceof Error ? err.message : 'failed' pattern.
+
+### UI-09: No Card wrapper for list sections
+**✅ backend ready** · ~30 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Sources and Cohorts sections are plain divs with an h3 heading and a divide-y bordered container. No Card/CardHeader/CardTitle/CardDescription wrapper.
+
+**Desired**: Wrap each section in <Card className='border-border/60 shadow-none'> with <CardHeader><CardTitle className='text-base'>...</CardTitle><CardDescription>...</CardDescription></CardHeader><CardContent className='pt-6'>...</CardContent>. This matches external-sync's ConnectionsCard, RunsCard, and inbound-sources' registry card. The Card provides the consistent border, shadow, and spacing vocabulary.
+
+### UI-03: Amplitude setup shows only the /add URL -- operator must mentally derive /create and /remove
+**❌ needs backend** · ~30 lines · internal/handlers/console/cohortsync/handler.go, console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: For Amplitude sources, the UI shows only the /add URL as the canonical webhook URL, with a hint 'Amplitude needs three URLs (replace /add with /create and /remove)' (cohort-sync-ui.tsx lines 180-185). The operator must perform string replacement by hand.
+
+**Desired**: Show all three Amplitude URLs (Create, Add, Remove) as separate labeled fields, each with a copy button. The labels should match Amplitude's destination configuration form labels exactly. No string replacement required.
+
+### UI-07: Health dashboard shows no temporal data -- impossible to assess sync freshness
+**❌ needs backend** · ~80 lines · internal/handlers/console/cohortsync/handler.go, console/src/features/cohort-sync/components/cohort-sync-ui.tsx, internal/service/cohortsync/service.go
+
+**Current**: The health cards (cohort-sync-ui.tsx lines 67-74) show five static counters: Sources, Active, Errors, Cohorts, Members. There is no information about when the last sync happened across all sources, no sync frequency/trend, no member count change over time. The CohortSyncHealth proto (lines 136-142) only has these five integer fields.
+
+**Desired**: Add to health: (1) lastSyncAcrossAllSources timestamp with relative time ('3 minutes ago'), (2) syncs in the last 24h count, (3) a simple sparkline or mini chart showing sync activity over the past 7 days. At minimum, surface a 'last sync: X ago' that turns red if it exceeds a threshold. This is the single most important monitoring signal.
+
+### UI-10: No UI to update/rotate source credentials
+**✅ backend ready** · ~80 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The API layer has updateCohortSource() (cohort-sync.ts line 34) and the handler supports PATCH /sources/:id (handler.go line 114) with credential and pullCredential fields. However, the UI has ZERO edit functionality -- no edit button, no edit dialog, no inline editing on sources. The updateCohortSource and updateCohort functions are defined in the API file but never imported or called by any component.
+
+**Desired**: Each source row should have an 'Edit' or 'Settings' button that opens a dialog allowing the operator to: (1) rename the source, (2) rotate the webhook credential, (3) rotate the pull credential, (4) enable/disable the source, (5) update base URL. Credential fields should show a masked placeholder for existing values and allow replacement. After rotation, prompt to 'Test Connection' to verify the new credentials work.
+
+### UI-12: Sync run history is not displayed anywhere in the UI
+**✅ backend ready** · ~80 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The API has listCohortSyncRunsQuery() (cohort-sync.ts line 82) and the handler returns full SyncRun records with trigger, status, membersAdded, membersRemoved, membersTotal, errorMessage, startedAt, finishedAt. The CohortSyncRun proto is fully defined (lines 110-122). However, this query is never called by any component. There is no sync run history view anywhere in the UI.
+
+**Desired**: Each cohort should have an expandable or linked view showing its sync run history: a table/list of recent runs with columns for timestamp, trigger (webhook/manual/pull), status (success/failed), members added/removed/total, duration, and error message if failed. This is essential for troubleshooting -- without it, the operator cannot see what happened during past syncs.
+
+### API-03: No ListMembers endpoint (cohort membership viewer)
+**❌ needs backend** · ~130 lines · proto/attune/v1/cohort_sync.proto, internal/service/cohortsync/service.go, internal/handlers/console/cohortsync/handler.go
+
+**Current**: Repo has ListMembers (repo.go:621) returning []Membership with full user details. But the service Repo interface (service.go:39-68) does NOT include ListMembers, there is no Service.ListMembers public method, no handler, no route, no proto RPC, no proto Membership message, and no frontend API function.
+
+**Desired**: Add ListMembers to service Repo interface and expose a Service.ListMembers method. Proto message CohortMembership and RPC ListCohortMembers with route GET /cohort-sync/cohorts/{cohort_id}/members?limit=N. Frontend listCohortMembersQuery(cohortId, limit). This is essential for the cohort detail page to show who is in the cohort.
+
+### UI-01: Delete mutation silently swallows errors
+**✅ backend ready** · ~10 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: In cohort-sync-ui.tsx line 127-130, `deleteMutation` has `onSuccess` but no `onError` handler. If the DELETE call fails (network, 404, 500), nothing happens -- no toast, no error message, no UI feedback. The operator clicks Delete, confirms via window.confirm, and then nothing visually changes. The row stays, but the operator gets no indication the delete failed.
+
+**Desired**: deleteMutation should have an `onError` callback that shows an error notification (toast or inline). The button should also show a transient error state. Compare to createCohortSource which does show `mutation.error` below the dialog.
+
+### UI-02: syncCohort mutation silently swallows errors
+**✅ backend ready** · ~10 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: In cohort-sync-ui.tsx line 192-195, `syncMutation` (CohortRow) has `onSuccess` but no `onError`. If SyncNow fails (no pull credential, provider unreachable, ErrConflict from concurrent sync), the button goes back from 'Syncing...' to 'Sync Now' with zero feedback. The operator has no idea what went wrong.
+
+**Desired**: syncMutation should have an `onError` handler that displays the error. Ideally show inline below the cohort row or as a toast. The error message from the backend (e.g. 'a sync is already running for this cohort') is informative and should be surfaced.
+
+
+## 🟠 HIGH (30)
+
+### UI-03: No useDocumentTitle hook
+**✅ backend ready** · ~3 lines · console/src/features/cohort-sync/components/cohort-sync-page.tsx
+
+**Current**: The CohortSyncPage component never calls useDocumentTitle(). The browser tab title does not update when navigating to this page.
+
+**Desired**: Call useDocumentTitle(t('nav.cohort_sync')) at the top of the page component, matching external-sync-page.tsx line 206.
+
+### UI-08: Create dialog uses DialogTrigger instead of controlled open state
+**✅ backend ready** · ~30 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: CreateSourceDialog manages its own open state internally and uses DialogTrigger to render the 'Add Source' button inside the dialog component. The parent has no control over when the dialog opens or closes.
+
+**Desired**: The create dialog should accept open/onOpenChange/pending props from the parent, matching the CreateInboundSourceDialog and CreateConnectionDialog patterns. The trigger button belongs in the page component's PageHero actions slot, not inside the dialog. The dialog should reset form state when closing (in the onOpenChange handler). The parent controls open state to coordinate with other dialogs and page state.
+
+### UI-10: Health cards use ad-hoc grid instead of PageHeroMetric
+**✅ backend ready** · ~20 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Health metrics are rendered as a grid of HealthCard components (custom local component with border box, text-2xl value, text-xs label). These are visually different from every other integration page.
+
+**Desired**: Use <PageHeroMetric> components inside the PageHero metrics slot, matching external-sync (PageHeroMetric for connections, active runs, conflicts, etc.) and inbound-sources (PageHeroMetric for total, healthy, paused, errors). The PageHeroMetric supports tone='urgent' for error counts and tone='active' for active states. Remove the local HealthCard component.
+
+### UI-13: Submit button text changes to 'Creating...' instead of showing spinner icon
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The create button displays text 'Creating...' when pending: {mutation.isPending ? 'Creating...' : 'Create'}. The test button shows 'Testing...' and sync shows 'Syncing...'.
+
+**Desired**: All buttons keep their label text constant and show a Loader2 spinner icon alongside: {pending && <Loader2 className='size-3 animate-spin' />} {t('common.create')}. This is the universal pattern in external-sync (every mutation button), inbound-sources (every action button), and all dialogs.
+
+### UI-14: No form element wrapping create dialog fields
+**✅ backend ready** · ~10 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The CreateSourceDialog does not wrap its fields in a <form> element. The submit is triggered by an onClick handler on the button. There is no onSubmit handler and no e.preventDefault().
+
+**Desired**: Wrap dialog body in a <form onSubmit={handleSubmit}> where handleSubmit calls e.preventDefault() then performs the mutation. The submit button should be type='submit'. The cancel button should be type='button'. This enables Enter-to-submit and matches CreateConnectionDialog, CreateInboundSourceDialog, and EditConnectionDialog patterns.
+
+### UI-15: No form field disabled state during mutation
+**✅ backend ready** · ~8 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Form fields (Input, Select) in the create dialog do not pass disabled={pending}. The user can modify fields while the create mutation is in flight.
+
+**Desired**: All form inputs should pass disabled={pending} to prevent editing during submission. This matches every dialog in external-sync and inbound-sources where all Input and Select components receive disabled={pending}.
+
+### UI-16: No form reset on dialog close
+**✅ backend ready** · ~10 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Form fields are only reset in onSuccess. If the user opens the dialog, fills fields, then closes it without submitting, the fields retain their values on next open.
+
+**Desired**: Add a reset() function that clears all form state. Call it in onOpenChange when the dialog closes (v === false). This matches CreateConnectionDialog (line 1979-1990 reset function, called in onOpenChange) and CreateInboundSourceDialog (line 159-169 reset function).
+
+### UI-18: Webhook URL display has no copy-to-clipboard button
+**✅ backend ready** · ~25 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The webhook URL is shown in a plain <code> block with no copy button. Users must manually select and copy the URL.
+
+**Desired**: Add a copy-to-clipboard button next to the webhook URL, matching the SecretRevealDialog pattern (inbound-sources/secret-reveal-dialog.tsx lines 62-81): a ghost Button with <Copy className='h-3 w-3' /> icon and copied/copy state toggle. The navigator.clipboard.writeText() call should have error handling for insecure contexts.
+
+### UI-20: No test file for cohort-sync-ui or cohort-sync-page
+**✅ backend ready** · ~200 lines · console/src/features/cohort-sync/components/cohort-sync-ui.test.tsx, console/src/features/cohort-sync/components/cohort-sync-page.test.tsx, console/src/features/cohort-sync/api/cohort-sync.test.ts
+
+**Current**: The cohort-sync feature has zero test files. The directory contains only api/cohort-sync.ts, components/cohort-sync-page.tsx, and components/cohort-sync-ui.tsx.
+
+**Desired**: Add test files matching the established pattern: external-sync has external-sync-page.test.tsx and api/external-sync.test.ts; inbound-sources has sources-table.test.tsx, create-dialog.test.tsx, confirm-dialogs.test.tsx, edit-intercom-dialog.test.tsx, secret-reveal-dialog.test.tsx, and inbound-sources-page.test.tsx. At minimum, cohort-sync needs a page-level render test and dialog interaction tests.
+
+### UI-21: Error inline below dialog footer instead of toast
+**✅ backend ready** · ~5 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The CreateSourceDialog shows mutation errors as a <p> element below the DialogFooter: {mutation.error && <p className='text-sm text-destructive'>...}. This appears outside the dialog's expected content flow.
+
+**Desired**: Remove inline error display. Use toast.error() in the mutation's onError callback, matching all other dialogs. Error display below the footer is not used anywhere else in the console.
+
+### UI-01: Empty state lacks onboarding guidance or setup wizard
+**✅ backend ready** · ~60 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: When no sources exist, the empty state shows 'No cohort sources configured. Connect Amplitude or Mixpanel to start importing cohorts.' -- a two-line dashed box with no actionable guidance (cohort-sync-ui.tsx lines 78-84).
+
+**Desired**: A rich empty state with: (1) step-by-step numbered instructions for the full setup flow (create source in attune, configure destination in provider, trigger test sync), (2) provider-specific quick-start links to Amplitude/Mixpanel docs, (3) a prominent 'Add Source' CTA in the empty state itself (not just the top-right corner), (4) an illustration or icon to make the page feel intentional rather than broken.
+
+### UI-04: Create dialog provides no guidance on what credential format to use
+**✅ backend ready** · ~25 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The 'Webhook API Key' field (cohort-sync-ui.tsx line 288) has placeholder 'API key for webhook authentication' with no guidance on where to find this key or what format it takes. The pull credential placeholder shows the format (api_key:secret_key) but does not explain where to find these values in the provider's UI.
+
+**Desired**: Each credential field should have: (1) a link to the provider's documentation page where the key is found, (2) an explicit description of the format, (3) a note explaining when it will be used (webhook auth vs. pull/test). The webhook API key field should clarify that the operator chooses this key (it is not retrieved from the provider) -- it is the shared secret they configure in both attune and the provider destination.
+
+### UI-05: No post-creation success screen showing next steps
+**✅ backend ready** · ~50 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: After creating a source, the dialog closes (line 246) and the list refreshes. The operator sees their new source in the list but gets no explicit confirmation of what to do next. They must scroll down to find the webhook URL in the source row, then figure out on their own to go configure the provider.
+
+**Desired**: After creation, show a success state (either keep the dialog open with a 'Next Steps' view, or show a toast with a link). The success view should: (1) confirm the source was created, (2) display the full webhook URL(s) with copy buttons, (3) list the next steps (go to Amplitude/Mixpanel, configure destination, test), (4) provide a 'Test Connection' button inline.
+
+### UI-08: Source row shows lastSyncAt but no staleness indicator
+**✅ backend ready** · ~25 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Each source row shows 'last synced <timestamp>' as raw toLocaleString() (cohort-sync-ui.tsx line 140). There is no visual indicator of whether this is fresh or stale. A source that last synced 3 days ago looks identical to one that synced 5 minutes ago.
+
+**Desired**: Show relative time ('5 minutes ago' / '3 days ago') and apply visual escalation: green for recent (<1h), yellow for aging (1h-24h), red for stale (>24h). The threshold should be configurable per-source or at least documented. A source with no lastSyncAt should show 'Never synced' in a warning color.
+
+### UI-09: Failed sync errors are only visible as inline text -- no alert or notification
+**✅ backend ready** · ~35 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx, console/src/routes/-control-tower-page.tsx
+
+**Current**: If a source has a lastError, it is shown as small red text below the source name (cohort-sync-ui.tsx line 144). Similarly for cohort errors (line 209). The health card shows 'Errors' count but no detail. There is no banner, no toast, no notification system. An operator who does not visit this page daily will miss errors entirely.
+
+**Desired**: When error sources exist: (1) show an alert banner at the top of the cohort sync page with the count and most recent error, (2) surface the error on the Control Tower page (already partially done -- control-tower-page.tsx line 135 shows a count but no detail), (3) consider an optional webhook/email notification for persistent errors.
+
+### UI-11: No UI to update cohort settings (name, TTL, enabled, description)
+**✅ backend ready** · ~70 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The API has updateCohort() (cohort-sync.ts line 66) and the handler supports PATCH /cohorts/:id (handler.go line 191) with name, description, staleTtlDays, and enabled fields. The proto UpdateCohortRequest has all four fields. However, the CohortRow component (cohort-sync-ui.tsx line 191) has no edit capability -- only 'Sync Now' and a status badge. The updateCohort function is never called by any component.
+
+**Desired**: Each cohort row should have an edit action (inline or dialog) allowing: (1) rename, (2) set description, (3) adjust stale TTL days, (4) enable/disable toggle. The TTL field should explain what it controls ('Members who leave this cohort are kept for N days before cleanup').
+
+### UI-13: 401/auth errors from webhooks are not surfaced with actionable remediation
+**❌ needs backend** · ~40 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx, internal/handlers/console/cohortsync/handler.go
+
+**Current**: If a webhook returns 401 (credential mismatch), the source.lastError field would contain the error text, shown as small red text (line 144). There is no guidance on how to fix it -- no link to the credential rotation UI (which does not exist per UI-10), no link to docs, no suggested action.
+
+**Desired**: Error messages should be categorized (auth error, parse error, timeout, etc.) with specific remediation instructions. For auth errors: 'The webhook credential does not match. Update your credential in Edit Source, or reconfigure the destination in [Provider].' For parse errors: 'The provider sent malformed data. Check the webhook payload format in [Provider] docs.'
+
+### UI-14: No way to detect stale cohort syncs -- cohort that stopped syncing is invisible
+**✅ backend ready** · ~20 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Cohort rows show 'synced <timestamp>' (line 204) as raw toLocaleString(). A cohort that last synced 2 days ago looks the same as one synced 2 minutes ago. There is no staleness detection, no 'this cohort has not been synced in X days' warning. The operator must manually check each cohort's timestamp and do the math.
+
+**Desired**: Apply the same staleness indicator as UI-08 to cohorts. Additionally, provide a 'Stale' filter or sort so the operator can quickly find cohorts that need attention. Show a warning badge if a cohort's lastSyncedAt exceeds its staleTtlDays threshold.
+
+### UI-18: No enable/disable toggle for sources -- only full delete
+**✅ backend ready** · ~25 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The source row has a StatusBadge that shows Active/Disabled/Error state (line 173) and the enabled field exists on the proto. The UpdateSource handler accepts an enabled field. But there is no toggle or button in the UI to enable/disable a source. The only destructive action available is Delete.
+
+**Desired**: Add an enable/disable toggle (or action in a dropdown menu) on each source row. This allows operators to temporarily pause sync without losing configuration. The disabled state should be visually distinct (grayed out, with a clear 'Enable' action).
+
+### UI-19: Cohort filter chip in feedback page shows raw cohort ID instead of name
+**✅ backend ready** · ~5 lines · console/src/features/feedback/components/feedback-page.tsx
+
+**Current**: When a cohort filter is applied in the feedback page, the ActiveChip shows the raw cohortFilter value (feedback-page.tsx line 569: value: cohortFilter). The cohortFilter state is the cohort ID, not the name. So the filter chip displays a UUID instead of the human-readable cohort name.
+
+**Desired**: Resolve the cohort ID to its name using the cohortList data, similar to how tags resolve their name: value: cohortList.data?.find(c => c.id === cohortFilter)?.name || cohortFilter.
+
+### UI-22: Customer requests page does not expose cohort filter in the UI
+**✅ backend ready** · ~30 lines · console/src/features/customer-requests/components/customer-requests-page.tsx
+
+**Current**: The customer request API (customer-request-api.ts line 58) has a cohortId filter field and sends it as a query parameter (line 507). However, no customer request page component uses this filter. The docs (private-deploy.md line 1235) say 'use the Cohort filter dropdown in the Feedback list or Customer Request list' but the Customer Request list does not have this dropdown.
+
+**Desired**: Add the same cohort filter dropdown to the Customer Requests page, consistent with the feedback page. The backend already supports it.
+
+### API-01: No GetCohortSource endpoint (single source detail view)
+**✅ backend ready** · ~60 lines · proto/attune/v1/cohort_sync.proto, internal/handlers/console/cohortsync/handler.go, internal/handlers/console/router.go
+
+**Current**: Service has GetSource (service.go:190) and handler declares it on its service interface (handler.go:32), but there is no handler method, no route, no proto RPC, and no frontend API function for GET /sources/{id}.
+
+**Desired**: Proto RPC GetCohortSource, handler method, route GET /cohort-sync/sources/{id}, and frontend getCohortSource(id) function so the UI can fetch a single source for detail/edit views without loading the full list.
+
+### API-02: No GetCohort endpoint (single cohort detail view)
+**❌ needs backend** · ~80 lines · proto/attune/v1/cohort_sync.proto, internal/service/cohortsync/service.go, internal/handlers/console/cohortsync/handler.go
+
+**Current**: Service has no GetCohort public method (it uses repo.GetCohort internally in UpdateCohort/SyncNow). Handler service interface does not list GetCohort. No proto RPC, no route, no frontend API function for GET /cohorts/{id}.
+
+**Desired**: Proto RPC GetCohort, service method, handler method, route GET /cohort-sync/cohorts/{id}, and frontend getCohort(id) function so the UI can render a cohort detail page with members, runs, and edit controls.
+
+### API-05: updateCohortSource frontend function defined but never used by any component
+**✅ backend ready** · ~100 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: updateCohortSource is defined in console/src/features/cohort-sync/api/cohort-sync.ts:34 and the backend PATCH /sources/{id} endpoint is fully wired (proto, handler, route). But no component imports or calls updateCohortSource. There is no source-edit UI.
+
+**Desired**: A source edit dialog/form component that imports updateCohortSource and allows operators to edit source name, enable/disable, rotate credentials, and change base_url/provider_config without deleting and recreating.
+
+### API-06: updateCohort frontend function defined but never used by any component
+**✅ backend ready** · ~80 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: updateCohort is defined in console/src/features/cohort-sync/api/cohort-sync.ts:66 and the backend PATCH /cohorts/{id} endpoint is fully wired (proto, handler, route). But no component imports or calls updateCohort. There is no cohort edit UI.
+
+**Desired**: A cohort edit dialog/inline-edit component that imports updateCohort and allows operators to rename a cohort, change its description, adjust stale_ttl_days, and enable/disable it.
+
+### API-07: listCohortSyncRunsQuery frontend function defined but never used by any component
+**✅ backend ready** · ~60 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: listCohortSyncRunsQuery is defined in console/src/features/cohort-sync/api/cohort-sync.ts:82 and the backend GET /cohorts/{cohort_id}/runs endpoint is fully wired (proto, handler, route). But no component imports or calls it. There is no sync run history UI.
+
+**Desired**: A sync runs table/timeline component (likely on a cohort detail page) that imports listCohortSyncRunsQuery and displays run history with trigger, status, members added/removed/total, error messages, and timestamps.
+
+### UI-03: Page-level query errors produce no visible error state
+**✅ backend ready** · ~30 lines · console/src/features/cohort-sync/components/cohort-sync-page.tsx, console/src/features/cohort-sync/components/cohort-sync-ui.tsx, console/src/routes/_authed.integrations.cohort-sync.tsx
+
+**Current**: In cohort-sync-page.tsx, sourcesQuery/cohortsQuery/healthQuery error states are never checked. If any query fails after the route loader succeeds (e.g. on refetch after tab focus, or on invalidation after a mutation), `sourcesQuery.data` falls back to `[]` via the `?? []` coalescing. The operator sees an empty 'No cohort sources configured' message instead of an error. The route has no `errorComponent`. The app has no global `ErrorBoundary`. Health data is `undefined` on error which simply hides the health cards. There is no 'error' vs 'empty' distinction.
+
+**Desired**: The CohortSyncPage or CohortSyncUI should check `isError` on each query and render a distinct error state ('Failed to load sources' with a retry button), clearly differentiated from the empty state ('No cohort sources configured'). The route definition should have an `errorComponent` for loader-level failures.
+
+### BE-01: No unique constraint on source name per tenant -- duplicate names allowed
+**❌ needs backend** · ~15 lines · internal/infra/database/migrations/117_cohort_sync.sql, internal/service/cohortsync/service.go
+
+**Current**: The `cohort_sources` table (migration 117) has no UNIQUE constraint on `(tenant_id, name)` or `(tenant_id, provider, name)`. The service layer's `validateSourceShape` checks name is non-empty and valid UTF-8 but does not check uniqueness. An operator can create two sources with the exact same name and same provider, which makes the UI confusing -- two identical rows with different IDs but identical display. The webhook URLs differ by UUID, so they function independently, but the operator cannot distinguish them in the sources list.
+
+**Desired**: Either add a UNIQUE constraint on `(tenant_id, name)` via migration, or add a service-level uniqueness check with a clear 409 Conflict error. At minimum, the UI should display the provider and creation date prominently enough to disambiguate.
+
+### BE-04: TestSource returns both error and result -- handler reads result.Error even when testErr is non-nil
+**✅ backend ready** · ~12 lines · internal/handlers/console/cohortsync/handler.go
+
+**Current**: In console/cohortsync/handler.go TestSource (lines 151-161), when `testErr != nil`, the handler reads `result.Error` for the error message. But the service's TestSource (service.go line 315-346) has multiple early-return paths: (1) if GetSource fails, it returns an empty CheckResult and the repo error -- `result.Error` is empty; (2) if Lookup fails, it returns a result with an error string AND a typed error. The handler at line 155 only sets `errMsg` when `testErr != nil`, but in case (1) `result.Error` is empty, so the response has `ok: false, error: ''` -- the frontend shows 'Failed' with no explanation. Also, the handler always returns HTTP 200 OK even when testErr is a real service error (not a provider connectivity issue), because it does not distinguish between 'provider unreachable' and 'internal service failure'.
+
+**Desired**: When testErr is non-nil and result.Error is empty, fall through to the general error mapper (mapError) for internal errors. Only return the ok/error response shape when the test itself completed (even if the provider was unreachable). The handler should distinguish 'could not run the test' from 'test ran and provider reported an error'.
+
+### BE-05: PullCohort returning 0 members treated as valid full snapshot -- marks all existing members departed
+**✅ backend ready** · ~12 lines · internal/service/cohortsync/service.go
+
+**Current**: In service.go SyncNow (line 572-588), when `provider.PullCohort` returns a payload with zero deltas (empty cohort list from the provider), `ApplyFullSnapshot` is called with an empty Members slice. In apply.go, `upsertMembersInTx` does nothing (line 110-111 returns 0), then `markDepartedInTx` with `IsSnapshot=true` and `OlderThan=now` marks ALL existing active members as departed (line 161-176). A legitimate empty API response (provider API glitch, temporary data issue, rate limit returning empty) would wipe the entire cohort membership in one sync.
+
+**Desired**: Add a safety check: if PullCohort returns 0 members for a cohort that currently has >0 members, either refuse the sync with an error ('provider returned empty membership list -- this would remove all N members; use force=true to confirm'), or at minimum log a warning. This is a common provider-API failure mode.
+
+
+## 🟡 MEDIUM (32)
+
+### UI-11: StatusBadge is a local component diverging from established patterns
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: StatusBadge is a local function component using rounded-full bg-muted/bg-destructive/bg-green-100 pills. It diverges from both external-sync's StatusPill (rounded-full border with destructive/amber/muted theming) and inbound-sources' StateBadge (rounded-md border with icon + text).
+
+**Desired**: Either reuse external-sync's StatusPill component (already exported) or model after inbound-sources' StateBadge with icons. The styling should use border-based pills with the same color tokens: border-destructive/20 bg-destructive/10 for errors, border-green-600/30 bg-green-600/10 for active, border-border bg-muted/50 for neutral states. Avoid raw bg-green-100 which does not have a dark mode counterpart.
+
+### UI-12: Create dialog footer has Cancel as variant='outline' instead of 'ghost'
+**✅ backend ready** · ~5 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The CreateSourceDialog footer uses <Button variant='outline' onClick={() => setOpen(false)}>Cancel</Button>.
+
+**Desired**: All other dialogs use variant='ghost' for the Cancel button: CreateConnectionDialog, CreateProviderInstallationDialog, EditConnectionDialog, CreateInboundSourceDialog, DeleteInboundSourceDialog, RotateConfirmDialog, and EditIntercomSourceDialog all use <Button variant='ghost'> for cancel. The submit button should include a Loader2 spinner when pending, not text like 'Creating...'.
+
+### UI-17: No two-column grid layout with detail panel
+**✅ backend ready** · ~80 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The page renders sources and cohorts as stacked full-width sections. There is no detail panel, no selected-source state driving a detail view, no master-detail layout.
+
+**Desired**: Use a two-column grid layout matching inbound-sources: grid xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]. Left column contains the sources Card and cohorts Card; right column contains a detail panel for the selected source (showing webhook URL, last sync, errors, linked cohorts, and recent sync runs). External-sync uses xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] for its master-detail layout.
+
+### UI-19: No aria-describedby on dialog content
+**✅ backend ready** · ~2 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The create dialog's DialogContent does not pass aria-describedby={undefined}. Some dialogs with a DialogDescription render correctly, but external-sync dialogs explicitly pass aria-describedby={undefined} when there is no description, avoiding the warning about missing accessible description.
+
+**Desired**: Dialogs without DialogDescription should pass aria-describedby={undefined} on DialogContent, matching CreateConnectionDialog and EditConnectionDialog patterns. Dialogs with DialogDescription (like DeleteInboundSourceDialog) are fine as-is.
+
+### UI-22: Test result uses emoji checkmarks instead of Lucide icons
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Test connection result displays emoji-style text: '✓ OK' for success and '✗ Failed' for error, using raw template literals.
+
+**Desired**: Use Lucide CheckCircle2 and XCircle icons with proper color classes, matching the inbound-sources test result pattern: <CheckCircle2 className='h-3.5 w-3.5' /> for success in text-green-700 dark:text-green-500, <XCircle className='h-3.5 w-3.5' /> for error in text-destructive.
+
+### UI-23: No selected-item highlight pattern for source/cohort rows
+**✅ backend ready** · ~20 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Source and cohort rows have no selection state. There is no selectedID tracking, no visual highlight on click, no master-detail linkage.
+
+**Desired**: Implement selection highlight matching external-sync's pattern: selectedID === item.id ? 'border-primary/50 bg-primary/5' : 'border-border/60 bg-background hover:bg-muted/50'. Clicking a source row should update selectedSourceID and drive the detail panel. Inbound-sources uses the same pattern with bg-primary/5 for selected table rows.
+
+### UI-24: Monolithic CohortSyncUI component, no file decomposition
+**✅ backend ready** · ~50 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx, console/src/features/cohort-sync/components/create-source-dialog.tsx, console/src/features/cohort-sync/components/delete-source-dialog.tsx
+
+**Current**: All UI is in a single cohort-sync-ui.tsx file: CohortSyncUI, SourceRow, CohortRow, CreateSourceDialog, HealthCard, StatusBadge. The create dialog is inline rather than a separate file.
+
+**Desired**: Decompose into separate files matching inbound-sources: create-dialog.tsx for CreateSourceDialog, delete-dialog.tsx for delete confirmation, and keep cohort-sync-ui.tsx for StatusBadge/SourceRow/CohortRow. Inbound-sources has create-dialog.tsx, delete-dialog.tsx, rotate-dialog.tsx, secret-reveal-dialog.tsx, edit-intercom-dialog.tsx, and sources-table.tsx as separate files.
+
+### UI-25: Query invalidation uses generic key instead of structured query keys
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/api/cohort-sync.ts
+
+**Current**: All query invalidation uses a single flat call: queryClient.invalidateQueries({ queryKey: ['cohort-sync'] }). Query keys are inline arrays like ['cohort-sync', 'sources'].
+
+**Desired**: Define a structured cohortSyncQueryKeys object matching external-sync's externalSyncQueryKeys pattern: root, sources, cohorts, runs, health as factory functions returning typed const arrays. Invalidation should target specific sub-keys where possible rather than blasting the entire tree.
+
+### UI-06: No confirmation of successful webhook receipt after provider setup
+**❌ needs backend** · ~60 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx, internal/handlers/console/cohortsync/handler.go
+
+**Current**: After the operator configures the provider and triggers a test sync, there is no real-time feedback in attune's console. The operator must manually refresh the page and check if a new cohort appeared in the Cohorts section, or if the source's lastSyncAt changed. There is no webhook event log.
+
+**Desired**: Show a webhook activity log or at minimum a 'last webhook received at' timestamp on the source row. Ideally, auto-refresh (polling or websocket) so the operator sees the cohort appear in real time after triggering a sync from the provider. A 'Waiting for first webhook...' state on new sources would set expectations.
+
+### UI-15: Cohort list has no search, filter by source, or pagination
+**✅ backend ready** · ~50 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The cohorts section (cohort-sync-ui.tsx line 94) renders all cohorts in a flat list with no search, no filter by source, no sort, and no pagination. The API supports sourceId filtering (cohort-sync.ts line 54) but the UI never uses it. With many cohorts from multiple sources, this becomes unusable.
+
+**Desired**: Add: (1) a search/filter input above the cohort list, (2) a source filter dropdown (using the already-supported sourceId parameter), (3) sort by name/memberCount/lastSyncedAt, (4) pagination or virtual scrolling for large lists.
+
+### UI-16: No cohort member list view
+**❌ needs backend** · ~100 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx, internal/handlers/console/cohortsync/handler.go
+
+**Current**: Cohort rows show member count (line 202) but there is no way to see who is in the cohort. No member list, no member search, no way to verify that a specific user is in a cohort. The operator cannot debug 'why is user X not showing up in cohort Y' without direct database access.
+
+**Desired**: Provide a member list view accessible from each cohort row -- either inline expandable or a detail page. Show external_user_id, joined_at, and status (active/stale). Include search by user ID. This is necessary for debugging the feedback cohort filter when it does not return expected results.
+
+### UI-17: Delete source uses browser confirm() -- no proper confirmation dialog
+**✅ backend ready** · ~50 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Deleting a source uses window.confirm() (cohort-sync-ui.tsx line 165): if (window.confirm(`Delete source "${source.name}"?`)). This is a bare browser dialog with no information about consequences. The operator is not warned about cascade effects.
+
+**Desired**: Replace with a proper shadcn/ui AlertDialog that: (1) names the source being deleted, (2) warns about what will be deleted (all cohorts from this source, all memberships, all sync runs), (3) shows the count of affected cohorts and members, (4) requires typing the source name to confirm (for sources with cohorts), (5) has a clear 'Delete' / 'Cancel' button pair. Also offer a 'Disable' alternative for operators who want to stop syncing without losing data.
+
+### UI-20: Cohort filter dropdown not internationalized -- hardcoded 'All cohorts' label
+**✅ backend ready** · ~5 lines · console/src/features/feedback/components/feedback-page.tsx
+
+**Current**: The cohort filter dropdown in feedback-page.tsx uses hardcoded English strings: aria-label='All cohorts' (line 1541), placeholder='All cohorts' (line 1542), SelectItem value='__all'>All cohorts (line 1545). All other dropdowns in the same FilterBar use t() for internationalization.
+
+**Desired**: Use i18n keys: t('feedback.filter.all_cohorts') for the label and placeholder, matching the pattern used by all other filter dropdowns in the same component.
+
+### UI-21: Cohort filter is conditionally hidden -- no empty state guidance for the filter
+**✅ backend ready** · ~15 lines · console/src/features/feedback/components/feedback-page.tsx
+
+**Current**: The cohort dropdown is only rendered when cohorts.length > 0 (feedback-page.tsx line 1536). If no cohorts exist, the dropdown is completely absent from the filter bar. An operator who knows about cohort sync but has not set it up cannot discover the filter exists.
+
+**Desired**: When no cohorts exist, either: (a) show the dropdown in a disabled state with a tooltip 'No cohorts synced yet. Set up Cohort Sync in Integrations.' linking to /integrations/cohort-sync, or (b) always show the dropdown with only the 'All cohorts' option and a helper message. Option (a) is preferred for discoverability.
+
+### UI-23: Sync Now button gives no feedback on completion -- no result display
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The 'Sync Now' button on cohort rows (cohort-sync-ui.tsx line 218) triggers syncCohort() and on success calls onAction() to invalidate queries. The SyncCohortResponse contains a full SyncRun with membersAdded/membersRemoved/membersTotal, but none of this information is shown to the operator. They see the button change from 'Syncing...' back to 'Sync Now' with no result.
+
+**Desired**: After a successful sync, show a toast or inline result with: 'Sync complete: +N added, -M removed, K total members.' For failures, show the error message from the run. This gives immediate feedback without requiring the operator to check the sync run history.
+
+### UI-25: No documentation links from the UI to provider setup guides
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The entire cohort sync UI has no links to documentation. The create dialog, source rows, and empty states do not link to private-deploy.md's cohort sync section or to Amplitude/Mixpanel documentation for configuring destinations.
+
+**Desired**: Add contextual help links: (1) in the page header or empty state, link to the attune docs cohort sync section, (2) in the create dialog, link to the relevant provider's destination setup docs, (3) in error states, link to troubleshooting docs.
+
+### UI-26: Cohort rows do not show which source they belong to
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Each cohort row (cohort-sync-ui.tsx line 198) shows name, member count, and external cohort ID, but not which source (provider/project) the cohort belongs to. The cohort proto has cohortSourceId but no source name. With multiple sources, the operator cannot tell which cohorts belong to which source.
+
+**Desired**: Show the source name (and provider icon) on each cohort row, or group cohorts by source. The source name can be resolved client-side since both sources and cohorts are loaded. Alternatively, the backend could include source_name on the cohort response.
+
+### UI-28: Create source error message is generic -- does not show validation details
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: If source creation fails, the error shown is either the Error.message (if it is an Error instance) or the generic string 'Failed to create source' (cohort-sync-ui.tsx line 330). The backend returns structured error codes (VALIDATION, CONFLICT, etc.) but these are not parsed for user-friendly display.
+
+**Desired**: Parse the error response to show specific messages: 'A source with this name already exists' for CONFLICT, 'Name is required' or 'Invalid credential format' for VALIDATION, etc. The generic fallback should only apply to truly unexpected errors.
+
+### API-04: No ListEvents endpoint (webhook event audit trail)
+**❌ needs backend** · ~140 lines · proto/attune/v1/cohort_sync.proto, internal/service/cohortsync/service.go, internal/handlers/console/cohortsync/handler.go
+
+**Current**: Repo has ListEvents (events.go:66) and the service Repo interface includes it (service.go:67). Service has RecordEvent and UpdateEventStatus public methods but no ListEvents public method. No handler, no route, no proto RPC, no proto SyncEvent message, and no frontend API function.
+
+**Desired**: Add Service.ListEvents public method. Proto message CohortSyncEvent and RPC ListCohortSyncEvents with route GET /cohort-sync/sources/{source_id}/events?limit=N. Frontend listCohortSyncEventsQuery(sourceId, limit). Allows operators to see webhook delivery history, dedup status, and failure reasons for a source.
+
+### API-08: Health endpoint response lacks per-source and per-cohort breakdown
+**❌ needs backend** · ~50 lines · proto/attune/v1/cohort_sync.proto, internal/service/cohortsync/service.go, internal/handlers/console/cohortsync/handler.go
+
+**Current**: CohortSyncHealth proto message (cohort_sync.proto:190-196) has only five aggregate counters: source_count, active_sources, error_sources, cohort_count, total_active_members. The Health service method (service.go:621) computes these by iterating ListSources and ListAllCohorts but only returns totals.
+
+**Desired**: For a rich health dashboard, the response should include: last_sync_at (most recent sync across all sources), stale_cohort_count (cohorts with last_synced_at older than their stale_ttl_days), disabled_sources count (currently lumped into non-active), and optionally a list of sources/cohorts in error state with their error messages so the UI can surface actionable items without a separate ListSources call.
+
+### API-09: Cohort proto message missing source_name for display without join
+**❌ needs backend** · ~40 lines · proto/attune/v1/cohort_sync.proto, internal/handlers/console/cohortsync/handler.go, internal/repo/cohortsync/repo.go
+
+**Current**: The Cohort proto message (cohort_sync.proto:122-135) has cohort_source_id but not the source's name or provider. The frontend listCohortsQuery returns cohorts, but to display which source a cohort belongs to, the UI must separately fetch sources and join by ID client-side.
+
+**Desired**: Add source_name and/or source_provider fields to the Cohort proto message (or a richer GetCohort response) so the UI can display the source context without an extra round-trip.
+
+### UI-04: Create dialog form not reset on error -- stale error persists across re-open
+**✅ backend ready** · ~8 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: In cohort-sync-ui.tsx CreateSourceDialog (lines 226-336), form state (name, credential, pullCredential, provider) is only reset `onSuccess` (line 244-247). If creation fails (400 validation, 500 internal), the error message appears (line 328-332), but if the operator closes the dialog and reopens it, the stale form values AND the stale error message persist -- `mutation.error` is never cleared on dialog open/close. The `onOpenChange` handler is implicit from radix Dialog; it does not reset mutation state.
+
+**Desired**: Reset form fields and call `mutation.reset()` when the dialog closes without success, or when it opens. This can be done in the `onOpenChange` callback.
+
+### UI-05: Double-click on Create button fires duplicate mutations
+**✅ backend ready** · ~3 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: In cohort-sync-ui.tsx line 321-325, the Create button is disabled when `mutation.isPending`, which protects against rapid double-clicks in most cases. However, there is a small window between the click and React re-rendering the disabled state. More importantly, the Delete button (line 161-169) uses `window.confirm` which blocks the main thread, but `deleteMutation.mutate()` is called unconditionally after confirm -- no check that deleteMutation isn't already pending before the confirm dialog appears.
+
+**Desired**: The Create button's protection is adequate for most cases. The Delete flow should check `deleteMutation.isPending` before showing the confirm dialog, or the disabled prop should gate the onClick entirely.
+
+### UI-06: No client-side validation on form fields -- all validation is server-side
+**✅ backend ready** · ~25 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The Create button (line 322) is only disabled when `!name || !credential`, which is a minimal empty-check. There is no validation on: (1) name length (backend limits to 200 UTF-8 chars), (2) credential format or minimum length, (3) pullCredential format (should be 'api_key:secret_key' containing a colon), (4) name containing only whitespace (backend trims then rejects, but the button would be enabled). The operator discovers these only after a server round-trip.
+
+**Desired**: Add client-side validation: name length limit, whitespace-only rejection, pullCredential colon-format hint. These don't need to be blocking -- inline helper text or field-level errors on blur would be sufficient.
+
+### UI-07: Webhook URL is not copy-able via keyboard -- no copy button
+**✅ backend ready** · ~30 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: In cohort-sync-ui.tsx lines 177-186, the webhook URL is rendered as a `<code>` block inside a div. There is no copy button, no `navigator.clipboard.writeText` integration, and no click-to-copy behavior. The operator must manually select the text and copy. For Amplitude, the instructions say to 'replace /add with /create and /remove' -- this is error-prone without a proper copy mechanism for each URL variant.
+
+**Desired**: Add a copy-to-clipboard button next to the webhook URL. For Amplitude sources, show all three URLs (create, add, remove) each with their own copy button rather than asking the operator to mentally transform the URL.
+
+### BE-02: Webhook handler does not check source.Enabled at the auth layer
+**✅ backend ready** · ~8 lines · internal/handlers/cohortsyncwebhook/handler.go
+
+**Current**: In cohortsyncwebhook/handler.go, `authenticateSource` (line 189-220) verifies the source exists and the credential matches, but does not check `source.Enabled`. The entire request body is read, parsed, and the event is recorded before the service layer's `ApplyDelta`/`ApplyFullSnapshot` detects the disabled state and creates a 'skipped' run. This means disabled sources still accept and process webhook traffic, consuming resources (body parsing, event recording, run insertion) before ultimately skipping the actual membership update.
+
+**Desired**: Check `source.Enabled` in `authenticateSource` or immediately after, and return 200 OK early with a log line, before reading and parsing the body. This saves resources for disabled sources that may receive high webhook traffic.
+
+### BE-03: Webhook race with source deletion -- TOCTOU between auth and apply
+**✅ backend ready** · ~15 lines · internal/handlers/cohortsyncwebhook/handler.go, internal/service/cohortsync/service.go
+
+**Current**: In cohortsyncwebhook/handler.go, `authenticateSource` fetches the source at line 190. Then `applyPayload` records an event and calls `ApplyDelta`/`ApplyFullSnapshot`. If the source is deleted (CASCADE deletes cohorts + memberships) between the auth check and the apply call, the behavior depends on which step hits first: (1) RecordEvent may succeed (sync_events has its own FK), (2) ensureCohort may create a new cohort referencing a now-deleted source_id, causing a FK violation. The CASCADE DELETE on `cohort_sources.id` would have already removed cohorts, so `GetCohortByExternalID` returns not-found, and `UpsertCohort` tries to INSERT with a deleted `cohort_source_id` FK, producing a 500 error.
+
+**Desired**: The applyPayload path should handle FK violation errors from cohort/membership inserts gracefully -- map them to a 404 or 410 Gone response rather than 500. Alternatively, wrap the entire apply in a serializable transaction that re-checks source existence.
+
+### BE-06: CleanExpired has no concurrency guard against active syncs
+**✅ backend ready** · ~10 lines · internal/service/cohortsync/service.go, internal/repo/cohortsync/repo.go
+
+**Current**: In service.go line 602-604, `CleanExpired` calls `repo.CleanExpired` which presumably deletes memberships where `expires_at < NOW()`. This runs independently of any active sync. If CleanExpired runs during an active ApplyMembershipDelta transaction, the two could conflict: CleanExpired might delete a membership that the sync is about to update, or the sync's MarkDeparted might set an expires_at that CleanExpired immediately removes before the sync transaction commits (though if CleanExpired is in a separate transaction, snapshot isolation should prevent this). The main risk is that CleanExpired and a concurrent sync produce confusing member_count values.
+
+**Desired**: CleanExpired should either skip cohorts that have a running sync_run (check idx_cohort_sync_runs_one_running) or use appropriate row-level locking. Document the concurrency expectations.
+
+### BE-09: DeleteSource does not check for running sync runs before deletion
+**✅ backend ready** · ~10 lines · internal/service/cohortsync/service.go
+
+**Current**: In service.go DeleteSource (lines 200-211), the method fetches the source, then immediately deletes it. The CASCADE delete removes all cohorts, memberships, and sync_runs. If there is an active (status='running') sync run for any cohort under this source, the delete will succeed and the running ApplyMembershipDelta transaction will fail on commit (its cohort/source rows are gone). The sync run will be left in a 'running' state in the in-memory struct but the DB row is CASCADE-deleted. The user gets a 200 OK on delete but the concurrent sync gets a 500.
+
+**Desired**: Before deleting, check if any cohorts under this source have running sync runs. If so, return a 409 Conflict asking the operator to wait for the sync to complete.
+
+### UI-11: No frontend tests for cohort-sync feature
+**✅ backend ready** · ~200 lines · console/src/features/cohort-sync/components/cohort-sync-ui.test.tsx
+
+**Current**: There are zero test files under console/src/features/cohort-sync/. No unit tests, no component tests, no integration tests. The feature has mutation logic, error handling paths, state management, and conditional rendering that are all untested.
+
+**Desired**: Add component tests for CohortSyncUI covering: loading state, empty state, error state, create flow (success + error), delete flow (success + error), test flow (success + error), sync flow (success + error). Add unit tests for the API layer mocking fetch.
+
+### UI-12: Sync success gives no result feedback -- operator only sees button revert
+**✅ backend ready** · ~15 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: In cohort-sync-ui.tsx CohortRow (lines 192-195), after a successful sync, `onAction()` is called which invalidates queries and triggers a refetch. The button reverts from 'Syncing...' to 'Sync Now'. The SyncCohortResponse from the backend includes the run details (members added/removed/total) but this data is discarded -- `syncMutation.data` is never displayed. The operator has no idea how many members were added/removed by the sync.
+
+**Desired**: After successful sync, show a brief summary: 'Synced: +12 added, -3 removed, 156 total' as a transient message near the button, or in a toast. The data is already returned by the API.
+
+### UI-13: Route loader uses Promise.all with ensureQueryData -- single failure blocks entire page
+**✅ backend ready** · ~10 lines · console/src/routes/_authed.integrations.cohort-sync.tsx
+
+**Current**: In _authed.integrations.cohort-sync.tsx line 15-19, the route loader uses `Promise.all([ensureQueryData(health), ensureQueryData(sources), ensureQueryData(cohorts)])`. If any single query fails (e.g. health endpoint is down), the entire page fails to load. There is no `errorComponent` on the route, so TanStack Router's default error handling kicks in (which may be a blank page or an uncaught error). The queries are independent -- sources and cohorts should load even if health fails.
+
+**Desired**: Use `Promise.allSettled` instead of `Promise.all`, or wrap each `ensureQueryData` in a try/catch that falls through. Add an `errorComponent` to the route that shows a retry-able error page. Alternatively, make health non-blocking (remove from loader, let it load in the background).
+
+
+## ⚪ LOW (14)
+
+### UI-26: Label spacing uses raw <div> instead of space-y-1.5 or space-y-2 pattern
+**✅ backend ready** · ~10 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: Form fields in CreateSourceDialog use bare <div> wrappers with no spacing classes between Label and Input. Some have a mt-1 on the help text.
+
+**Desired**: Use <div className='space-y-1.5'> or <div className='space-y-2'> wrapping Label + Input + help text, matching the consistent pattern in external-sync's CreateConnectionDialog and inbound-sources' CreateInboundSourceDialog.
+
+### UI-27: No staleTime on queries
+**✅ backend ready** · ~5 lines · console/src/features/cohort-sync/api/cohort-sync.ts
+
+**Current**: listCohortSourcesQuery, listCohortsQuery, and cohortSyncHealthQuery do not set staleTime. They will refetch on every component mount/focus.
+
+**Desired**: Set appropriate staleTime values matching external-sync: health at 20_000, list queries at 20_000, provider/schema queries at 60_000. This prevents unnecessary refetches on tab switches and component remounts.
+
+### UI-24: Test Source result is ephemeral and not persisted in the UI state
+**❌ needs backend** · ~20 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx, internal/handlers/console/cohortsync/handler.go
+
+**Current**: The Test button result (green checkmark or red X) is stored in local component state (line 116) and disappears on page navigation or component re-render. If the operator tests, navigates away, and comes back, they cannot see that they already tested successfully.
+
+**Desired**: Consider persisting the last test result as part of the source status on the backend, or at minimum show the last test timestamp from the source metadata. The current UI-only state is fragile.
+
+### UI-27: Auth type in create dialog is hardcoded to api_key with no UI control
+**✅ backend ready** · ~10 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The CreateSourceDialog hardcodes authType: 'api_key' (cohort-sync-ui.tsx line 237). The proto CreateCohortSourceRequest has an authType field, and the docs mention Basic Auth for Amplitude (line 1218). There is no selector for auth type.
+
+**Desired**: Either expose an auth type selector if multiple auth types are supported, or document why api_key is the only supported type and remove the unused proto field. Currently it is ambiguous whether other auth types work.
+
+### API-10: SyncCohort response includes run but no updated cohort state
+**✅ backend ready** · ~15 lines · proto/attune/v1/cohort_sync.proto, internal/handlers/console/cohortsync/handler.go, console/src/proto/attune/v1/cohort_sync.ts
+
+**Current**: SyncCohortResponse proto (cohort_sync.proto:157-159) returns only a CohortSyncRun. The service SyncNow (service.go:542) returns SyncRunResult which contains both Run and Cohort, but the handler (handler.go:233-235) maps only result.Run into the response.
+
+**Desired**: Include the updated cohort in the SyncCohortResponse (e.g., add optional Cohort cohort = 2) so the UI can update its cohort display (member_count, last_synced_at, last_error) immediately after a sync without a separate refetch.
+
+### API-11: ListCohortSyncRuns lacks cursor pagination
+**❌ needs backend** · ~40 lines · proto/attune/v1/cohort_sync.proto, internal/repo/cohortsync/repo.go, internal/service/cohortsync/service.go
+
+**Current**: ListCohortSyncRunsRequest (cohort_sync.proto:177-180) supports only an optional limit. ListCohortSyncRunsResponse returns a flat list with no pagination cursor or total count. The repo caps at 50 (repo.go:533). For cohorts with long run histories, there is no way to page past the first 50 results.
+
+**Desired**: Add optional string cursor/offset and a next_cursor field to the request/response so the UI can implement infinite scroll or paginated run history tables.
+
+### UI-08: StatusBadge has no ARIA label -- screen readers get raw text only
+**✅ backend ready** · ~8 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: StatusBadge (lines 359-379) renders a `<span>` with colored background and text ('Active', 'Disabled', 'Error'). The color coding is not accessible to screen readers, and the badge has no `role` or `aria-label` to communicate its semantic meaning. Similarly, the test result icons (line 157-159) use checkmark/cross Unicode characters with no SR-accessible label.
+
+**Desired**: Add `role='status'` and `aria-label` to the StatusBadge. Test result indicators should have `aria-label='Test passed'` or `aria-label='Test failed: <reason>'`.
+
+### UI-09: Test result persists indefinitely after first test
+**✅ backend ready** · ~3 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: In cohort-sync-ui.tsx SourceRow, `testResult` (line 116) is set on test completion and never cleared. If the operator tests, gets an error, fixes the credential, and tests again successfully, the old error result stays visible until the new test completes. More subtly, if the operator deletes and re-creates a source with the same row position, React may reuse the component and show a stale test result from the previous source (though keyed by `source.id` this is unlikely).
+
+**Desired**: Clear testResult when starting a new test (`onMutate` or at the top of the click handler). Consider auto-clearing after a timeout (e.g. 30 seconds).
+
+### UI-10: No loading/pending state for delete operation
+**✅ backend ready** · ~2 lines · console/src/features/cohort-sync/components/cohort-sync-ui.tsx
+
+**Current**: The Delete button (line 161-169) is disabled during pending but its text does not change to 'Deleting...' like the other buttons do ('Testing...', 'Creating...', 'Syncing...'). The operator has no visual confirmation that the delete is in progress beyond the button being disabled.
+
+**Desired**: Change button text to 'Deleting...' when `deleteMutation.isPending`, consistent with other mutation buttons.
+
+### BE-07: Health endpoint is O(N) -- counts all cohorts and sums member counts in Go, not SQL
+**✅ backend ready** · ~20 lines · internal/service/cohortsync/service.go, internal/repo/cohortsync/repo.go
+
+**Current**: In service.go Health (lines 621-645), the method fetches ALL sources and ALL cohorts for the tenant, then iterates in Go to count active/error sources and sum member counts. For tenants with many sources and cohorts, this loads all rows into memory. The member count comes from the cached `cohort.MemberCount` column which is fine, but the full list fetch is unnecessary.
+
+**Desired**: Use a single aggregate SQL query: SELECT count(*) as source_count, count(*) FILTER (WHERE status='active') as active, ... from cohort_sources WHERE tenant_id=$1. This is a single round-trip and constant memory.
+
+### BE-08: Webhook dedup key includes payload digest -- retries with identical body are deduped but partial retries are not
+**✅ backend ready** · ~5 lines · internal/handlers/cohortsyncwebhook/handler.go
+
+**Current**: In cohortsyncwebhook/handler.go line 138, dedupeKey is `provider:externalCohortID:payloadDigest`. This means if Amplitude retries the exact same webhook payload, it is correctly deduped. However, if Amplitude sends a different payload for the same logical event (e.g. the payload includes a timestamp that changes on retry, or the member list is slightly different due to concurrent changes), the dedup will not catch it and the event will be processed twice. This is by design (content-based dedup), but the lack of an idempotency key from the provider means true logical dedup is not possible.
+
+**Desired**: This is acceptable given the constraints. Document that dedup is content-based, not event-based. If providers offer an event ID header, prefer that as the dedup key.
+
+### BE-10: TotalActiveMembers in Health uses int32 proto field -- overflows at ~2.1B members
+**❌ needs backend** · ~5 lines · internal/handlers/console/cohortsync/handler.go, proto/attune/v1/cohort_sync.proto
+
+**Current**: In console/cohortsync/handler.go line 278, `TotalActiveMembers: int32(health.TotalActiveMembers)`. The Go service returns `int` which is 64-bit, but the proto field is `int32`. A tenant with more than 2^31-1 total active members across all cohorts would see a negative count in the UI. While this is unlikely for most deployments, a single large Amplitude cohort can have millions of members, and many such cohorts could approach the limit.
+
+**Desired**: Change the proto field to int64 or add a cap/guard in the handler to prevent silent overflow.
+
+### BE-11: Webhook authenticateSource uses basic auth username as full credential -- password ignored
+**✅ backend ready** · ~8 lines · internal/handlers/cohortsyncwebhook/handler.go, internal/service/cohortsync/service.go
+
+**Current**: In cohortsyncwebhook/handler.go line 213, `username, _, _ := r.BasicAuth()` discards the password. The credential comparison is done on the username only. This is documented behavior for Amplitude's webhook auth model, but if an operator configures a credential that includes a colon (e.g. 'my:key'), `BasicAuth()` will split it at the colon, comparing only the part before the colon. The stored credential is compared against the full string. This means a credential containing ':' will never authenticate via webhook.
+
+**Desired**: Document that webhook credentials must not contain ':'. Alternatively, validate this at creation time in the service layer. Or compare against the raw Authorization header instead of using BasicAuth() parsing.
+
+### BE-12: RecoverStaleRuns is declared on Repo interface but never called from Service
+**✅ backend ready** · ~15 lines · internal/service/cohortsync/service.go
+
+**Current**: The Repo interface in service.go line 57 declares `RecoverStaleRuns(ctx context.Context, timeout time.Duration) (int64, error)` but the Service type has no method that calls it. If a sync run gets stuck in 'running' status (e.g. process crash during ApplyMembershipDelta), there is no mechanism to recover it. The partial unique index `idx_cohort_sync_runs_one_running` will permanently block new syncs for that cohort until manual DB intervention.
+
+**Desired**: Add a Service.RecoverStaleRuns method and wire it to a periodic background job (e.g. every 5 minutes). Mark runs as 'failed' if they have been 'running' for longer than a threshold (e.g. 30 minutes).
+

@@ -65,6 +65,7 @@ type Repo interface {
 	RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error)
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error
 	ListEvents(ctx context.Context, tenantID string, sourceID uuid.UUID, limit int) ([]repo.SyncEvent, error)
+	ListMembers(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.Membership, error)
 }
 
 type auditRecorder interface {
@@ -376,6 +377,16 @@ func (s *Service) ListAllCohorts(ctx context.Context, tenantID string) ([]repo.C
 	return s.repo.ListAllCohorts(ctx, tenantID)
 }
 
+// GetCohort retrieves a single cohort by ID.
+func (s *Service) GetCohort(ctx context.Context, tenantID string, id uuid.UUID) (*repo.Cohort, error) {
+	return s.repo.GetCohort(ctx, tenantID, id)
+}
+
+// ListMembers returns active members of a cohort.
+func (s *Service) ListMembers(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.Membership, error) {
+	return s.repo.ListMembers(ctx, tenantID, cohortID, limit)
+}
+
 // UpdateCohortInput is the input for updating a cohort.
 type UpdateCohortInput struct {
 	TenantID     string
@@ -613,8 +624,11 @@ type HealthSummary struct {
 	SourceCount        int
 	ActiveSources      int
 	ErrorSources       int
+	DisabledSources    int
 	CohortCount        int
 	TotalActiveMembers int
+	LastSyncAt         *time.Time
+	SyncsLast24h       int
 }
 
 // Health returns a health summary for the tenant.
@@ -631,6 +645,14 @@ func (s *Service) Health(ctx context.Context, tenantID string) (HealthSummary, e
 			h.ActiveSources++
 		case "error":
 			h.ErrorSources++
+		case "disabled":
+			h.DisabledSources++
+		}
+		if src.LastSyncAt != nil {
+			t := ptrext.Indirect(src.LastSyncAt)
+			if h.LastSyncAt == nil || t.After(ptrext.Indirect(h.LastSyncAt)) {
+				h.LastSyncAt = ptrext.Of(t)
+			}
 		}
 	}
 	cohorts, err := s.repo.ListAllCohorts(ctx, tenantID)

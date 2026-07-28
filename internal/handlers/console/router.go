@@ -3278,114 +3278,8 @@ func (r *Router) mountCohortSync(m chi.Router) {
 	}
 	m.Route("/cohort-sync", func(cs chi.Router) {
 		cs.Use(r.requireDelegatedAdmin)
-		cs.Get("/sources", dispatcher.Bind(
-			"console.CohortSyncHandler.ListSources",
-			dispatcher.Empty(func() *attunev1.ListCohortSourcesRequest {
-				return ptrext.Of(attunev1.ListCohortSourcesRequest{})
-			}),
-			r.cohortSync.ListSources,
-			dispatcher.WithAuth(sessionAuth[attunev1.ListCohortSourcesRequest]),
-		))
-		cs.Post("/sources", dispatcher.Bind(
-			"console.CohortSyncHandler.CreateSource",
-			dispatcher.JSON(func() *attunev1.CreateCohortSourceRequest {
-				return ptrext.Of(attunev1.CreateCohortSourceRequest{})
-			}),
-			r.cohortSync.CreateSource,
-			dispatcher.WithAuth(sessionAuth[attunev1.CreateCohortSourceRequest]),
-		))
-		cs.Patch("/sources/{id}", dispatcher.Bind(
-			"console.CohortSyncHandler.UpdateSource",
-			dispatcher.Combine(
-				func() *attunev1.UpdateCohortSourceRequest {
-					return ptrext.Of(attunev1.UpdateCohortSourceRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.UpdateCohortSourceRequest],
-				dispatcher.Param("id", func(req *attunev1.UpdateCohortSourceRequest, v string) {
-					req.Id = v
-				}),
-			),
-			r.cohortSync.UpdateSource,
-			dispatcher.WithAuth(sessionAuth[attunev1.UpdateCohortSourceRequest]),
-		))
-		cs.Post("/sources/{id}:test", dispatcher.Bind(
-			"console.CohortSyncHandler.TestSource",
-			dispatcher.Path(
-				func() *attunev1.TestCohortSourceRequest {
-					return ptrext.Of(attunev1.TestCohortSourceRequest{})
-				},
-				dispatcher.Param("id", func(req *attunev1.TestCohortSourceRequest, v string) {
-					req.Id = v
-				}),
-			),
-			r.cohortSync.TestSource,
-			dispatcher.WithAuth(sessionAuth[attunev1.TestCohortSourceRequest]),
-		))
-		cs.Delete("/sources/{id}", dispatcher.Bind(
-			"console.CohortSyncHandler.DeleteSource",
-			dispatcher.Path(
-				func() *attunev1.DeleteCohortSourceRequest {
-					return ptrext.Of(attunev1.DeleteCohortSourceRequest{})
-				},
-				dispatcher.Param("id", func(req *attunev1.DeleteCohortSourceRequest, v string) {
-					req.Id = v
-				}),
-			),
-			r.cohortSync.DeleteSource,
-			dispatcher.WithAuth(sessionAuth[attunev1.DeleteCohortSourceRequest]),
-		))
-		cs.Get("/cohorts", dispatcher.Bind(
-			"console.CohortSyncHandler.ListCohorts",
-			dispatcher.Query(
-				func() *attunev1.ListCohortsRequest {
-					return ptrext.Of(attunev1.ListCohortsRequest{})
-				},
-				consolecohortsync.BindListCohortsRequest,
-			),
-			r.cohortSync.ListCohorts,
-			dispatcher.WithAuth(sessionAuth[attunev1.ListCohortsRequest]),
-		))
-		cs.Patch("/cohorts/{id}", dispatcher.Bind(
-			"console.CohortSyncHandler.UpdateCohort",
-			dispatcher.Combine(
-				func() *attunev1.UpdateCohortRequest {
-					return ptrext.Of(attunev1.UpdateCohortRequest{})
-				},
-				dispatcher.JSONBody[*attunev1.UpdateCohortRequest],
-				dispatcher.Param("id", func(req *attunev1.UpdateCohortRequest, v string) {
-					req.Id = v
-				}),
-			),
-			r.cohortSync.UpdateCohort,
-			dispatcher.WithAuth(sessionAuth[attunev1.UpdateCohortRequest]),
-		))
-		cs.Post("/cohorts/{id}:sync", dispatcher.Bind(
-			"console.CohortSyncHandler.SyncCohort",
-			dispatcher.Path(
-				func() *attunev1.SyncCohortRequest {
-					return ptrext.Of(attunev1.SyncCohortRequest{})
-				},
-				dispatcher.Param("id", func(req *attunev1.SyncCohortRequest, v string) {
-					req.Id = v
-				}),
-			),
-			r.cohortSync.SyncCohort,
-			dispatcher.WithAuth(sessionAuth[attunev1.SyncCohortRequest]),
-		))
-		cs.Get("/cohorts/{cohort_id}/runs", dispatcher.Bind(
-			"console.CohortSyncHandler.ListSyncRuns",
-			dispatcher.Query(
-				func() *attunev1.ListCohortSyncRunsRequest {
-					return ptrext.Of(attunev1.ListCohortSyncRunsRequest{})
-				},
-				dispatcher.Param("cohort_id", func(req *attunev1.ListCohortSyncRunsRequest, v string) {
-					req.CohortId = v
-				}),
-				consolecohortsync.BindListRunsRequest,
-			),
-			r.cohortSync.ListSyncRuns,
-			dispatcher.WithAuth(sessionAuth[attunev1.ListCohortSyncRunsRequest]),
-		))
+		r.mountCohortSyncSources(cs)
+		r.mountCohortSyncCohorts(cs)
 		cs.Get("/health", dispatcher.Bind(
 			"console.CohortSyncHandler.Health",
 			dispatcher.Empty(func() *attunev1.GetCohortSyncHealthRequest {
@@ -3395,6 +3289,159 @@ func (r *Router) mountCohortSync(m chi.Router) {
 			dispatcher.WithAuth(sessionAuth[attunev1.GetCohortSyncHealthRequest]),
 		))
 	})
+}
+
+func (r *Router) mountCohortSyncSources(cs chi.Router) {
+	cs.Get("/sources", dispatcher.Bind(
+		"console.CohortSyncHandler.ListSources",
+		dispatcher.Empty(func() *attunev1.ListCohortSourcesRequest {
+			return ptrext.Of(attunev1.ListCohortSourcesRequest{})
+		}),
+		r.cohortSync.ListSources,
+		dispatcher.WithAuth(sessionAuth[attunev1.ListCohortSourcesRequest]),
+	))
+	cs.Get("/sources/{id}", dispatcher.Bind(
+		"console.CohortSyncHandler.GetSource",
+		dispatcher.Path(
+			func() *attunev1.GetCohortSourceRequest {
+				return ptrext.Of(attunev1.GetCohortSourceRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.GetCohortSourceRequest, v string) {
+				req.Id = v
+			}),
+		),
+		r.cohortSync.GetSource,
+		dispatcher.WithAuth(sessionAuth[attunev1.GetCohortSourceRequest]),
+	))
+	cs.Post("/sources", dispatcher.Bind(
+		"console.CohortSyncHandler.CreateSource",
+		dispatcher.JSON(func() *attunev1.CreateCohortSourceRequest {
+			return ptrext.Of(attunev1.CreateCohortSourceRequest{})
+		}),
+		r.cohortSync.CreateSource,
+		dispatcher.WithAuth(sessionAuth[attunev1.CreateCohortSourceRequest]),
+	))
+	cs.Patch("/sources/{id}", dispatcher.Bind(
+		"console.CohortSyncHandler.UpdateSource",
+		dispatcher.Combine(
+			func() *attunev1.UpdateCohortSourceRequest {
+				return ptrext.Of(attunev1.UpdateCohortSourceRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateCohortSourceRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateCohortSourceRequest, v string) {
+				req.Id = v
+			}),
+		),
+		r.cohortSync.UpdateSource,
+		dispatcher.WithAuth(sessionAuth[attunev1.UpdateCohortSourceRequest]),
+	))
+	cs.Post("/sources/{id}:test", dispatcher.Bind(
+		"console.CohortSyncHandler.TestSource",
+		dispatcher.Path(
+			func() *attunev1.TestCohortSourceRequest {
+				return ptrext.Of(attunev1.TestCohortSourceRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.TestCohortSourceRequest, v string) {
+				req.Id = v
+			}),
+		),
+		r.cohortSync.TestSource,
+		dispatcher.WithAuth(sessionAuth[attunev1.TestCohortSourceRequest]),
+	))
+	cs.Delete("/sources/{id}", dispatcher.Bind(
+		"console.CohortSyncHandler.DeleteSource",
+		dispatcher.Path(
+			func() *attunev1.DeleteCohortSourceRequest {
+				return ptrext.Of(attunev1.DeleteCohortSourceRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.DeleteCohortSourceRequest, v string) {
+				req.Id = v
+			}),
+		),
+		r.cohortSync.DeleteSource,
+		dispatcher.WithAuth(sessionAuth[attunev1.DeleteCohortSourceRequest]),
+	))
+}
+
+func (r *Router) mountCohortSyncCohorts(cs chi.Router) {
+	cs.Get("/cohorts/{id}", dispatcher.Bind(
+		"console.CohortSyncHandler.GetCohort",
+		dispatcher.Path(
+			func() *attunev1.GetCohortRequest {
+				return ptrext.Of(attunev1.GetCohortRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.GetCohortRequest, v string) {
+				req.Id = v
+			}),
+		),
+		r.cohortSync.GetCohort,
+		dispatcher.WithAuth(sessionAuth[attunev1.GetCohortRequest]),
+	))
+	cs.Get("/cohorts", dispatcher.Bind(
+		"console.CohortSyncHandler.ListCohorts",
+		dispatcher.Query(
+			func() *attunev1.ListCohortsRequest {
+				return ptrext.Of(attunev1.ListCohortsRequest{})
+			},
+			consolecohortsync.BindListCohortsRequest,
+		),
+		r.cohortSync.ListCohorts,
+		dispatcher.WithAuth(sessionAuth[attunev1.ListCohortsRequest]),
+	))
+	cs.Patch("/cohorts/{id}", dispatcher.Bind(
+		"console.CohortSyncHandler.UpdateCohort",
+		dispatcher.Combine(
+			func() *attunev1.UpdateCohortRequest {
+				return ptrext.Of(attunev1.UpdateCohortRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateCohortRequest],
+			dispatcher.Param("id", func(req *attunev1.UpdateCohortRequest, v string) {
+				req.Id = v
+			}),
+		),
+		r.cohortSync.UpdateCohort,
+		dispatcher.WithAuth(sessionAuth[attunev1.UpdateCohortRequest]),
+	))
+	cs.Post("/cohorts/{id}:sync", dispatcher.Bind(
+		"console.CohortSyncHandler.SyncCohort",
+		dispatcher.Path(
+			func() *attunev1.SyncCohortRequest {
+				return ptrext.Of(attunev1.SyncCohortRequest{})
+			},
+			dispatcher.Param("id", func(req *attunev1.SyncCohortRequest, v string) {
+				req.Id = v
+			}),
+		),
+		r.cohortSync.SyncCohort,
+		dispatcher.WithAuth(sessionAuth[attunev1.SyncCohortRequest]),
+	))
+	cs.Get("/cohorts/{cohort_id}/members", dispatcher.Bind(
+		"console.CohortSyncHandler.ListMembers",
+		dispatcher.Query(
+			func() *attunev1.ListCohortMembersRequest {
+				return ptrext.Of(attunev1.ListCohortMembersRequest{})
+			},
+			dispatcher.Param("cohort_id", func(req *attunev1.ListCohortMembersRequest, v string) {
+				req.CohortId = v
+			}),
+		),
+		r.cohortSync.ListMembers,
+		dispatcher.WithAuth(sessionAuth[attunev1.ListCohortMembersRequest]),
+	))
+	cs.Get("/cohorts/{cohort_id}/runs", dispatcher.Bind(
+		"console.CohortSyncHandler.ListSyncRuns",
+		dispatcher.Query(
+			func() *attunev1.ListCohortSyncRunsRequest {
+				return ptrext.Of(attunev1.ListCohortSyncRunsRequest{})
+			},
+			dispatcher.Param("cohort_id", func(req *attunev1.ListCohortSyncRunsRequest, v string) {
+				req.CohortId = v
+			}),
+			consolecohortsync.BindListRunsRequest,
+		),
+		r.cohortSync.ListSyncRuns,
+		dispatcher.WithAuth(sessionAuth[attunev1.ListCohortSyncRunsRequest]),
+	))
 }
 
 // sessionAuth is a generic dispatcher auth function that returns the

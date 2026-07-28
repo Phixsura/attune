@@ -21,6 +21,7 @@ export interface CohortSource {
   webhookUrl: string;
   createdAt?: Date | undefined;
   updatedAt?: Date | undefined;
+  webhookUrls: string[];
 }
 
 export interface ListCohortSourcesRequest {
@@ -28,6 +29,10 @@ export interface ListCohortSourcesRequest {
 
 export interface ListCohortSourcesResponse {
   sources: CohortSource[];
+}
+
+export interface GetCohortSourceRequest {
+  id: string;
 }
 
 export interface CreateCohortSourceRequest {
@@ -81,6 +86,8 @@ export interface Cohort {
   lastError: string;
   createdAt?: Date | undefined;
   updatedAt?: Date | undefined;
+  sourceName: string;
+  sourceProvider: string;
 }
 
 export interface ListCohortsRequest {
@@ -89,6 +96,10 @@ export interface ListCohortsRequest {
 
 export interface ListCohortsResponse {
   cohorts: Cohort[];
+}
+
+export interface GetCohortRequest {
+  id: string;
 }
 
 export interface UpdateCohortRequest {
@@ -130,6 +141,24 @@ export interface ListCohortSyncRunsResponse {
   runs: CohortSyncRun[];
 }
 
+export interface CohortMembership {
+  id: string;
+  externalUserId: string;
+  email: string;
+  displayName: string;
+  joinedAt?: Date | undefined;
+  lastSeenAt?: Date | undefined;
+}
+
+export interface ListCohortMembersRequest {
+  cohortId: string;
+  limit?: number | undefined;
+}
+
+export interface ListCohortMembersResponse {
+  members: CohortMembership[];
+}
+
 export interface GetCohortSyncHealthRequest {
 }
 
@@ -139,6 +168,9 @@ export interface CohortSyncHealth {
   errorSources: number;
   cohortCount: number;
   totalActiveMembers: number;
+  lastSyncAt?: Date | undefined;
+  syncsLast24h: number;
+  disabledSources: number;
 }
 
 /**
@@ -147,13 +179,16 @@ export interface CohortSyncHealth {
  */
 export interface CohortSyncService {
   ListCohortSources(request: ListCohortSourcesRequest): Promise<ListCohortSourcesResponse>;
+  GetCohortSource(request: GetCohortSourceRequest): Promise<CohortSource>;
   CreateCohortSource(request: CreateCohortSourceRequest): Promise<CohortSource>;
   UpdateCohortSource(request: UpdateCohortSourceRequest): Promise<CohortSource>;
   DeleteCohortSource(request: DeleteCohortSourceRequest): Promise<DeleteCohortSourceResponse>;
   TestCohortSource(request: TestCohortSourceRequest): Promise<TestCohortSourceResponse>;
   ListCohorts(request: ListCohortsRequest): Promise<ListCohortsResponse>;
+  GetCohort(request: GetCohortRequest): Promise<Cohort>;
   UpdateCohort(request: UpdateCohortRequest): Promise<Cohort>;
   SyncCohort(request: SyncCohortRequest): Promise<SyncCohortResponse>;
   ListCohortSyncRuns(request: ListCohortSyncRunsRequest): Promise<ListCohortSyncRunsResponse>;
+  ListCohortMembers(request: ListCohortMembersRequest): Promise<ListCohortMembersResponse>;
   GetCohortSyncHealth(request: GetCohortSyncHealthRequest): Promise<CohortSyncHealth>;
 }
