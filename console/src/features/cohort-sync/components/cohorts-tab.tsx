@@ -98,7 +98,7 @@ export function CohortsTab({ cohorts }: { cohorts: Cohort[] }) {
                   <TableCell className="text-sm">
                     {t('cohort_sync.cohort.member_count', { count: cohort.memberCount })}
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
+                  <TableCell className={`text-sm ${stalenessColor(cohort.lastSyncedAt)}`}>
                     {cohort.lastSyncedAt
                       ? formatDistanceToNow(new Date(cohort.lastSyncedAt), {
                           addSuffix: true,
@@ -144,4 +144,13 @@ export function CohortsTab({ cohorts }: { cohorts: Cohort[] }) {
       )}
     </>
   )
+}
+
+function stalenessColor(lastSyncAt: string | Date | undefined): string {
+  if (!lastSyncAt) return 'text-muted-foreground'
+  const ts = lastSyncAt instanceof Date ? lastSyncAt.getTime() : new Date(lastSyncAt).getTime()
+  const hours = (Date.now() - ts) / 3_600_000
+  if (hours < 1) return 'text-green-600 dark:text-green-400'
+  if (hours < 24) return 'text-amber-600 dark:text-amber-400'
+  return 'text-destructive'
 }

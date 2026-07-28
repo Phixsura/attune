@@ -62,6 +62,7 @@ type Repo interface {
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
 	HasRunningRun(ctx context.Context, tenantID string, cohortID uuid.UUID) (bool, error)
 	HasRunningRunForSource(ctx context.Context, tenantID string, sourceID uuid.UUID) (bool, error)
+	CountRecentRuns(ctx context.Context, tenantID string, since time.Duration) (int, error)
 	ApplyMembershipDelta(ctx context.Context, in repo.ApplyInput) (repo.ApplyResult, error)
 	RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error)
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error
@@ -684,6 +685,9 @@ func (s *Service) Health(ctx context.Context, tenantID string) (HealthSummary, e
 	for _, c := range cohorts {
 		h.TotalActiveMembers += c.MemberCount
 	}
+	// Count runs in the last 24 hours for the health summary.
+	recentRuns, _ := s.repo.CountRecentRuns(ctx, tenantID, 24*time.Hour)
+	h.SyncsLast24h = recentRuns
 	return h, nil
 }
 

@@ -116,7 +116,7 @@ function SourceRow({
       <TableCell>
         <StatusBadge status={source.status} enabled={source.enabled} />
       </TableCell>
-      <TableCell className="text-muted-foreground text-sm">
+      <TableCell className={`text-sm ${stalenessColor(source.lastSyncAt)}`}>
         {source.lastSyncAt
           ? formatDistanceToNow(new Date(source.lastSyncAt), { addSuffix: true, locale: zhCN })
           : t('common.never')}
@@ -195,4 +195,13 @@ function StatusBadge({ status, enabled }: { status: string; enabled: boolean }) 
       {t('cohort_sync.source.status.active')}
     </span>
   )
+}
+
+function stalenessColor(lastSyncAt: string | Date | undefined): string {
+  if (!lastSyncAt) return 'text-muted-foreground'
+  const ts = lastSyncAt instanceof Date ? lastSyncAt.getTime() : new Date(lastSyncAt).getTime()
+  const hours = (Date.now() - ts) / 3_600_000
+  if (hours < 1) return 'text-green-600 dark:text-green-400'
+  if (hours < 24) return 'text-amber-600 dark:text-amber-400'
+  return 'text-destructive'
 }

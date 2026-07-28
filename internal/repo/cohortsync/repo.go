@@ -55,6 +55,9 @@ func (r *Repo) CreateSource(ctx context.Context, in Source) (*Source, error) {
 		row.Enabled, row.Status,
 		row.CreatedBy, row.UpdatedBy,
 	).Scan(&row.CreatedAt, &row.UpdatedAt) // ptrext:allow scan-out-param
+	if pgxutil.IsUniqueViolation(err) {
+		return nil, fmt.Errorf("%w: source name already exists for this tenant", ErrConflict)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create cohort source: %w", err)
 	}
@@ -567,6 +570,20 @@ func (r *Repo) HasRunningRun(ctx context.Context, tenantID string, cohortID uuid
 		return false, fmt.Errorf("check running run: %w", err)
 	}
 	return exists, nil
+}
+
+// CountRecentRuns returns the number of sync runs created in the given duration.
+func (r *Repo) CountRecentRuns(ctx context.Context, tenantID string, since time.Duration) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `
+		SELECT count(*)
+		  FROM cohort_sync_runs
+		 WHERE tenant_id = $1 AND created_at > NOW() - $2::interval`,
+		tenantID, since.String()).Scan(&count) // ptrext:allow scan-out-param
+	if err != nil {
+		return 0, fmt.Errorf("count recent runs: %w", err)
+	}
+	return count, nil
 }
 
 // HasRunningRunForSource checks if any cohort under a source has a running sync.

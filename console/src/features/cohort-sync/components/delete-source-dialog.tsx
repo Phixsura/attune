@@ -34,7 +34,7 @@ export function DeleteSourceDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={pending}>
             {t('common.cancel')}
           </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={pending}>

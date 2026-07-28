@@ -188,7 +188,7 @@ export function SourceFormDialog({
           <DialogFooter className="mt-6">
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               onClick={() => onOpenChange(false)}
               disabled={pending}
             >

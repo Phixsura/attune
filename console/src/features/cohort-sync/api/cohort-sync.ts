@@ -26,6 +26,7 @@ export function listCohortSourcesQuery() {
     queryKey: ['cohort-sync', 'sources'],
     queryFn: ({ signal }) =>
       api<ListCohortSourcesResponse>(`${base}/sources`, { signal }).then((r) => r.sources ?? []),
+    staleTime: 20_000,
   })
 }
 
@@ -66,6 +67,7 @@ export function listCohortsQuery(sourceId?: string) {
         (r) => r.cohorts ?? [],
       )
     },
+    staleTime: 20_000,
   })
 }
 
@@ -110,6 +112,7 @@ export function listCohortSyncRunsQuery(cohortId: string, limit = 20) {
         signal,
       }).then((r) => r.runs ?? []),
     enabled: !!cohortId,
+    staleTime: 30_000,
   })
 }
 

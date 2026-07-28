@@ -200,6 +200,10 @@ func (m *mockRepo) HasRunningRunForSource(_ context.Context, _ string, _ uuid.UU
 	return m.hasRunning, nil
 }
 
+func (m *mockRepo) CountRecentRuns(_ context.Context, _ string, _ time.Duration) (int, error) {
+	return 0, nil
+}
+
 func (m *mockRepo) RecordEvent(_ context.Context, in repo.SyncEvent) (*repo.SyncEvent, error) {
 	row := in
 	if row.ID == uuid.Nil {
