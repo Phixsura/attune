@@ -23,6 +23,7 @@ import {
   type CohortSyncEvent,
   listCohortSyncEventsQuery,
 } from '../api/cohort-sync'
+import { WebhookUrlsDisplay } from './webhook-urls-display'
 
 export function SourceEventsSheet({
   source,
@@ -46,7 +47,44 @@ export function SourceEventsSheet({
           </SheetDescription>
         </SheetHeader>
 
+        {/* Source overview */}
+        <div className="mt-4 space-y-3 rounded-md border bg-muted/30 p-3">
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <div>
+              <span className="text-xs text-muted-foreground">
+                {t('cohort_sync.source.status_label')}
+              </span>
+              <div>
+                {source.enabled
+                  ? t('cohort_sync.source.status.active')
+                  : t('cohort_sync.source.status.disabled')}
+              </div>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground">
+                {t('cohort_sync.source.last_sync')}
+              </span>
+              <div>
+                {source.lastSyncAt
+                  ? formatDistanceToNow(new Date(source.lastSyncAt), {
+                      addSuffix: true,
+                      locale: zhCN,
+                    })
+                  : t('common.never')}
+              </div>
+            </div>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">
+              {t('cohort_sync.source.webhook_urls')}
+            </span>
+            <WebhookUrlsDisplay urls={source.webhookUrls ?? []} provider={source.provider} />
+          </div>
+        </div>
+
+        {/* Events */}
         <section className="mt-4">
+          <h3 className="mb-2 text-sm font-medium">{t('cohort_sync.events.title')}</h3>
           {eventsQ.isLoading ? (
             <Loading />
           ) : eventsQ.isError ? (

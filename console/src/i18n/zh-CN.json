@@ -4770,7 +4770,8 @@
         "amplitude_remove": "移除地址",
         "default": "Webhook 地址"
       },
-      "credential_note": "此密钥由您自行设定，用于 attune 验证来自提供商的请求"
+      "credential_note": "此密钥由您自行设定，用于 attune 验证来自提供商的请求",
+      "waiting_first": "等待首个 webhook"
     },
     "cohort": {
       "no_cohorts": "尚未同步任何人群",
@@ -4840,7 +4841,11 @@
       "name_taken": "来源名称已存在",
       "credential_required": "认证密钥不能为空",
       "sync_running": "当前有同步正在运行，请稍后再试",
-      "delete_while_running": "无法删除正在同步的来源"
+      "delete_while_running": "无法删除正在同步的来源",
+      "hint_auth": "→ 请检查认证密钥是否正确",
+      "hint_timeout": "→ 提供商 API 响应超时，请稍后重试",
+      "hint_rate_limit": "→ 触发了速率限制，请降低同步频率",
+      "hint_empty_snapshot": "→ 提供商返回空数据，请检查 cohort 在提供商侧是否正常"
     }
   }
 }

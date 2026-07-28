@@ -102,6 +102,7 @@ export function SourcesTab({
                 <SourceRow
                   key={source.id}
                   source={source}
+                  selected={eventsSource?.id === source.id}
                   testing={testingId === source.id}
                   onTest={() => onTest(source)}
                   onEdit={() => onEdit(source)}
@@ -127,6 +128,7 @@ export function SourcesTab({
 
 function SourceRow({
   source,
+  selected,
   testing,
   onTest,
   onEdit,
@@ -135,6 +137,7 @@ function SourceRow({
   onShowEvents,
 }: {
   source: CohortSource
+  selected: boolean
   testing: boolean
   onTest: () => void
   onEdit: () => void
@@ -145,15 +148,13 @@ function SourceRow({
   const { t } = useTranslation()
 
   return (
-    <TableRow className={source.enabled ? '' : 'opacity-50'}>
+    <TableRow className={`${source.enabled ? '' : 'opacity-50'} ${selected ? 'bg-primary/5' : ''}`}>
       <TableCell>
         <div className="text-sm font-medium">{source.name}</div>
         {source.lastError && (
-          <div
-            className="mt-0.5 max-w-[20rem] truncate text-xs text-destructive"
-            title={source.lastError}
-          >
-            {source.lastError}
+          <div className="mt-0.5 max-w-[20rem] text-xs text-destructive" title={source.lastError}>
+            <span className="truncate block">{source.lastError}</span>
+            <span className="text-muted-foreground">{classifyError(source.lastError, t)}</span>
           </div>
         )}
       </TableCell>
@@ -162,9 +163,14 @@ function SourceRow({
         <StatusBadge status={source.status} enabled={source.enabled} />
       </TableCell>
       <TableCell className={`text-sm ${stalenessColor(source.lastSyncAt)}`}>
-        {source.lastSyncAt
-          ? formatDistanceToNow(new Date(source.lastSyncAt), { addSuffix: true, locale: zhCN })
-          : t('common.never')}
+        {source.lastSyncAt ? (
+          formatDistanceToNow(new Date(source.lastSyncAt), { addSuffix: true, locale: zhCN })
+        ) : (
+          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
+            {t('cohort_sync.source.waiting_first')}
+          </span>
+        )}
       </TableCell>
       <TableCell>
         <WebhookUrlsDisplay urls={source.webhookUrls ?? []} provider={source.provider} compact />
@@ -268,4 +274,17 @@ function stalenessColor(lastSyncAt: string | Date | undefined): string {
   if (hours < 1) return 'text-green-600 dark:text-green-400'
   if (hours < 24) return 'text-amber-600 dark:text-amber-400'
   return 'text-destructive'
+}
+
+/** Classify error text into actionable remediation hints. */
+function classifyError(error: string, t: (key: string) => string): string {
+  const lower = error.toLowerCase()
+  if (lower.includes('401') || lower.includes('auth') || lower.includes('credential'))
+    return t('cohort_sync.errors.hint_auth')
+  if (lower.includes('timeout') || lower.includes('deadline'))
+    return t('cohort_sync.errors.hint_timeout')
+  if (lower.includes('429') || lower.includes('rate'))
+    return t('cohort_sync.errors.hint_rate_limit')
+  if (lower.includes('empty snapshot')) return t('cohort_sync.errors.hint_empty_snapshot')
+  return ''
 }

@@ -95,7 +95,18 @@ export function SourceFormDialog({
             <DialogTitle>
               {mode === 'create' ? t('cohort_sync.source.create') : t('cohort_sync.source.edit')}
             </DialogTitle>
-            <DialogDescription>{t('cohort_sync.subtitle')}</DialogDescription>
+            <DialogDescription>
+              {t('cohort_sync.subtitle')}{' '}
+              <a
+                href="https://github.com/Phixsura/attune/blob/main/docs/private-deploy.md#cohort-sync"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 text-primary hover:underline"
+              >
+                {t('cohort_sync.onboarding.docs')}
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            </DialogDescription>
           </DialogHeader>
 
           <div className="mt-4 space-y-4">
