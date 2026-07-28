@@ -71,7 +71,8 @@ func (r *Repo) GetSource(ctx context.Context, tenantID string, id uuid.UUID) (*S
 		       credential_key_id, credential_ciphertext, base_url, provider_config,
 		       webhook_secret_key_id, webhook_secret_ciphertext,
 		       pull_credential_key_id, pull_credential_ciphertext, enabled, status,
-		       last_sync_at, last_error, created_by, updated_by, created_at, updated_at
+		       last_sync_at, last_error, last_tested_at, last_test_ok,
+		       created_by, updated_by, created_at, updated_at
 		  FROM cohort_sources
 		 WHERE tenant_id = $1 AND id = $2`, tenantID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -90,7 +91,8 @@ func (r *Repo) ListSources(ctx context.Context, tenantID string) ([]Source, erro
 		       credential_key_id, credential_ciphertext, base_url, provider_config,
 		       webhook_secret_key_id, webhook_secret_ciphertext,
 		       pull_credential_key_id, pull_credential_ciphertext, enabled, status,
-		       last_sync_at, last_error, created_by, updated_by, created_at, updated_at
+		       last_sync_at, last_error, last_tested_at, last_test_ok,
+		       created_by, updated_by, created_at, updated_at
 		  FROM cohort_sources
 		 WHERE tenant_id = $1
 		 ORDER BY provider ASC, name ASC`, tenantID)
@@ -532,30 +534,74 @@ func (r *Repo) FinishRun(ctx context.Context, id uuid.UUID, status string, added
 }
 
 // ListRuns returns sync runs for a cohort, most recent first.
+// ListRunsResult contains runs plus an optional cursor for pagination.
+type ListRunsResult struct {
+	Runs       []SyncRun
+	NextCursor string // empty if no more pages
+}
+
 func (r *Repo) ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]SyncRun, error) {
+	result, err := r.ListRunsPaginated(ctx, tenantID, cohortID, limit, "")
+	if err != nil {
+		return nil, err
+	}
+	return result.Runs, nil
+}
+
+// ListRunsPaginated returns sync runs with keyset cursor pagination.
+// The cursor is the created_at timestamp of the last item in ISO format.
+func (r *Repo) ListRunsPaginated(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int, cursor string) (ListRunsResult, error) {
 	if limit <= 0 || limit > defaultLimit {
 		limit = defaultLimit
 	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, cohort_id, trigger, status, members_added, members_removed,
-		       members_total, error_message, started_at, finished_at, created_at
-		  FROM cohort_sync_runs
-		 WHERE tenant_id = $1 AND cohort_id = $2
-		 ORDER BY created_at DESC
-		 LIMIT $3`, tenantID, cohortID, limit)
+	// Fetch limit+1 to detect if there are more pages.
+	fetchLimit := limit + 1
+
+	var rows pgx.Rows
+	var err error
+	if cursor != "" {
+		cursorTime, parseErr := time.Parse(time.RFC3339Nano, cursor)
+		if parseErr != nil {
+			return ListRunsResult{}, fmt.Errorf("invalid cursor: %w", parseErr)
+		}
+		rows, err = r.pool.Query(ctx, `
+			SELECT id, tenant_id, cohort_id, trigger, status, members_added, members_removed,
+			       members_total, error_message, started_at, finished_at, created_at
+			  FROM cohort_sync_runs
+			 WHERE tenant_id = $1 AND cohort_id = $2 AND created_at < $3
+			 ORDER BY created_at DESC
+			 LIMIT $4`, tenantID, cohortID, cursorTime, fetchLimit)
+	} else {
+		rows, err = r.pool.Query(ctx, `
+			SELECT id, tenant_id, cohort_id, trigger, status, members_added, members_removed,
+			       members_total, error_message, started_at, finished_at, created_at
+			  FROM cohort_sync_runs
+			 WHERE tenant_id = $1 AND cohort_id = $2
+			 ORDER BY created_at DESC
+			 LIMIT $3`, tenantID, cohortID, fetchLimit)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("list cohort sync runs: %w", err)
+		return ListRunsResult{}, fmt.Errorf("list cohort sync runs: %w", err)
 	}
 	defer rows.Close()
 	var out []SyncRun
 	for rows.Next() {
-		row, err := scanRun(rows)
-		if err != nil {
-			return nil, err
+		row, scanErr := scanRun(rows)
+		if scanErr != nil {
+			return ListRunsResult{}, scanErr
 		}
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ListRunsResult{}, err
+	}
+
+	var nextCursor string
+	if len(out) > limit {
+		out = out[:limit]
+		nextCursor = out[limit-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+	return ListRunsResult{Runs: out, NextCursor: nextCursor}, nil
 }
 
 // HasRunningRun checks if a cohort has an active running sync.
@@ -584,6 +630,19 @@ func (r *Repo) CountRecentRuns(ctx context.Context, tenantID string, since time.
 		return 0, fmt.Errorf("count recent runs: %w", err)
 	}
 	return count, nil
+}
+
+// UpdateTestResult persists the last connectivity test outcome on a source.
+func (r *Repo) UpdateTestResult(ctx context.Context, tenantID string, id uuid.UUID, ok bool) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE cohort_sources
+		   SET last_tested_at = NOW(), last_test_ok = $3, updated_at = NOW()
+		 WHERE tenant_id = $1 AND id = $2`,
+		tenantID, id, ok)
+	if err != nil {
+		return fmt.Errorf("update test result: %w", err)
+	}
+	return nil
 }
 
 // HasRunningRunForSource checks if any cohort under a source has a running sync.
@@ -622,7 +681,9 @@ func scanSource(s scannable) (Source, error) {
 		&row.WebhookSecretKeyID, &row.WebhookSecretCiphertext,
 		&row.PullCredentialKeyID, &row.PullCredentialCiphertext,
 		&row.Enabled, &row.Status,
-		&row.LastSyncAt, &row.LastError, &row.CreatedBy, &row.UpdatedBy,
+		&row.LastSyncAt, &row.LastError,
+		&row.LastTestedAt, &row.LastTestOK,
+		&row.CreatedBy, &row.UpdatedBy,
 		&row.CreatedAt, &row.UpdatedAt,
 	) // ptrext:allow scan-out-param
 	return row, err

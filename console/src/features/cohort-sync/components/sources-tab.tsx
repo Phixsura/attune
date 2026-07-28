@@ -170,6 +170,21 @@ function SourceRow({
         <WebhookUrlsDisplay urls={source.webhookUrls ?? []} provider={source.provider} compact />
       </TableCell>
       <TableCell className="text-right">
+        {source.lastTestOk != null && (
+          <span
+            className={`mr-1 text-xs ${source.lastTestOk ? 'text-green-600' : 'text-destructive'}`}
+            title={
+              source.lastTestedAt
+                ? formatDistanceToNow(new Date(source.lastTestedAt), {
+                    addSuffix: true,
+                    locale: zhCN,
+                  })
+                : undefined
+            }
+          >
+            {source.lastTestOk ? '✓' : '✗'}
+          </span>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" onClick={onTest} disabled={testing}>
@@ -227,23 +242,21 @@ function SourceRow({
 
 function StatusBadge({ status, enabled }: { status: string; enabled: boolean }) {
   const { t } = useTranslation()
-  if (!enabled) {
-    return (
-      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-        {t('cohort_sync.source.status.disabled')}
-      </span>
-    )
-  }
-  if (status === 'error') {
-    return (
-      <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-xs text-destructive">
-        {t('cohort_sync.source.status.error')}
-      </span>
-    )
-  }
+  const label = !enabled
+    ? t('cohort_sync.source.status.disabled')
+    : status === 'error'
+      ? t('cohort_sync.source.status.error')
+      : t('cohort_sync.source.status.active')
+  const cls = !enabled
+    ? 'border-border bg-muted/50 text-muted-foreground'
+    : status === 'error'
+      ? 'border-destructive/20 bg-destructive/10 text-destructive'
+      : 'border-green-300/40 bg-green-100/60 text-green-800 dark:bg-green-900/20 dark:text-green-200'
   return (
-    <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400">
-      {t('cohort_sync.source.status.active')}
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}
+    >
+      {label}
     </span>
   )
 }

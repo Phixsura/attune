@@ -192,6 +192,14 @@ func (m *mockRepo) ListRuns(_ context.Context, _ string, _ uuid.UUID, _ int) ([]
 	return nil, nil
 }
 
+func (m *mockRepo) ListRunsPaginated(_ context.Context, _ string, _ uuid.UUID, _ int, _ string) (repo.ListRunsResult, error) {
+	return repo.ListRunsResult{}, nil
+}
+
+func (m *mockRepo) UpdateTestResult(_ context.Context, _ string, _ uuid.UUID, _ bool) error {
+	return nil
+}
+
 func (m *mockRepo) HasRunningRun(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
 	return m.hasRunning, nil
 }

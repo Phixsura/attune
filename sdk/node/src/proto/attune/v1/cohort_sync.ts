@@ -22,6 +22,8 @@ export interface CohortSource {
   createdAt?: Date | undefined;
   updatedAt?: Date | undefined;
   webhookUrls: string[];
+  lastTestedAt?: Date | undefined;
+  lastTestOk?: boolean | undefined;
 }
 
 export interface ListCohortSourcesRequest {
@@ -135,10 +137,12 @@ export interface CohortSyncRun {
 export interface ListCohortSyncRunsRequest {
   cohortId: string;
   limit?: number | undefined;
+  cursor?: string | undefined;
 }
 
 export interface ListCohortSyncRunsResponse {
   runs: CohortSyncRun[];
+  nextCursor?: string | undefined;
 }
 
 export interface CohortMembership {

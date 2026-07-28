@@ -40,6 +40,7 @@ type service interface {
 	ListEvents(ctx context.Context, tenantID string, sourceID uuid.UUID, limit int) ([]repo.SyncEvent, error)
 	SyncNow(ctx context.Context, tenantID string, cohortID uuid.UUID, actor svc.Actor, auditActor auditlogsvc.Actor) (*svc.SyncRunResult, error)
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
+	ListRunsPaginated(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int, cursor string) (repo.ListRunsResult, error)
 	Health(ctx context.Context, tenantID string) (svc.HealthSummary, error)
 }
 
@@ -359,15 +360,19 @@ func (h *Handler) ListSyncRuns(
 	if limit <= 0 {
 		limit = 20
 	}
-	runs, err := h.service.ListRuns(ctx, ctx.Auth.TenantID, cohortID, limit)
+	result, err := h.service.ListRunsPaginated(ctx, ctx.Auth.TenantID, cohortID, limit, req.GetCursor())
 	if err != nil {
 		return internalError[*attunev1.ListCohortSyncRunsResponse](ctx, "ListSyncRuns", err)
 	}
-	items := make([]*attunev1.CohortSyncRun, 0, len(runs))
-	for i := range runs {
-		items = append(items, runToProto(runs[i]))
+	items := make([]*attunev1.CohortSyncRun, 0, len(result.Runs))
+	for i := range result.Runs {
+		items = append(items, runToProto(result.Runs[i]))
 	}
-	return dispatcher.OK(ptrext.Of(attunev1.ListCohortSyncRunsResponse{Runs: items}))
+	resp := ptrext.Of(attunev1.ListCohortSyncRunsResponse{Runs: items})
+	if result.NextCursor != "" {
+		resp.NextCursor = ptrext.Of(result.NextCursor)
+	}
+	return dispatcher.OK(resp)
 }
 
 // ---------- Health ----------
@@ -428,6 +433,12 @@ func (h *Handler) sourceToProto(s repo.Source) *attunev1.CohortSource {
 	})
 	if s.LastSyncAt != nil {
 		out.LastSyncAt = timestamppb.New(ptrext.Indirect(s.LastSyncAt))
+	}
+	if s.LastTestedAt != nil {
+		out.LastTestedAt = timestamppb.New(ptrext.Indirect(s.LastTestedAt))
+	}
+	if s.LastTestOK != nil {
+		out.LastTestOk = s.LastTestOK
 	}
 	return out
 }

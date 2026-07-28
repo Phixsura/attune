@@ -35,6 +35,8 @@ type Source struct {
 	Status                   string
 	LastSyncAt               *time.Time
 	LastError                string
+	LastTestedAt             *time.Time
+	LastTestOK               *bool
 	CreatedBy                string
 	UpdatedBy                string
 	CreatedAt                time.Time

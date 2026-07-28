@@ -85,6 +85,8 @@ message CohortSource {
   google.protobuf.Timestamp created_at = 11;
   google.protobuf.Timestamp updated_at = 12;
   repeated string webhook_urls = 13;
+  optional google.protobuf.Timestamp last_tested_at = 14;
+  optional bool last_test_ok = 15;
 }
 
 message ListCohortSourcesRequest {}
@@ -200,10 +202,12 @@ message CohortSyncRun {
 message ListCohortSyncRunsRequest {
   string cohort_id = 1;
   optional int32 limit = 2;
+  optional string cursor = 3;
 }
 
 message ListCohortSyncRunsResponse {
   repeated CohortSyncRun runs = 1;
+  optional string next_cursor = 2;
 }
 
 // ---------- Members ----------

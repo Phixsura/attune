@@ -60,9 +60,11 @@ type Repo interface {
 	InsertExclusiveRun(ctx context.Context, run repo.SyncRun) (*repo.SyncRun, error)
 	FinishRun(ctx context.Context, id uuid.UUID, status string, added, removed, total int, errorMessage string) error
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
+	ListRunsPaginated(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int, cursor string) (repo.ListRunsResult, error)
 	HasRunningRun(ctx context.Context, tenantID string, cohortID uuid.UUID) (bool, error)
 	HasRunningRunForSource(ctx context.Context, tenantID string, sourceID uuid.UUID) (bool, error)
 	CountRecentRuns(ctx context.Context, tenantID string, since time.Duration) (int, error)
+	UpdateTestResult(ctx context.Context, tenantID string, id uuid.UUID, ok bool) error
 	ApplyMembershipDelta(ctx context.Context, in repo.ApplyInput) (repo.ApplyResult, error)
 	RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error)
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error
@@ -351,6 +353,8 @@ func (s *Service) TestSource(ctx context.Context, tenantID string, id uuid.UUID,
 	if checkErr != nil && result.Error == "" {
 		result.Error = redact(checkErr.Error())
 	}
+	// Persist the test result so operators can see it after navigating away.
+	_ = s.repo.UpdateTestResult(ctx, tenantID, id, result.OK)
 	s.record(ctx, auditActor, tenantID, "cohort_source.update",
 		"cohort_source", id.String(), "Tested cohort source", nil,
 		map[string]any{"provider": source.Provider, "ok": result.OK, "error": result.Error})
@@ -639,6 +643,11 @@ func (s *Service) CleanExpired(ctx context.Context) (int64, error) {
 // ListRuns returns sync runs for a cohort.
 func (s *Service) ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error) {
 	return s.repo.ListRuns(ctx, tenantID, cohortID, limit)
+}
+
+// ListRunsPaginated returns sync runs with cursor pagination.
+func (s *Service) ListRunsPaginated(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int, cursor string) (repo.ListRunsResult, error) {
+	return s.repo.ListRunsPaginated(ctx, tenantID, cohortID, limit, cursor)
 }
 
 // HealthSummary is a snapshot of cohort sync health for a tenant.

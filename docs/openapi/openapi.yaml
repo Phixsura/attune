@@ -1376,6 +1376,10 @@ paths:
                   schema:
                     type: integer
                     format: int32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -11327,6 +11331,11 @@ components:
                     type: array
                     items:
                         type: string
+                lastTestedAt:
+                    type: string
+                    format: date-time
+                lastTestOk:
+                    type: boolean
         CohortSyncEvent:
             type: object
             properties:
@@ -15243,6 +15252,8 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/CohortSyncRun'
+                nextCursor:
+                    type: string
         ListCohortsResponse:
             type: object
             properties:
