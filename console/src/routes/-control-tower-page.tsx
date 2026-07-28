@@ -69,14 +69,18 @@ const cohortSyncHealthQuery = {
       sourceCount: number
       activeSources: number
       errorSources: number
+      disabledSources: number
       cohortCount: number
       totalActiveMembers: number
+      syncsLast24h: number
     }>('/fb/v1/console/cohort-sync/health').catch(() => ({
       sourceCount: 0,
       activeSources: 0,
       errorSources: 0,
+      disabledSources: 0,
       cohortCount: 0,
       totalActiveMembers: 0,
+      syncsLast24h: 0,
     })),
 }
 

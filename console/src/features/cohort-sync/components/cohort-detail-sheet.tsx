@@ -61,6 +61,7 @@ export function CohortDetailSheet({
       qc.invalidateQueries({ queryKey: ['cohort-sync'] })
       toast.success(t('common.save'))
       setEditing(false)
+      onOpenChange(false) // close to avoid stale prop display
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
   })
@@ -70,6 +71,7 @@ export function CohortDetailSheet({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['cohort-sync'] })
       toast.success(t('common.save'))
+      onOpenChange(false) // close to avoid stale prop display
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
   })
