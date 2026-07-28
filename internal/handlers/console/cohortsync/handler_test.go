@@ -943,3 +943,171 @@ func TestListEvents_BadSourceID(t *testing.T) {
 	_, err := h.ListEvents(testCtx(), &attunev1.ListCohortSyncEventsRequest{SourceId: "nope"})
 	assertDispatcherErr(t, err, http.StatusBadRequest, attunev1.ErrorCode_BAD_ID)
 }
+
+// --- Success-path handler tests (covering 0% functions) ---
+
+func TestCreateSource_Success(t *testing.T) {
+	src := &repo.Source{
+		ID: uuid.New(), TenantID: "t1", Provider: "amplitude",
+		Name: "Test", AuthType: "api_key", Enabled: true, Status: "active",
+		CreatedAt: refTime, UpdatedAt: refTime,
+	}
+	h := NewHandler(&stubService{source: src}, "https://example.com")
+	res, err := h.CreateSource(testCtx(), &attunev1.CreateCohortSourceRequest{
+		Provider: "amplitude", Name: "Test", AuthType: "api_key", Credential: "secret", Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Body.Name != "Test" {
+		t.Errorf("Name = %q, want Test", res.Body.Name)
+	}
+	if len(res.Body.WebhookUrls) != 3 {
+		t.Errorf("WebhookUrls = %d, want 3", len(res.Body.WebhookUrls))
+	}
+}
+
+func TestCreateSource_ValidationError(t *testing.T) {
+	h := NewHandler(&stubService{err: svc.ErrValidation}, "https://example.com")
+	_, err := h.CreateSource(testCtx(), &attunev1.CreateCohortSourceRequest{Provider: "amplitude", Name: "Test"})
+	assertDispatcherErr(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+}
+
+func TestUpdateSource_Success(t *testing.T) {
+	src := &repo.Source{
+		ID: uuid.New(), TenantID: "t1", Provider: "amplitude",
+		Name: "Updated", Enabled: true, Status: "active",
+		CreatedAt: refTime, UpdatedAt: refTime,
+	}
+	h := NewHandler(&stubService{source: src}, "https://example.com")
+	name := "Updated"
+	res, err := h.UpdateSource(testCtx(), &attunev1.UpdateCohortSourceRequest{Id: src.ID.String(), Name: &name})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Body.Name != "Updated" {
+		t.Errorf("Name = %q, want Updated", res.Body.Name)
+	}
+}
+
+func TestUpdateSource_BadID(t *testing.T) {
+	h := NewHandler(&stubService{}, "https://example.com")
+	_, err := h.UpdateSource(testCtx(), &attunev1.UpdateCohortSourceRequest{Id: "bad"})
+	assertDispatcherErr(t, err, http.StatusBadRequest, attunev1.ErrorCode_BAD_ID)
+}
+
+func TestGetCohort_Success(t *testing.T) {
+	sourceID := uuid.New()
+	c := &repo.Cohort{
+		ID: uuid.New(), TenantID: "t1", CohortSourceID: sourceID,
+		ExternalCohortID: "ext1", Name: "Enterprise",
+		StaleTTLDays: 30, MemberCount: 100, Enabled: true,
+		CreatedAt: refTime, UpdatedAt: refTime,
+	}
+	src := &repo.Source{ID: sourceID, TenantID: "t1", Provider: "amplitude", Name: "My Amp"}
+	h := NewHandler(&stubService{cohort: c, source: src}, "https://example.com")
+	res, err := h.GetCohort(testCtx(), &attunev1.GetCohortRequest{Id: c.ID.String()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Body.Name != "Enterprise" {
+		t.Errorf("Name = %q, want Enterprise", res.Body.Name)
+	}
+	if res.Body.SourceName != "My Amp" {
+		t.Errorf("SourceName = %q, want My Amp", res.Body.SourceName)
+	}
+}
+
+func TestGetCohort_NotFound(t *testing.T) {
+	h := NewHandler(&stubService{err: repo.ErrCohortNotFound}, "https://example.com")
+	_, err := h.GetCohort(testCtx(), &attunev1.GetCohortRequest{Id: uuid.New().String()})
+	assertDispatcherErr(t, err, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND)
+}
+
+func TestListCohorts_Success(t *testing.T) {
+	sourceID := uuid.New()
+	cohorts := []repo.Cohort{{
+		ID: uuid.New(), TenantID: "t1", CohortSourceID: sourceID,
+		ExternalCohortID: "c1", Name: "C1", Enabled: true,
+		CreatedAt: refTime, UpdatedAt: refTime,
+	}}
+	sources := []repo.Source{{ID: sourceID, TenantID: "t1", Provider: "amplitude", Name: "Src"}}
+	h := NewHandler(&stubService{cohorts: cohorts, sources: sources}, "https://example.com")
+	res, err := h.ListCohorts(testCtx(), &attunev1.ListCohortsRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Body.Cohorts) != 1 {
+		t.Errorf("Cohorts = %d, want 1", len(res.Body.Cohorts))
+	}
+	if res.Body.Cohorts[0].SourceName != "Src" {
+		t.Errorf("SourceName = %q, want Src", res.Body.Cohorts[0].SourceName)
+	}
+}
+
+func TestListCohorts_BySourceID(t *testing.T) {
+	sourceID := uuid.New()
+	cohorts := []repo.Cohort{{
+		ID: uuid.New(), TenantID: "t1", CohortSourceID: sourceID,
+		ExternalCohortID: "c1", Name: "C1", Enabled: true,
+		CreatedAt: refTime, UpdatedAt: refTime,
+	}}
+	sources := []repo.Source{{ID: sourceID, TenantID: "t1", Provider: "mixpanel", Name: "MX"}}
+	h := NewHandler(&stubService{cohorts: cohorts, sources: sources}, "https://example.com")
+	sid := sourceID.String()
+	res, err := h.ListCohorts(testCtx(), &attunev1.ListCohortsRequest{SourceId: &sid})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Body.Cohorts) != 1 {
+		t.Errorf("Cohorts = %d, want 1", len(res.Body.Cohorts))
+	}
+}
+
+func TestListMembers_Success(t *testing.T) {
+	members := []repo.Membership{{
+		ID: uuid.New(), ExternalUserID: "u1", Email: "u1@test.com",
+		JoinedAt: refTime, LastSeenAt: refTime,
+	}}
+	h := NewHandler(&stubService{members: members}, "https://example.com")
+	res, err := h.ListMembers(testCtx(), &attunev1.ListCohortMembersRequest{CohortId: uuid.New().String()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Body.Members) != 1 {
+		t.Errorf("Members = %d, want 1", len(res.Body.Members))
+	}
+}
+
+func TestListEvents_Success(t *testing.T) {
+	events := []repo.SyncEvent{{
+		ID: uuid.New(), CohortSourceID: uuid.New(), Provider: "amplitude",
+		EventType: "incremental", Status: "processed", MembersCount: 5,
+		ReceivedAt: refTime, CreatedAt: refTime,
+	}}
+	h := NewHandler(&stubService{events: events}, "https://example.com")
+	res, err := h.ListEvents(testCtx(), &attunev1.ListCohortSyncEventsRequest{SourceId: uuid.New().String()})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res.Body.Events) != 1 {
+		t.Errorf("Events = %d, want 1", len(res.Body.Events))
+	}
+}
+
+func TestUpdateCohort_Success(t *testing.T) {
+	c := &repo.Cohort{
+		ID: uuid.New(), TenantID: "t1", CohortSourceID: uuid.New(),
+		ExternalCohortID: "c1", Name: "Renamed", StaleTTLDays: 60, Enabled: true,
+		CreatedAt: refTime, UpdatedAt: refTime,
+	}
+	h := NewHandler(&stubService{cohort: c}, "https://example.com")
+	name := "Renamed"
+	res, err := h.UpdateCohort(testCtx(), &attunev1.UpdateCohortRequest{Id: c.ID.String(), Name: &name})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Body.Name != "Renamed" {
+		t.Errorf("Name = %q, want Renamed", res.Body.Name)
+	}
+}
