@@ -563,10 +563,12 @@ export function FeedbackPage({
     }
 
     if (cohortFilter) {
+      const cohortName =
+        (cohortList.data ?? []).find((c) => c.id === cohortFilter)?.name ?? cohortFilter
       chips.push({
         key: 'cohort',
-        label: 'Cohort',
-        value: cohortFilter,
+        label: t('cohort_sync.tabs.cohorts'),
+        value: cohortName,
         onRemove: () => setCohortFilter(''),
       })
     }
@@ -1538,11 +1540,14 @@ function FilterBar({
             value={cohortFilter || '__all'}
             onValueChange={(v) => onCohortChange(v === '__all' ? '' : v)}
           >
-            <SelectTrigger className="h-10 w-full bg-background" aria-label="All cohorts">
-              <SelectValue placeholder="All cohorts" />
+            <SelectTrigger
+              className="h-10 w-full bg-background"
+              aria-label={t('cohort_sync.filter.all')}
+            >
+              <SelectValue placeholder={t('cohort_sync.filter.all')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__all">All cohorts</SelectItem>
+              <SelectItem value="__all">{t('cohort_sync.filter.all')}</SelectItem>
               {cohorts.map((c) => (
                 <SelectItem key={c.id} value={c.id}>
                   {c.name}
