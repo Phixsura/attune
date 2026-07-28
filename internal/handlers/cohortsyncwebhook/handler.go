@@ -21,6 +21,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	repo "github.com/Phixsura/attune/internal/repo/cohortsync"
+	"github.com/Phixsura/attune/internal/repo/pgxutil"
 	svc "github.com/Phixsura/attune/internal/service/cohortsync"
 )
 
@@ -282,6 +283,10 @@ func (h *Handler) reject(ctx context.Context, w http.ResponseWriter, where strin
 		dispatcher.Reject(ctx, w, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, err.Error())
 	case errors.Is(err, repo.ErrConflict):
 		dispatcher.Reject(ctx, w, http.StatusConflict, attunev1.ErrorCode_CONFLICT, err.Error())
+	case pgxutil.IsForeignKeyViolation(err):
+		// FK violation during apply means the source was deleted concurrently.
+		logext.Warnf(ctx, "[%s] source deleted during sync,err:%s", where, err.Error())
+		dispatcher.Reject(ctx, w, http.StatusGone, attunev1.ErrorCode_NOT_FOUND, "source was deleted")
 	default:
 		rejectInternal(ctx, w, where, err.Error())
 	}

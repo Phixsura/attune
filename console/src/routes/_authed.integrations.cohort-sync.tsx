@@ -12,7 +12,8 @@ export const Route = createFileRoute('/_authed/integrations/cohort-sync')({
     requireRouteAccess(context, { permission: 'settings:cohort_sync:view' }),
   component: CohortSyncPage,
   loader: async ({ context }) => {
-    await Promise.all([
+    // Load independently so a single endpoint failure does not block the page.
+    await Promise.allSettled([
       context.queryClient.ensureQueryData(cohortSyncHealthQuery()),
       context.queryClient.ensureQueryData(listCohortSourcesQuery()),
       context.queryClient.ensureQueryData(listCohortsQuery()),

@@ -1,8 +1,14 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
+import { Loader2, Pencil, Save } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { Loading } from '@/components/loading'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Sheet,
   SheetContent,
@@ -24,6 +30,7 @@ import {
   type CohortSyncRun,
   listCohortMembersQuery,
   listCohortSyncRunsQuery,
+  updateCohort,
 } from '../api/cohort-sync'
 
 export function CohortDetailSheet({
@@ -36,8 +43,36 @@ export function CohortDetailSheet({
   onOpenChange: (v: boolean) => void
 }) {
   const { t } = useTranslation()
+  const qc = useQueryClient()
   const membersQ = useQuery(listCohortMembersQuery(cohort.id))
   const runsQ = useQuery(listCohortSyncRunsQuery(cohort.id))
+
+  const [editing, setEditing] = useState(false)
+  const [editName, setEditName] = useState(cohort.name)
+  const [editTTL, setEditTTL] = useState(String(cohort.staleTtlDays))
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      updateCohort(cohort.id, {
+        name: editName,
+        staleTtlDays: Number.parseInt(editTTL, 10) || cohort.staleTtlDays,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cohort-sync'] })
+      toast.success(t('common.save'))
+      setEditing(false)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+  })
+
+  const toggleMutation = useMutation({
+    mutationFn: () => updateCohort(cohort.id, { enabled: !cohort.enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['cohort-sync'] })
+      toast.success(t('common.save'))
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+  })
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -66,6 +101,74 @@ export function CohortDetailSheet({
             }
           />
         </div>
+
+        {/* Edit controls */}
+        <section className="mt-4 flex items-center gap-2">
+          {editing ? (
+            <form
+              className="flex flex-1 items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                saveMutation.mutate()
+              }}
+            >
+              <div className="flex-1 space-y-1">
+                <Label htmlFor="edit-cohort-name">{t('cohort_sync.source.name')}</Label>
+                <Input
+                  id="edit-cohort-name"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  disabled={saveMutation.isPending}
+                />
+              </div>
+              <div className="w-20 space-y-1">
+                <Label htmlFor="edit-cohort-ttl">{t('cohort_sync.cohort.ttl_days')}</Label>
+                <Input
+                  id="edit-cohort-ttl"
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={editTTL}
+                  onChange={(e) => setEditTTL(e.target.value)}
+                  disabled={saveMutation.isPending}
+                />
+              </div>
+              <Button type="submit" size="sm" disabled={saveMutation.isPending}>
+                {saveMutation.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Save className="h-3.5 w-3.5" />
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditing(false)}
+                disabled={saveMutation.isPending}
+              >
+                {t('common.cancel')}
+              </Button>
+            </form>
+          ) : (
+            <>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+                <Pencil className="mr-1 h-3.5 w-3.5" />
+                {t('common.edit')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => toggleMutation.mutate()}
+                disabled={toggleMutation.isPending}
+              >
+                {cohort.enabled
+                  ? t('cohort_sync.source.status.disabled')
+                  : t('cohort_sync.source.enabled')}
+              </Button>
+            </>
+          )}
+        </section>
 
         {/* Members preview */}
         <section className="mt-6">
