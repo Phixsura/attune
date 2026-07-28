@@ -4812,6 +4812,19 @@
     },
     "filter": {
       "all": "全部人群"
+    },
+    "onboarding": {
+      "title": "快速上手",
+      "step1": "在 attune 中添加一个来源（选择提供商、填写认证密钥）",
+      "step2": "将生成的 Webhook 地址复制到 Amplitude 或 Mixpanel 的人群同步目标配置中",
+      "step3": "在提供商中触发一次同步，attune 会自动接收并创建人群",
+      "docs": "文档",
+      "created_title": "来源创建成功",
+      "created_desc": "将以下 Webhook 地址配置到您的提供商中，人群成员数据将自动推送到 attune。",
+      "next_steps": "下一步操作",
+      "next1": "复制上方 Webhook 地址",
+      "next2": "在 Amplitude / Mixpanel 中添加 attune 为同步目标，粘贴地址",
+      "next3": "点击「测试连接」验证配置是否正确"
     }
   }
 }

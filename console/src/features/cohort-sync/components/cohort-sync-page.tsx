@@ -5,6 +5,13 @@ import { toast } from 'sonner'
 import { Loading } from '@/components/loading'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import {
   type CohortSource,
@@ -20,6 +27,7 @@ import { CohortsTab } from './cohorts-tab'
 import { DeleteSourceDialog } from './delete-source-dialog'
 import { type SourceFormData, SourceFormDialog } from './source-form-dialog'
 import { SourcesTab } from './sources-tab'
+import { WebhookUrlsDisplay } from './webhook-urls-display'
 
 export function CohortSyncPage() {
   const { t } = useTranslation()
@@ -32,6 +40,7 @@ export function CohortSyncPage() {
   const healthQ = useQuery(cohortSyncHealthQuery())
 
   const [createOpen, setCreateOpen] = useState(false)
+  const [createdSource, setCreatedSource] = useState<CohortSource | null>(null)
   const [editSource, setEditSource] = useState<CohortSource | null>(null)
   const [deleteSource, setDeleteSource] = useState<CohortSource | null>(null)
 
@@ -46,10 +55,11 @@ export function CohortSyncPage() {
         baseUrl: data.baseUrl,
         enabled: true,
       }),
-    onSuccess: () => {
+    onSuccess: (source) => {
       invalidate()
       toast.success(t('common.create'))
       setCreateOpen(false)
+      setCreatedSource(source)
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
   })
@@ -189,6 +199,39 @@ export function CohortSyncPage() {
           pending={deleteM.isPending}
           onConfirm={() => deleteM.mutate(deleteSource.id)}
         />
+      )}
+      {createdSource && (
+        <Dialog open={!!createdSource} onOpenChange={(v) => !v && setCreatedSource(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('cohort_sync.onboarding.created_title')}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {t('cohort_sync.onboarding.created_desc')}
+              </p>
+              <div className="rounded-md border bg-muted/30 p-3">
+                <WebhookUrlsDisplay
+                  urls={createdSource.webhookUrls ?? []}
+                  provider={createdSource.provider}
+                />
+              </div>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  {t('cohort_sync.onboarding.next_steps')}
+                </p>
+                <ol className="list-inside list-decimal space-y-1">
+                  <li>{t('cohort_sync.onboarding.next1')}</li>
+                  <li>{t('cohort_sync.onboarding.next2')}</li>
+                  <li>{t('cohort_sync.onboarding.next3')}</li>
+                </ol>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setCreatedSource(null)}>{t('common.close')}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </>
   )

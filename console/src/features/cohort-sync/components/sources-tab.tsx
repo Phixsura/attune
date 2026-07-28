@@ -1,6 +1,6 @@
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { Loader2, Pencil, Power, PowerOff, Trash2, Zap } from 'lucide-react'
+import { ExternalLink, Loader2, Pencil, Power, PowerOff, Trash2, Zap } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
@@ -38,11 +38,41 @@ export function SourcesTab({
 
   if (sources.length === 0) {
     return (
-      <EmptyState
-        title={t('cohort_sync.source.no_sources')}
-        description={t('cohort_sync.source.no_sources_desc')}
-        action={{ label: t('cohort_sync.source.create'), onClick: onCreateClick }}
-      />
+      <div className="mx-auto max-w-lg space-y-6 py-12 text-center">
+        <EmptyState
+          title={t('cohort_sync.source.no_sources')}
+          description={t('cohort_sync.source.no_sources_desc')}
+          action={{ label: t('cohort_sync.source.create'), onClick: onCreateClick }}
+        />
+        <div className="space-y-3 rounded-md border bg-muted/30 p-4 text-left text-sm">
+          <p className="font-medium">{t('cohort_sync.onboarding.title')}</p>
+          <ol className="list-inside list-decimal space-y-2 text-muted-foreground">
+            <li>{t('cohort_sync.onboarding.step1')}</li>
+            <li>{t('cohort_sync.onboarding.step2')}</li>
+            <li>{t('cohort_sync.onboarding.step3')}</li>
+          </ol>
+          <div className="flex gap-3 pt-2">
+            <a
+              href="https://www.docs.developers.amplitude.com/analytics/apis/cohort-api/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              Amplitude {t('cohort_sync.onboarding.docs')}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+            <a
+              href="https://docs.mixpanel.com/docs/cohort-sync/overview"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              Mixpanel {t('cohort_sync.onboarding.docs')}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
+        </div>
+      </div>
     )
   }
 
