@@ -4,6 +4,8 @@ package cohortsync
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -116,5 +118,29 @@ func TestUnavailableError(t *testing.T) {
 	}
 	if err.Error() != "cohort sync provider unavailable: posthog" {
 		t.Errorf("unexpected message: %s", err.Error())
+	}
+}
+
+func TestIsUnavailableError_True(t *testing.T) {
+	base := UnavailableError("posthog")
+	wrapped := fmt.Errorf("outer: %w", base)
+
+	if !IsUnavailableError(base) {
+		t.Error("IsUnavailableError should return true for a direct UnavailableError")
+	}
+	if !IsUnavailableError(wrapped) {
+		t.Error("IsUnavailableError should return true for a wrapped UnavailableError")
+	}
+}
+
+func TestIsUnavailableError_False(t *testing.T) {
+	if IsUnavailableError(nil) {
+		t.Error("IsUnavailableError(nil) should return false")
+	}
+	if IsUnavailableError(errors.New("something else")) {
+		t.Error("IsUnavailableError should return false for unrelated errors")
+	}
+	if IsUnavailableError(fmt.Errorf("wrapped other: %w", errors.New("nope"))) {
+		t.Error("IsUnavailableError should return false for a wrapped unrelated error")
 	}
 }
