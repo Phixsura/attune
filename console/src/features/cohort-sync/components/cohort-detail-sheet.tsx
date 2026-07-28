@@ -203,8 +203,8 @@ function MembersTable({ members }: { members: CohortMembership[] }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>ID</TableHead>
-            <TableHead>Email</TableHead>
+            <TableHead>{t('cohort_sync.cohort.member_id')}</TableHead>
+            <TableHead>{t('cohort_sync.cohort.member_email')}</TableHead>
             <TableHead>{t('cohort_sync.source.last_sync')}</TableHead>
           </TableRow>
         </TableHeader>

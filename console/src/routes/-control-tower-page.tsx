@@ -130,7 +130,7 @@ export function ControlTowerPage() {
             />
             {cohortHealth.data && cohortHealth.data.sourceCount > 0 && (
               <PageHeroMetric
-                label="Cohort Sync"
+                label={t('cohort_sync.title')}
                 value={`${cohortHealth.data.activeSources}/${cohortHealth.data.sourceCount}`}
                 tone={cohortHealth.data.errorSources > 0 ? 'urgent' : 'default'}
               />

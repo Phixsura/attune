@@ -4785,7 +4785,9 @@
       "description": "描述",
       "no_members": "暂无成员",
       "enable": "启用人群",
-      "disable": "禁用人群"
+      "disable": "禁用人群",
+      "member_id": "用户 ID",
+      "member_email": "邮箱"
     },
     "run": {
       "trigger": {
