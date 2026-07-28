@@ -415,14 +415,43 @@ func (r *Repo) MarkMembersDeparted(ctx context.Context, tenantID string, cohortI
 	return tag.RowsAffected(), nil
 }
 
-// CleanExpired deletes memberships whose TTL has passed.
+// CleanExpired deletes memberships whose TTL has passed, in batches of 10000
+// to avoid long-running transactions and excessive WAL volume.
 func (r *Repo) CleanExpired(ctx context.Context) (int64, error) {
+	var total int64
+	for {
+		tag, err := r.pool.Exec(ctx, `
+			DELETE FROM cohort_memberships
+			 WHERE id IN (
+			   SELECT id FROM cohort_memberships
+			    WHERE expires_at IS NOT NULL AND expires_at < NOW()
+			    LIMIT 10000
+			 )`)
+		if err != nil {
+			return total, fmt.Errorf("clean expired memberships: %w", err)
+		}
+		batch := tag.RowsAffected()
+		total += batch
+		if batch < 10000 {
+			break
+		}
+	}
+	return total, nil
+}
+
+// RecoverStaleRuns marks sync runs stuck in "running" status longer than
+// the given timeout as "failed". Returns the count of recovered runs.
+func (r *Repo) RecoverStaleRuns(ctx context.Context, timeout time.Duration) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM cohort_memberships
-		 WHERE expires_at IS NOT NULL
-		   AND expires_at < NOW()`)
+		UPDATE cohort_sync_runs
+		   SET status = 'failed',
+		       error_message = 'recovered: stuck in running state',
+		       finished_at = NOW()
+		 WHERE status = 'running'
+		   AND started_at < NOW() - $1::interval`,
+		timeout.String())
 	if err != nil {
-		return 0, fmt.Errorf("clean expired memberships: %w", err)
+		return 0, fmt.Errorf("recover stale runs: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }

@@ -54,6 +54,7 @@ type Repo interface {
 	MarkDeparted(ctx context.Context, tenantID string, cohortID uuid.UUID, staleTTLDays int, olderThan time.Time) (int64, error)
 	MarkMembersDeparted(ctx context.Context, tenantID string, cohortID uuid.UUID, staleTTLDays int, externalUserIDs []string) (int64, error)
 	CleanExpired(ctx context.Context) (int64, error)
+	RecoverStaleRuns(ctx context.Context, timeout time.Duration) (int64, error)
 	CountActiveMembers(ctx context.Context, tenantID string, cohortID uuid.UUID) (int, error)
 	InsertRun(ctx context.Context, run repo.SyncRun) (*repo.SyncRun, error)
 	InsertExclusiveRun(ctx context.Context, run repo.SyncRun) (*repo.SyncRun, error)
@@ -229,7 +230,29 @@ func (s *Service) UpdateSource(ctx context.Context, in UpdateSourceInput) (*repo
 	if err != nil {
 		return nil, err
 	}
-	next := ptrext.Indirect(current)
+	next := current // keep pointer
+	applyScalarFields(in, next)
+	if err := s.applySourceConfig(in, next); err != nil {
+		return nil, err
+	}
+	if err := s.applySourceCredentials(in, next); err != nil {
+		return nil, err
+	}
+	if next.Name == "" {
+		return nil, fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	next.UpdatedBy = in.Actor.ID
+	updated, err := s.repo.UpdateSource(ctx, ptrext.Indirect(next))
+	if err != nil {
+		return nil, err
+	}
+	s.record(ctx, in.AuditActor, in.TenantID, "cohort_source.update",
+		"cohort_source", updated.ID.String(), "Updated cohort source",
+		sourceAudit(current), sourceAudit(updated))
+	return updated, nil
+}
+
+func applyScalarFields(in UpdateSourceInput, next *repo.Source) { // ptrext:allow mutating-helper
 	if in.Name != nil {
 		next.Name = strings.TrimSpace(ptrext.Indirect(in.Name))
 	}
@@ -237,29 +260,36 @@ func (s *Service) UpdateSource(ctx context.Context, in UpdateSourceInput) (*repo
 		next.Enabled = ptrext.Indirect(in.Enabled)
 		next.Status = sourceStatus(next.Enabled)
 	}
+}
+
+func (s *Service) applySourceConfig(in UpdateSourceInput, next *repo.Source) error { // ptrext:allow mutating-helper
 	if in.BaseURL != nil {
 		next.BaseURL = strings.TrimSpace(ptrext.Indirect(in.BaseURL))
 		if next.BaseURL != "" {
 			if err := cohortsync.ValidateProviderURL(next.BaseURL); err != nil {
-				return nil, fmt.Errorf("%w: base_url: %s", ErrValidation, err.Error())
+				return fmt.Errorf("%w: base_url: %s", ErrValidation, err.Error())
 			}
 		}
 	}
 	if in.ProviderConfig != nil {
 		cfg, err := normalizeJSONObject(ptrext.Indirect(in.ProviderConfig))
 		if err != nil {
-			return nil, err
+			return err
 		}
 		next.ProviderConfig = []byte(cfg)
 	}
+	return nil
+}
+
+func (s *Service) applySourceCredentials(in UpdateSourceInput, next *repo.Source) error { // ptrext:allow mutating-helper
 	if in.Credential != nil {
 		cred := strings.TrimSpace(ptrext.Indirect(in.Credential))
 		if cred == "" {
-			return nil, fmt.Errorf("%w: credential is required", ErrValidation)
+			return fmt.Errorf("%w: credential is required", ErrValidation)
 		}
 		encrypted, err := s.store.EncryptValue([]byte(cred), sourceAAD(next.TenantID, next.ID, next.Provider))
 		if err != nil {
-			return nil, fmt.Errorf("encrypt cohort credential: %w", err)
+			return fmt.Errorf("encrypt cohort credential: %w", err)
 		}
 		next.CredentialKeyID = encrypted.KeyID
 		next.CredentialCiphertext = encrypted.Ciphertext
@@ -269,7 +299,7 @@ func (s *Service) UpdateSource(ctx context.Context, in UpdateSourceInput) (*repo
 		if pc != "" {
 			enc, err := s.store.EncryptValue([]byte(pc), sourcePullAAD(next.TenantID, next.ID, next.Provider))
 			if err != nil {
-				return nil, fmt.Errorf("encrypt pull credential: %w", err)
+				return fmt.Errorf("encrypt pull credential: %w", err)
 			}
 			next.PullCredentialKeyID = enc.KeyID
 			next.PullCredentialCiphertext = enc.Ciphertext
@@ -278,18 +308,7 @@ func (s *Service) UpdateSource(ctx context.Context, in UpdateSourceInput) (*repo
 			next.PullCredentialCiphertext = nil
 		}
 	}
-	if next.Name == "" {
-		return nil, fmt.Errorf("%w: name is required", ErrValidation)
-	}
-	next.UpdatedBy = in.Actor.ID
-	updated, err := s.repo.UpdateSource(ctx, next)
-	if err != nil {
-		return nil, err
-	}
-	s.record(ctx, in.AuditActor, in.TenantID, "cohort_source.update",
-		"cohort_source", updated.ID.String(), "Updated cohort source",
-		sourceAudit(current), sourceAudit(updated))
-	return updated, nil
+	return nil
 }
 
 // TestSource verifies connectivity to the provider by calling the adapter's Check method.
@@ -415,6 +434,7 @@ type SyncRunResult struct {
 
 // ApplyDelta processes an incremental membership update from a provider webhook.
 func (s *Service) ApplyDelta(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*SyncRunResult, error) {
+	syncStart := time.Now()
 	source, err := s.repo.GetSource(ctx, tenantID, sourceID)
 	if err != nil {
 		return nil, err
@@ -448,10 +468,12 @@ func (s *Service) ApplyDelta(ctx context.Context, tenantID string, sourceID uuid
 	})
 	if err != nil {
 		_ = s.repo.UpdateSourceSyncStatus(ctx, tenantID, sourceID, redact(err.Error()))
+		recordSyncMetrics(source.Provider, "webhook", "failed", 0, 0, 0)
 		return nil, err
 	}
 
 	recordSyncMetrics(source.Provider, "webhook", "succeeded", result.MembersAdded, int(result.Removed), result.MemberCount)
+	observeDuration(source.Provider, "webhook", syncStart)
 
 	return ptrext.Of(SyncRunResult{
 		Run:     result.Run,
@@ -462,7 +484,10 @@ func (s *Service) ApplyDelta(ctx context.Context, tenantID string, sourceID uuid
 }
 
 // ApplyFullSnapshot processes a full membership snapshot (Mixpanel "members" action).
-func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*SyncRunResult, error) {
+// The trigger parameter distinguishes webhook-initiated ("webhook") from operator-
+// initiated ("manual") syncs in metrics and run records.
+func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload, trigger string) (*SyncRunResult, error) {
+	syncStart := time.Now()
 	source, err := s.repo.GetSource(ctx, tenantID, sourceID)
 	if err != nil {
 		return nil, err
@@ -490,7 +515,7 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 		TenantID:     tenantID,
 		CohortID:     cohort.ID,
 		SourceID:     sourceID,
-		Trigger:      "webhook",
+		Trigger:      trigger,
 		Members:      adds,
 		StaleTTLDays: cohort.StaleTTLDays,
 		OlderThan:    time.Now(),
@@ -498,10 +523,12 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 	})
 	if err != nil {
 		_ = s.repo.UpdateSourceSyncStatus(ctx, tenantID, sourceID, redact(err.Error()))
+		recordSyncMetrics(source.Provider, trigger, "failed", 0, 0, 0)
 		return nil, err
 	}
 
-	recordSyncMetrics(source.Provider, "webhook", "succeeded", result.MembersAdded, int(result.Removed), result.MemberCount)
+	recordSyncMetrics(source.Provider, trigger, "succeeded", result.MembersAdded, int(result.Removed), result.MemberCount)
+	observeDuration(source.Provider, trigger, syncStart)
 
 	return ptrext.Of(SyncRunResult{
 		Run:     result.Run,
@@ -555,10 +582,11 @@ func (s *Service) SyncNow(ctx context.Context, tenantID string, cohortID uuid.UU
 	if err != nil {
 		errMsg := redact(err.Error())
 		_ = s.repo.UpdateSourceSyncStatus(ctx, tenantID, source.ID, errMsg)
+		recordSyncMetrics(source.Provider, "manual", "failed", 0, 0, 0)
 		return nil, err
 	}
 
-	result, err := s.ApplyFullSnapshot(ctx, tenantID, source.ID, payload)
+	result, err := s.ApplyFullSnapshot(ctx, tenantID, source.ID, payload, "manual")
 	if err != nil {
 		return nil, err
 	}
@@ -793,6 +821,10 @@ func recordSyncMetrics(provider, trigger, status string, added, removed, activeM
 		metrics.CohortSyncMembersChangedTotal.WithLabelValues(provider, "remove").Add(float64(removed))
 	}
 	metrics.CohortSyncActiveMembers.WithLabelValues(provider).Set(float64(activeMembers))
+}
+
+func observeDuration(provider, trigger string, start time.Time) {
+	metrics.CohortSyncRunDurationSeconds.WithLabelValues(provider, trigger).Observe(time.Since(start).Seconds())
 }
 
 var urlPattern = regexp.MustCompile(`https?://[^\s"'<>)]+`)

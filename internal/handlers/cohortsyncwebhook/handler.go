@@ -30,7 +30,7 @@ type service interface {
 	GetSource(ctx context.Context, tenantID string, id uuid.UUID) (*repo.Source, error)
 	DecryptCredential(source repo.Source) ([]byte, error)
 	ApplyDelta(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*svc.SyncRunResult, error)
-	ApplyFullSnapshot(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload) (*svc.SyncRunResult, error)
+	ApplyFullSnapshot(ctx context.Context, tenantID string, sourceID uuid.UUID, payload cohortsync.SyncPayload, trigger string) (*svc.SyncRunResult, error)
 	RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error)
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error
 }
@@ -160,13 +160,15 @@ func (h *Handler) applyPayload(ctx context.Context, w http.ResponseWriter, where
 	var applyErr error
 	var result *svc.SyncRunResult
 	if payload.IsFullSnapshot {
-		result, applyErr = h.service.ApplyFullSnapshot(ctx, tenantID, sourceID, payload)
+		result, applyErr = h.service.ApplyFullSnapshot(ctx, tenantID, sourceID, payload, "webhook")
 	} else {
 		result, applyErr = h.service.ApplyDelta(ctx, tenantID, sourceID, payload)
 	}
 	if applyErr != nil {
 		metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "error").Inc()
-		_ = h.service.UpdateEventStatus(ctx, event.ID, "failed", nil, applyErr.Error())
+		if statusErr := h.service.UpdateEventStatus(ctx, event.ID, "failed", nil, applyErr.Error()); statusErr != nil {
+			logext.Warnf(ctx, "[%s] event status update failed,event_id:%s,err:%s", where, event.ID.String(), statusErr.Error())
+		}
 		h.reject(ctx, w, where, applyErr)
 		return
 	}
@@ -175,7 +177,9 @@ func (h *Handler) applyPayload(ctx context.Context, w http.ResponseWriter, where
 	if result != nil {
 		runID = ptrext.Of(result.Run.ID)
 	}
-	_ = h.service.UpdateEventStatus(ctx, event.ID, "processed", runID, "")
+	if statusErr := h.service.UpdateEventStatus(ctx, event.ID, "processed", runID, ""); statusErr != nil {
+		logext.Warnf(ctx, "[%s] event status update failed,event_id:%s,err:%s", where, event.ID.String(), statusErr.Error())
+	}
 	metrics.CohortSyncWebhookRequestsTotal.WithLabelValues(payload.Provider, "ok").Inc()
 	w.WriteHeader(http.StatusOK)
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,source_id:%s,cohort:%s,deltas:%d",

@@ -39,6 +39,7 @@ export interface CreateCohortSourceRequest {
   baseUrl?: string | undefined;
   providerConfigJson?: string | undefined;
   enabled: boolean;
+  pullCredential?: string | undefined;
 }
 
 export interface UpdateCohortSourceRequest {
@@ -48,6 +49,7 @@ export interface UpdateCohortSourceRequest {
   credential?: string | undefined;
   baseUrl?: string | undefined;
   providerConfigJson?: string | undefined;
+  pullCredential?: string | undefined;
 }
 
 export interface DeleteCohortSourceRequest {

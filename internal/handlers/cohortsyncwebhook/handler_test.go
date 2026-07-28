@@ -49,7 +49,7 @@ func (s *stubService) ApplyDelta(_ context.Context, _ string, _ uuid.UUID, paylo
 	return &svc.SyncRunResult{}, nil
 }
 
-func (s *stubService) ApplyFullSnapshot(_ context.Context, _ string, _ uuid.UUID, payload cohortsync.SyncPayload) (*svc.SyncRunResult, error) {
+func (s *stubService) ApplyFullSnapshot(_ context.Context, _ string, _ uuid.UUID, payload cohortsync.SyncPayload, _ string) (*svc.SyncRunResult, error) {
 	s.applied = &payload
 	if s.applyErr != nil {
 		return nil, s.applyErr

@@ -1091,6 +1091,11 @@
           "expr": "(rate(attune_cohort_sync_stale_members_cleaned_total[$__rate_interval])) or vector(0)",
           "legendFormat": "stale cleaned",
           "refId": "E"
+        },
+        {
+          "expr": "(histogram_quantile(0.95, sum by (provider, trigger, le) (rate(attune_cohort_sync_run_duration_seconds_bucket[$__rate_interval])))) or vector(0)",
+          "legendFormat": "p95 duration / {{provider}} / {{trigger}}",
+          "refId": "F"
         }
       ],
       "fieldConfig": {

@@ -372,6 +372,16 @@ var CohortSyncStaleCleanedTotal = prometheus.NewCounter(
 	},
 )
 
+// CohortSyncRunDurationSeconds measures cohort sync run latency.
+var CohortSyncRunDurationSeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_cohort_sync_run_duration_seconds",
+		Help:    "Duration of cohort sync runs by provider and trigger.",
+		Buckets: prometheus.ExponentialBuckets(0.1, 2, 12), // 0.1s to ~200s
+	},
+	[]string{"provider", "trigger"},
+)
+
 // ClaimContentionTotal counts when an enricher tryClaim hit a row that
 // another worker had already claimed. Useful health signal — high
 // contention = consider tuning enricher_batch / interval.
@@ -1158,6 +1168,7 @@ var allMetrics = []prometheus.Collector{
 	CohortSyncRunsTotal,
 	CohortSyncActiveMembers,
 	CohortSyncStaleCleanedTotal,
+	CohortSyncRunDurationSeconds,
 	ClaimContentionTotal,
 	IngestRateLimitTotal,
 	TriageDecisionsTotal,
@@ -1277,6 +1288,7 @@ func registeredMetricNamesCore() []string {
 		"attune_cohort_sync_runs_total",
 		"attune_cohort_sync_active_members",
 		"attune_cohort_sync_stale_members_cleaned_total",
+		"attune_cohort_sync_run_duration_seconds",
 		"attune_claim_contention_total",
 		"attune_ingest_rate_limit_total",
 		"attune_triage_decisions_total",

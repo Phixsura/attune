@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	core "github.com/Phixsura/attune/internal/cohortsync"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -46,6 +48,7 @@ func (a *Adapter) Check(ctx context.Context, conn core.Connection) (core.CheckRe
 	req.SetBasicAuth(string(conn.Credential), "")
 	resp, err := a.client.Do(req)
 	if err != nil {
+		logext.Warnf(ctx, "[amplitude.Check] request failed,err:%s", err.Error())
 		return core.CheckResult{OK: false, Error: err.Error()}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -53,6 +56,7 @@ func (a *Adapter) Check(ctx context.Context, conn core.Connection) (core.CheckRe
 		return core.CheckResult{OK: true}, nil
 	}
 	msg := fmt.Sprintf("amplitude API returned %d", resp.StatusCode)
+	logext.Warnf(ctx, "[amplitude.Check] %s", msg)
 	return core.CheckResult{OK: false, Error: msg}, fmt.Errorf("%s", msg)
 }
 
@@ -130,93 +134,16 @@ func (a *Adapter) PullCohort(ctx context.Context, conn core.Connection, external
 		return core.SyncPayload{}, err
 	}
 
-	// Step 1: Request cohort export.
-	reqURL := fmt.Sprintf("%s/api/5/cohorts/request/%s", baseURL, externalCohortID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	requestID, err := a.requestCohortExport(ctx, baseURL, apiKey, secretKey, externalCohortID)
 	if err != nil {
-		return core.SyncPayload{}, fmt.Errorf("amplitude: create request: %w", err)
+		return core.SyncPayload{}, err
 	}
-	req.SetBasicAuth(apiKey, secretKey)
-	resp, err := a.client.Do(req)
+	if err := a.pollExportStatus(ctx, baseURL, apiKey, secretKey, requestID); err != nil {
+		return core.SyncPayload{}, err
+	}
+	userIDs, err := a.downloadAndParseCohort(ctx, baseURL, apiKey, secretKey, requestID)
 	if err != nil {
-		return core.SyncPayload{}, fmt.Errorf("amplitude: request cohort: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return core.SyncPayload{}, fmt.Errorf("amplitude: request cohort returned %d", resp.StatusCode)
-	}
-	var reqResp struct {
-		RequestID string `json:"request_id"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&reqResp); err != nil { // ptrext:allow decode-out-param
-		return core.SyncPayload{}, fmt.Errorf("amplitude: parse request response: %w", err)
-	}
-
-	// Step 2: Poll for completion.
-	for i := 0; i < 60; i++ {
-		select {
-		case <-ctx.Done():
-			return core.SyncPayload{}, ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
-
-		statusURL := fmt.Sprintf("%s/api/5/cohorts/request/%s/status", baseURL, reqResp.RequestID)
-		statusReq, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
-		if err != nil {
-			return core.SyncPayload{}, fmt.Errorf("amplitude: create status request: %w", err)
-		}
-		statusReq.SetBasicAuth(apiKey, secretKey)
-		statusResp, err := a.client.Do(statusReq)
-		if err != nil {
-			return core.SyncPayload{}, fmt.Errorf("amplitude: poll status: %w", err)
-		}
-		var status struct {
-			AsyncStatus string `json:"async_status"`
-		}
-		_ = json.NewDecoder(statusResp.Body).Decode(&status) // ptrext:allow decode-out-param
-		_ = statusResp.Body.Close()
-		if strings.EqualFold(status.AsyncStatus, "COMPLETE") {
-			break
-		}
-		if strings.EqualFold(status.AsyncStatus, "FAILED") {
-			return core.SyncPayload{}, fmt.Errorf("amplitude: cohort export failed")
-		}
-		if i == 59 {
-			return core.SyncPayload{}, fmt.Errorf("amplitude: cohort export timed out after 2 minutes")
-		}
-	}
-
-	// Step 3: Download the result.
-	dlURL := fmt.Sprintf("%s/api/5/cohorts/request/%s/file", baseURL, reqResp.RequestID)
-	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
-	if err != nil {
-		return core.SyncPayload{}, fmt.Errorf("amplitude: create download request: %w", err)
-	}
-	dlReq.SetBasicAuth(apiKey, secretKey)
-	dlResp, err := a.client.Do(dlReq)
-	if err != nil {
-		return core.SyncPayload{}, fmt.Errorf("amplitude: download cohort: %w", err)
-	}
-	defer func() { _ = dlResp.Body.Close() }()
-	if dlResp.StatusCode != http.StatusOK {
-		return core.SyncPayload{}, fmt.Errorf("amplitude: download returned %d", dlResp.StatusCode)
-	}
-
-	// Parse the response (JSON array of user IDs or CSV).
-	body, err := io.ReadAll(io.LimitReader(dlResp.Body, 64<<20)) // 64MB limit
-	if err != nil {
-		return core.SyncPayload{}, fmt.Errorf("amplitude: read download: %w", err)
-	}
-
-	var userIDs []string
-	if err := json.Unmarshal(body, &userIDs); err != nil { // ptrext:allow unmarshal-out-param
-		// Fallback: try line-separated format
-		for _, line := range strings.Split(string(body), "\n") {
-			uid := strings.TrimSpace(line)
-			if uid != "" {
-				userIDs = append(userIDs, uid)
-			}
-		}
+		return core.SyncPayload{}, err
 	}
 
 	deltas := make([]core.MemberDelta, 0, len(userIDs))
@@ -224,18 +151,111 @@ func (a *Adapter) PullCohort(ctx context.Context, conn core.Connection, external
 		if uid == "" {
 			continue
 		}
-		deltas = append(deltas, core.MemberDelta{
-			ExternalUserID: uid,
-			Action:         "add",
-		})
+		deltas = append(deltas, core.MemberDelta{ExternalUserID: uid, Action: "add"})
 	}
-
 	return core.SyncPayload{
 		Provider:         providerID,
 		ExternalCohortID: externalCohortID,
 		IsFullSnapshot:   true,
 		Deltas:           deltas,
 	}, nil
+}
+
+func (a *Adapter) requestCohortExport(ctx context.Context, baseURL, apiKey, secretKey, cohortID string) (string, error) {
+	reqURL := baseURL + "/api/5/cohorts/request/" + url.PathEscape(cohortID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("amplitude: create request: %w", err)
+	}
+	req.SetBasicAuth(apiKey, secretKey)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("amplitude: request cohort: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("amplitude: request cohort returned %d", resp.StatusCode)
+	}
+	var out struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil { // ptrext:allow decode-out-param
+		return "", fmt.Errorf("amplitude: parse request response: %w", err)
+	}
+	return out.RequestID, nil
+}
+
+func (a *Adapter) pollExportStatus(ctx context.Context, baseURL, apiKey, secretKey, requestID string) error {
+	for i := 0; i < 60; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+		statusURL := baseURL + "/api/5/cohorts/request/" + url.PathEscape(requestID) + "/status"
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+		if err != nil {
+			return fmt.Errorf("amplitude: create status request: %w", err)
+		}
+		req.SetBasicAuth(apiKey, secretKey)
+		resp, err := a.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("amplitude: poll status: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			return fmt.Errorf("amplitude: status poll returned %d", resp.StatusCode)
+		}
+		var status struct {
+			AsyncStatus string `json:"async_status"`
+		}
+		decErr := json.NewDecoder(resp.Body).Decode(&status) // ptrext:allow decode-out-param
+		_ = resp.Body.Close()
+		if decErr != nil {
+			return fmt.Errorf("amplitude: parse status response: %w", decErr)
+		}
+		if strings.EqualFold(status.AsyncStatus, "COMPLETE") {
+			return nil
+		}
+		if strings.EqualFold(status.AsyncStatus, "FAILED") {
+			return fmt.Errorf("amplitude: cohort export failed")
+		}
+	}
+	return fmt.Errorf("amplitude: cohort export timed out after 2 minutes")
+}
+
+func (a *Adapter) downloadAndParseCohort(ctx context.Context, baseURL, apiKey, secretKey, requestID string) ([]string, error) {
+	dlURL := baseURL + "/api/5/cohorts/request/" + url.PathEscape(requestID) + "/file"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dlURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("amplitude: create download request: %w", err)
+	}
+	req.SetBasicAuth(apiKey, secretKey)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("amplitude: download cohort: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("amplitude: download returned %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20)) // 64MB limit
+	if err != nil {
+		return nil, fmt.Errorf("amplitude: read download: %w", err)
+	}
+
+	var userIDs []string
+	if err := json.Unmarshal(body, &userIDs); err != nil { // ptrext:allow unmarshal-out-param
+		// Fallback: try line-separated format.
+		for _, line := range strings.Split(string(body), "\n") {
+			uid := strings.TrimSpace(line)
+			if uid != "" {
+				userIDs = append(userIDs, uid)
+			}
+		}
+	}
+	return userIDs, nil
 }
 
 func splitPullCredential(cred []byte) (string, string, error) {

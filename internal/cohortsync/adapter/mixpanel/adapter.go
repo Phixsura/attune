@@ -8,11 +8,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	core "github.com/Phixsura/attune/internal/cohortsync"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
@@ -45,6 +48,7 @@ func (a *Adapter) Check(ctx context.Context, conn core.Connection) (core.CheckRe
 	req.SetBasicAuth(string(conn.Credential), "")
 	resp, err := a.client.Do(req)
 	if err != nil {
+		logext.Warnf(ctx, "[mixpanel.Check] request failed,err:%s", err.Error())
 		return core.CheckResult{OK: false, Error: err.Error()}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -52,6 +56,7 @@ func (a *Adapter) Check(ctx context.Context, conn core.Connection) (core.CheckRe
 		return core.CheckResult{OK: true}, nil
 	}
 	msg := fmt.Sprintf("mixpanel API returned %d", resp.StatusCode)
+	logext.Warnf(ctx, "[mixpanel.Check] %s", msg)
 	return core.CheckResult{OK: false, Error: msg}, fmt.Errorf("%s", msg)
 }
 
@@ -135,61 +140,20 @@ func (a *Adapter) PullCohort(ctx context.Context, conn core.Connection, external
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return core.SyncPayload{}, fmt.Errorf("mixpanel: pull credential must be 'username:secret'")
 	}
-	username, secret := parts[0], parts[1]
 
 	var allDeltas []core.MemberDelta
-	page := 0
-	sessionID := ""
-
+	page, sessionID := 0, ""
 	for {
-		engageURL := fmt.Sprintf("%s/api/2.0/engage?filter_by_cohort={\"id\":%s}&page_size=1000", baseURL, externalCohortID)
-		if sessionID != "" {
-			engageURL += "&session_id=" + sessionID + "&page=" + fmt.Sprintf("%d", page)
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, engageURL, nil)
+		resp, err := a.fetchEngagePage(ctx, baseURL, parts[0], parts[1], externalCohortID, page, sessionID)
 		if err != nil {
-			return core.SyncPayload{}, fmt.Errorf("mixpanel: create engage request: %w", err)
+			return core.SyncPayload{}, err
 		}
-		req.SetBasicAuth(username, secret)
-		resp, err := a.client.Do(req)
-		if err != nil {
-			return core.SyncPayload{}, fmt.Errorf("mixpanel: engage request: %w", err)
-		}
-
-		var engageResp struct {
-			Results   []engagePerson `json:"results"`
-			Total     int            `json:"total"`
-			Page      int            `json:"page"`
-			SessionID string         `json:"session_id"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&engageResp); err != nil { // ptrext:allow decode-out-param
-			_ = resp.Body.Close()
-			return core.SyncPayload{}, fmt.Errorf("mixpanel: parse engage response: %w", err)
-		}
-		_ = resp.Body.Close()
-
-		for _, person := range engageResp.Results {
-			uid := strings.TrimSpace(person.DistinctID)
-			if uid == "" {
-				continue
-			}
-			props := person.Properties
-			allDeltas = append(allDeltas, core.MemberDelta{
-				ExternalUserID: uid,
-				Email:          strings.TrimSpace(props.Email),
-				DisplayName:    buildDisplayName(props.FirstName, props.LastName),
-				Action:         "add",
-			})
-		}
-
-		sessionID = engageResp.SessionID
-		if len(engageResp.Results) == 0 || len(allDeltas) >= engageResp.Total {
+		allDeltas = append(allDeltas, personsToDelta(resp.Results)...)
+		sessionID = resp.SessionID
+		if len(resp.Results) == 0 || len(allDeltas) >= resp.Total || page >= 100 {
 			break
 		}
 		page++
-		if page > 100 { // safety limit
-			break
-		}
 	}
 
 	return core.SyncPayload{
@@ -198,6 +162,65 @@ func (a *Adapter) PullCohort(ctx context.Context, conn core.Connection, external
 		IsFullSnapshot:   true,
 		Deltas:           allDeltas,
 	}, nil
+}
+
+type engagePageResult struct {
+	Results   []engagePerson
+	Total     int
+	SessionID string
+}
+
+func (a *Adapter) fetchEngagePage(ctx context.Context, baseURL, user, secret, cohortID string, page int, sessionID string) (engagePageResult, error) {
+	q := url.Values{}
+	q.Set("filter_by_cohort", fmt.Sprintf(`{"id":%s}`, cohortID))
+	q.Set("page_size", "1000")
+	if sessionID != "" {
+		q.Set("session_id", sessionID)
+		q.Set("page", fmt.Sprintf("%d", page))
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/2.0/engage?"+q.Encode(), nil)
+	if err != nil {
+		return engagePageResult{}, fmt.Errorf("mixpanel: create engage request: %w", err)
+	}
+	req.SetBasicAuth(user, secret)
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return engagePageResult{}, fmt.Errorf("mixpanel: engage request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		_ = resp.Body.Close()
+		return engagePageResult{}, fmt.Errorf("mixpanel: engage API returned %d on page %d", resp.StatusCode, page)
+	}
+	var out struct {
+		Results   []engagePerson `json:"results"`
+		Total     int            `json:"total"`
+		SessionID string         `json:"session_id"`
+	}
+	limited := io.LimitReader(resp.Body, 64<<20)                  // 64MB per-page limit
+	if err := json.NewDecoder(limited).Decode(&out); err != nil { // ptrext:allow decode-out-param
+		_ = resp.Body.Close()
+		return engagePageResult{}, fmt.Errorf("mixpanel: parse engage response: %w", err)
+	}
+	_ = resp.Body.Close()
+	return engagePageResult{Results: out.Results, Total: out.Total, SessionID: out.SessionID}, nil
+}
+
+func personsToDelta(persons []engagePerson) []core.MemberDelta {
+	deltas := make([]core.MemberDelta, 0, len(persons))
+	for _, person := range persons {
+		uid := strings.TrimSpace(person.DistinctID)
+		if uid == "" {
+			continue
+		}
+		props := person.Properties
+		deltas = append(deltas, core.MemberDelta{
+			ExternalUserID: uid,
+			Email:          strings.TrimSpace(props.Email),
+			DisplayName:    buildDisplayName(props.FirstName, props.LastName),
+			Action:         "add",
+		})
+	}
+	return deltas
 }
 
 type engagePerson struct {

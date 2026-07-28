@@ -77,6 +77,7 @@ func (h *Handler) CreateSource(
 		Name:           req.GetName(),
 		AuthType:       req.GetAuthType(),
 		Credential:     req.GetCredential(),
+		PullCredential: req.GetPullCredential(),
 		WebhookSecret:  req.GetWebhookSecret(),
 		BaseURL:        req.GetBaseUrl(),
 		ProviderConfig: req.GetProviderConfigJson(),
@@ -125,6 +126,7 @@ func (h *Handler) UpdateSource(
 		Name:           req.Name,
 		Enabled:        req.Enabled,
 		Credential:     req.Credential,
+		PullCredential: req.PullCredential,
 		BaseURL:        req.BaseUrl,
 		ProviderConfig: req.ProviderConfigJson,
 		Actor:          svc.Actor{Type: ctx.Auth.UserType, ID: ctx.Auth.UserID},
@@ -280,21 +282,40 @@ func (h *Handler) Health(
 
 func sourceToProto(s repo.Source) *attunev1.CohortSource {
 	out := ptrext.Of(attunev1.CohortSource{
-		Id:        s.ID.String(),
-		Provider:  s.Provider,
-		Name:      s.Name,
-		AuthType:  s.AuthType,
-		BaseUrl:   s.BaseURL,
-		Enabled:   s.Enabled,
-		Status:    s.Status,
-		LastError: s.LastError,
-		CreatedAt: timestamppb.New(s.CreatedAt),
-		UpdatedAt: timestamppb.New(s.UpdatedAt),
+		Id:         s.ID.String(),
+		Provider:   s.Provider,
+		Name:       s.Name,
+		AuthType:   s.AuthType,
+		BaseUrl:    s.BaseURL,
+		Enabled:    s.Enabled,
+		Status:     s.Status,
+		LastError:  s.LastError,
+		WebhookUrl: webhookURL(s),
+		CreatedAt:  timestamppb.New(s.CreatedAt),
+		UpdatedAt:  timestamppb.New(s.UpdatedAt),
 	})
 	if s.LastSyncAt != nil {
 		out.LastSyncAt = timestamppb.New(ptrext.Indirect(s.LastSyncAt))
 	}
 	return out
+}
+
+// webhookURL computes the webhook receiver URL for a source so operators can
+// configure their provider's cohort destination. The returned path is relative
+// to the attune root (operators prepend their public base URL).
+func webhookURL(s repo.Source) string {
+	base := "/v1/cohort-sync"
+	sid := s.ID.String()
+	switch s.Provider {
+	case "amplitude":
+		// Amplitude needs separate URLs for create, add, remove operations.
+		// Return the add URL as canonical; the UI shows all three.
+		return base + "/amplitude/" + s.TenantID + "/" + sid + "/add"
+	case "mixpanel":
+		return base + "/mixpanel/" + s.TenantID + "/" + sid
+	default:
+		return base + "/" + s.Provider + "/" + s.TenantID + "/" + sid
+	}
 }
 
 func cohortToProto(c repo.Cohort) *attunev1.Cohort {
@@ -354,6 +375,8 @@ func mapError[T proto.Message](ctx context.Context, where string, err error) (di
 		return dispatcher.Fail[T](http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND, err.Error())
 	case errors.Is(err, repo.ErrConflict):
 		return dispatcher.Fail[T](http.StatusConflict, attunev1.ErrorCode_CONFLICT, err.Error())
+	case cohortsync.IsUnavailableError(err):
+		return dispatcher.Fail[T](http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	default:
 		return internalError[T](ctx, where, err)
 	}

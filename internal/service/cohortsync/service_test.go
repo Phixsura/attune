@@ -141,6 +141,10 @@ func (m *mockRepo) MarkMembersDeparted(_ context.Context, _ string, _ uuid.UUID,
 
 func (m *mockRepo) CleanExpired(_ context.Context) (int64, error) { return 0, nil }
 
+func (m *mockRepo) RecoverStaleRuns(_ context.Context, _ time.Duration) (int64, error) {
+	return 0, nil
+}
+
 func (m *mockRepo) CountActiveMembers(_ context.Context, _ string, _ uuid.UUID) (int, error) {
 	return m.memberAdded, nil
 }
@@ -379,7 +383,7 @@ func TestApplyFullSnapshot(t *testing.T) {
 			{ExternalUserID: "u1", Action: "add"},
 			{ExternalUserID: "u2", Action: "add"},
 		},
-	})
+	}, "webhook")
 	if err != nil {
 		t.Fatalf("ApplyFullSnapshot failed: %v", err)
 	}
@@ -412,7 +416,7 @@ func TestApplyFullSnapshot_SkipsDisabledCohort(t *testing.T) {
 		CohortName:       "Disabled",
 		IsFullSnapshot:   true,
 		Deltas:           []cohortsync.MemberDelta{{ExternalUserID: "u1", Action: "add"}},
-	})
+	}, "webhook")
 	if err != nil {
 		t.Fatalf("ApplyFullSnapshot failed: %v", err)
 	}
@@ -440,7 +444,7 @@ func TestApplyFullSnapshot_RejectsRunning(t *testing.T) {
 		CohortName:       "C",
 		IsFullSnapshot:   true,
 		Deltas:           []cohortsync.MemberDelta{{ExternalUserID: "u1", Action: "add"}},
-	})
+	}, "webhook")
 	if err == nil {
 		t.Fatal("expected conflict error for running sync")
 	}

@@ -20,6 +20,10 @@ var ErrDuplicateEvent = errors.New("duplicate cohort sync event")
 
 // RecordEvent inserts a webhook event for dedup. Returns ErrDuplicateEvent if
 // the dedupe_key already exists for this source.
+// RecordEvent inserts a webhook event for dedup. Returns ErrDuplicateEvent if
+// the dedupe_key already exists AND the existing event was successfully processed.
+// Failed events are re-processable: the ON CONFLICT clause resets their status
+// to "received" so the provider's retry is not permanently blocked.
 func (r *Repo) RecordEvent(ctx context.Context, in SyncEvent) (*SyncEvent, error) {
 	row := in
 	if row.ID == uuid.Nil {
@@ -29,12 +33,15 @@ func (r *Repo) RecordEvent(ctx context.Context, in SyncEvent) (*SyncEvent, error
 		INSERT INTO cohort_sync_events (id, tenant_id, cohort_source_id, provider,
 		       event_type, dedupe_key, status, payload_digest, members_count)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT (tenant_id, cohort_source_id, dedupe_key) DO NOTHING
-		RETURNING created_at`,
+		ON CONFLICT (tenant_id, cohort_source_id, dedupe_key) DO UPDATE
+		   SET status = 'received', failure_reason = ''
+		 WHERE cohort_sync_events.status = 'failed'
+		RETURNING id, created_at`,
 		row.ID, row.TenantID, row.CohortSourceID, row.Provider,
 		row.EventType, row.DedupeKey, row.Status, row.PayloadDigest, row.MembersCount,
-	).Scan(&row.CreatedAt) // ptrext:allow scan-out-param
+	).Scan(&row.ID, &row.CreatedAt) // ptrext:allow scan-out-param
 	if errors.Is(err, pgx.ErrNoRows) {
+		// Conflict hit but existing event is not 'failed' → already processed.
 		return nil, ErrDuplicateEvent
 	}
 	if err != nil {

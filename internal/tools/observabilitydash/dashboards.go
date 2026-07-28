@@ -317,6 +317,7 @@ func cohortSyncHealthPanel() panel {
 		targetExpr("C", `sum by (provider, trigger, status) (rate(attune_cohort_sync_runs_total[$__rate_interval]))`, "runs / {{provider}} / {{trigger}} / {{status}}"),
 		targetExpr("D", `sum by (provider) (attune_cohort_sync_active_members)`, "active / {{provider}}"),
 		targetExpr("E", `rate(attune_cohort_sync_stale_members_cleaned_total[$__rate_interval])`, "stale cleaned"),
+		targetExpr("F", `histogram_quantile(0.95, sum by (provider, trigger, le) (rate(attune_cohort_sync_run_duration_seconds_bucket[$__rate_interval])))`, "p95 duration / {{provider}} / {{trigger}}"),
 	}, "short", gp(0, 92, 24, 8))
 }
 

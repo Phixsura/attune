@@ -273,7 +273,7 @@ func startRuntimeWorkers(
 	safego(ctx, "external_sync", func() { externalSyncWorker.Run(ctx) })
 
 	cohortSyncService := cohortsyncservice.New(cohortsyncrepo.New(pool), secrets)
-	safego(ctx, "cohort_sync_cleanup", func() { cohortSyncService.RunCleanupLoop(ctx, cohortsyncservice.DefaultCleanupInterval) })
+	safego(ctx, "cohort_sync_cleanup", func() { cohortSyncService.RunCleanupLoop(ctx, pool, cohortsyncservice.DefaultCleanupInterval) })
 	safego(ctx, "outbox_lag_refresher", func() { runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo) })
 	safego(ctx, "audit_pruner", func() {
 		runAuditPruner(ctx, pool, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)

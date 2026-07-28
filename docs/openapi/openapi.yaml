@@ -11396,6 +11396,8 @@ components:
                     type: string
                 enabled:
                     type: boolean
+                pullCredential:
+                    type: string
         CreateCustomerRequestGitHubIssueRequest:
             required:
                 - id
@@ -18324,6 +18326,8 @@ components:
                 baseUrl:
                     type: string
                 providerConfigJson:
+                    type: string
+                pullCredential:
                     type: string
         UpdateCustomerRequestRequest:
             required:

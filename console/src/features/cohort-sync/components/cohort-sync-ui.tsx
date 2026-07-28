@@ -113,9 +113,16 @@ export function CohortSyncUI({ sources, cohorts, health, isLoading }: CohortSync
 }
 
 function SourceRow({ source, onAction }: { source: CohortSource; onAction: () => void }) {
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
   const testMutation = useMutation({
     mutationFn: () => testCohortSource(source.id),
-    onSuccess: () => onAction(),
+    onSuccess: (data) => {
+      setTestResult({ ok: data.ok, error: data.error })
+      onAction()
+    },
+    onError: () => {
+      setTestResult({ ok: false, error: 'Network error' })
+    },
   })
   const deleteMutation = useMutation({
     mutationFn: () => deleteCohortSource(source.id),
@@ -123,42 +130,60 @@ function SourceRow({ source, onAction }: { source: CohortSource; onAction: () =>
   })
 
   return (
-    <div className="flex items-center justify-between px-4 py-3">
-      <div>
-        <div className="text-sm font-medium">{source.name}</div>
-        <div className="text-xs text-muted-foreground">
-          {source.provider} &middot; {source.status}
-          {source.lastSyncAt && (
-            <> &middot; last synced {new Date(source.lastSyncAt).toLocaleString()}</>
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm font-medium">{source.name}</div>
+          <div className="text-xs text-muted-foreground">
+            {source.provider} &middot; {source.status}
+            {source.lastSyncAt && (
+              <> &middot; last synced {new Date(source.lastSyncAt).toLocaleString()}</>
+            )}
+          </div>
+          {source.lastError && (
+            <div className="mt-1 text-xs text-destructive">{source.lastError}</div>
           )}
         </div>
-        {source.lastError && (
-          <div className="mt-1 text-xs text-destructive">{source.lastError}</div>
-        )}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => testMutation.mutate()}
+            disabled={testMutation.isPending}
+          >
+            {testMutation.isPending ? 'Testing...' : 'Test'}
+          </Button>
+          {testResult && (
+            <span className={`text-xs ${testResult.ok ? 'text-green-600' : 'text-destructive'}`}>
+              {testResult.ok ? '✓ OK' : `✗ ${testResult.error || 'Failed'}`}
+            </span>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (window.confirm(`Delete source "${source.name}"?`)) {
+                deleteMutation.mutate()
+              }
+            }}
+            disabled={deleteMutation.isPending}
+          >
+            Delete
+          </Button>
+          <StatusBadge status={source.status} enabled={source.enabled} />
+        </div>
       </div>
-      <div className="flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => testMutation.mutate()}
-          disabled={testMutation.isPending}
-        >
-          {testMutation.isPending ? 'Testing...' : 'Test'}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            if (window.confirm(`Delete source "${source.name}"?`)) {
-              deleteMutation.mutate()
-            }
-          }}
-          disabled={deleteMutation.isPending}
-        >
-          Delete
-        </Button>
-        <StatusBadge status={source.status} enabled={source.enabled} />
-      </div>
+      {source.webhookUrl && (
+        <div className="mt-2 rounded bg-muted/50 px-3 py-2">
+          <div className="text-xs font-medium text-muted-foreground">Webhook URL</div>
+          <code className="block break-all text-xs">{source.webhookUrl}</code>
+          {source.provider === 'amplitude' && (
+            <div className="mt-1 text-xs text-muted-foreground">
+              Amplitude needs three URLs (replace /add with /create and /remove).
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -213,6 +238,7 @@ function CreateSourceDialog({ onCreated }: { onCreated: () => void }) {
         authType: 'api_key',
         credential,
         enabled: true,
+        pullCredential: pullCredential || undefined,
       }),
     onSuccess: () => {
       setOpen(false)

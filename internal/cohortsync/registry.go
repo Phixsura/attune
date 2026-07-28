@@ -164,3 +164,8 @@ var ErrProviderUnavailable = errors.New("cohort sync provider unavailable")
 func UnavailableError(provider string) error {
 	return fmt.Errorf("%w: %s", ErrProviderUnavailable, provider)
 }
+
+// IsUnavailableError reports whether err wraps ErrProviderUnavailable.
+func IsUnavailableError(err error) bool {
+	return errors.Is(err, ErrProviderUnavailable)
+}
