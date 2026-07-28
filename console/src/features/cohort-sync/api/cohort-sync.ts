@@ -2,10 +2,12 @@ import { queryOptions } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import type {
   Cohort,
+  CohortMembership,
   CohortSource,
   CohortSyncHealth,
   CohortSyncRun,
   CreateCohortSourceRequest,
+  ListCohortMembersResponse,
   ListCohortSourcesResponse,
   ListCohortSyncRunsResponse,
   ListCohortsResponse,
@@ -25,6 +27,10 @@ export function listCohortSourcesQuery() {
     queryFn: ({ signal }) =>
       api<ListCohortSourcesResponse>(`${base}/sources`, { signal }).then((r) => r.sources ?? []),
   })
+}
+
+export async function getCohortSource(id: string): Promise<CohortSource> {
+  return api<CohortSource>(`${base}/sources/${id}`)
 }
 
 export async function createCohortSource(body: CreateCohortSourceRequest): Promise<CohortSource> {
@@ -63,6 +69,10 @@ export function listCohortsQuery(sourceId?: string) {
   })
 }
 
+export async function getCohort(id: string): Promise<Cohort> {
+  return api<Cohort>(`${base}/cohorts/${id}`)
+}
+
 export async function updateCohort(
   id: string,
   body: Omit<UpdateCohortRequest, 'id'>,
@@ -77,6 +87,19 @@ export async function syncCohort(id: string): Promise<SyncCohortResponse> {
   })
 }
 
+// ---------- Members ----------
+
+export function listCohortMembersQuery(cohortId: string, limit = 50) {
+  return queryOptions({
+    queryKey: ['cohort-sync', 'members', cohortId],
+    queryFn: ({ signal }) =>
+      api<ListCohortMembersResponse>(`${base}/cohorts/${cohortId}/members?limit=${limit}`, {
+        signal,
+      }).then((r) => r.members ?? []),
+    enabled: !!cohortId,
+  })
+}
+
 // ---------- Sync Runs ----------
 
 export function listCohortSyncRunsQuery(cohortId: string, limit = 20) {
@@ -86,6 +109,7 @@ export function listCohortSyncRunsQuery(cohortId: string, limit = 20) {
       api<ListCohortSyncRunsResponse>(`${base}/cohorts/${cohortId}/runs?limit=${limit}`, {
         signal,
       }).then((r) => r.runs ?? []),
+    enabled: !!cohortId,
   })
 }
 
@@ -98,4 +122,11 @@ export function cohortSyncHealthQuery() {
   })
 }
 
-export type { Cohort, CohortSource, CohortSyncHealth, CohortSyncRun }
+export type {
+  Cohort,
+  CohortMembership,
+  CohortSource,
+  CohortSyncHealth,
+  CohortSyncRun,
+  CreateCohortSourceRequest,
+}

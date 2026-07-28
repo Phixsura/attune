@@ -338,6 +338,22 @@ async function handleRoute(
     await fulfillJson(route, { sources: [] })
     return true
   }
+  if (method === 'GET' && path.startsWith('/cohort-sync/sources/')) {
+    await fulfillJson(route, { id: '', provider: '', name: '', status: 'active' })
+    return true
+  }
+  if (method === 'GET' && path.match(/\/cohort-sync\/cohorts\/[^/]+$/)) {
+    await fulfillJson(route, { id: '', name: '', member_count: 0 })
+    return true
+  }
+  if (method === 'GET' && path.match(/\/cohort-sync\/cohorts\/[^/]+\/members$/)) {
+    await fulfillJson(route, { members: [] })
+    return true
+  }
+  if (method === 'GET' && path.match(/\/cohort-sync\/cohorts\/[^/]+\/runs$/)) {
+    await fulfillJson(route, { runs: [] })
+    return true
+  }
 
   if (method === 'GET' && path === '/feedback') {
     const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
