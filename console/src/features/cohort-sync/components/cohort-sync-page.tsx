@@ -98,6 +98,23 @@ export function CohortSyncPage() {
     return <Loading />
   }
 
+  // Show error state if critical queries failed (sources or cohorts).
+  // Health failure is non-critical — page still renders without metrics.
+  if (sourcesQ.isError || cohortsQ.isError) {
+    return (
+      <>
+        <PageHero
+          eyebrow={t('shell.groups.integrations')}
+          title={t('cohort_sync.title')}
+          subtitle={t('cohort_sync.subtitle')}
+        />
+        <div className="mt-6 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {t('common.error')} — {t('common.retry')}
+        </div>
+      </>
+    )
+  }
+
   const sources = sourcesQ.data ?? []
   const cohorts = cohortsQ.data ?? []
   const health = healthQ.data

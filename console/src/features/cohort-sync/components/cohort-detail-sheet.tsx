@@ -171,13 +171,25 @@ export function CohortDetailSheet({
         {/* Members preview */}
         <section className="mt-6">
           <h3 className="mb-2 text-sm font-medium">{t('cohort_sync.cohort.members')}</h3>
-          {membersQ.isLoading ? <Loading /> : <MembersTable members={membersQ.data ?? []} />}
+          {membersQ.isLoading ? (
+            <Loading />
+          ) : membersQ.isError ? (
+            <p className="text-sm text-destructive">{t('common.error')}</p>
+          ) : (
+            <MembersTable members={membersQ.data ?? []} />
+          )}
         </section>
 
         {/* Sync run history */}
         <section className="mt-6">
           <h3 className="mb-2 text-sm font-medium">{t('cohort_sync.cohort.runs')}</h3>
-          {runsQ.isLoading ? <Loading /> : <RunsTable runs={runsQ.data ?? []} />}
+          {runsQ.isLoading ? (
+            <Loading />
+          ) : runsQ.isError ? (
+            <p className="text-sm text-destructive">{t('common.error')}</p>
+          ) : (
+            <RunsTable runs={runsQ.data ?? []} />
+          )}
         </section>
       </SheetContent>
     </Sheet>
