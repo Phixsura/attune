@@ -174,13 +174,17 @@ func (h *Handler) TestSource(
 	}
 	result, testErr := h.service.TestSource(ctx, ctx.Auth.TenantID, id,
 		auditlogsvc.ActorFromRequest(ctx.Auth.UserType, ctx.Auth.UserID, ctx.Request()))
-	errMsg := ""
 	if testErr != nil {
-		errMsg = result.Error
+		// If the test could not run at all (e.g., source not found, credential
+		// decrypt failed), return a proper error response instead of the ok/error
+		// shape. Only return TestCohortSourceResponse when the test ran.
+		if result.Error == "" {
+			return mapError[*attunev1.TestCohortSourceResponse](ctx, "TestSource", testErr)
+		}
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.TestCohortSourceResponse{
 		Ok:    result.OK,
-		Error: errMsg,
+		Error: result.Error,
 	}))
 }
 

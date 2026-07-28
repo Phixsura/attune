@@ -196,6 +196,10 @@ func (m *mockRepo) HasRunningRun(_ context.Context, _ string, _ uuid.UUID) (bool
 	return m.hasRunning, nil
 }
 
+func (m *mockRepo) HasRunningRunForSource(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
+	return m.hasRunning, nil
+}
+
 func (m *mockRepo) RecordEvent(_ context.Context, in repo.SyncEvent) (*repo.SyncEvent, error) {
 	row := in
 	if row.ID == uuid.Nil {

@@ -200,6 +200,14 @@ func (h *Handler) authenticateSource(ctx context.Context, w http.ResponseWriter,
 		dispatcher.Reject(ctx, w, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, "provider mismatch")
 		return nil, nil, false
 	}
+	// Early exit for disabled sources: accept the webhook (200 OK) without
+	// reading the body or processing, to avoid wasting resources on paused
+	// integrations. The provider sees success and does not retry.
+	if !source.Enabled {
+		logext.Infof(ctx, "[%s] source disabled,tenant_id:%s,source_id:%s", where, tenantID, sourceID.String())
+		w.WriteHeader(http.StatusOK)
+		return nil, nil, false
+	}
 
 	credential, err := h.service.DecryptCredential(ptrext.Indirect(source))
 	if err != nil {

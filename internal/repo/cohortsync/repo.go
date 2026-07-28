@@ -569,6 +569,21 @@ func (r *Repo) HasRunningRun(ctx context.Context, tenantID string, cohortID uuid
 	return exists, nil
 }
 
+// HasRunningRunForSource checks if any cohort under a source has a running sync.
+func (r *Repo) HasRunningRunForSource(ctx context.Context, tenantID string, sourceID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM cohort_sync_runs sr
+			  JOIN cohorts c ON c.id = sr.cohort_id AND c.tenant_id = sr.tenant_id
+			 WHERE sr.tenant_id = $1 AND c.cohort_source_id = $2 AND sr.status = 'running'
+		)`, tenantID, sourceID).Scan(&exists) // ptrext:allow scan-out-param
+	if err != nil {
+		return false, fmt.Errorf("check running run for source: %w", err)
+	}
+	return exists, nil
+}
+
 // ---------- scanners ----------
 
 type scannable interface {

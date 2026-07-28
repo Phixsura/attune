@@ -61,6 +61,7 @@ type Repo interface {
 	FinishRun(ctx context.Context, id uuid.UUID, status string, added, removed, total int, errorMessage string) error
 	ListRuns(ctx context.Context, tenantID string, cohortID uuid.UUID, limit int) ([]repo.SyncRun, error)
 	HasRunningRun(ctx context.Context, tenantID string, cohortID uuid.UUID) (bool, error)
+	HasRunningRunForSource(ctx context.Context, tenantID string, sourceID uuid.UUID) (bool, error)
 	ApplyMembershipDelta(ctx context.Context, in repo.ApplyInput) (repo.ApplyResult, error)
 	RecordEvent(ctx context.Context, in repo.SyncEvent) (*repo.SyncEvent, error)
 	UpdateEventStatus(ctx context.Context, id uuid.UUID, status string, runID *uuid.UUID, failureReason string) error
@@ -197,11 +198,20 @@ func (s *Service) ListSources(ctx context.Context, tenantID string) ([]repo.Sour
 	return s.repo.ListSources(ctx, tenantID)
 }
 
-// DeleteSource deletes a cohort source.
+// DeleteSource deletes a cohort source. Returns ErrConflict if any cohort
+// under this source has a running sync run.
 func (s *Service) DeleteSource(ctx context.Context, tenantID string, id uuid.UUID, actor Actor, auditActor auditlogsvc.Actor) error {
 	before, err := s.repo.GetSource(ctx, tenantID, id)
 	if err != nil {
 		return err
+	}
+	// Check for running sync runs under any cohort belonging to this source.
+	running, err := s.repo.HasRunningRunForSource(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if running {
+		return fmt.Errorf("%w: cannot delete source while sync is running", repo.ErrConflict)
 	}
 	if err := s.repo.DeleteSource(ctx, tenantID, id); err != nil {
 		return err
@@ -516,6 +526,17 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 	}
 
 	adds, _ := splitDeltas(payload.Deltas)
+
+	// Safety check: if the snapshot contains zero members but the cohort
+	// already has members, this is likely a provider API error (rate limit,
+	// auth failure returning empty body, transient outage). Proceeding would
+	// mark ALL existing members as departed — a data-destructive operation.
+	if len(adds) == 0 && cohort.MemberCount > 0 {
+		errMsg := "empty snapshot rejected: provider returned 0 members but cohort has existing members"
+		_ = s.repo.UpdateSourceSyncStatus(ctx, tenantID, sourceID, errMsg)
+		recordSyncMetrics(source.Provider, trigger, "failed", 0, 0, 0)
+		return nil, fmt.Errorf("%w: %s", ErrValidation, errMsg)
+	}
 
 	// Full-snapshot uses InsertExclusiveRun inside ApplyMembershipDelta
 	// (the partial unique index enforces at most one running run).

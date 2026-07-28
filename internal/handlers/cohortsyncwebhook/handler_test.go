@@ -91,7 +91,7 @@ func TestAmplitude_SourceNotFound_Returns404(t *testing.T) {
 func TestAmplitude_BadAuth_Returns401(t *testing.T) {
 	sourceID := uuid.New()
 	s := &stubService{
-		source:     &repo.Source{ID: sourceID, TenantID: "t1", Provider: "amplitude"},
+		source:     &repo.Source{ID: sourceID, TenantID: "t1", Provider: "amplitude", Enabled: true},
 		credential: []byte("correct-key"),
 	}
 	r := setupRouter(s)
@@ -121,7 +121,7 @@ func TestAmplitude_InvalidSourceID_Returns400(t *testing.T) {
 func TestMixpanel_ProviderMismatch_Returns400(t *testing.T) {
 	sourceID := uuid.New()
 	s := &stubService{
-		source:     &repo.Source{ID: sourceID, TenantID: "t1", Provider: "amplitude"}, // wrong provider
+		source:     &repo.Source{ID: sourceID, TenantID: "t1", Provider: "amplitude", Enabled: true}, // wrong provider
 		credential: []byte("key"),
 	}
 	r := setupRouter(s)
