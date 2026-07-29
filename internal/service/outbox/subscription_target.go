@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -56,15 +57,21 @@ func (w *OutboxWorker) processSubscriptionRow(ctx context.Context, row outboxrep
 	if err := w.sendToSubscription(ctx, row, sub); err != nil {
 		de := notify.AsDeliveryError(err)
 		if de.HTTPStatus == http.StatusGone {
+			metrics.NotifyFailuresTotal.
+				WithLabelValues(DestSubscriptionWebhook, "terminal").Inc()
 			w.disableGoneSubscription(ctx, row, sub)
 			return
 		}
 		if errors.Is(err, notify.ErrTerminal) {
+			metrics.NotifyFailuresTotal.
+				WithLabelValues(DestSubscriptionWebhook, "terminal").Inc()
 			logext.Warnf(ctx, "[%s] terminal failure,id:%d,kind:%s,status:%d,err:%s",
 				where, row.ID, de.Kind, de.HTTPStatus, err.Error())
 			w.markDeadSubscription(ctx, row, err.Error(), de.Kind, de.HTTPStatus)
 			return
 		}
+		metrics.NotifyFailuresTotal.
+			WithLabelValues(DestSubscriptionWebhook, "retryable").Inc()
 		logext.Warnf(ctx, "[%s] retryable failure,id:%d,attempts:%d,kind:%s,status:%d,err:%s",
 			where, row.ID, row.Attempts, de.Kind, de.HTTPStatus, err.Error())
 		w.failOrDead(ctx, row, err.Error(), de.Kind, de.HTTPStatus)
