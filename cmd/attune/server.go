@@ -264,6 +264,7 @@ func startRuntimeWorkers(
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as MarkDone
 	// (at-least-once); a background worker drains them.
 	runtimeDeps.enricher.SetOutbox(runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo)
+	runtimeDeps.enricher.SetSubscriptions(runtimeDeps.webhookSubRepo)
 	outboxWorker := outbox.NewOutboxWorker(
 		runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo,
 		notify.NewTransport(nil, notify.DefaultRetry()),

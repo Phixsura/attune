@@ -62,6 +62,7 @@ type Enricher struct {
 	model         string                         // resolved from config; "" → enricher rejects with 400-like error
 	outbox        *outboxrepo.OutboxRepo         // optional outbox writer
 	targets       *notifytarget.NotifyTargetRepo // optional, paired with outbox
+	subs          subscriptionLister             // optional automation-subscription fan-out (#234)
 	embeddingTask *embeddingrepo.TaskRepo        // optional embedding task outbox
 	draftTask     *replydraftrepo.DraftTaskRepo  // optional reply-draft task outbox
 	sources       domain.SourceSet               // injected union; resolves the envelope's source_display label
