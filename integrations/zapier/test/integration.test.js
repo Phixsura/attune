@@ -78,7 +78,7 @@ test('perform reshapes the live envelope with a dedup id', async () => {
     cleanedRequest: samples.feedbackUrgent,
   })
   assert.equal(results.length, 1)
-  assert.equal(results[0].id, '12345-feedback.urgent')
+  assert.equal(results[0].id, '12345-feedback.urgent-2026-07-01T08:09:15Z')
   assert.equal(results[0].event_type, 'feedback.urgent')
   assert.equal(results[0].feedback.enriched.is_urgent, true)
 })

@@ -30,12 +30,15 @@ const unsubscribeHook = (z, bundle) =>
     .then((response) => response.data)
 
 // Zapier dedups on `id`. The delivery id header is not part of the body, so
-// the item id is derived from the entity id + event type — stable across
-// at-least-once redeliveries of the same event, distinct across event types.
+// the item id is derived from entity id + event type + envelope timestamp —
+// stable across at-least-once redeliveries of the SAME occurrence (payload
+// is frozen at enqueue, so the timestamp never changes on retry), while two
+// DISTINCT occurrences of the same event on the same entity (e.g. a request
+// bouncing open->planned->open->planned) get distinct ids.
 const itemFromEnvelope = (envelope) => {
   const entity = envelope.feedback || envelope.request || {}
   return {
-    id: `${entity.id}-${envelope.event_type}`,
+    id: `${entity.id}-${envelope.event_type}-${envelope.timestamp || ''}`,
     ...envelope,
   }
 }

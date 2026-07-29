@@ -93,10 +93,17 @@ func (h *Handler) AddNoteAutomation(
 	const where = "console.CustomerRequestHandler.AddNoteAutomation"
 	switch req.GetVisibility() {
 	case "", NoteVisibilityInternal:
-		return h.AddNote(ctx, ptrext.Of(attunev1.AddCustomerRequestNoteRequest{
+		res, err := h.AddNote(ctx, ptrext.Of(attunev1.AddCustomerRequestNoteRequest{
 			Id:   req.GetId(),
 			Body: req.GetBody(),
 		}))
+		if err != nil {
+			return res, err
+		}
+		// The automation surface documents POST /v1/requests/{id}/notes as
+		// 201 (see customer_request.proto); the console AddNote returns 200.
+		res.Status = http.StatusCreated
+		return res, nil
 	case NoteVisibilityPublic:
 		if h.publicCommenter == nil {
 			return dispatcher.Fail[*attunev1.CustomerRequestDetail](

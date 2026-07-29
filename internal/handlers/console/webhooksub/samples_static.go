@@ -15,8 +15,8 @@ func staticSample(eventType string) []byte {
 		return []byte(`{
   "version": "2",
   "event_type": "request.created",
-  "delivered_at": "2026-07-01T10:00:00Z",
-  "trace_id": "sample-trace-id",
+  "timestamp": "2026-07-01T10:00:00Z",
+  "tenant_id": "sample-tenant",
   "request": {
     "id": "11111111-2222-3333-4444-555555555555",
     "display_id": "REQ-42",
@@ -32,8 +32,8 @@ func staticSample(eventType string) []byte {
 		return []byte(`{
   "version": "2",
   "event_type": "request.status_changed",
-  "delivered_at": "2026-07-02T09:30:00Z",
-  "trace_id": "sample-trace-id",
+  "timestamp": "2026-07-02T09:30:00Z",
+  "tenant_id": "sample-tenant",
   "request": {
     "id": "11111111-2222-3333-4444-555555555555",
     "display_id": "REQ-42",
@@ -59,8 +59,8 @@ func feedbackSample(eventType string) []byte {
 	return []byte(`{
   "version": "2",
   "event_type": "` + eventType + `",
-  "delivered_at": "2026-07-01T08:09:15Z",
-  "trace_id": "sample-trace-id",
+  "timestamp": "2026-07-01T08:09:15Z",
+  "tenant_id": "sample-tenant",
   "feedback": {
     "id": 12345,
     "tenant_id": "sample-tenant",

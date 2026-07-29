@@ -1121,6 +1121,10 @@ func (s *Service) promoteInTransaction(ctx context.Context, in PromoteInput) (*D
 		"Promoted feedback to customer request", after); err != nil {
 		return nil, err
 	}
+	if err := s.emitRequestEventTx(ctx, tx, ptrext.Indirect(created),
+		domain.EventRequestCreated, ""); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}

@@ -170,3 +170,29 @@ func TestAutomationSink_UnsetSinkNoPanic(t *testing.T) {
 		t.Fatalf("Create without sink: %v", err)
 	}
 }
+
+func TestAutomationSink_PromoteEmitsRequestCreated(t *testing.T) {
+	created := ptrext.Of(repo.Summary{
+		ID: uuid.MustParse("dddddddd-0000-0000-0000-000000000008"), TenantID: "t1",
+		DisplayID: "REQ-8", Title: "Promoted", Status: repo.StatusOpen,
+	})
+	fx := newSinkFixture(t, created, nil, nil)
+
+	_, err := fx.svc.PromoteFeedback(context.Background(), PromoteInput{
+		TenantID: "t1", Title: "Promoted", FeedbackIDs: []int64{41},
+		IdempotencyKey: "sink-promote-1", Actor: auditlogsvc.Actor{ID: "a1"},
+	})
+	if err != nil {
+		t.Fatalf("PromoteFeedback: %v", err)
+	}
+	if len(fx.outbox.rows) != 1 {
+		t.Fatalf("promote must emit request.created, got %d rows", len(fx.outbox.rows))
+	}
+	var env map[string]any
+	if err := json.Unmarshal(fx.outbox.rows[0].Payload, &env); err != nil {
+		t.Fatalf("payload: %v", err)
+	}
+	if env["event_type"] != domain.EventRequestCreated {
+		t.Errorf("event_type: %v", env["event_type"])
+	}
+}

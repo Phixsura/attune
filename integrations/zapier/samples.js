@@ -1,15 +1,16 @@
 'use strict'
 
 // Static sample data (Zapier publishing check D012). MUST stay
-// schema-identical to the live webhook envelopes — these mirror the server's
+// schema-identical to the live WIRE envelopes (outbound.Envelope as the
+// raw-webhook adapter serializes it) — these mirror the server's
 // samples_static.go fixtures, plus the flat `id` the trigger perform adds.
 
 const feedbackSample = (eventType, urgent) => ({
-  id: `12345-${eventType}`,
+  id: `12345-${eventType}-2026-07-01T08:09:15Z`,
   version: '2',
   event_type: eventType,
-  delivered_at: '2026-07-01T08:09:15Z',
-  trace_id: 'sample-trace-id',
+  timestamp: '2026-07-01T08:09:15Z',
+  tenant_id: 'sample-tenant',
   feedback: {
     id: 12345,
     tenant_id: 'sample-tenant',
@@ -30,11 +31,11 @@ const feedbackSample = (eventType, urgent) => ({
 })
 
 const requestSample = (eventType, extra) => ({
-  id: `11111111-2222-3333-4444-555555555555-${eventType}`,
+  id: `11111111-2222-3333-4444-555555555555-${eventType}-2026-07-02T09:30:00Z`,
   version: '2',
   event_type: eventType,
-  delivered_at: '2026-07-02T09:30:00Z',
-  trace_id: 'sample-trace-id',
+  timestamp: '2026-07-02T09:30:00Z',
+  tenant_id: 'sample-tenant',
   request: {
     id: '11111111-2222-3333-4444-555555555555',
     display_id: 'REQ-42',

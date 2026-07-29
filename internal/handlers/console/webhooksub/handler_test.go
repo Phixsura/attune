@@ -268,3 +268,41 @@ func TestSamples_StaticFallbackSchemaMatchesEnvelope(t *testing.T) {
 		}
 	}
 }
+
+func TestSamples_StoredPayloadConvertedToWireShape(t *testing.T) {
+	// Stored payloads use delivered_at/trace_id + nested tenant; the wire
+	// (and therefore samples — Zapier T004) uses timestamp + top-level
+	// tenant_id. The handler must run stored payloads through the same
+	// mapping the delivery adapter uses.
+	stored := []byte(`{"version":"2","event_type":"feedback.created",` +
+		`"delivered_at":"2026-07-29T00:00:00Z","trace_id":"tr-1",` +
+		`"feedback":{"id":7,"tenant_id":"t1","content":"c","source":"api",` +
+		`"user_id":"u","submitted_at":"2026-07-29T00:00:00Z",` +
+		`"enriched":{"title":"t","attrs":{},"is_urgent":false,"rationale":"r",` +
+		`"enriched_at":"2026-07-29T00:00:00Z"}}}`)
+	h := NewHandler(newFakeSubRepo(), fixedSampleSource{payloads: [][]byte{stored}})
+
+	res, err := h.Samples(reqCtx("t1"), ptrext.Of(attunev1.ListWebhookSamplesRequest{EventType: "feedback.created"}))
+	if err != nil {
+		t.Fatalf("Samples: %v", err)
+	}
+	fields := res.Body.Samples[0].GetFields()
+	if fields["timestamp"].GetStringValue() != "2026-07-29T00:00:00Z" {
+		t.Errorf("wire shape must carry timestamp, got %v", fields["timestamp"])
+	}
+	if fields["tenant_id"].GetStringValue() != "t1" {
+		t.Errorf("wire shape must carry top-level tenant_id, got %v", fields["tenant_id"])
+	}
+	if _, has := fields["delivered_at"]; has {
+		t.Error("stored-only key delivered_at must not leak into samples")
+	}
+	if _, has := fields["trace_id"]; has {
+		t.Error("stored-only key trace_id must not leak into samples")
+	}
+}
+
+type fixedSampleSource struct{ payloads [][]byte }
+
+func (f fixedSampleSource) RecentEnvelopes(_ context.Context, _, _ string, _ int) ([][]byte, error) {
+	return f.payloads, nil
+}

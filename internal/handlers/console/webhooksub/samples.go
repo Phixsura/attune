@@ -9,6 +9,7 @@ import (
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
+	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
@@ -52,9 +53,24 @@ func (h *Handler) Samples(
 
 	out := make([]*structpb.Struct, 0, len(envelopes))
 	for _, raw := range envelopes {
-		var m map[string]any
-		if err := json.Unmarshal(raw, &m); err != nil {
+		// Convert the STORED payload into the WIRE shape through the same
+		// mapping the delivery adapter uses (outbound.FromStoredPayload) —
+		// Zapier's T004 check requires performList items to be
+		// schema-identical to live webhook payloads, so this conversion
+		// must never be skipped or reimplemented here.
+		env, err := outbound.FromStoredPayload(raw, ctx.Auth.TenantID)
+		if err != nil {
 			logext.Warnf(ctx, "[%s] skip malformed envelope,err:%s", where, err.Error())
+			continue
+		}
+		wire, err := json.Marshal(env)
+		if err != nil {
+			logext.Warnf(ctx, "[%s] skip unmarshalable envelope,err:%s", where, err.Error())
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(wire, &m); err != nil {
+			logext.Warnf(ctx, "[%s] skip malformed wire envelope,err:%s", where, err.Error())
 			continue
 		}
 		st, err := structpb.NewStruct(m)
