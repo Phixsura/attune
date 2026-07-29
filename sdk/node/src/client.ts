@@ -8,6 +8,13 @@ import type {
 } from './proto/attune/v1/audit'
 import type { ErrorResponse } from './proto/attune/v1/common'
 import type {
+  AddRequestNoteAutomationRequest,
+  CreateRequestAutomationRequest,
+  CustomerRequestDetail,
+  ListCustomerRequestsResponse,
+  UpdateRequestAutomationRequest,
+} from './proto/attune/v1/customer_request'
+import type {
   CancelGdprRequestResponse,
   DeleteGdprSubjectRequest,
   DeleteGdprSubjectResponse,
@@ -47,6 +54,12 @@ import type {
   Tag,
   UpdateTagRequest,
 } from './proto/attune/v1/tag'
+import type {
+  CreateWebhookSubscriptionRequest,
+  ListWebhookSamplesResponse,
+  ListWebhookSubscriptionsResponse,
+  WebhookSubscription,
+} from './proto/attune/v1/webhook_subscription'
 import type {
   ArchiveStateResponse,
   CreateStateRequest,
@@ -1497,6 +1510,165 @@ export class Client {
       `/v1/mcp/clients/${encodeURIComponent(validatedClientId)}/sessions/${encodeURIComponent(validatedSessionId)}`,
       undefined,
       '',
+      validatedOpts?.signal,
+    )
+  }
+
+  // ── Webhook subscriptions + request automation (#234) ─────────────────────
+  // Hooks need the hooks:manage scope; requests need requests:read / write
+  // (both explicit — legacy unscoped keys are denied).
+
+  /** Register a webhook subscription (REST-hook subscribe). The secret is write-only. */
+  createWebhookSubscription(
+    req: CreateWebhookSubscriptionRequest,
+    opts?: RequestOptions,
+  ): Promise<WebhookSubscription> {
+    const validated = validateObjectRequest(req, 'webhook subscription request must be an object')
+    if (validated instanceof AttuneError) return Promise.reject(validated)
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<WebhookSubscription>(
+      'POST',
+      '/v1/hooks',
+      validated,
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
+      validatedOpts?.signal,
+    )
+  }
+
+  /** List the tenant's webhook subscriptions. */
+  listWebhookSubscriptions(opts?: {
+    signal?: AbortSignal
+  }): Promise<ListWebhookSubscriptionsResponse> {
+    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<ListWebhookSubscriptionsResponse>(
+      'GET',
+      '/v1/hooks',
+      undefined,
+      '',
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Delete a webhook subscription by id (REST-hook unsubscribe). */
+  deleteWebhookSubscription(id: string, opts?: { signal?: AbortSignal }): Promise<void> {
+    const validatedId = validatePathSegment(id, 'subscription id is invalid')
+    if (validatedId instanceof AttuneError) return Promise.reject(validatedId)
+    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<void>(
+      'DELETE',
+      `/v1/hooks/${encodeURIComponent(validatedId)}`,
+      undefined,
+      '',
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Recent (or static fallback) event envelopes for one event type — the Zapier performList contract. */
+  listWebhookSamples(
+    eventType: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ListWebhookSamplesResponse> {
+    const validatedType = validatePathSegment(eventType, 'event type is invalid')
+    if (validatedType instanceof AttuneError) return Promise.reject(validatedType)
+    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<ListWebhookSamplesResponse>(
+      'GET',
+      `/v1/hooks/samples/${encodeURIComponent(validatedType)}`,
+      undefined,
+      '',
+      validatedOpts?.signal,
+    )
+  }
+
+  /** List customer requests (newest first; server-side filtering). */
+  listRequests(opts?: {
+    q?: string
+    limit?: number
+    cursor?: string
+    signal?: AbortSignal
+  }): Promise<ListCustomerRequestsResponse> {
+    const validated = validateOptionalOptionsObject(opts, 'request list options must be an object')
+    if (validated instanceof AttuneError) return Promise.reject(validated)
+    const signal = validateOptionalAbortSignal(validated?.signal, 'signal must be an AbortSignal')
+    if (signal instanceof AttuneError) return Promise.reject(signal)
+    const query = new URLSearchParams()
+    if (typeof validated?.q === 'string' && validated.q !== '') query.set('q', validated.q)
+    if (typeof validated?.limit === 'number' && validated.limit > 0)
+      query.set('limit', String(Math.floor(validated.limit)))
+    if (typeof validated?.cursor === 'string' && validated.cursor !== '')
+      query.set('cursor', validated.cursor)
+    const qs = query.toString()
+    return this.#request<ListCustomerRequestsResponse>(
+      'GET',
+      `/v1/requests${qs ? `?${qs}` : ''}`,
+      undefined,
+      '',
+      signal,
+    )
+  }
+
+  /** Create a customer request. `idempotencyKey` (8-64 chars, [A-Za-z0-9_-]) is required by the server. */
+  createRequest(
+    req: CreateRequestAutomationRequest,
+    opts?: RequestOptions,
+  ): Promise<CustomerRequestDetail> {
+    const validated = validateObjectRequest(req, 'create request must be an object')
+    if (validated instanceof AttuneError) return Promise.reject(validated)
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<CustomerRequestDetail>(
+      'POST',
+      '/v1/requests',
+      validated,
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Update a customer request by id, including status transitions. */
+  updateRequest(
+    req: UpdateRequestAutomationRequest,
+    opts?: { signal?: AbortSignal },
+  ): Promise<CustomerRequestDetail> {
+    const validated = validateObjectRequestWithPathId(
+      req,
+      'update request must be an object',
+      'request id is invalid',
+    )
+    if (validated instanceof AttuneError) return Promise.reject(validated)
+    const validatedOpts = validateSignalOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<CustomerRequestDetail>(
+      'PATCH',
+      `/v1/requests/${encodeURIComponent(validated.id)}`,
+      validated.req,
+      '',
+      validatedOpts?.signal,
+    )
+  }
+
+  /** Add a note to a customer request. visibility "internal" (default) or "public" (moderated portal comment). */
+  addRequestNote(
+    req: AddRequestNoteAutomationRequest,
+    opts?: RequestOptions,
+  ): Promise<CustomerRequestDetail> {
+    const validated = validateObjectRequestWithPathId(
+      req,
+      'note request must be an object',
+      'request id is invalid',
+    )
+    if (validated instanceof AttuneError) return Promise.reject(validated)
+    const validatedOpts = validateRequestOptions(opts, 'request options must be an object')
+    if (validatedOpts instanceof AttuneError) return Promise.reject(validatedOpts)
+    return this.#request<CustomerRequestDetail>(
+      'POST',
+      `/v1/requests/${encodeURIComponent(validated.id)}/notes`,
+      validated.req,
+      resolveIdempotencyKey(validatedOpts?.idempotencyKey),
       validatedOpts?.signal,
     )
   }

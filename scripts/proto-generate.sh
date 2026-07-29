@@ -13,6 +13,8 @@ sdk_go_paths=(
   --path proto/attune/v1/mcp_client.proto
   --path proto/attune/v1/tag.proto
   --path proto/attune/v1/workflow.proto
+  --path proto/attune/v1/webhook_subscription.proto
+  --path proto/attune/v1/customer_request.proto
   --path proto/attune/v1/common.proto
 )
 
