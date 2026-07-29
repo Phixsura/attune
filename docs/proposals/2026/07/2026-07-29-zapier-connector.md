@@ -179,8 +179,8 @@ shared-secret norm. Two DEFERs tracked as follow-ups:
 ## Risks / tradeoffs
 
 - **Event fan-out volume**: each enriched feedback row now also fans out over
-  subscriptions. Bounded by per-tenant subscription counts (soft cap 25,
-  config-guarded) and the existing outbox backpressure.
+  subscriptions. Bounded by a per-tenant cap of 25 active subscriptions
+  (compile-time constant) and the existing outbox backpressure.
 - **Envelope schema is a public contract**: performList and live payloads must
   stay schema-identical (Zapier T004-T006). A golden test pins the envelope;
   changes are additive-only.

@@ -33,6 +33,6 @@ module.exports = {
           },
         })
         .then((response) => response.data),
-    sample: { id: 12345, status: 'accepted' },
+    sample: { id: '12345', enrichmentStatus: 'pending' },
   },
 }

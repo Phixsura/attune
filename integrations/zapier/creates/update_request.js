@@ -42,7 +42,7 @@ module.exports = {
     sample: {
       request: {
         id: '11111111-2222-3333-4444-555555555555',
-        display_id: 'REQ-42',
+        displayId: 'REQ-42',
         title: 'Add dark mode',
         status: 'CUSTOMER_REQUEST_STATUS_IN_PROGRESS',
       },

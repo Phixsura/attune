@@ -203,14 +203,16 @@ func (r *Repo) Disable(ctx context.Context, id uuid.UUID, reason string) error {
 	return nil
 }
 
-// CountByTenant returns the total subscription count (any status) for the
-// create-time soft cap.
+// CountByTenant returns the ACTIVE subscription count for the create-time
+// soft cap. Disabled rows (e.g. auto-disabled on 410 after a Zap was
+// deleted) don't count — otherwise gone-hooks would accumulate and brick
+// the tenant at the cap with no consumer-visible way to recover.
 func (r *Repo) CountByTenant(ctx context.Context, tenantID string) (int, error) {
 	const where = "repo.webhooksub.CountByTenant"
 	var n int
 	err := r.pool.QueryRow(
 		ctx,
-		`SELECT COUNT(*) FROM webhook_subscriptions WHERE tenant_id = $1`,
+		`SELECT COUNT(*) FROM webhook_subscriptions WHERE tenant_id = $1 AND status = 'active'`,
 		tenantID,
 	).Scan(&n)
 	if err != nil {

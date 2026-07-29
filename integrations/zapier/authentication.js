@@ -35,8 +35,10 @@ const authentication = {
   ],
   test,
   connectionLabel: (z, bundle) => {
+    // bundle.inputData carries the auth-test response. The API serializes
+    // protojson camelCase (tenantDisplayName), not proto field names.
     const data = bundle.inputData || {}
-    const workspace = data.tenant_display_name || ''
+    const workspace = data.tenantDisplayName || ''
     const label = data.label || ''
     return [workspace, label].filter(Boolean).join(' — ') || 'attune'
   },

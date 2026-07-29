@@ -26,6 +26,6 @@ module.exports = {
           body: { tag_name: bundle.inputData.tag_name },
         })
         .then((response) => response.data),
-    sample: { tag: { id: 'aaaaaaaa-1111-2222-3333-444444444444', name: 'bug' } },
+    sample: { tag: { id: 'aaaaaaaa-1111-2222-3333-444444444444', name: 'bug', color: '#ef4444' } },
   },
 }

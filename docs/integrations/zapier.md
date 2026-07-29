@@ -36,7 +36,8 @@ and the event type; turning it off calls `DELETE /v1/hooks/{id}`. Deliveries
 are HMAC-SHA256 signed (`X-Attune-Signature`, content-hash scheme) and carry
 `X-Attune-Delivery-Id` for at-least-once dedup. If the hook URL answers HTTP
 410, attune disables the subscription and stops sending. Subscriptions are
-capped at 25 per workspace.
+capped at 25 **active** subscriptions per workspace (auto-disabled hooks
+do not count; `DELETE /v1/hooks/{id}` cleans them up).
 
 The same events are available to any consumer — `POST /v1/hooks` with
 `consumer: "generic"` is the vendor-neutral subscription API;

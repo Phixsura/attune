@@ -36,9 +36,13 @@ func BuildRequestEnvelope(s repo.Summary, eventType, previousStatus, traceID str
 		Request     requestOut `json:"request"`
 	}
 	env := envelopeOut{
-		Version:     "2",
-		EventType:   eventType,
-		DeliveredAt: s.UpdatedAt.UTC().Format(time.RFC3339),
+		Version:   "2",
+		EventType: eventType,
+		// Nano precision: consumers (Zapier) derive their dedup id from
+		// entity id + event type + this timestamp — two status changes in
+		// the same second must not collide. RFC3339Nano is a strict
+		// superset of RFC3339 for parsers.
+		DeliveredAt: s.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		TraceID:     traceID,
 		Request: requestOut{
 			ID:             s.ID.String(),
