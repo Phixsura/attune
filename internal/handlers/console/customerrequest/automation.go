@@ -17,7 +17,6 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
-	svc "github.com/Phixsura/attune/internal/service/customerrequest"
 )
 
 // Note visibility values for AddRequestNoteAutomation.
@@ -132,5 +131,3 @@ func (h *Handler) AddNoteAutomation(
 		)
 	}
 }
-
-var _ = svc.NoteInput{} // keep the svc import anchored to the delegating methods
