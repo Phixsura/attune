@@ -12,6 +12,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
 
 type fakePublicCommenter struct {
@@ -95,5 +96,31 @@ func TestAddNoteAutomation_PublicBadID400(t *testing.T) {
 	}
 	if len(pc.calls) != 0 {
 		t.Fatal("commenter must not be called on bad id")
+	}
+}
+
+func TestAddNoteAutomation_PublicPolicyDisabled409(t *testing.T) {
+	pc := ptrext.Of(fakePublicCommenter{err: publicvisibilitysvc.ErrDisabled})
+	h := NewHandler(nil)
+	h.SetPublicCommenter(pc)
+	_, err := h.AddNoteAutomation(automationCtx(), ptrext.Of(attunev1.AddRequestNoteAutomationRequest{
+		Id: uuid.NewString(), Body: "x", Visibility: NoteVisibilityPublic,
+	}))
+	var de *dispatcher.Error
+	if !errors.As(err, &de) || de.Status != http.StatusConflict {
+		t.Fatalf("policy-disabled public note: want 409, got %v", err)
+	}
+}
+
+func TestAddNoteAutomation_PublicValidation400(t *testing.T) {
+	pc := ptrext.Of(fakePublicCommenter{err: publicvisibilitysvc.ErrValidation})
+	h := NewHandler(nil)
+	h.SetPublicCommenter(pc)
+	_, err := h.AddNoteAutomation(automationCtx(), ptrext.Of(attunev1.AddRequestNoteAutomationRequest{
+		Id: uuid.NewString(), Body: "", Visibility: NoteVisibilityPublic,
+	}))
+	var de *dispatcher.Error
+	if !errors.As(err, &de) || de.Status != http.StatusBadRequest {
+		t.Fatalf("empty public note: want 400, got %v", err)
 	}
 }

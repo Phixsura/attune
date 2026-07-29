@@ -8,6 +8,7 @@ package customerrequest
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -17,6 +18,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
+	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 )
 
 // Note visibility values for AddRequestNoteAutomation.
@@ -112,7 +114,7 @@ func (h *Handler) AddNoteAutomation(
 			ctx, ctx.Auth.TenantID, id, req.GetBody(), ctx.Auth.UserID,
 		); err != nil {
 			logext.Warnf(ctx, "[%s] public comment failed,request_id:%s,err:%+v", where, id, err.Error())
-			return h.detailError(ctx, err)
+			return h.publicNoteError(ctx, err)
 		}
 		if h.service == nil {
 			return dispatcher.Fail[*attunev1.CustomerRequestDetail](
@@ -129,5 +131,29 @@ func (h *Handler) AddNoteAutomation(
 			http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST,
 			"visibility must be internal or public",
 		)
+	}
+}
+
+// publicNoteError maps the publicvisibility sentinels onto the automation
+// error contract — specific, actionable 4xx (never a blanket 500).
+func (h *Handler) publicNoteError(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	err error,
+) (dispatcher.Result[*attunev1.CustomerRequestDetail], error) {
+	switch {
+	case errors.Is(err, publicvisibilitysvc.ErrDisabled):
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](
+			http.StatusConflict, attunev1.ErrorCode_FEATURE_DISABLED,
+			"public comments are disabled for this workspace; enable them under Public visibility, or use visibility=internal")
+	case errors.Is(err, publicvisibilitysvc.ErrValidation):
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION,
+			"note body must be 1-5000 characters")
+	case errors.Is(err, publicvisibilitysvc.ErrNotFound):
+		return dispatcher.Fail[*attunev1.CustomerRequestDetail](
+			http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND,
+			"customer request not found")
+	default:
+		return h.detailError(ctx, err)
 	}
 }
