@@ -47,8 +47,9 @@ type service interface {
 }
 
 type Handler struct {
-	service service
-	views   savedViewService
+	service         service
+	views           savedViewService
+	publicCommenter PublicCommenter // automation public notes (#234); nil = 501
 }
 
 func NewHandler(service service) *Handler {
