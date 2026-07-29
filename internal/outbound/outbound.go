@@ -16,7 +16,10 @@ package outbound
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // EventChannel — adapters that deliver per-event notifications implement this.
@@ -60,12 +63,45 @@ type Envelope struct {
 	Timestamp string         `json:"timestamp"`
 	EventType string         `json:"event_type"`
 	TenantID  string         `json:"tenant_id"`
-	Feedback  map[string]any `json:"feedback"`
+	Feedback  map[string]any `json:"feedback,omitempty"`
+	// Request carries customer-request automation events (#234) —
+	// request.created / request.status_changed. Exactly one of Feedback /
+	// Request is set; omitempty keeps each event type's wire shape clean.
+	Request map[string]any `json:"request,omitempty"`
 
 	// DeliveryID identifies one outbox row. It is stable across the at-least-once
 	// retries of that row, so a webhook consumer can dedup replays on it. Set at
 	// send time (the row id isn't known at enqueue), not persisted in the payload.
 	DeliveryID string `json:"-"`
+}
+
+// FromStoredPayload converts a stored outbox payload into the Envelope the
+// adapters deliver. The stored format uses "delivered_at" and nests
+// tenant_id inside the entity; the wire Envelope uses "timestamp" and a
+// top-level tenant_id — this is the single place that owns the mapping, so
+// the samples (performList) endpoint and the worker send path can never
+// drift apart.
+func FromStoredPayload(payload []byte, tenantID string) (*Envelope, error) {
+	var env Envelope
+	if err := json.Unmarshal(payload, &env); err != nil { // ptrext:allow unmarshal-out-param
+		return nil, err
+	}
+	if env.Timestamp == "" {
+		var raw struct {
+			DeliveredAt string `json:"delivered_at"`
+		}
+		_ = json.Unmarshal(payload, &raw) // ptrext:allow unmarshal-out-param
+		env.Timestamp = raw.DeliveredAt
+	}
+	if env.TenantID == "" {
+		if tid, ok := env.Feedback["tenant_id"].(string); ok {
+			env.TenantID = tid
+		}
+	}
+	if env.TenantID == "" {
+		env.TenantID = tenantID
+	}
+	return ptrext.Of(env), nil
 }
 
 // NotificationEnvelope is the public-safe request notification payload passed

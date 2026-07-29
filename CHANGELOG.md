@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Zapier connector + unified webhook subscription API (#234):
+  - **Subscription layer**: new `webhook_subscriptions` table and
+    `POST/GET/DELETE /v1/hooks` (scope `hooks:manage`, explicit) implementing
+    the Zapier REST-hook contract — one subscription per Zap, append-only
+    event vocabulary (`feedback.created`, `feedback.urgent`,
+    `request.created`, `request.status_changed`), per-subscription HMAC
+    secrets, HTTP 410 auto-disable, 25-per-tenant cap, and
+    `GET /v1/hooks/samples/{event_type}` returning envelopes
+    schema-identical to live deliveries (performList).
+  - **Events**: `request.created` / `request.status_changed` enqueue in the
+    same transaction as the write; feedback events fan out from the
+    enricher alongside the legacy notify targets; delivery reuses the
+    notify outbox worker (at-least-once, backoff, dead queue).
+  - **Automation API**: customer requests over API keys — `GET/POST
+    /v1/requests`, `PATCH /v1/requests/{id}` (status), `POST
+    /v1/requests/{id}/notes` (internal note or moderated public portal
+    comment) with new `requests:read` / `requests:write` scopes; tag
+    assignment `POST /v1/feedback/{id}/tags` (`tags:write`);
+    `tenant_display_name` on `GET /v1/auth/verify` for connection labels.
+  - **SDKs**: Go + Node methods for hooks and request automation.
+  - **Zapier app**: in-repo Zapier Platform CLI project
+    (`integrations/zapier/`) with 4 instant triggers, 4 actions, and
+    integration tests runnable against mocks or a live local API.
+
 - Amplitude and Mixpanel cohort sync (#233):
   - **Backend**: 15 proto RPCs, Tink-encrypted dual credentials (webhook +
     pull), per-provider webhook receivers with auth-before-body-read, SHA-256

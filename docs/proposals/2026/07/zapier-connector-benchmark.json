@@ -1,0 +1,2960 @@
+[
+ {
+  "name": "Linear",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 15,
+  "instant_triggers": 15,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Issue (Instant)",
+   "Updated Issue (Instant)",
+   "New Issue Comment (Instant)",
+   "New Customer Need (Instant)",
+   "New Project Update (Instant)"
+  ],
+  "action_total": 14,
+  "action_examples": [
+   "Create Issue",
+   "Update Issue",
+   "Create Comment",
+   "Create Customer Need",
+   "Find Issue by ID (search)"
+  ],
+  "zapier_auth": "OAuth2 (user authorizes the Zapier app in Linear; Linear docs note issues created via Zapier are attributed to the 'Zapier' app, i.e. app-level OAuth actor)",
+  "webhook_sub_endpoint": "GraphQL mutation webhookCreate(input: { url, teamId, resourceTypes: [\"Issue\", ...] }) against api.linear.app/graphql; also configurable in Settings > API UI. Scope = one team or all public teams",
+  "event_vocab_examples": [
+   "Linear-Event: Issue",
+   "Linear-Event: Comment",
+   "resourceTypes: [\"Issue\",\"Comment\",\"IssueLabel\",\"Project\",\"Cycle\",\"Reaction\"]",
+   "payload action: \"create\"",
+   "payload action: \"update\""
+  ],
+  "event_filtering": "per-subscription resourceTypes array (PascalCase entity types) + team scope; action (create/update/remove) arrives as a payload field, not a subscription filter",
+  "signature_scheme": "Linear-Signature header: hex HMAC-SHA256 of raw request body with per-webhook signing secret; Linear-Timestamp header + webhookTimestamp body field (ms epoch) for replay protection",
+  "retry_disable_policy": "Fails on non-200, unreachable, or >5s response; retried max 3 times with backoff at 1 minute, 1 hour, 6 hours; persistently failing webhooks may be disabled by Linear and must be manually re-enabled",
+  "dedup_mechanism": "Linear-Delivery header: UUIDv4 unique per payload; webhookId field in body identifies the subscription",
+  "learnings": "Copy Linear's delivery contract wholesale: hex HMAC-SHA256 of raw body in one header, a per-delivery UUID header for dedup, and a timestamp for replay defense - it is the cleanest of the six. Entity-type-array filtering (resourceTypes) plus a create/update/remove action field keeps the subscription vocabulary small while staying expressive. Avoid its thin retry budget (3 attempts over ~7h) and silent auto-disable; attune should notify or expose disable state via API.",
+  "sources": [
+   "https://zapier.com/apps/linear/integrations",
+   "https://linear.app/developers/webhooks",
+   "https://linear.app/docs/zapier"
+  ]
+ },
+ {
+  "name": "Jira Software Cloud",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 4,
+  "instant_triggers": 0,
+  "polling_triggers": 4,
+  "trigger_examples": [
+   "New Issue (polling)",
+   "Updated Issue (polling)",
+   "Issue Status Changed (polling)",
+   "New Issue (Via JQL) (polling)"
+  ],
+  "action_total": 22,
+  "action_examples": [
+   "Create Issue",
+   "Update Issue",
+   "Add Comment to Issue",
+   "Move Issue to Sprint",
+   "Find Issues (Via JQL) (search)"
+  ],
+  "zapier_auth": "OAuth2 (Atlassian 3LO: log in, pick site, grant; directory page lists requested scopes read:jira-user read:jira-work read:attachment:jira read:sprint:jira-software etc.; some legacy operations additionally ask for a Jira API token field)",
+  "webhook_sub_endpoint": "POST /rest/api/3/webhook (OAuth2 apps; url + webhooks with events array + JQL filter, expires after 30 days, extend via PUT /rest/api/3/webhook) or POST /rest/webhooks/1.0/webhook (admin webhooks; {name, url, events:[...], filters:{\"issue-related-events-section\": \"<JQL>\"}, excludeBody, secret})",
+  "event_vocab_examples": [
+   "jira:issue_created",
+   "jira:issue_updated",
+   "jira:issue_deleted",
+   "issue_property_set",
+   "worklog_created"
+  ],
+  "event_filtering": "per-subscription events array (or all events) plus declarative JQL scoping to restrict which issues fire the webhook",
+  "signature_scheme": "Admin/REST webhooks: X-Hub-Signature header, format method=signature e.g. sha256=<hex HMAC> (WebSub-style, HMAC of body with the registration secret). OAuth2-app webhooks instead carry a JWT bearer token in Authorization signed with the app's client secret",
+  "retry_disable_policy": "Retries up to 5 times on 425/429/5xx or connection failure/timeout, each retry delayed 5-15 minutes with randomized backoff; REST-registered webhooks expire after 30 days unless refreshed; failed webhooks retrievable via 'Get failed webhooks' API; X-Atlassian-Webhook-Flow header marks Primary vs Secondary (bulk-operation) deliveries",
+  "dedup_mechanism": "X-Atlassian-Webhook-Identifier header: unique per webhook event within tenant and stable across retries (documented as the retry filter key); X-Atlassian-Webhook-Retry header carries current retry count",
+  "learnings": "Copy the X-Atlassian-Webhook-Identifier pattern: a delivery id that is explicitly stable across retries plus a retry-count header is the most precise dedup contract found in this batch. The namespaced snake_case vocabulary (jira:issue_created) also matches attune's likely style. Avoid the 30-day expiry-and-refresh treadmill - it is almost certainly why Zapier ships Jira with zero Instant triggers (all four visible triggers are polling despite Jira having webhooks) - and avoid split registration paths with different auth/signature semantics.",
+  "sources": [
+   "https://zapier.com/apps/jira-software-cloud/integrations",
+   "https://developer.atlassian.com/cloud/jira/platform/webhooks/",
+   "https://help.zapier.com/hc/en-us/articles/38815673973133-How-to-get-started-with-Jira-Software-Cloud-on-Zapier"
+  ]
+ },
+ {
+  "name": "Asana",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 15,
+  "instant_triggers": 9,
+  "polling_triggers": 6,
+  "trigger_examples": [
+   "New Task (Instant)",
+   "Updated Task (Instant)",
+   "Tag Added to Task (Instant)",
+   "Task Moved to Section (Instant)",
+   "Completed Task (polling)"
+  ],
+  "action_total": 25,
+  "action_examples": [
+   "Create Task",
+   "Update Task",
+   "Create Project",
+   "Add Tag to Task",
+   "Find Task by ID (search)"
+  ],
+  "zapier_auth": "OAuth2 (help doc: 'Log into Asana to authenticate. Grant Zapier permission to access your account')",
+  "webhook_sub_endpoint": "POST https://app.asana.com/api/1.0/webhooks with resource (gid), target (URL), and optional filters array; requires webhooks:write scope; creation completes only after an X-Hook-Secret handshake the target must echo with 200/204",
+  "event_vocab_examples": [
+   "{\"resource_type\":\"task\",\"resource_subtype\":\"milestone\",\"action\":\"changed\",\"fields\":[\"due_at\",\"due_on\",\"dependencies\"]}",
+   "action: added",
+   "action: removed",
+   "action: deleted",
+   "action: undeleted"
+  ],
+  "event_filtering": "per-subscription filters array of structured objects {resource_type, resource_subtype, action, fields} - down to field-level granularity; filters are mandatory for webhooks on team/portfolio/goal/workspace resources; events matching any filter are delivered (OR semantics)",
+  "signature_scheme": "X-Hook-Signature header: HMAC-SHA256 of request body using the per-webhook X-Hook-Secret shared during the creation handshake",
+  "retry_disable_policy": "Target must answer within 10 seconds; on failure Asana retries with exponential backoff for up to 24 hours, then the webhook is deleted; webhook object exposes delivery_retry_count, next_attempt_after, failure_deletion_timestamp, last_success_at; heartbeat events keep liveness observable",
+  "dedup_mechanism": "No delivery-id header documented; events are batched (multiple events per POST) and described by the events schema; consumers rely on event content plus last_success_at bookkeeping",
+  "learnings": "Copy the X-Hook-Secret handshake: it proves endpoint ownership at subscribe time and establishes a per-webhook secret in one flow - a good fit for attune's public subscription API. The structured filter object (resource_type + action + fields) is the most granular filtering model in this batch and worth studying if attune wants field-level event noise control. Avoid hard-deleting subscriptions after a 24h outage; prefer ClickUp-style suspend/reactivate so consumers do not silently lose their subscription.",
+  "sources": [
+   "https://zapier.com/apps/asana/integrations",
+   "https://developers.asana.com/docs/webhooks-guide",
+   "https://developers.asana.com/reference/createwebhook",
+   "https://help.zapier.com/hc/en-us/articles/8495914652045-How-to-get-started-with-Asana-on-Zapier"
+  ]
+ },
+ {
+  "name": "Trello",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 14,
+  "instant_triggers": 4,
+  "polling_triggers": 10,
+  "trigger_examples": [
+   "New Activity (Instant)",
+   "Card Moved to List (Instant)",
+   "Card Updated (Instant)",
+   "New Card (polling)",
+   "New Comment in Card (polling)"
+  ],
+  "action_total": 37,
+  "action_examples": [
+   "Create Card",
+   "Move Card to List",
+   "Add Label to Card",
+   "Create Comment",
+   "Find Card (search)"
+  ],
+  "zapier_auth": "OAuth-style token authorization (help doc: 'Log into Trello to authenticate. Grant Zapier permission... Click Yes, Continue to Trello' - Trello's API key + user token model behind an authorize screen)",
+  "webhook_sub_endpoint": "POST https://api.trello.com/1/tokens/{APIToken}/webhooks/?key={APIKey} with {callbackURL, idModel, description}; Trello sends an HTTP HEAD to callbackURL at creation and refuses the webhook unless it returns 200",
+  "event_vocab_examples": [
+   "createCard",
+   "updateCard",
+   "commentCard",
+   "addMemberToCard",
+   "moveCardToBoard"
+  ],
+  "event_filtering": "all-events-per-model: a webhook is bound to one model (board/card/list/member) via idModel and fires for ANY action touching that model; no event-type filter at subscription time - consumers filter on the action.type in the payload",
+  "signature_scheme": "X-Trello-Webhook header: base64 HMAC-SHA1 of (raw request body concatenated with the callbackURL) keyed with the application's secret",
+  "retry_disable_policy": "3 retries with 30s / 60s / 120s backoff, then stops; webhook is deleted when the callback returns HTTP 410 Gone, when the bound token is revoked/expires, or via the DELETE route; webhook object tracks consecutiveFailures and firstConsecutiveFailDate",
+  "dedup_mechanism": "None documented; X-Trello-Client-Identifier header echo exists for attributing which client caused the action, not for delivery dedup",
+  "learnings": "Mostly an anti-pattern list for attune: model-scoped all-events firehose without event-type filtering pushes all filtering cost to consumers (visible in Zapier - only 4 of 14 triggers could be made Instant), and HMAC-SHA1 keyed with an app-global secret over body+callbackURL is dated and awkward to verify. Do copy two ideas: HTTP 410 as a consumer-initiated unsubscribe signal, and the HEAD-check at creation as a cheap URL-validity gate (though Asana's echo handshake is stronger).",
+  "sources": [
+   "https://zapier.com/apps/trello/integrations",
+   "https://developer.atlassian.com/cloud/trello/guides/rest-api/webhooks/",
+   "https://developer.atlassian.com/cloud/trello/guides/rest-api/action-types/",
+   "https://help.zapier.com/hc/en-us/articles/8495921364237-How-to-get-started-with-Trello-on-Zapier"
+  ]
+ },
+ {
+  "name": "monday.com",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 10,
+  "instant_triggers": 8,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Item in Board (Instant)",
+   "Any Column Value Changed in Board (Instant)",
+   "Specific Column Value Changed in Board (Instant)",
+   "New Update in Board (Instant)",
+   "New Board (polling)"
+  ],
+  "action_total": 27,
+  "action_examples": [
+   "Create Item",
+   "Update Item",
+   "Create Subitem",
+   "Create Update",
+   "Get Items by Column Value (search)"
+  ],
+  "zapier_auth": "API key (help doc: 'In the API Token field, enter your personal access token')",
+  "webhook_sub_endpoint": "GraphQL mutation create_webhook(board_id: ID!, url: String!, event: WebhookEventType!, config: JSON) - one event type per webhook, board-scoped; requires webhooks:write scope; also configurable via the board Automations Center UI; URL must answer a challenge echo at creation",
+  "event_vocab_examples": [
+   "create_item",
+   "change_column_value",
+   "change_status_column_value",
+   "item_archived",
+   "create_update"
+  ],
+  "event_filtering": "single event type per subscription (WebhookEventType enum), board-scoped; a config JSON refines some events (e.g. change_specific_column_value takes {\"columnId\": ...}); subscribing to N event types requires N webhooks",
+  "signature_scheme": "JWT in Authorization header, verified against the app's Signing Secret - but only for webhooks created with an integration app token; ordinary board webhooks rely on the creation-time challenge echo ({\"challenge\": \"<token>\"} must be returned) and are otherwise unsigned",
+  "retry_disable_policy": "Retries once a minute for 30 minutes, then gives up (no exponential backoff, no documented auto-disable)",
+  "dedup_mechanism": "None documented; payload carries originalTriggerUuid but its dedup semantics are not specified",
+  "learnings": "Avoid the one-event-per-subscription model: it multiplies webhook registrations and API calls (attune should accept an events array). Also avoid making payload signing an opt-in that depends on how the webhook was created - default deliveries being unauthenticated is a real gap. The challenge-echo URL verification is simple and worth considering as an alternative or complement to Asana's header handshake, and per-event config JSON (column-level filtering) shows how to bolt fine-grained filters onto a coarse event enum.",
+  "sources": [
+   "https://zapier.com/apps/monday/integrations",
+   "https://developer.monday.com/api-reference/reference/webhooks",
+   "https://help.zapier.com/hc/en-us/articles/8496052585485-How-to-get-started-with-monday-com-on-Zapier"
+  ]
+ },
+ {
+  "name": "ClickUp",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 10,
+  "instant_triggers": 10,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Task (Instant)",
+   "Task Changes (Instant)",
+   "New Comment on a Task (Instant)",
+   "New List (Instant)",
+   "New Time Entry (Instant)"
+  ],
+  "action_total": 26,
+  "action_examples": [
+   "Create Task",
+   "Update Task",
+   "Post a Task Comment",
+   "Create Subtask",
+   "Find Task by ID (search)"
+  ],
+  "zapier_auth": "OAuth2 (help doc: 'Log into ClickUp to authenticate. Grant Zapier permission to access your account')",
+  "webhook_sub_endpoint": "POST https://api.clickup.com/api/v2/team/{team_id}/webhook with {endpoint, events: [...]} where events accepts \"*\" wildcard; optional space_id/folder_id/list_id/task_id narrow the location scope; per-webhook secret returned in the creation response; manage via PUT/DELETE /api/v2/webhook/{webhook_id}",
+  "event_vocab_examples": [
+   "taskCreated",
+   "taskUpdated",
+   "taskStatusUpdated",
+   "taskCommentPosted",
+   "listCreated",
+   "keyResultCreated"
+  ],
+  "event_filtering": "per-subscription events array (camelCase nounVerb strings) with \"*\" wildcard for all events, combined with hierarchical location scoping (workspace > space > folder > list > task)",
+  "signature_scheme": "X-Signature header: hex HMAC-SHA256 of request body using the per-webhook secret returned at creation",
+  "retry_disable_policy": "Documented health lifecycle: active -> failing -> suspended. Failing = non-2xx or >7s response; up to 5 retries per event, then fail_count increments and that event is dropped (never resent); suspended at fail_count 100; responding 410 or 401 suspends immediately; success auto-resets to active and zeroes fail_count; reactivate via PUT /api/v2/webhook/{webhook_id}; no notification on status change",
+  "dedup_mechanism": "Documented idempotency key formula: {{webhook_id}}:{{history_item_id}} (webhook_id and history_items[].id are in every payload body)",
+  "learnings": "The best overall template for attune's subscription API: POST /team/{id}/webhook with an events array + \"*\" wildcard + resource scoping, a per-webhook HMAC-SHA256 secret returned at creation, and an explicitly documented active/failing/suspended lifecycle with 410/401 fast-suspend and PUT reactivation - this maps directly onto a POST /api/v1/webhooks {url, events[]} design. Its documented idempotency-key formula is also a practice worth copying (though a dedicated delivery-id header like Linear's is cleaner). Avoid dropping failed events permanently and avoid staying silent when a webhook is suspended.",
+  "sources": [
+   "https://zapier.com/apps/clickup/integrations",
+   "https://developer.clickup.com/docs/webhooks",
+   "https://developer.clickup.com/docs/webhooksignature",
+   "https://developer.clickup.com/docs/webhookhealth",
+   "https://developer.clickup.com/reference/createwebhook",
+   "https://help.zapier.com/hc/en-us/articles/8496034846733-How-to-get-started-with-ClickUp-on-Zapier"
+  ]
+ },
+ {
+  "name": "Front",
+  "category": "support",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 5,
+  "instant_triggers": 5,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Inbound Message (Instant)",
+   "New Outbound Message (Instant)",
+   "New Comment (Instant)",
+   "New Tag Added to Message (Instant)",
+   "Rule Triggered (Instant)"
+  ],
+  "action_total": 28,
+  "action_examples": [
+   "Send Reply",
+   "Add Comment",
+   "Create Contact",
+   "Update Conversation",
+   "Find or Create Contact (search)"
+  ],
+  "zapier_auth": "OAuth2 (Zapier help: 'Log into Front App to authenticate. Grant Zapier permission'; requires Front company admin)",
+  "webhook_sub_endpoint": "dashboard-only: 'application webhooks' are configured as a feature of a developer app on Front's Developers page (with a challenge/response URL validation handshake); 'rule webhooks' are configured through the rules UI. No public POST /webhooks REST endpoint.",
+  "event_vocab_examples": [
+   "inbound_received",
+   "outbound_sent",
+   "conversation_moved",
+   "conversation_archived",
+   "new_comment_added",
+   "assignee_changed",
+   "tag_added",
+   "message_delivery_failed"
+  ],
+  "event_filtering": "no per-subscription event array: application webhooks receive the full fixed event set for shared inboxes (payload carries a 'type' field); rule webhooks filter via rule conditions instead",
+  "signature_scheme": "application webhooks: x-front-signature = base64(HMAC-SHA256(app signing key, '{x-front-request-timestamp}:' + raw_body)); rule webhooks: X-Front-Signature = base64(HMAC-SHA1(API secret, raw_body))",
+  "retry_disable_policy": "5-second response timeout; 429/500/408/timeout retried up to 3 times; 429 is the documented back-off signal; after the last failed retry the webhook is auto-disabled and the app creator is emailed; no backfill of missed events (docs tell you to reconcile via the List Events polling API)",
+  "dedup_mechanism": "no delivery-id header documented; event objects carry sequential never-reused IDs (evt_*, base-36 of a decimal counter) usable for ordering/dedup",
+  "learnings": "Copy Front's timestamp-prefixed HMAC-SHA256 signature (defeats replay) and its explicit 429-means-back-off contract, plus the challenge/echo URL-validation handshake before activating a subscription. Also copy the pairing of webhooks with a polling /events API as the documented reconciliation path after retries are exhausted. Avoid the split-brain of two webhook systems with different signature algorithms (SHA256 vs SHA1) and no per-subscription event filter.",
+  "sources": [
+   "https://zapier.com/apps/front-app/integrations",
+   "https://help.zapier.com/hc/en-us/articles/11957141323277-How-to-get-started-with-Front-on-Zapier",
+   "https://dev.frontapp.com/docs/webhooks-1",
+   "https://dev.frontapp.com/docs/application-webhooks.md",
+   "https://dev.frontapp.com/docs/rule-webhooks.md",
+   "https://dev.frontapp.com/reference/events.md"
+  ]
+ },
+ {
+  "name": "Help Scout",
+  "category": "support",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 4,
+  "instant_triggers": 3,
+  "polling_triggers": 1,
+  "trigger_examples": [
+   "Conversation Created (Instant)",
+   "Conversation Assigned (Instant)",
+   "Tags Updated (Instant)",
+   "New Customer (polling)"
+  ],
+  "action_total": 14,
+  "action_examples": [
+   "Send Reply",
+   "Add Note",
+   "Create Conversation",
+   "Find or Create Customer (search)",
+   "Get Custom Report (search)"
+  ],
+  "zapier_auth": "OAuth2 (Help Scout's Inbox API is HTTPS-only OAuth 2.0 with Authorization Code flow for third-party integrations like Zapier)",
+  "webhook_sub_endpoint": "programmatic + dashboard: POST /v2/webhooks accepting {url, events: [\"convo.assigned\", ...], secret, payloadVersion: \"V2\", label, notification}; full CRUD (List/Get/Update/Delete Webhook); also configurable via Manage > Apps > Webhooks UI",
+  "event_vocab_examples": [
+   "convo.created",
+   "convo.assigned",
+   "convo.tags",
+   "convo.customer.reply.created",
+   "convo.note.created",
+   "customer.created",
+   "satisfaction.ratings",
+   "tag.updated",
+   "user.status.changed"
+  ],
+  "event_filtering": "per-subscription event-type array ('events' field, enum of ~27 dot-namespaced types); one webhook carries N event types",
+  "signature_scheme": "X-HelpScout-Signature = base64(HMAC-SHA1(secret, raw_json_body)); X-HelpScout-Event header carries the event name; signature computed on the raw escaped body",
+  "retry_disable_policy": "success = 2xx; HTTP 410 causes the webhook to be deactivated/deleted; any other non-2xx is retried up to 10 times with increasing timeout between retries, then the event is discarded; the webhook is auto-deactivated after 10+ discarded events",
+  "dedup_mechanism": "no delivery-id header documented; only X-HelpScout-Event + X-HelpScout-Signature headers; a 'notification' mode sends only the changed resource URI instead of the payload",
+  "learnings": "This is the cleanest template for attune's subscription API: a single POST /v2/webhooks with url + events[] + caller-supplied secret + versioned payload (payloadVersion), dot-namespaced resource.action event names, and the HTTP-410-unsubscribes convention Zapier REST hooks expect. Copy the graduated retry-then-quarantine policy (N retries -> discard, M discards -> auto-disable). Avoid HMAC-SHA1 (use SHA256) and add a delivery-id header, which Help Scout lacks.",
+  "sources": [
+   "https://zapier.com/apps/help-scout/integrations",
+   "https://developer.helpscout.com/webhooks/",
+   "https://developer.helpscout.com/mailbox-api/endpoints/webhooks/create/",
+   "https://developer.helpscout.com/mailbox-api/overview/authentication/"
+  ]
+ },
+ {
+  "name": "Freshdesk",
+  "category": "support",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 5,
+  "instant_triggers": 5,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Ticket (Instant)",
+   "Update Ticket (Instant)",
+   "New Ticket Note (Instant)",
+   "New Contact (Instant)",
+   "Update Contact (Instant)"
+  ],
+  "action_total": 11,
+  "action_examples": [
+   "Create Ticket",
+   "Update Ticket",
+   "Add Notes to a Ticket",
+   "Create Contact",
+   "Find Ticket by Id (search)"
+  ],
+  "zapier_auth": "API key (Zapier help: requires your Freshdesk API key from profile settings, admin-only; paid Growth/Pro/Enterprise plan required)",
+  "webhook_sub_endpoint": "dashboard-only: no webhook-subscription endpoint in the public REST API; outbound webhooks exist only as a 'Trigger Webhook' action inside automation rules configured in the admin UI (callback URL + optional API-key auth + custom headers)",
+  "event_vocab_examples": [],
+  "event_filtering": "rule-condition based: each automation rule (on ticket create / ticket update) carries its own condition filters and fires one configured callback URL; no event-type array or subscription object",
+  "signature_scheme": "none documented; endpoint authentication is opt-in via 'Requires authentication' (API key/basic) plus user-defined custom headers (e.g. X-Sample-CustomHeader1: VALUE)",
+  "retry_disable_policy": "failed callbacks (non-2xx/3xx) are retried once every 30 minutes for a total of 48 calls; webhook requests are rate-limited to 1000/hour with overflow buffered; account admins get an email on failure with time and reason; no auto-disable documented",
+  "dedup_mechanism": "none documented; outbound WhatsApp API mentions a customer-supplied external_reference_id echoed in webhook payloads, but rule webhooks have no delivery-id header",
+  "learnings": "Freshdesk shows the cost of having no first-class subscription API: Zapier still gets Instant triggers, but ordinary customers must click through automation-rule UIs, and there is no signature, no event vocabulary, and no delivery id -- everything attune wants to avoid. Its one useful idea is the operational safety valve: an hourly webhook budget with buffering plus admin email alerts on failure. Do not copy the fixed 30-minute flat retry cadence (48 tries over 24h) -- exponential backoff is strictly better.",
+  "sources": [
+   "https://zapier.com/apps/freshdesk/integrations",
+   "https://help.zapier.com/hc/en-us/articles/40859563158285-How-to-get-started-with-Freshdesk-on-Zapier",
+   "https://developers.freshdesk.com/api/",
+   "https://support.freshdesk.com/support/solutions/articles/132589-using-webhooks-in-automation-rules-that-run-on-ticket-events"
+  ]
+ },
+ {
+  "name": "Gorgias",
+  "category": "support",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "(only a hidden/unpublished 'Ticket Created' polling trigger exists in the app definition; no publicly usable triggers)"
+  ],
+  "action_total": 2,
+  "action_examples": [
+   "Create Ticket",
+   "Create Ticket Message"
+  ],
+  "zapier_auth": "not stated in retrieved sources (Gorgias' own REST API authenticates with HTTP Basic: account email + API key, so the Zapier app most likely follows that; unverified)",
+  "webhook_sub_endpoint": "programmatic: POST /api/integrations with body {name, type: \"http\", http: {url, method, headers, triggers: {\"ticket-created\": true, ...}, request_content_type, response_content_type}} -- webhooks are modeled as generic 'HTTP integrations' bound to ticket events; full CRUD on /api/integrations",
+  "event_vocab_examples": [
+   "ticket-created",
+   "ticket-updated",
+   "ticket-message-created",
+   "ticket-message-failed",
+   "ticket-status-updated",
+   "ticket-assignment-updated",
+   "ticket-self-unsnoozed",
+   "ticket-handed-over"
+  ],
+  "event_filtering": "per-integration boolean map: 'triggers' object with one boolean flag per event type (not an array); docs inconsistently show dash-form (ticket-created) in the tutorial and underscore-form (ticket_created) in the API reference example",
+  "signature_scheme": "none documented for outbound HTTP-integration calls; requests carry whatever static headers you configure (e.g. your own API key header)",
+  "retry_disable_policy": "not documented in retrieved sources",
+  "dedup_mechanism": "not documented in retrieved sources",
+  "learnings": "Gorgias is the cautionary tale: its Zapier app has zero public triggers (only 2 actions), so 'attune has a Zapier app' must mean triggers or it is near-useless for a signal-routing product. Its generic HTTP-integration model (webhook = an integration record with a boolean-per-event triggers map, templated URLs, arbitrary headers) is flexible but has no signature, no documented retry policy, and an event vocabulary whose dash vs underscore spelling drifts between docs -- exactly the kind of token instability attune's append-only source rule forbids. Prefer Help Scout/Chatwoot's events-array model.",
+  "sources": [
+   "https://zapier.com/apps/gorgias/integrations",
+   "https://zapier.com/api/v4/apps/?title_search=gorgias",
+   "https://developers.gorgias.com/reference/create-integration.md",
+   "https://developers.gorgias.com/docs/create-integrations-and-widgets-programmatically.md",
+   "https://developers.gorgias.com/reference/the-tickethttpintegration-object.md"
+  ]
+ },
+ {
+  "name": "Crisp",
+  "category": "support",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 8,
+  "instant_triggers": 8,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "Message Incoming (Instant)",
+   "New Conversation (Instant)",
+   "New Contact (Instant)",
+   "Conversation Status Change (Instant)",
+   "Conversation Segments Updated (Instant)"
+  ],
+  "action_total": 10,
+  "action_examples": [
+   "Send Operator Text Message",
+   "Create Conversation",
+   "Create/Update Contact",
+   "Change Conversation State",
+   "Search for a Profile (search)"
+  ],
+  "zapier_auth": "token/API key: install the Zapier plugin from the Crisp marketplace, generate a token in plugin settings, paste it into the Zapier connection",
+  "webhook_sub_endpoint": "dashboard-only: Website Hooks are configured in Crisp dashboard website settings (Advanced configuration > Web Hooks); Plugin Hooks are configured on a Crisp Marketplace plugin; no public REST subscription endpoint documented",
+  "event_vocab_examples": [
+   "message:send",
+   "message:received",
+   "session:set_email",
+   "session:set_state",
+   "session:sync:rating",
+   "session:removed",
+   "people:profile:created (People Profile Created)",
+   "message:compose:send"
+  ],
+  "event_filtering": "per-hook event-namespace selection, gated by token scopes: each event namespace maps to a token scope+permission, and Plugin vs Website hooks have different allowed namespace matrices (Website Hooks get a reduced set)",
+  "signature_scheme": "X-Crisp-Signature = HMAC-SHA256 over the string '[{X-Crisp-Request-Timestamp};{json_body_string}]' with your signing secret -- but signed on Plugin Hooks only; Website Hooks are unsigned (docs recommend a ?key=KEY URL parameter instead)",
+  "retry_disable_policy": "non-200 responses are re-attempted later; X-Delivery-Attempt-Limit and X-Delivery-Attempt-Count headers expose the retry budget per request; if all attempts fail, all deliveries to the endpoint are paused for about a minute (events in that window are lost); Website Hooks get no retries at all",
+  "dedup_mechanism": "no delivery-id header; payload carries website_id + event + timestamp, and message events carry a client 'fingerprint' field; attempt-count headers identify redeliveries of the same event",
+  "learnings": "Copy Crisp's colon-namespaced event taxonomy with scope-gated filtering (event namespace -> required token scope) and the X-Delivery-Attempt-Count/Limit headers that make retry state observable to the receiver -- great for debugging. Avoid the two-tier trap where the easy tier (Website Hooks, what Zapier-style users reach first) is unsigned, unretried, and event-restricted; attune should have exactly one webhook tier with signing and retries for everyone. Note Crisp still ships 8/8 Instant Zapier triggers off this infrastructure.",
+  "sources": [
+   "https://zapier.com/apps/crisp/integrations",
+   "https://help.crisp.chat/en/article/how-to-connect-crisp-with-zapier-dt0hdh/",
+   "https://docs.crisp.chat/references/web-hooks/v1/",
+   "https://docs.crisp.chat/guides/web-hooks/quickstart/",
+   "https://docs.crisp.chat/guides/web-hooks/website-hooks/"
+  ]
+ },
+ {
+  "name": "Chatwoot",
+  "category": "support",
+  "zapier_exists": false,
+  "confidence": "high",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "n/a -- zapier.com/apps/chatwoot/integrations returns 404 and the Zapier v4 apps API has no Chatwoot entry; integrations are built with the generic 'Webhooks by Zapier' app instead",
+  "webhook_sub_endpoint": "programmatic + dashboard: POST /api/v1/accounts/{account_id}/webhooks with {url, name, subscriptions: [\"conversation_created\", ...]} authenticated via api_access_token header; response includes a server-generated per-webhook 'secret'; full CRUD (GET list, PATCH update, DELETE)",
+  "event_vocab_examples": [
+   "conversation_created",
+   "conversation_updated",
+   "conversation_status_changed",
+   "message_created",
+   "message_updated",
+   "contact_created",
+   "contact_updated",
+   "webwidget_triggered",
+   "conversation_typing_on",
+   "conversation_typing_off"
+  ],
+  "event_filtering": "per-subscription event-type array ('subscriptions' enum field); payload carries a top-level 'event' discriminator field",
+  "signature_scheme": "X-Chatwoot-Signature = 'sha256=' + HMAC-SHA256(webhook_secret, '{timestamp}.{raw_body}') with X-Chatwoot-Timestamp (unix seconds) for replay protection; docs prescribe constant-time comparison and optional timestamp-age rejection",
+  "retry_disable_policy": "not documented in retrieved sources (no retry schedule or auto-disable policy published)",
+  "dedup_mechanism": "X-Chatwoot-Delivery header: unique delivery ID per webhook event (when available)",
+  "learnings": "Chatwoot (attune's closest OSS analog) is the best single design to copy for the subscription API: account-scoped POST /api/v1/accounts/{id}/webhooks with a subscriptions[] enum, server-generated secret returned once, Stripe-style 'sha256=' timestamp-bound HMAC-SHA256 signature, and a dedicated X-*-Delivery dedup header. Its gap is equally instructive: no official Zapier app means every Zapier user hand-wires 'Webhooks by Zapier' + copies signatures manually -- shipping attune's own Zapier connector on top of this exact webhook shape is the differentiator. Also note the undocumented retry policy is a trust gap attune should not repeat.",
+  "sources": [
+   "https://zapier.com/apps/chatwoot/integrations (404)",
+   "https://zapier.com/api/v4/apps/?title_search=chatwoot (0 results)",
+   "https://developers.chatwoot.com/api-reference/webhooks/add-a-webhook",
+   "https://www.chatwoot.com/hc/user-guide/articles/1677693021-how-to-use-webhooks",
+   "https://developers.chatwoot.com/llms.txt"
+  ]
+ },
+ {
+  "name": "Basecamp",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "OAuth2 (Basecamp 3 API supports only OAuth 2.0 bearer tokens; no API-key path exists)",
+  "trigger_total": 12,
+  "instant_triggers": 7,
+  "polling_triggers": 5,
+  "trigger_examples": [
+   "New To-Do (Instant)",
+   "To-Do Completed/Uncompleted (Instant)",
+   "New Comment (Instant)",
+   "New Message (Instant)",
+   "New Project (polling)"
+  ],
+  "action_total": 26,
+  "action_examples": [
+   "Create To-Do",
+   "Create Project From Template",
+   "Create Comment on Todo",
+   "Find or Create To-Do List",
+   "Find Person (search)"
+  ],
+  "webhook_sub_endpoint": "POST /buckets/{projectId}/webhooks.json with {payload_url (HTTPS required), types: [\"Todo\",\"Todolist\", ...]} (default all types); PUT /webhooks/{id}.json updates payload_url/types/active; project-scoped, not account-scoped",
+  "event_vocab_examples": [
+   "message_created",
+   "todo_completed",
+   "todo_uncompleted",
+   "comment_created",
+   "message_archived",
+   "kanban_card_assignment_changed"
+  ],
+  "event_filtering": "per-subscription array of RESOURCE types (Todo, Message, Comment...), not event kinds \u2014 every lifecycle event (created/updated/trashed/...) for a subscribed type is delivered; the event kind arrives as a snake_case `kind` field in the payload",
+  "signature_scheme": "none \u2014 no HMAC signature documented; deliveries carry only User-Agent 'Basecamp3 Webhook' and X-Request-Id",
+  "retry_disable_policy": "up to 10 attempts with exponentially growing intervals, then the webhook is deactivated; only 2xx counts as success; 3xx redirects are not followed",
+  "dedup_mechanism": "numeric event `id` in payload plus X-Request-Id UUID header per delivery; recent_deliveries with full request/response readable via GET webhook",
+  "learnings": "Copy: resource-scoped subscription (payload_url + types array) is the simplest workable programmatic shape, and exposing recent_deliveries on the webhook resource is great operator UX. Avoid: no HMAC signature at all (receivers can't authenticate Basecamp), and filtering by resource type rather than event kind forces receivers to re-filter on `kind` themselves.",
+  "sources": [
+   "https://zapier.com/apps/basecamp3/integrations",
+   "https://raw.githubusercontent.com/basecamp/bc3-api/master/sections/webhooks.md",
+   "https://raw.githubusercontent.com/basecamp/bc3-api/master/README.md"
+  ]
+ },
+ {
+  "name": "Height",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "medium",
+  "zapier_auth": "OAuth2 (Height API documents OAuth2 authorization-code flow for third-party apps; API also had secret_ API keys; Zapier directory does not state it explicitly)",
+  "trigger_total": 8,
+  "instant_triggers": 8,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Task (Instant)",
+   "New or Updated Task (Instant)",
+   "Completed Task (Instant)",
+   "Task Assigned to User (Instant)",
+   "Task Updated to Status (Instant)"
+  ],
+  "action_total": 6,
+  "action_examples": [
+   "Create Task",
+   "Update Task(s)",
+   "Create Message",
+   "Search Tasks (search)",
+   "Get Task (search)"
+  ],
+  "webhook_sub_endpoint": "",
+  "event_vocab_examples": [
+   "task.created",
+   "task.updated",
+   "task.deleted",
+   "activity.created",
+   "activity.deleted"
+  ],
+  "event_filtering": "unknown \u2014 delivery envelope carries a `type` field (resource.verb) and a `webhookId`, implying per-webhook subscriptions, but the subscription API shape was never mirrored (docs lived in a now-dead Notion page; the community OpenAPI mirror has a Webhooks tag with zero paths)",
+  "signature_scheme": "none documented \u2014 a community receiver authenticates deliveries only by matching the payload's webhookId field",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "event envelope has unique `id` and `model: \"webhookEvent\"` plus `webhookId`; `data.model` / `data.previousModel` carry new/old resource snapshots",
+  "learnings": "Height shut down 2025-09-24; its Zapier listing (8 all-Instant triggers) outlived its docs \u2014 a warning that webhook API docs hosted on Notion evaporate, so attune should keep webhook docs in-repo/versioned. Its `resource.verb` event naming and `model`/`previousModel` old-new snapshot pair in the payload are worth copying; shipping webhooks without any HMAC signature is not.",
+  "sources": [
+   "https://zapier.com/apps/height/integrations",
+   "https://github.com/konfig-sdks/openapi-examples/blob/main/height/openapi.yaml",
+   "https://github.com/api-evangelist/height/blob/main/apis.yml",
+   "https://github.com/redraskal/height-discord-webhook/blob/main/index.ts",
+   "https://github.com/PipedreamHQ/pipedream/tree/master/components/height/sources"
+  ]
+ },
+ {
+  "name": "Shortcut",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "API key \u2014 Shortcut API only supports token auth (Shortcut-Token header, generated at app.shortcut.com/settings/account/api-tokens); no OAuth",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 4,
+  "action_examples": [
+   "Create Story",
+   "Create Story From Template",
+   "Find or Create a Story",
+   "Search Stories (search)"
+  ],
+  "webhook_sub_endpoint": "dashboard-only \u2014 one Outgoing Webhook configured at app.shortcut.com/settings/integrations/outgoing-webhook (URL + optional secret); no REST endpoint to create/manage webhooks",
+  "event_vocab_examples": [
+   "story/update",
+   "story/create",
+   "epic/delete (entity_type + action fields, e.g. entity_type: \"story\", action: \"update\")"
+  ],
+  "event_filtering": "all-events-per-endpoint \u2014 fires on every Story/Epic create/update/delete (incl. comments, tasks, VCS-driven workflow-state changes); no event-type selection; receiver dispatches on actions[].entity_type/action",
+  "signature_scheme": "Payload-Signature header, HMAC-SHA256 over the UTF-8 request body, hex-encoded; only sent when a secret was configured (optional)",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "UUID `id` per webhook event envelope; changed_at timestamp; actions[] each carry entity id",
+  "learnings": "Shortcut is the anti-pattern proof for attune's Zapier goal: because its webhook is a dashboard-only, unfiltered firehose with no subscription API, its Zapier app has ZERO triggers \u2014 only actions. A programmatic REST-hook subscribe/unsubscribe endpoint with per-event filtering is a hard prerequisite for Instant Zapier triggers. Its optional-secret HMAC-SHA256 Payload-Signature is fine but should be mandatory in attune.",
+  "sources": [
+   "https://zapier.com/apps/shortcut/integrations",
+   "https://developer.shortcut.com/api/webhook/v1/",
+   "https://developer.shortcut.com/api/rest/v3"
+  ]
+ },
+ {
+  "name": "Wrike",
+  "category": "pm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "OAuth2 (Wrike API v4 uses OAuth 2.0 authorization-code; permanent access tokens exist but are legacy)",
+  "trigger_total": 2,
+  "instant_triggers": 0,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Task (polling)",
+   "New Folder (polling)"
+  ],
+  "action_total": 6,
+  "action_examples": [
+   "Create Task",
+   "Create Project",
+   "Create Comment",
+   "Create Time Entry",
+   "API Request (Beta)"
+  ],
+  "webhook_sub_endpoint": "POST /api/v4/webhooks (account scope), POST /folders/{folderId}/webhooks, POST /spaces/{spaceId}/webhooks \u2014 body: hookUrl, secret (optional), events [TaskCreated,AttachmentAdded,...] (default all), recursive, parameterisedEvents (conditional filters + extra payload fields), customItemTypes; GET/PUT(status=Active|Suspended)/DELETE /webhooks/{id}",
+  "event_vocab_examples": [
+   "TaskCreated",
+   "TaskStatusChanged",
+   "FolderTitleChanged",
+   "TaskCustomFieldChanged",
+   "AttachmentAdded",
+   "AttachmentDeleted"
+  ],
+  "event_filtering": "per-subscription event array PLUS parameterized conditional filters (e.g. TaskCustomFieldChanged limited to specific customField IDs) and customItemTypes scoping; logic = CIT AND (events OR parameterisedEvents); an event may appear in events or parameterisedEvents, not both",
+  "signature_scheme": "X-Hook-Signature: HMAC-SHA256(secret, request body) on every event; registration handshake sends X-Hook-Secret random challenge \u2014 receiver must echo HMAC-SHA256(secret, challenge) back in the response X-Hook-Secret header",
+  "retry_disable_policy": "retryable statuses: up to 3 delivery attempts then webhook Suspended; non-retryable 4xx (all except 408 and 429) suspend immediately with no retries; author gets email on suspension; reactivate via PUT /webhooks/{id} status=Active",
+  "dedup_mechanism": "Idempotency-Key request header carrying a unique identifier per event, explicitly documented for duplicate-delivery protection (at-least-once delivery)",
+  "learnings": "Wrike has the most complete subscription API of the PM cohort \u2014 copy the explicit Idempotency-Key header, the Active/Suspended state machine with an un-suspend endpoint, and the challenge-response handshake that proves URL ownership at registration. Also note the irony: despite this rich webhook API its Zapier app still uses polling triggers, so attune must actually wire REST hooks into the Zapier app, not just ship the API.",
+  "sources": [
+   "https://zapier.com/apps/wrike/integrations",
+   "https://developers.wrike.com/webhooks/"
+  ]
+ },
+ {
+  "name": "Zendesk",
+  "category": "support",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "API key \u2014 subdomain + agent (admin) email + Zendesk API token, per Zapier's own help article",
+  "trigger_total": 12,
+  "instant_triggers": 1,
+  "polling_triggers": 11,
+  "trigger_examples": [
+   "New Ticket (polling)",
+   "Updated Ticket (polling)",
+   "New Ticket in View (polling)",
+   "Tag Added to User (Instant)",
+   "New Suspended Ticket (polling)"
+  ],
+  "action_total": 21,
+  "action_examples": [
+   "Create Ticket",
+   "Add Comment to Ticket",
+   "Update Ticket",
+   "Find or Create User",
+   "Find Tickets (search)"
+  ],
+  "webhook_sub_endpoint": "POST /api/v2/webhooks with body {webhook: {name, endpoint, http_method: \"POST\", request_format: \"json\", status: \"active\", subscriptions: [\"zen:event-type:ticket.created\", ...]}}; signing secret via GET/POST /api/v2/webhooks/{id}/signing_secret",
+  "event_vocab_examples": [
+   "zen:event-type:ticket.created",
+   "zen:event-type:ticket.status_changed",
+   "zen:event-type:ticket.comment_added",
+   "zen:event-type:user.created",
+   "zen:event-type:organization.created"
+  ],
+  "event_filtering": "per-subscription event-type array (subscriptions field) \u2014 OR, mutually exclusively, the webhook is connected to a Zendesk trigger/automation with a custom JSON payload; a single webhook cannot do both",
+  "signature_scheme": "X-Zendesk-Webhook-Signature: base64(HMAC-SHA256(secret, timestamp + rawBody)) with the timestamp in a separate X-Zendesk-Webhook-Signature-Timestamp header (ISO-8601); replay-protect by rejecting stale timestamps",
+  "retry_disable_policy": "409 retried up to 3 times; 429/503 honor Retry-After when under 60s; circuit breaker pauses delivery when error rate hits 70% or after 1,000+ errors in a 5-minute window",
+  "dedup_mechanism": "CloudEvents-style envelope with unique event `id` (used as idempotency key), `type`, `time`, `subject` (e.g. zen:ticket:35436), `detail` snapshot and `event` diff",
+  "learnings": "Zendesk's namespaced vendor-prefixed event vocabulary (zen:event-type:resource.verb) and signed-timestamp HMAC (timestamp+body, separate timestamp header) are the strongest security/naming pattern in this batch \u2014 attune should copy the timestamp-in-signature replay defense. The subscriptions-array-per-webhook endpoint is exactly the shape attune's Zapier REST hooks need. Its error-rate circuit breaker (70% / 1000-in-5-min) is a good scale-safe alternative to naive N-consecutive-failures disabling.",
+  "sources": [
+   "https://zapier.com/apps/zendesk/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495936547085-How-to-get-started-with-Zendesk-on-Zapier",
+   "https://github.com/hookdeck/webhook-skills/tree/main/skills/zendesk-webhooks",
+   "https://github.com/simstudioai/sim/blob/main/apps/sim/lib/webhooks/providers/zendesk.ts",
+   "https://github.com/simstudioai/sim/blob/main/apps/sim/triggers/zendesk/utils.ts"
+  ]
+ },
+ {
+  "name": "Intercom",
+  "category": "support",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "OAuth2 \u2014 log into Intercom and grant Zapier permission (per Zapier's help article)",
+  "trigger_total": 18,
+  "instant_triggers": 18,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Conversation (Instant)",
+   "New Lead (Instant)",
+   "Contact Replied (Instant)",
+   "New Closed Conversation (Instant)",
+   "Tag Added to Conversation (Instant)"
+  ],
+  "action_total": 25,
+  "action_examples": [
+   "Create Ticket",
+   "Reply to Conversation",
+   "Send Message to Contact",
+   "Create/Update Lead",
+   "Find Conversation (search)"
+  ],
+  "webhook_sub_endpoint": "dashboard-only \u2014 webhook URL + topic selection configured per app in the Developer Hub (app settings); saving triggers a signed `ping` handshake that must get a 2xx; no public REST subscription-management endpoint",
+  "event_vocab_examples": [
+   "conversation.user.created",
+   "conversation.user.replied",
+   "conversation.admin.replied",
+   "contact.user.created",
+   "ticket.created",
+   "ticket.state.updated"
+  ],
+  "event_filtering": "per-app topic list (array of topics selected in the Developer Hub); one endpoint per app receives all selected topics; receiver dispatches on the envelope `topic` field",
+  "signature_scheme": "X-Hub-Signature: sha1=<hex> \u2014 HMAC-SHA1 over the raw JSON body keyed by the app's client_secret (legacy GitHub-style; weak algorithm by modern standards)",
+  "retry_disable_policy": "retries failed deliveries multiple times with backoff (exact schedule not documented in retrieved sources); envelope carries delivery_status and delivery_attempts fields",
+  "dedup_mechanism": "unique notification `id` (notif_...) in every envelope, documented as the idempotency key; delivery_attempts counter exposes redelivery",
+  "learnings": "Intercom proves all-Instant Zapier triggers (18/18) are achievable even with dashboard-only topic config \u2014 because Zapier is itself the OAuth app owning the subscription; but attune, wanting third parties to subscribe, should still prefer Zendesk-style programmatic subscriptions. Copy Intercom's dot-separated resource.actor.verb topic vocabulary, the uniform notification envelope with delivery_attempts, and the signed ping handshake; avoid HMAC-SHA1 \u2014 use SHA-256.",
+  "sources": [
+   "https://zapier.com/apps/intercom/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495977468301-How-to-get-started-with-Intercom-on-Zapier",
+   "https://github.com/hookdeck/webhook-skills/tree/main/skills/intercom-webhooks"
+  ]
+ },
+ {
+  "name": "Frill",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 4,
+  "instant_triggers": 4,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Idea",
+   "New Comment",
+   "New Vote",
+   "Idea Status Change"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "API key (inferred from Frill API docs \u2014 Bearer / Basic / query-string api_key are the only schemes Frill's API supports; Zapier directory does not state auth)",
+  "webhook_sub_endpoint": "dashboard-only (Settings > Webhooks); no programmatic subscription endpoint in public API reference, though Zapier's 4 Instant triggers imply a private REST-hook subscribe API",
+  "event_vocab_examples": [
+   "idea.created",
+   "idea.statusChanged",
+   "idea.roadmapChanged",
+   "idea.voted",
+   "comment.created",
+   "announcement.published"
+  ],
+  "event_filtering": "per-subscription event selection implied (\"subscribe to certain events\") but configured in dashboard; not documented as an events array on an API",
+  "signature_scheme": "HTTP header `Signature` (no vendor prefix) = hex HMAC-SHA256 of JSON payload keyed with dashboard Webhook Secret; verified via hash_hmac('sha256', payloadJson, secret)",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "none documented; envelope carries only triggered_at (UTC), event, data, data_type \u2014 no delivery id or event id",
+  "learnings": "Copy Frill's clean noun.verb event vocabulary and its uniform envelope {triggered_at, event, data, data_type}, but avoid its mistakes: a bare `Signature` header (no product prefix, collision-prone), mixed casing (idea.statusChanged camelCase verb), signing the re-encoded JSON rather than the raw body, and no delivery-id/retry documentation. Also note the gap attune can beat: webhook config is dashboard-only while Zapier gets instant triggers, so a public REST-hook subscribe API is a differentiator.",
+  "sources": [
+   "https://zapier.com/apps/frill/integrations",
+   "https://help.frill.co/article/93-webhooks",
+   "https://developers.frill.co/api/authentication.md",
+   "https://developers.frill.co/llms.txt"
+  ]
+ },
+ {
+  "name": "Nolt",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 6,
+  "instant_triggers": 6,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Post",
+   "New Comment",
+   "Post Status Updated",
+   "Post Tags Updated",
+   "Post Deleted"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "API key (inferred from Nolt Public API \u2014 `apikey` header on the GraphQL endpoint is the only documented auth; Zapier directory does not state auth)",
+  "webhook_sub_endpoint": "dashboard-only (board > Settings > Integrations > Webhooks; form fields: Endpoint URL, optional Verify token, optional Signing secret); public API is GraphQL at https://api.nolt.io/api/v1/graphql with no webhook mutations documented",
+  "event_vocab_examples": [
+   "post.created",
+   "post.deleted",
+   "post.status.updated",
+   "post.tags.updated",
+   "comment.created",
+   "comment.deleted"
+  ],
+  "event_filtering": "all-events-per-endpoint \u2014 the webhook form has no event selection; every board event is delivered and the handler switches on the `event` field",
+  "signature_scheme": "X-Hub-Signature: sha256={hex} \u2014 HMAC-SHA256 over the raw request body keyed with the Signing secret; plus a PubSubHubbub-style GET verification handshake (hub.mode=subscribe&hub.challenge&hub.verify_token) that the endpoint must echo before activation",
+  "retry_disable_policy": "endpoint must return 200 OK within 5 seconds; on failure Nolt emails the board owner; continued failure may disable the webhook, owner re-enables manually after fixing; no backoff schedule documented",
+  "dedup_mechanism": "none documented; body carries event, boardId, triggeredAt (ISO 8601), data \u2014 no delivery id",
+  "learnings": "Nolt is the best small-scale reference for the GitHub-style conventions attune wants: X-Hub-Signature sha256= HMAC over raw body, a challenge/verify-token subscription handshake, and a stable {event, boardId, triggeredAt, data} envelope. Avoid its inconsistent event grammar (post.status.updated three-segment vs comment.created two-segment) and the missing delivery-id/retry-schedule; also note all-events-per-endpoint forces consumers to filter client-side \u2014 attune should carry an events array per subscription instead.",
+  "sources": [
+   "https://zapier.com/apps/nolt/integrations",
+   "https://nolt.io/help/webhooks",
+   "https://nolt.io/docs/publicapi/"
+  ]
+ },
+ {
+  "name": "Upvoty",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 6,
+  "instant_triggers": 4,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Feedback (new_post)",
+   "New Comment",
+   "New Vote",
+   "Status Change",
+   "Get Feedback Statuses (polling helper)"
+  ],
+  "action_total": 3,
+  "action_examples": [
+   "Create Feedback",
+   "Change Status",
+   "Search Feedback (search)"
+  ],
+  "zapier_auth": "API key (inferred \u2014 Upvoty API uses `Authorization: Bearer up_live_...` scoped keys per its API feature page; Zapier directory does not state auth)",
+  "webhook_sub_endpoint": "dashboard-configured (register endpoint, choose events, per-endpoint filters); no public programmatic subscription endpoint documented, though Zapier's 4 Instant triggers imply a private REST-hook subscribe API",
+  "event_vocab_examples": [
+   "post.created",
+   "post.updated",
+   "post.merged",
+   "post.deleted",
+   "post.status_changed",
+   "vote.added",
+   "vote.removed",
+   "comment.created",
+   "comment.deleted",
+   "user.created",
+   "segment.updated"
+  ],
+  "event_filtering": "per-endpoint event-type selection plus attribute filters (board, tag, segment, vote count); multiple endpoints supported so different events can route to different URLs",
+  "signature_scheme": "X-Upvoty-Signature header \u2014 HMAC-SHA256 over the raw request body with a shared secret, accompanied by a timestamp to prevent replay (explicitly modeled on Stripe); example shows value form sha256=...",
+  "retry_disable_policy": "non-2xx triggers exponential backoff retries for up to 24 hours; every attempt logged with request/response/latency; after 24h of continuous failure the endpoint is marked degraded and the owner emailed \u2014 events are never silently dropped; dashboard supports one-click replay of any past delivery",
+  "dedup_mechanism": "delivery/event replay via dashboard event log; no explicit delivery-id or idempotency header documented (payload schemas described as stable and versioned)",
+  "learnings": "Upvoty's webhook surface (from its official product pages) is the richest checklist in this cohort: X-Upvoty-Signature HMAC-SHA256 + timestamp anti-replay, exponential backoff capped at 24h, degraded-endpoint email instead of silent disable, full delivery log with replay, per-endpoint event arrays plus attribute filters, and versioned payload schemas. attune should copy the retry/replay/observability posture and the timestamped signature; caveat: this is marketing copy, and the formal developer reference with the subscription endpoint shape is not publicly reachable, so verify header/value details before cloning exactly.",
+  "sources": [
+   "https://zapier.com/apps/upvoty/integrations",
+   "https://upvoty.com/integrations/webhooks",
+   "https://upvoty.com/integrations/zapier",
+   "https://upvoty.com/features/api"
+  ]
+ },
+ {
+  "name": "Sleekplan",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 14,
+  "instant_triggers": 14,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Feedback",
+   "Update Feedback",
+   "New Feedback Vote",
+   "New Changelog Update",
+   "New Satisfaction Survey"
+  ],
+  "action_total": 3,
+  "action_examples": [
+   "Create Feedback",
+   "Update Feedback",
+   "Create Changelog Update"
+  ],
+  "zapier_auth": "API key (inferred \u2014 Sleekplan REST API uses `Authorization: Bearer YOUR_API_KEY` from Settings > Developer; Zapier directory does not state auth)",
+  "webhook_sub_endpoint": "dashboard-only (Settings > Developer > Webhooks > Add webhook, URL with recommended ?key=SECRET query param); no programmatic subscription API documented",
+  "event_vocab_examples": [
+   "item.create",
+   "item.update",
+   "item.delete",
+   "comment.create",
+   "vote.create",
+   "subscription.create",
+   "user.create",
+   "changelog.create",
+   "changelog.subscribe",
+   "satisfaction.create"
+  ],
+  "event_filtering": "all-events-per-endpoint \u2014 docs describe registering a URL and Sleekplan 'starts delivering events immediately'; no event selection documented; consumer switches on the `action` field",
+  "signature_scheme": "none \u2014 docs explicitly state Sleekplan does not HMAC-sign payloads; recommended verification is a secret appended as a GET query parameter (?key=MY_SECRET_KEY) validated server-side",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "none documented; envelope is {product_id, action, data, timestamp(ms)} with no delivery or event id",
+  "learnings": "Sleekplan is the anti-pattern for attune's security story: no HMAC signature (secret-in-URL instead, which leaks via logs/referrers), no retry policy, no delivery id, and imperative-verb events (item.create) instead of past-tense. Its two good ideas are worth keeping: the `data` payload shape exactly mirrors the REST API resource representation (one schema to document), and its 14 instant Zapier triggers show that a wide event vocabulary maps 1:1 onto Zapier hook triggers cheaply.",
+  "sources": [
+   "https://zapier.com/apps/sleekplan/integrations",
+   "https://sleekplan.com/docs/webhooks.md",
+   "https://sleekplan.com/docs/api/overview.md",
+   "https://sleekplan.com/docs/authentication/api-keys.md"
+  ]
+ },
+ {
+  "name": "featureOS (Hellonext)",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 15,
+  "instant_triggers": 10,
+  "polling_triggers": 5,
+  "trigger_examples": [
+   "New Post",
+   "New Comment",
+   "New Vote in Post",
+   "Post Status Change",
+   "New Form Response"
+  ],
+  "action_total": 1,
+  "action_examples": [
+   "Create a New Post"
+  ],
+  "zapier_auth": "API key (inferred \u2014 featureOS API authenticates with an `API-KEY: hn_...` header; OAuth2 apps exist but the legacy HellonextCLIAPI Zapier app predates them; Zapier directory does not state auth)",
+  "webhook_sub_endpoint": "dashboard for org webhooks (Dashboard > Webhooks > Add Webhook: URL + description + event checkboxes); programmatic for OAuth apps: POST https://api.featureos.app/oauth/apps with webhook_url + subscribed_webhook_events[] (requires webhooks:manage scope), and per-install granted_webhook_events[] subset at consent",
+  "event_vocab_examples": [
+   "post_created",
+   "post_updated",
+   "post_completed",
+   "changelog_created",
+   "changelog_updated",
+   "changelog_published"
+  ],
+  "event_filtering": "per-subscription event-type array \u2014 dashboard webhooks select events at creation; OAuth apps declare subscribed_webhook_events and each installing org grants a subset (granted_webhook_events), auto-provisioning a webhook scoped to the granted events",
+  "signature_scheme": "HMAC signing stated for the shared webhook pipeline, but header name and algorithm are not documented in the public pages retrieved",
+  "retry_disable_policy": "3 retries at fixed intervals of 5 minutes, 30 minutes, and 2 hours after a non-200; after all fail the webhook is disabled and the owner emailed; manual re-enable in Organization Settings > Webhooks; per-webhook retry logs viewable in dashboard",
+  "dedup_mechanism": "none documented; payload is {type, data, created(unix)} with before/after diff objects for update events \u2014 no delivery id header",
+  "learnings": "Two ideas worth copying: (1) the before/after diff block inside update payloads (status transitions carry both old and new values \u2014 exactly what a Zapier 'status changed to X' filter needs), and (2) the OAuth-app model where the app declares subscribed_webhook_events and each tenant grants a subset \u2014 a clean consent story for attune's connector. Avoid the vocabulary drift (snake_case post_created in the app API vs camelCase postCompleted in the classic payload `type`) and the fixed 3-retry-then-disable policy which is harsher than backoff-based peers.",
+  "sources": [
+   "https://zapier.com/apps/hellonext/integrations",
+   "https://developers.featureos.app/docs/webhooks",
+   "https://developers.featureos.app/docs/webhooks/setup",
+   "https://developers.featureos.app/docs/webhooks/retry",
+   "https://developers.featureos.app/docs/webhooks/examples",
+   "https://developers.featureos.app/docs/oauth-apps/webhooks",
+   "https://developers.featureos.app/docs/authentication"
+  ]
+ },
+ {
+  "name": "Savio",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "medium",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 1,
+  "action_examples": [
+   "Log Product Feedback"
+  ],
+  "zapier_auth": "API token \u2014 Savio docs explicitly instruct including `Authorization: Token YOUR_TOKEN_VALUE` when using the API as a webhook target in Zapier",
+  "webhook_sub_endpoint": "",
+  "event_vocab_examples": [],
+  "event_filtering": "unknown \u2014 no outbound webhook or event system documented anywhere in Savio's public API reference",
+  "signature_scheme": "",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "",
+  "learnings": "Savio is the inbound-only counterexample: its Zapier app is a single write action (Log Product Feedback) and its API is ingest/read REST with token auth \u2014 no outbound events at all, so a customer cannot react to feedback triage in their own tools. This validates attune's thesis that outbound webhook subscriptions plus instant Zapier triggers are the differentiating half of a connector; a create-feedback action alone is table stakes. Savio's one nice touch: a copy-paste 'API reference for AI assistants' block in its docs.",
+  "sources": [
+   "https://zapier.com/apps/savio/integrations",
+   "https://www.savio.io/help/api/",
+   "https://www.savio.io/integrations/zapier/"
+  ]
+ },
+ {
+  "name": "Canny",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 5,
+  "instant_triggers": 5,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Post",
+   "New Comment",
+   "New Vote",
+   "Post Status Change",
+   "Tag Added to Post"
+  ],
+  "action_total": 6,
+  "action_examples": [
+   "Create a Post",
+   "Change Post Status",
+   "Comment on a Post",
+   "Create or Update User",
+   "Scan With Autopilot",
+   "Find Post (search)"
+  ],
+  "zapier_auth": "API key (Secret API Key from Canny Settings > API; Owner-level admin required to authorize)",
+  "webhook_sub_endpoint": "dashboard-only (configured in Your Subdomain > Settings > API; no public subscription REST endpoint documented \u2014 the Zapier CLI app evidently uses a private REST-hook subscribe API since all 5 triggers are Instant)",
+  "event_vocab_examples": [
+   "post.created",
+   "post.status_changed",
+   "post.tag_added",
+   "comment.created",
+   "vote.created",
+   "post.jira_issue_linked"
+  ],
+  "event_filtering": "unknown \u2014 docs list a global vocabulary of 13 event types; no per-subscription event selection is documented",
+  "signature_scheme": "canny-signature header = HMAC-SHA256 of the canny-nonce (NOT the body), keyed with the team API key, Base64-encoded; plus canny-timestamp (ms epoch, for replay protection) and canny-nonce (random, unique per request)",
+  "retry_disable_policy": "not documented (no retry/backoff/disable policy anywhere in the API reference)",
+  "dedup_mechanism": "canny-nonce header is unique per request and canny-timestamp guards replays; no explicit event-id dedup guidance",
+  "learnings": "Copy: all visible triggers as Instant REST hooks plus a Find Post search and Create-or-Update User action for vote-on-behalf round-trips; envelope shape {created, object, objectType, type} with objectType.verb naming is clean. Avoid: signing only a nonce instead of timestamp+body (weaker integrity), leaving retry policy undocumented, and offering no public programmatic subscription endpoint while the Zapier app clearly uses a private one.",
+  "sources": [
+   "https://zapier.com/apps/canny/integrations",
+   "https://developers.canny.io/api-reference",
+   "https://help.canny.io/en/articles/1627383-zapier-integration"
+  ]
+ },
+ {
+  "name": "Productboard",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 4,
+  "instant_triggers": 2,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Note (polling)",
+   "Updated Note (Instant)",
+   "New Feature (polling)",
+   "Updated Feature (Instant)"
+  ],
+  "action_total": 7,
+  "action_examples": [
+   "Create Note",
+   "Create Feature",
+   "Update Note",
+   "API Request (Beta)",
+   "Find Note (search)",
+   "Get Feature by ID (search)",
+   "List Note Relationships (search)"
+  ],
+  "zapier_auth": "API token (Bearer) \u2014 Productboard API supports API token / OAuth2 / OAuth S2S JWT; Zapier directory does not state which explicitly, vendor help says Zapier maintains the integration on top of the public API",
+  "webhook_sub_endpoint": "POST https://api.productboard.com/v2/webhooks with body {data:{fields:{name, events:[{eventType}], notification:{url (https, publicly resolvable, no loopback/private IPs), version:1, headers:{authorization}}}}}; also GET /v2/webhooks, GET/DELETE /v2/webhooks/{id}; requires webhooks:write scope",
+  "event_vocab_examples": [
+   "feature.created",
+   "feature.updated",
+   "feature.deleted",
+   "note.created",
+   "insight.created",
+   "hierarchy-entity.custom-field-value.updated",
+   "feature-release-assignment.updated"
+  ],
+  "event_filtering": "per-subscription event-type array (events: [{eventType}], at least one, no duplicates) validated against OAuth scopes",
+  "signature_scheme": "no HMAC signature \u2014 subscriber authenticates deliveries via a customer-configured static Authorization header (notification.headers.authorization, any scheme) echoed on every delivery",
+  "retry_disable_policy": "5s end-to-end delivery timeout; any 2XX acknowledges (204 preferred); failed deliveries retried with exponential backoff up to 8 attempts (1m, 3m, 9m, ...); too many timeouts/failures may result in Productboard disabling the subscription with notification loss",
+  "dedup_mechanism": "not documented \u2014 v1 payload carries entity id + eventType + links.target + updatedAttributes but no delivery/event id",
+  "learnings": "Copy: the cleanest programmatic subscription contract in the cohort \u2014 named subscriptions, event-type array, explicit payload version field, URL validation (https + SSRF guard), documented backoff schedule and auto-disable, thin payload with links.target fetch-back plus updatedAttributes diff hints. Avoid: shipping without HMAC body signing (static auth header is weaker) and without a delivery/event id for dedup; also note their Zapier 'New X' triggers fall back to polling \u2014 attune should make created-events instant too.",
+  "sources": [
+   "https://zapier.com/apps/productboard/integrations",
+   "https://developer.productboard.com/reference/createwebhook",
+   "https://developer.productboard.com/reference/authentication.md",
+   "https://support.productboard.com/hc/en-us/articles/360058216633-Integrate-with-Zapier"
+  ]
+ },
+ {
+  "name": "UserVoice",
+  "category": "feedback",
+  "zapier_exists": false,
+  "confidence": "high",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "",
+  "webhook_sub_endpoint": "dashboard-only (Admin Console > Integrations > Service hooks; Admin API v2 only exposes read-only GET /admin/service_hook_logs for delivery logs)",
+  "event_vocab_examples": [
+   "New Forum",
+   "New Idea",
+   "New Comment",
+   "Idea Internal Status Update",
+   "New Idea Status Update",
+   "Idea Votes Update"
+  ],
+  "event_filtering": "per-hook event checkboxes chosen in dashboard, optionally restricted to specific forums; no dotted machine-readable event tokens documented",
+  "signature_scheme": "'signature' request parameter = HMAC-SHA256 over the 'data' parameter (JSON or XML payload), keyed with the account's SSO key \u2014 no dedicated header",
+  "retry_disable_policy": "explicitly none \u2014 help doc FAQ: no auto-retry on failure; no bundling or rate limiting, individual events only",
+  "dedup_mechanism": "none documented",
+  "learnings": "Cautionary tale: zapier.com/apps/uservoice/integrations 404s and Zapier's app API returns zero results, so the listed slug no longer exists \u2014 a once-listed integration can disappear. Its service hooks are legacy design: dashboard-only, human-readable event names instead of stable tokens, signature keyed on the SSO key (credential reuse), and explicitly no retries. The per-forum event scoping is the one idea worth keeping (attune analog: per-source/tenant filters on a subscription).",
+  "sources": [
+   "https://zapier.com/apps/uservoice/integrations (HTTP 404)",
+   "https://zapier.com/api/v4/apps/?title_starts_with=uservoice (count 0)",
+   "https://help.uservoice.com/hc/en-us/articles/360035484333-Custom-Web-Service-Hooks",
+   "https://developer.uservoice.com/",
+   "https://uservoice.uservoice.com/api/v2/public/doc/api-v2-reference (OpenAPI: /admin/service_hook_logs)"
+  ]
+ },
+ {
+  "name": "Pendo",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 3,
+  "instant_triggers": 3,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Request",
+   "New Comment on Request",
+   "Request Status Changed"
+  ],
+  "action_total": 0,
+  "action_examples": [
+   "(only hidden Create/Update Customer write; no visible actions or searches)"
+  ],
+  "zapier_auth": "API key / integration auth token (hidden 'Check Auth Token' test trigger in the app; underlying Feedback API authenticates with an 'auth-token' header carrying the Feedback integration key)",
+  "webhook_sub_endpoint": "POST https://api.feedback.us.pendo.io/hooks with JSON {target_url, event} (one event string per subscription); unsubscribe via POST /hooks/unsubscribe with {target_url}; auth-token header",
+  "event_vocab_examples": [
+   "feature_created",
+   "feature_status_changed",
+   "feature_comment_created"
+  ],
+  "event_filtering": "one event type per subscription (subscribe call takes a single 'event' string; create one hook per event)",
+  "signature_scheme": "none documented",
+  "retry_disable_policy": "not documented",
+  "dedup_mechanism": "not documented",
+  "learnings": "The 'pendo' Zapier slug is actually Pendo Feedback (ex-Receptive, ReceptiveCLIAPI); the flagship Pendo product sits at pendo-legacy with only polling report triggers \u2014 evidence that a purpose-built REST-hook subscribe API (POST /hooks {target_url, event}) is exactly what makes instant Zapier triggers cheap to build. Copy the minimal subscribe/unsubscribe shape as the Zapier-facing surface, but avoid its gaps: no signature, no retry policy, no dedup, no list endpoint, and snake_case event names inconsistent with the industry object.verb style.",
+  "sources": [
+   "https://zapier.com/apps/pendo/integrations",
+   "https://zapier.com/apps/pendo-legacy/integrations",
+   "https://zapier.com/api/v4/apps/?title_starts_with=pendo",
+   "https://feedbackapi.pendo.io/ (Postman collection 13083765/Tzm8Fb1F, Hooks folder)"
+  ]
+ },
+ {
+  "name": "Sprig",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 1,
+  "instant_triggers": 1,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Survey Response"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "API key \u2014 environment-scoped 'Zapier API Key' (Development ID / Production ID from Sprig Integrations > Zapier > Get API Keys)",
+  "webhook_sub_endpoint": "dashboard-only (Integrations > Destinations > Webhook > Configure: payload URL + Bearer token + event checkboxes, per Product and per Environment; includes a Test Webhook button)",
+  "event_vocab_examples": [
+   "survey_response (eventType)",
+   "surveyResponse (eventName)",
+   "studySeen",
+   "studySent",
+   "surveyStatusChange",
+   "TEST"
+  ],
+  "event_filtering": "per-configuration event checkboxes in dashboard (Answer submitted, Study submitted, Study sent, Study seen, Theme identified, Study status changed); one config per Product+Environment",
+  "signature_scheme": "none \u2014 outbound requests carry a customer-set static Bearer token in the authorization header; no HMAC",
+  "retry_disable_policy": "not documented",
+  "dedup_mechanism": "numeric 'id' (webhook ID) field in the Answer Submitted payload; no formal delivery-id/dedup guidance",
+  "learnings": "Minimal viable Zapier surface: a single Instant trigger with zero actions still ships value for a survey product, and environment-scoped API keys (dev vs prod ID) are a nice tenancy idea for attune. Avoid its event naming chaos \u2014 three parallel vocabularies (human labels, eventType snake_case, eventName camelCase) across payloads with inconsistent field docs; the built-in Test Webhook button is worth copying for DX.",
+  "sources": [
+   "https://zapier.com/apps/sprig/integrations",
+   "https://docs.sprig.com/docs/zapier",
+   "https://docs.sprig.com/docs/integrations/data-destinations/webhooks.md"
+  ]
+ },
+ {
+  "name": "Featurebase",
+  "category": "feedback",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 2,
+  "instant_triggers": 0,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Post",
+   "New Comment"
+  ],
+  "action_total": 4,
+  "action_examples": [
+   "Create Post",
+   "Change Post Status",
+   "Upvote Post",
+   "Create Changelog"
+  ],
+  "zapier_auth": "API key (Settings > Integrations > next to Zapier click Get API Key, paste into Zapier)",
+  "webhook_sub_endpoint": "POST https://do.featurebase.app/v2/webhooks with {name, url (https), description?, topics[], requestConfig?{timeoutMs, headers (max 10)}}; response includes signing secret 'whsec_...'; full CRUD: list/retrieve/update/delete plus refresh_secret rotation endpoint; max 10 endpoints per org; versioned via Featurebase-Version header (2026-01-01.nova); dashboard config also available",
+  "event_vocab_examples": [
+   "post.created",
+   "post.updated",
+   "post.voted",
+   "comment.created",
+   "changelog.published",
+   "conversation.user.created",
+   "conversation.admin.assigned",
+   "audit_log.created"
+  ],
+  "event_filtering": "per-subscription topics array (subscribe to exactly the topics you need; ~28 topics across feedback, changelog, and conversation domains)",
+  "signature_scheme": "X-Webhook-Signature = hex HMAC-SHA256 over '{timestamp}.{raw body}' keyed with the whsec_ secret, plus X-Webhook-Timestamp (Unix seconds); docs mandate 5-minute replay window and constant-time compare \u2014 Stripe-style",
+  "retry_disable_policy": "up to 3 automatic retries at 1 minute, 1 hour, and 6 hours; failure = non-2xx, timeout, or connection failure; webhook objects carry a status field ('active') but no documented auto-disable threshold",
+  "dedup_mechanism": "notification_event envelope with unique event id ('notif_<uuid7>'); docs explicitly instruct persisting processed IDs and skipping duplicates; ordering explicitly NOT guaranteed",
+  "learnings": "The best end-to-end reference for attune's webhook-subscription API: programmatic CRUD + topics array + whsec_ secret returned at creation + rotation endpoint + Stripe-style timestamp.body HMAC + documented retry ladder + notif_ event-id dedup + explicit no-ordering contract + date-tagged API versioning. Ironically its Zapier triggers are plain polling \u2014 proving a great webhook API still needs the Zapier app wired to REST hooks to get the Instant badge; attune should do both.",
+  "sources": [
+   "https://zapier.com/apps/featurebase/integrations",
+   "https://developers.featurebase.app/guides/webhooks",
+   "https://developers.featurebase.app/guides/webhooks/topics",
+   "https://developers.featurebase.app/guides/webhooks/security",
+   "https://developers.featurebase.app/guides/webhooks/delivery",
+   "https://developers.featurebase.app/api/resources/webhooks/methods/create",
+   "https://help.featurebase.app/en/articles/7019199-zapier-integration"
+  ]
+ },
+ {
+  "name": "Vercel",
+  "category": "devops",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 2,
+  "instant_triggers": 0,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Deployment",
+   "New Project"
+  ],
+  "action_total": 3,
+  "action_examples": [
+   "Create Deployment",
+   "Create Project",
+   "Find Project (search)"
+  ],
+  "zapier_auth": "API key (Vercel personal access token pasted into Zapier as 'Vercel API Token', optional Team ID field)",
+  "webhook_sub_endpoint": "POST https://api.vercel.com/v1/webhooks with JSON body {\"url\": \"https://example.com\", \"events\": [...], \"projectIds\": [...]} (Bearer token; optional ?teamId= query param). Response returns one-time secret + webhook id. Also GET list / GET one / DELETE. Dashboard config also available (Team Settings > Webhooks, Pro/Enterprise).",
+  "event_vocab_examples": [
+   "deployment.created",
+   "deployment.succeeded",
+   "deployment.ready",
+   "deployment.error",
+   "deployment.canceled",
+   "deployment.promoted",
+   "project.created"
+  ],
+  "event_filtering": "per-subscription event-type array (events[]) plus optional resource scoping via projectIds[]",
+  "signature_scheme": "x-vercel-signature header, HMAC-SHA1 hex digest of the raw request body using the webhook secret (integration webhooks use the OAuth2 Client Secret); docs recommend constant-time comparison",
+  "retry_disable_policy": "30-second delivery timeout; non-2xx responses retried with exponential backoff for up to 24 hours, then the event is discarded (no documented auto-disable of the endpoint)",
+  "dedup_mechanism": "Payload envelope carries 'id' documented as 'The ID of the webhook delivery' plus type/createdAt/region; consumers dedupe on id",
+  "learnings": "Vercel is the cleanest minimal reference for attune: one POST /v1/webhooks endpoint taking url + events[] + resource-id scoping, secret returned exactly once at creation, envelope {id,type,createdAt,payload}. Copy the envelope + per-subscription events array; avoid copying HMAC-SHA1 (use SHA-256) and note their weak Zapier app (polling-only) shows shipping REST-hook triggers is a differentiator.",
+  "sources": [
+   "https://zapier.com/apps/vercel/integrations",
+   "https://help.zapier.com/hc/en-us/articles/44933162773517-How-to-get-started-with-Vercel-on-Zapier",
+   "https://vercel.com/docs/webhooks",
+   "https://vercel.com/docs/webhooks/webhooks-api",
+   "https://vercel.com/docs/rest-api/reference/endpoints/webhooks/creates-a-webhook"
+  ]
+ },
+ {
+  "name": "Netlify",
+  "category": "devops",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 4,
+  "instant_triggers": 4,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Deploy Succeeded",
+   "New Deploy Started",
+   "New Deploy Failed",
+   "New Form Submission"
+  ],
+  "action_total": 1,
+  "action_examples": [
+   "Start Deploy"
+  ],
+  "zapier_auth": "Not explicitly documented in directory/help (getting-started article 404s); Netlify API uses OAuth2 bearer tokens and the connection uses Zapier's standard 'Add connection' flow",
+  "webhook_sub_endpoint": "POST /api/v1/hooks?site_id={site_id} with body {site_id, type (\"url\"|\"email\"|\"slack\"), event, data:{url:...}}; GET /api/v1/hooks?site_id=, GET/PUT/DELETE /api/v1/hooks/{hook_id}, POST /hooks/{hook_id}/enable, GET /hooks/types. Dashboard 'Deploy notifications' UI configures the same hooks.",
+  "event_vocab_examples": [
+   "deploy_created",
+   "deploy_failed",
+   "submission_created"
+  ],
+  "event_filtering": "one event per hook object (create N hooks for N events); no events-array per subscription",
+  "signature_scheme": "X-Webhook-Signature header carrying a JWS (JWT, HS256) whose claims are {iss:\"netlify\", sha256:<hex SHA-256 of payload>}; only sent if a JWS secret is configured (optional)",
+  "retry_disable_policy": "not documented in the deploy-notifications or API docs",
+  "dedup_mechanism": "not documented (payload is a JSON representation of the deploy/submission object; consumers key on deploy id)",
+  "learnings": "Netlify proves a tiny surface works: 4 all-Instant Zapier triggers built on one-event-per-hook subscriptions. The JWT-wrapped signature (X-Webhook-Signature JWS) is more complex for receivers than plain HMAC-hex \u2014 attune should prefer Stripe/HubSpot-style HMAC-SHA256. One-event-per-hook forces N subscriptions for N events; attune's events-array design is friendlier. Undocumented retry policy is a gap to avoid.",
+  "sources": [
+   "https://zapier.com/apps/netlify/integrations",
+   "https://docs.netlify.com/deploy/deploy-notifications.md",
+   "https://docs.netlify.com/api/get-started/",
+   "https://open-api.netlify.com/swagger.json",
+   "https://www.netlify.com/blog/2018/11/07/automate-your-netlify-sites-with-zapier/"
+  ]
+ },
+ {
+  "name": "HubSpot",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 27,
+  "instant_triggers": 7,
+  "polling_triggers": 20,
+  "trigger_examples": [
+   "New Contact (polling)",
+   "New Deal (Instant)",
+   "New Form Submission (Instant)",
+   "Deal Property Change (Instant)",
+   "CRM Object Recently Created or Updated (polling)"
+  ],
+  "action_total": 58,
+  "action_examples": [
+   "Create Contact",
+   "Create Deal",
+   "Create or Update Contact",
+   "Find Contact (search)",
+   "API Request (Beta)"
+  ],
+  "zapier_auth": "OAuth2 (log into HubSpot in a popup and grant Zapier access)",
+  "webhook_sub_endpoint": "Classic app webhooks: app-level settings (GET/PUT /webhooks/2026-3/{appId}/settings with {targetUrl, throttling.maxConcurrentRequests}) + per-event subscriptions (POST /webhooks/2026-3/{appId}/subscriptions, one eventType each; developer API key auth). New v4 model is pull-based: POST https://api.hubapi.com/webhooks-journal/subscriptions/v4 {objectTypeId, subscriptionType OBJECT|ASSOCIATION, actions [CREATE,UPDATE,DELETE], properties[], objectIds[]} with no targetUrl \u2014 the app polls a journal (GET /webhooks-journal/journal/v4/latest|earliest|offset/{offset}/next).",
+  "event_vocab_examples": [
+   "contact.creation",
+   "contact.propertyChange",
+   "deal.creation",
+   "company.deletion",
+   "ticket.merge",
+   "conversation.newMessage",
+   "object.creation",
+   "object.propertyChange",
+   "contact.privacyDeletion"
+  ],
+  "event_filtering": "one targetUrl per app; one subscription object per event type (objectType.action), property-change subscriptions filter by propertyName; deliveries are batched arrays of up to 100 notifications per POST",
+  "signature_scheme": "X-HubSpot-Signature (SHA-256 of app client secret + raw body); v3: X-HubSpot-Signature-v3 = base64(HMAC-SHA256(client_secret, method+uri+body+timestamp)) with X-HubSpot-Request-Timestamp, reject if older than 5 minutes",
+  "retry_disable_policy": "retries on connection failure, >5s timeout, or any 4xx/5xx; up to 10 retries spread over 24 hours with randomized jitter; concurrency capped at maxConcurrentRequests (min >5, default 10)",
+  "dedup_mechanism": "each notification carries eventId (explicitly 'not guaranteed to be unique'), subscriptionId, attemptNumber (starts at 0), occurredAt; v4 journal uses UUID offsets for exactly-once-style sequential consumption",
+  "learnings": "HubSpot's dotted objectType.action vocabulary (contact.creation, deal.propertyChange, generic object.*) is the naming style attune should copy, and its payload fields (eventId, subscriptionId, occurredAt, attemptNumber) are a good envelope checklist. Its weaknesses are instructive: one target URL per app (not per subscription) and a non-unique eventId force awkward consumer dedup \u2014 attune should give each subscription its own URL+secret and a globally unique delivery id. Batched arrays (<=100 events/POST) are worth considering for burst efficiency.",
+  "sources": [
+   "https://zapier.com/apps/hubspot/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495919882253-How-to-get-started-with-HubSpot-on-Zapier",
+   "https://developers.hubspot.com/docs/api-reference/latest/webhooks/guide.md",
+   "https://developers.hubspot.com/docs/guides/api/app-management/webhooks",
+   "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/request-validation.md",
+   "https://developers.hubspot.com/docs/apps/developer-platform/add-features/configure-webhooks.md",
+   "https://developers.hubspot.com/docs/apps/legacy-apps/public-apps/create-generic-webhook-subscriptions.md"
+  ]
+ },
+ {
+  "name": "Salesforce",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "medium",
+  "trigger_total": 9,
+  "instant_triggers": 1,
+  "polling_triggers": 8,
+  "trigger_examples": [
+   "New Record (polling)",
+   "Updated Record (polling)",
+   "New Outbound Message (Instant)",
+   "Updated Field on Record (polling)",
+   "New Lead (polling)"
+  ],
+  "action_total": 31,
+  "action_examples": [
+   "Create Record",
+   "Update Record",
+   "Find Record (search)",
+   "Custom SOQL Query (search)",
+   "Launch Flow"
+  ],
+  "zapier_auth": "OAuth2 (log into Salesforce and grant access; requires My Domain and Zapier approved as an External Client App; connected-app limit of 5 access tokens per account)",
+  "webhook_sub_endpoint": "No generic public REST webhook-subscription endpoint. Push integrations are (a) Outbound Messages: SOAP/XML POSTs to a listener URL, configured through Workflow/Flow in Setup (dashboard-only) \u2014 this is what backs Zapier's one Instant trigger; (b) Change Data Capture / Platform Events consumed by subscribing to channels (e.g. /data/Employee__ChangeEvent) over Pub/Sub API (gRPC) or CometD \u2014 a streaming subscription, not an HTTP callback registration.",
+  "event_vocab_examples": [
+   "/data/Employee__ChangeEvent (channel)",
+   "ChangeEventHeader.changeType: CREATE",
+   "ChangeEventHeader.changeType: UPDATE",
+   "ChangeEventHeader.changeType: DELETE"
+  ],
+  "event_filtering": "topic/channel-based: subscribe per object change-event channel; objects must be enabled for Change Data Capture in Setup; changeType + changedFields discriminate within the channel",
+  "signature_scheme": "none documented for Outbound Messages (SOAP over HTTPS; receiver acks via SOAP response); CDC/Pub-Sub is an authenticated streaming connection so no per-delivery signature",
+  "retry_disable_policy": "not retrieved from primary docs (developer.salesforce.com help pages are JS-rendered and blocked); not asserted here",
+  "dedup_mechanism": "CDC events carry ChangeEventHeader with transactionKey, sequenceNumber, commitNumber and commitTimestamp for ordering/dedup; consumers replay streams from a position",
+  "learnings": "Salesforce is the anti-pattern for attune's goal: no simple 'POST a URL + events' API, push requires SOAP Outbound Messages configured in the admin UI, and its Zapier app is consequently 8/9 polling. The lesson is that heavyweight enterprise eventing (gRPC Pub/Sub, replay ids) maximizes power but makes third-party Instant triggers rare; attune should ship the simple HTTP subscription Salesforce lacks. Its transactionKey/sequenceNumber ordering metadata is worth borrowing conceptually for dedup.",
+  "sources": [
+   "https://zapier.com/apps/salesforce/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8496020790925-How-to-get-started-with-Salesforce-on-Zapier",
+   "https://trailhead.salesforce.com/content/learn/modules/change-data-capture/subscribe-to-events"
+  ]
+ },
+ {
+  "name": "Pipedrive",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 18,
+  "instant_triggers": 11,
+  "polling_triggers": 7,
+  "trigger_examples": [
+   "New Deal (Instant)",
+   "Updated Deal Stage (Instant)",
+   "New Person (Instant)",
+   "Deleted Person (Instant)",
+   "Deal Matching Filter (polling)"
+  ],
+  "action_total": 47,
+  "action_examples": [
+   "Create Deal",
+   "Update Deal",
+   "Create Person",
+   "Find Deals (search)",
+   "API Request (Beta)"
+  ],
+  "zapier_auth": "OAuth2 (log into Pipedrive and grant Zapier access)",
+  "webhook_sub_endpoint": "POST /v1/webhooks with JSON body {subscription_url (required, public HTTPS, no redirects, cannot be a Pipedrive API URL), event_action (required), event_object (required), user_id, http_auth_user, http_auth_password, name}; also manageable in-app at Settings > Tools and apps > Webhooks. Version field \"2.0\" selects Webhooks v2.",
+  "event_vocab_examples": [
+   "create.deal",
+   "change.deal",
+   "delete.persons",
+   "*.*",
+   "event_action values: create|change|delete|*",
+   "event_object values: activity|deal|lead|note|organization|person|product|user|*"
+  ],
+  "event_filtering": "one action.object pair per webhook with wildcard support (*.* = all events); wildcards match all supported actions/objects \u2014 N precise pairs need N webhooks unless wildcarded",
+  "signature_scheme": "no HMAC signature for general webhooks; receiver authentication is optional HTTP Basic auth via http_auth_user/http_auth_password on the subscription",
+  "retry_disable_policy": "success = any 2XX within 10s; on failure retries 3 more times after 3s, 30s and 150s; repeated unreachability increments a ban counter (banned webhook's events are lost); webhook is deleted after 3 consecutive days with no successful delivery",
+  "dedup_mechanism": "meta block on every payload: id (event ID), correlation_id, entity, action, entity_id, timestamp, attempt (delivery attempt number), is_bulk_edit, version",
+  "learnings": "Pipedrive shows what powers a heavily-Instant Zapier app (11/18 Instant): a dead-simple POST /v1/webhooks and a two-part action.object event grammar with wildcards \u2014 attune's event vocabulary could adopt the same verb.noun style plus '*' support. Its meta block (event id + correlation_id + attempt + previous-vs-data diff) is an excellent envelope model. Avoid: Basic-auth-only delivery security (no HMAC) and the aggressive silent auto-delete after 3 bad days, which loses events without notification.",
+  "sources": [
+   "https://zapier.com/apps/pipedrive/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495922929037-How-to-get-started-with-Pipedrive-on-Zapier",
+   "https://pipedrive.readme.io/docs/guide-for-webhooks-v2.md",
+   "https://developers.pipedrive.com/docs/api/v1/Webhooks"
+  ]
+ },
+ {
+  "name": "Mailchimp",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 10,
+  "instant_triggers": 3,
+  "polling_triggers": 7,
+  "trigger_examples": [
+   "New Subscriber (Instant)",
+   "New Unsubscriber (Instant)",
+   "New or Updated Subscriber (Instant)",
+   "New Campaign (polling)",
+   "Email Opened (polling)"
+  ],
+  "action_total": 19,
+  "action_examples": [
+   "Add/Update Subscriber",
+   "Add Subscriber to Tag",
+   "Send Campaign",
+   "Find a Subscriber (search)",
+   "API Request (Beta)"
+  ],
+  "zapier_auth": "OAuth2 (log into Mailchimp and grant Zapier access)",
+  "webhook_sub_endpoint": "POST /lists/{list_id}/webhooks (Marketing API, per-audience) to create; GET list, GET/PATCH/DELETE /lists/{list_id}/webhooks/{webhook_id}; also configurable per-audience in the web app (Audience > Settings > Webhooks), where update-type checkboxes select trigger events",
+  "event_vocab_examples": [
+   "subscribe",
+   "unsubscribe (payload type field, e.g. {\"type\":\"unsubscribe\",\"fired_at\":...,\"data\":{...}})"
+  ],
+  "event_filtering": "per-webhook set of event flags (checkbox 'update types' per audience webhook) plus source filters (whether user/admin/API-originated changes fire); webhook is scoped to one list/audience",
+  "signature_scheme": "X-Mailchimp-Signature: t={unix_ts},v1={hex} where v1 = HMAC-SHA256(signing_secret, \"{timestamp}.{raw_body}\"); signing secret shown once at creation; verification optional; reject if timestamp older than 5 minutes; deliveries are application/x-www-form-urlencoded",
+  "retry_disable_policy": "10-second response timeout; failed deliveries retried at increasing intervals over 75 minutes; excessive or unresponsive webhooks may be dropped or disabled at Mailchimp's discretion",
+  "dedup_mechanism": "no delivery-id header documented; payload has fired_at timestamp and data.id \u2014 consumers dedupe on content",
+  "learnings": "Mailchimp's timestamped signature format (t={ts},v1={hex} HMAC-SHA256 over 'timestamp.body' with 5-min replay window, Stripe-style) is the exact scheme attune should copy \u2014 it is the most modern of the six. Avoid: form-encoded payloads (JSON is table stakes), the short 75-minute retry horizon, discretionary undefined auto-disable, and the missing delivery id. Note its Instant Zapier triggers cover only the subscriber lifecycle where webhooks exist \u2014 trigger coverage tracks the webhook vocabulary 1:1.",
+  "sources": [
+   "https://zapier.com/apps/mailchimp/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495967673485-How-to-get-started-with-Mailchimp-on-Zapier",
+   "https://mailchimp.com/developer/marketing/guides/sync-audience-data-webhooks/",
+   "https://mailchimp.com/developer/marketing/api/list-webhooks/"
+  ]
+ },
+ {
+  "name": "PostHog",
+  "category": "analytics",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "Custom/API-key: 'Personal API Key' field sent as Authorization: Bearer <key>, plus optional API Host field for Cloud EU/self-hosted (from official posthog-zapier repo authentication.ts)",
+  "trigger_total": 1,
+  "instant_triggers": 1,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "Action Performed (Instant, isHook=true)",
+   "Action Defined (hidden, Instant \u2014 dropdown helper)",
+   "Annotation Created (hidden, deprecated)",
+   "Organization Created (hidden polling helper)",
+   "Project Created (hidden polling helper)"
+  ],
+  "action_total": 1,
+  "action_examples": [
+   "Capture Event (org + project + event name + distinct_id + properties dict + timestamp)"
+  ],
+  "webhook_sub_endpoint": "POST /api/projects/{project_id}/hooks/ with body {target: <url>, event: <event>, resource_id: <action_id>}; DELETE /api/projects/{project_id}/hooks/{hook_id}. Programmatic REST-hook API, but target domain is hard-restricted to hooks.zapier.com and the endpoint is hidden from API docs (hide_api_docs=true). Create internally provisions a HogFunction CDP destination. General-purpose webhooks are dashboard-configured CDP 'HTTP Webhook' destinations instead.",
+  "event_vocab_examples": [
+   "action_performed",
+   "action_defined",
+   "annotation_created"
+  ],
+  "event_filtering": "one event string per subscription (HOOK_EVENTS validated at write; only 'action_performed' remains valid) plus resource_id scoping to a specific Action; CDP destinations filter by action/event match rules",
+  "signature_scheme": "none documented \u2014 Zapier hook payload carries no HMAC header; body includes hook.id/hook.event/hook.target envelope",
+  "retry_disable_policy": "not documented for the hooks API; delivery now runs through CDP HogFunctions (webhook template throws on status >= 400, retries handled by pipeline, no published schedule)",
+  "dedup_mechanism": "payload envelope hook.id is set to the event UUID (eventUuid also in data) \u2014 consumer-side dedup key",
+  "learnings": "Copy PostHog's REST-hook triad: POST/DELETE hooks endpoint taking {target, event, resource_id} with the subscribe response id used for unsubscribe \u2014 it maps 1:1 onto Zapier's performSubscribe/performUnsubscribe. Avoid their Zapier-only target-domain restriction and hidden API docs; attune's endpoint should be public and generic. Also note they validate event against an allow-list at write time, matching attune's append-only source discipline.",
+  "sources": [
+   "https://zapier.com/apps/posthog/integrations (NEXT_DATA JSON)",
+   "https://github.com/PostHog/posthog-zapier (src/authentication.ts, src/utils.ts, src/triggers/action_performed.ts, README.md)",
+   "https://github.com/PostHog/posthog products/cdp/backend/api/hooks.py and models/hook.py",
+   "https://app.posthog.com/api/schema/ (OpenAPI)",
+   "https://github.com/PostHog/posthog.com contents/docs/cdp/destinations/webhook.mdx"
+  ]
+ },
+ {
+  "name": "Amplitude",
+  "category": "analytics",
+  "zapier_exists": false,
+  "confidence": "high",
+  "zapier_auth": "",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 0,
+  "action_examples": [],
+  "webhook_sub_endpoint": "dashboard-only \u2014 'Webhooks Streaming' destination created in Amplitude Data > Destinations UI (webhook URL + up to 5 custom headers + event/user forwarding toggles); no public subscription API",
+  "event_vocab_examples": [],
+  "event_filtering": "per-sync UI event picker ('Select and filter events') on the destination; no event-type string vocabulary \u2014 streams selected product analytics events and Identify calls",
+  "signature_scheme": "none documented \u2014 only preset headers Content-Type: application/json and User-Agent: Amplitude/Webhook/1.0, plus user-defined static headers",
+  "retry_disable_policy": "1 initial attempt + 9 more over 4 hours on failure; within each attempt an immediate inner retry for 5xx/429: max 3 tries, exponential from 100ms doubling with 50% jitter, capped at 4s",
+  "dedup_mechanism": "none documented for webhook delivery",
+  "learnings": "Amplitude's Zapier directory entry is an empty 'upcoming' placeholder (no implementation, zero triggers/actions) \u2014 a warning that a directory listing without a real connector is worse than none. Their two-layer retry (outer 10 attempts/4h + inner fast retry with jitter for 5xx/429) is a solid pattern attune can copy. Its FreeMarker payload templating is powerful but heavyweight; attune should prefer a fixed versioned envelope.",
+  "sources": [
+   "https://zapier.com/apps/amplitude/integrations (NEXT_DATA: isUpcoming=true, currentImplementation=null)",
+   "https://zapier.com/api/v4/apps/?title_search=amplitude",
+   "https://amplitude.com/docs/data/destination-catalog/webhooks"
+  ]
+ },
+ {
+  "name": "Mixpanel",
+  "category": "analytics",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "API key ('other'): Project Token field + optional Region field (EU/India data residency) \u2014 write-only ingestion token, no OAuth (from Zapier v4 implementations API)",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "(only hidden 'Test Auth' polling read exists \u2014 no user-facing triggers)"
+  ],
+  "action_total": 2,
+  "action_examples": [
+   "Track Event",
+   "Create or Update Profile (engage)"
+  ],
+  "webhook_sub_endpoint": "dashboard-only \u2014 cohort webhooks via Data > Destinations > Add Destination > Webhook (URL + optional Basic Auth); alert webhooks via Gear > Destinations > Notification Webhook (URL + Basic Auth username/password). Webhook URL cannot even be edited or deleted after creation, only disconnected.",
+  "event_vocab_examples": [
+   "members",
+   "add_members",
+   "remove_members"
+  ],
+  "event_filtering": "not event-typed \u2014 per-cohort sync selection; each POST carries an 'action' field (members/add_members/remove_members) plus parameters.mixpanel_cohort_id; alerts route per-alert to a chosen webhook",
+  "signature_scheme": "none \u2014 optional HTTP Basic Authentication only",
+  "retry_disable_policy": "cohort syncs every 30 min, batch 1000 users/call; 5 retries over 60s with exponential backoff on 5xx/429; syncs PAUSED (with email notification) on non-transient 400/401/403/404; 3-day snapshot expiry forces full re-sync; expects a JSON ack body {action, status: success|failure, error}",
+  "dedup_mechanism": "mixpanel_session_id identifies one export, page_info {total_pages, page_count} orders multi-page payloads; docs explicitly warn duplicate member delivery after mid-sync failure \u2014 consumer must dedup",
+  "learnings": "Mixpanel is action-only on Zapier (push data in, no triggers out) \u2014 attune should do the opposite and lead with instant triggers. Copy their explicit non-transient-4xx pause + email-notification policy and their response-ack contract idea; avoid their un-editable/un-deletable webhook config and their requirement that receivers implement diff/dedup logic themselves.",
+  "sources": [
+   "https://zapier.com/apps/mixpanel/integrations (NEXT_DATA JSON)",
+   "https://zapier.com/api/v4/implementations/ (MixpanelCLIAPI@1.3.1 auth_fields)",
+   "https://github.com/mixpanel/docs docs/cohort-sync/webhooks.mdx",
+   "https://github.com/mixpanel/docs docs/features/alerts.mdx (Webhook Alerts)"
+  ]
+ },
+ {
+  "name": "Heap",
+  "category": "analytics",
+  "zapier_exists": false,
+  "confidence": "medium",
+  "zapier_auth": "",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 0,
+  "action_examples": [],
+  "webhook_sub_endpoint": "dashboard-only \u2014 beta 'Event Webhooks' created in the in-app webhooks console (URL + custom HTTP headers + templated one-level JSON body + triggering events); feature must be enabled by support. Zapier integration is done manually via 'Webhooks by Zapier' Catch Hook on the trigger side and raw POSTs to https://heapanalytics.com/api/track on the action side.",
+  "event_vocab_examples": [],
+  "event_filtering": "per-webhook list of triggering events chosen from the account's defined/labeled events \u2014 no fixed event-type string vocabulary",
+  "signature_scheme": "none \u2014 'Webhooks only support basic header authentication methods' (static headers); no HMAC documented",
+  "retry_disable_policy": "not documented; beta explicitly disclaims uptime/deliverability guarantees and reserves the right to shut down webhooks causing load",
+  "dedup_mechanism": "none documented",
+  "learnings": "Heap shows the cost of not shipping a first-party connector: its Zapier directory page 404s and users are pointed at generic Webhooks-by-Zapier plumbing with hand-built JSON payloads. Its beta webhook limits (one-level JSON nesting, no arrays, static-header auth only, no retry contract) are all things attune's design should explicitly exceed.",
+  "sources": [
+   "https://zapier.com/apps/heap/integrations (HTTP 404)",
+   "https://zapier.com/api/v4/apps/?title_search=heap (no Heap app)",
+   "https://help.heap.io/hc/en-us/articles/37271927333137-Zapier-Integration",
+   "https://help.heap.io/hc/en-us/articles/37271953461393-Event-Webhooks-Integration-beta",
+   "https://help.heap.io/hc/en-us/articles/37271893062033-Does-Heap-support-Webhooks"
+  ]
+ },
+ {
+  "name": "Hotjar",
+  "category": "analytics",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "OAuth2 (auth_type: oauth, access_token + refresh_token fields per Zapier v4 implementations API)",
+  "trigger_total": 3,
+  "instant_triggers": 3,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Feedback (Instant)",
+   "New Recording (Instant)",
+   "New Survey Response (Instant)",
+   "(hidden polling helpers: List Feedback Widgets, List Surveys)"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "webhook_sub_endpoint": "dashboard-only \u2014 webhook URL is entered per Survey or per Recording Segment in the Hotjar UI (Scale plan); no public programmatic subscription endpoint documented",
+  "event_vocab_examples": [
+   "survey_response",
+   "recording",
+   "test_message",
+   "site_downgrade"
+  ],
+  "event_filtering": "one endpoint per resource (survey / recording segment); envelope is {event: <name>, version: 1, data: {...}} and receivers must tolerate unknown event types and unknown fields",
+  "signature_scheme": "com-hotjar-signature header, HMAC-SHA3-256 over the raw payload bytes with a per-site signing key ('View Webhook key' in settings); payload timestamp used for replay prevention (discard if >5 min old, verify HMAC first)",
+  "retry_disable_policy": "up to 6 retries: 30s, 1m, 2m, 5m, 10m, 20m; stops on any 2xx; HTTP 410 response causes Hotjar to DELETE the webhook; HTTPS required; 10s response timeout",
+  "dedup_mechanism": "explicit requirement: receivers dedup on the unique identifier in each message (e.g. survey response id / api_id); duplicates possible",
+  "learnings": "Hotjar is the best single model for attune's webhook contract: versioned envelope {event, version, data}, snake_case event names, documented retry ladder with 410-based auto-unsubscribe, HMAC signature header + timestamp replay protection, and explicit forward-compatibility rules (tolerate unknown events/fields). Copy nearly all of it \u2014 but use HMAC-SHA256 rather than SHA3-256 for ecosystem tooling compatibility, and expose subscriptions via API, not just dashboard. Their all-Instant, zero-action Zapier app also validates a trigger-first connector.",
+  "sources": [
+   "https://zapier.com/apps/hotjar/integrations (NEXT_DATA JSON)",
+   "https://zapier.com/api/v4/implementations/ (HotjarCLIAPI@2.1.0 auth)",
+   "https://help.hotjar.com/hc/en-us/articles/36820033755281-Webhooks-Reference",
+   "https://help.hotjar.com/hc/en-us/articles/36820033943569-Using-Hotjar-with-Zapier",
+   "https://help.hotjar.com/hc/en-us/articles/36819965653009-How-to-Set-Up-the-Hotjar-API"
+  ]
+ },
+ {
+  "name": "Segment",
+  "category": "analytics",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "API key ('other'): Segment Public API token (Workspace Settings > Access Management > Tokens) + required Region field (api.segmentapis.com vs eu1.api.segmentapis.com); listed as a Premium Zapier app under slug twilio-segment",
+  "trigger_total": 1,
+  "instant_triggers": 1,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Event (Instant \u2014 fires when an event reaches a 'Zapier Actions' destination; inputs: destinationId, zapIdentifier, fqlType/custom FQL filter, sampleEvent)",
+   "(hidden polling helpers: List Destinations, List Sources)"
+  ],
+  "action_total": 3,
+  "action_examples": [
+   "Send Event (to Segment HTTP API)",
+   "Create Source (Zapier source)",
+   "Create Destination (Zapier Actions destination)"
+  ],
+  "webhook_sub_endpoint": "hybrid: classic Webhooks destination is dashboard-configured (up to 5 URLs + headers + sharedSecret); the Zapier app provisions 'Zapier Actions' destinations programmatically through the Segment Public API (api.segmentapis.com) with per-subscription FQL filters \u2014 general destination/subscription CRUD is available via that Public API",
+  "event_vocab_examples": [
+   "track",
+   "identify",
+   "page",
+   "screen",
+   "group",
+   "alias",
+   "delete"
+  ],
+  "event_filtering": "spec-type based (the 7 Segment spec call types) plus per-subscription FQL (Filter Query Language) predicates for fine-grained event matching in Actions destinations",
+  "signature_scheme": "X-Signature header, hex HMAC-SHA1 of the JSON-stringified request body using the configured sharedSecret; for batched delivery only the FIRST event in the batch is signed",
+  "retry_disable_policy": "5s response timeout; retries temporary failures (timeouts, 5xx) for up to 4 hours; with multiple webhook URLs, success on any one URL stops retries to the others",
+  "dedup_mechanism": "none documented in the webhook destination docs (no delivery-id header)",
+  "learnings": "Segment's FQL-per-subscription filtering is the power-user ceiling for event filtering \u2014 attune only needs the simpler event-type-array model, but should note the pattern of the Zapier trigger programmatically creating a scoped subscription (destinationId + zapIdentifier) per Zap. Avoid HMAC-SHA1 and the sign-only-first-event-in-batch quirk, which is confusing and weak; sign the whole body with SHA-256.",
+  "sources": [
+   "https://zapier.com/apps/twilio-segment/integrations (NEXT_DATA JSON incl. newEvent trigger needs + FQL help text)",
+   "https://zapier.com/api/v4/implementations/ (App233766CLIAPI@1.1.0 auth)",
+   "https://github.com/segmentio/segment-docs src/connections/destinations/catalog/webhooks/index.md",
+   "https://github.com/segmentio/segment-docs src/connections/destinations/catalog/actions-webhook/index.md",
+   "https://github.com/segmentio/segment-docs src/connections/destinations/catalog/zapier/index.md",
+   "https://github.com/segmentio/action-destinations packages/destination-actions/src/destinations/zapier/index.ts"
+  ]
+ },
+ {
+  "name": "Customer.io",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 3,
+  "action_examples": [
+   "Create or Update a Person",
+   "Create Event",
+   "Create Anonymous Event"
+  ],
+  "zapier_auth": "API key \u2014 Track API credentials (Site ID + API Key) from workspace Account Settings > API Credentials",
+  "webhook_sub_endpoint": "POST /v1/reporting_webhooks (App API, full CRUD: GET list, GET/PUT/DELETE /v1/reporting_webhooks/{webhook_id}); body {name, endpoint, events[], disabled, full_resolution, with_content}",
+  "event_vocab_examples": [
+   "customer_subscribed",
+   "email_sent",
+   "email_opened",
+   "email_bounced",
+   "sms_delivered",
+   "push_clicked",
+   "in_app_opened",
+   "whatsapp_delivered"
+  ],
+  "event_filtering": "per-subscription event-type array (enum of flattened object_metric tokens); payload itself carries object_type + metric split (e.g. object_type=email, metric=sent)",
+  "signature_scheme": "x-cio-signature header: HMAC-SHA256 over the string v0:<x-cio-timestamp>:<body> using a per-webhook signing key; x-cio-timestamp header carries unix timestamp (replay protection)",
+  "retry_disable_policy": "Expects 2xx within 4 seconds; failed/timed-out calls retried with exponential backoff over 7 days; certain error codes wait 1 hour before retry; subsequent webhook calls are backlogged (ordered delivery) until the failed call succeeds",
+  "dedup_mechanism": "event_id field (ULID-style) in every event payload",
+  "learnings": "Copy the flattened <object>_<metric> event token enum plus a structured object_type/metric split in the payload, and the v0:<timestamp>:<body> signing string for replay protection. Note the gap: despite a full programmatic subscription API, Customer.io's Zapier app ships ZERO triggers (outbound events aren't wired to Zapier) \u2014 attune should make its webhook-subscription API the backing store for instant Zapier triggers from day one. The 7-day ordered-backlog retry is generous but head-of-line blocking is a tradeoff to weigh against attune's outbox model.",
+  "sources": [
+   "https://zapier.com/apps/customerio/integrations",
+   "https://help.zapier.com/hc/en-us/articles/40859379060365-How-to-get-started-with-Customer-io-on-Zapier",
+   "https://docs.customer.io/integrations/api/webhooks/",
+   "https://docs.customer.io/files/journeys-app.json",
+   "https://docs.customer.io/files/journeys-webhooks.json"
+  ]
+ },
+ {
+  "name": "Klaviyo",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 3,
+  "instant_triggers": 0,
+  "polling_triggers": 3,
+  "trigger_examples": [
+   "New Event (Polling)",
+   "New Profile (Polling)",
+   "Profile added to Segment or List (Polling)"
+  ],
+  "action_total": 21,
+  "action_examples": [
+   "Create Profile",
+   "Create Event",
+   "Add Profile to List",
+   "Find a Profile",
+   "Find or Create Subscriber"
+  ],
+  "zapier_auth": "OAuth2 (scopes incl. accounts:read metrics:read events:read/write profiles:read/write lists:read/write subscriptions:read/write campaigns:read/write tags:read/write)",
+  "webhook_sub_endpoint": "POST /api/webhooks (JSON:API; attributes {name, description, endpoint_url, secret_key}, relationships webhook-topics data:[{type:\"webhook-topic\", id:\"event:klaviyo.sent_sms\"}]); full CRUD plus topic discovery via GET /api/webhook-topics",
+  "event_vocab_examples": [
+   "event:klaviyo.sent_sms",
+   "event:klaviyo.received_sms",
+   "event:klaviyo.email_delivered"
+  ],
+  "event_filtering": "per-subscription topic array (JSON:API relationships to webhook-topic resources); topics are dynamic per account based on available metrics, discoverable via GET /api/webhook-topics",
+  "signature_scheme": "Klaviyo-Signature header: HMAC-SHA256 of request body using a user-supplied secret_key (min 16 chars, required at subscription creation); plus Klaviyo-Webhook-Id and Klaviyo-Timestamp headers",
+  "retry_disable_policy": "Expects 200/201/202 within 5 seconds; exponential backoff retries with max delay 1 hour; if webhook stays in error state >48 hours it is disabled (enabled flag set to false); one failure never disables",
+  "dedup_mechanism": "Payload data array items carry external_id (the event's ID); Klaviyo-Webhook-Id header identifies the webhook (not the delivery)",
+  "learnings": "Copy the discoverable topic catalog endpoint (GET /api/webhook-topics) \u2014 it lets a Zapier REST-hook trigger populate a dynamic event dropdown without hardcoding, which suits attune's registry-driven source vocabulary. The subscriber-supplied secret_key (min 16 chars, matching attune's existing webhook-secret rule) and the 48h-error-state auto-disable with enabled=false are clean patterns. Avoid Klaviyo's gap: its Zapier triggers are still polling despite having a webhooks API.",
+  "sources": [
+   "https://zapier.com/apps/klaviyo/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8496039282189-How-to-get-started-with-Klaviyo-on-Zapier",
+   "https://developers.klaviyo.com/en/reference/create_webhook",
+   "https://developers.klaviyo.com/en/docs/webhooks_api_overview",
+   "https://developers.klaviyo.com/en/docs/working_with_system_webhooks",
+   "https://raw.githubusercontent.com/klaviyo/openapi/main/openapi/stable/apis/create_webhook.json"
+  ]
+ },
+ {
+  "name": "ActiveCampaign",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 22,
+  "instant_triggers": 22,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Contact (Instant)",
+   "New Deal Added or Updated (Instant)",
+   "Tag Added or Removed From Contact (Instant)",
+   "New Campaign Open (Instant)",
+   "New Automation Webhook (Instant)"
+  ],
+  "action_total": 31,
+  "action_examples": [
+   "Create or Update Contact",
+   "Create Deal",
+   "Add/Remove Tag From Contact",
+   "Create Tracked Event",
+   "Find Contact"
+  ],
+  "zapier_auth": "API key + account-specific API URL (entered on Connect an Account page)",
+  "webhook_sub_endpoint": "POST /api/3/webhooks with {webhook:{name, url, events[], sources[], listid?, headers[]}}; full CRUD plus GET /api/3/webhook/events to list the event vocabulary",
+  "event_vocab_examples": [
+   "subscribe",
+   "unsubscribe",
+   "update",
+   "deal_add",
+   "deal_update",
+   "contact_tag_added",
+   "sent",
+   "open",
+   "click",
+   "bounce",
+   "sms_sent"
+  ],
+  "event_filtering": "per-subscription events array plus an orthogonal sources array (public/admin/api/system) filtering by who triggered the action; optional listid scoping",
+  "signature_scheme": "No default signature. Optional custom webhook headers: a header with is_signature=true uses its value as an HMAC-SHA256 secret over the request body and sends the computed signature as that header's value",
+  "retry_disable_policy": "Webhooks are never retried; delivery is at-least-once and docs explicitly tell consumers to build an idempotent system",
+  "dedup_mechanism": "None built-in; docs warn events may arrive more than once and require consumer-side idempotency",
+  "learnings": "Proof that a simple flat snake_case event list + per-subscription events array scales to the largest instant-trigger surface in this batch (22 REST-hook Zapier triggers). The sources[] dimension (who caused the event: public/admin/api/system) is a cheap, useful second filter axis attune could map to its ingest source vocabulary. Avoid: 'never retried' delivery and signature-off-by-default are anti-patterns; attune's outbox retry plus mandatory HMAC should stay.",
+  "sources": [
+   "https://zapier.com/apps/activecampaign/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495914434573-How-to-get-started-with-ActiveCampaign-on-Zapier",
+   "https://developers.activecampaign.com/reference/webhooks",
+   "https://developers.activecampaign.com/reference/create-webhook"
+  ]
+ },
+ {
+  "name": "Attio",
+  "category": "crm",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 7,
+  "instant_triggers": 7,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "Record Created (Instant)",
+   "Record Updated (Instant)",
+   "List Entry Created (Instant)",
+   "Record Deleted (Instant)",
+   "Task Created (Instant)"
+  ],
+  "action_total": 13,
+  "action_examples": [
+   "Create or Update Record",
+   "Create List Entry",
+   "Create Note",
+   "Create Task",
+   "Find Records"
+  ],
+  "zapier_auth": "API key (workspace access token with scopes; Attio recommends Read-write scopes for Zapier)",
+  "webhook_sub_endpoint": "POST /v2/webhooks with {data:{target_url, subscriptions:[{event_type, filter:{$or:[{field,operator,value}]}}]}}; CRUD via /v2/webhooks/{webhook_id}; secret returned in create response",
+  "event_vocab_examples": [
+   "record.created",
+   "record.updated",
+   "record.merged",
+   "note.created",
+   "list-entry.created",
+   "list-entry.updated",
+   "list.deleted",
+   "comment.resolved",
+   "object-attribute.created",
+   "note-content.updated"
+  ],
+  "event_filtering": "one subscription resource carries an array of {event_type, filter} pairs \u2014 event-type array plus optional per-event attribute-level filter expressions ($or of field/operator/value)",
+  "signature_scheme": "Attio-Signature header (duplicated as X-Attio-Signature for legacy middleware): HMAC-SHA256 of request body using the per-webhook secret",
+  "retry_disable_policy": "2xx (e.g. 200/202) = success; otherwise up to 10 retries with exponential backoff over ~3 days, then webhook marked degraded and owner emailed",
+  "dedup_mechanism": "Idempotency-Key header, unique per message but stable across retries and redeliveries; at-least-once delivery guaranteed",
+  "learnings": "The cleanest model in this batch and the closest template for attune: noun.verb event types, one webhook carrying an array of {event_type, filter} subscriptions with attribute-level filter expressions, per-webhook secret + HMAC-SHA256 signature header, and an Idempotency-Key delivery header. Its Zapier app is 100% instant triggers built directly on this API. Copy the degraded-state + owner-notification lifecycle instead of silent disablement.",
+  "sources": [
+   "https://zapier.com/apps/attio/integrations",
+   "https://docs.attio.com/rest-api/endpoint-reference/webhooks/create-a-webhook",
+   "https://docs.attio.com/rest-api/guides/webhooks",
+   "https://attio.com/help/apps/zapier-integration/connect-attio-and-zapier"
+  ]
+ },
+ {
+  "name": "Typeform",
+  "category": "forms",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 3,
+  "instant_triggers": 3,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Entry (Instant)",
+   "Agent Conversation Finished (Instant)",
+   "Automation Contact Action (Instant)"
+  ],
+  "action_total": 5,
+  "action_examples": [
+   "Create an Empty Form",
+   "Duplicates an Existing Form",
+   "Update Dropdown, Multiple Choice or Ranking Question Options",
+   "Lookup Responses"
+  ],
+  "zapier_auth": "OAuth2 (scopes: forms:read forms:write webhooks:read webhooks:write responses:read accounts:read workspaces:read offline)",
+  "webhook_sub_endpoint": "PUT https://api.typeform.com/forms/{form_id}/webhooks/{tag} \u2014 idempotent create-or-update keyed by caller-chosen tag, per form; body {enabled, event_types:{form_response_partial:true}, url, secret, verify_ssl}",
+  "event_vocab_examples": [
+   "form_response",
+   "form_response_partial"
+  ],
+  "event_filtering": "scoped per form (path param) + caller-chosen tag; event_types object with boolean flags \u2014 tiny fixed vocabulary rather than an event catalog",
+  "signature_scheme": "Typeform-Signature header: HMAC-SHA256 of the raw payload keyed with the webhook secret, base64-encoded, prefixed with sha256=",
+  "retry_disable_policy": "30s response timeout; 410 Gone or 404 \u2192 no retry, webhook disabled immediately; 429/408/503/423 \u2192 retry every 2-3 min for 10 hours; other codes \u2192 5 retries with backoff at 5min/10min/20min/1h/2h/3h/4h; auto-disable + notification if 100% failure within 24h (>300 attempts) or within 5 min (100 attempts)",
+  "dedup_mechanism": "event_id field in every payload (alongside event_type)",
+  "learnings": "The PUT-by-tag idempotent upsert is ideal for connector-managed subscriptions \u2014 Zapier's subscribeHook can safely re-run without duplicating webhooks; attune should offer an equivalent idempotency handle (client-supplied key or PUT semantics). Also copy the HTTP-status-differentiated retry classes and 410-Gone-means-unsubscribe convention. Avoid the resource-scoped-only filtering (per-form endpoint, 2 event types) \u2014 attune needs a real event catalog.",
+  "sources": [
+   "https://zapier.com/apps/typeform/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495992982029-How-to-get-started-with-Typeform-on-Zapier",
+   "https://www.typeform.com/developers/webhooks/",
+   "https://www.typeform.com/developers/webhooks/secure-your-webhooks/",
+   "https://www.typeform.com/developers/webhooks/reference/create-or-update-webhook/",
+   "https://www.typeform.com/developers/webhooks/example-payload/"
+  ]
+ },
+ {
+  "name": "SurveyMonkey",
+  "category": "forms",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 2,
+  "instant_triggers": 2,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Response Notification (Instant)",
+   "New Response Notification With Answers (Instant)"
+  ],
+  "action_total": 6,
+  "action_examples": [
+   "Create Contact",
+   "Send Survey",
+   "Find Survey",
+   "Find Collector",
+   "Find Contact"
+  ],
+  "zapier_auth": "OAuth2 (help article: 'Grant Zapier permission to access your account'; API uses Bearer access tokens)",
+  "webhook_sub_endpoint": "POST /v3/webhooks with {name, subscription_url, authorization?, verify_ssl, event_type, object_type, object_ids[]} \u2014 one event_type per webhook, scoped to specific surveys/collectors",
+  "event_vocab_examples": [
+   "response_completed",
+   "response_updated",
+   "response_disqualified",
+   "response_overquota",
+   "collector_created",
+   "collector_updated",
+   "collector_deleted",
+   "survey_created",
+   "app_uninstalled"
+  ],
+  "event_filtering": "single event_type per subscription (not an array) + object_type/object_ids resource scoping \u2014 multiple events require multiple webhooks",
+  "signature_scheme": "Sm-Signature header: HMAC-SHA1 of the raw body keyed with '<client_id>&<client_secret>' (base64); Sm-Apikey header also sent; Content-Type application/vnd.surveymonkey.<object>.v1+json",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "",
+  "learnings": "Copy the object_type/object_ids resource-scoping idea (a subscription bound to specific surveys maps well to attune scoping a subscription to specific tenants/sources), and the vendor-namespaced Content-Type for payload versioning. Avoid the single-event_type-per-webhook design (forces N webhooks for N events; every other product in this batch uses an events array) and the legacy HMAC-SHA1 keyed with app credentials instead of a per-webhook secret. Retry/auto-disable policy is not documented in the v3 API docs \u2014 an underspecified contract attune should not repeat.",
+  "sources": [
+   "https://zapier.com/apps/surveymonkey/integrations",
+   "https://help.zapier.com/hc/en-us/articles/40852741172749-How-to-get-started-with-SurveyMonkey-on-Zapier",
+   "https://api.surveymonkey.com/v3/docs#webhooks"
+  ]
+ },
+ {
+  "name": "Square",
+  "category": "commerce",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 6,
+  "instant_triggers": 0,
+  "polling_triggers": 6,
+  "trigger_examples": [
+   "New Payment",
+   "New Order",
+   "New Customer",
+   "New Invoice",
+   "New Appointment"
+  ],
+  "action_total": 19,
+  "action_examples": [
+   "Create Customer",
+   "Create Invoice",
+   "Refund Payment",
+   "Send Invoice",
+   "Find Customer"
+  ],
+  "zapier_auth": "OAuth2 (log into Square and grant Zapier permission)",
+  "webhook_sub_endpoint": "POST /v2/webhooks/subscriptions with body { idempotency_key, subscription: { name, event_types: [...], notification_url, api_version } }; returns server-generated signature_key. Full CRUD: list/retrieve/update/delete subscriptions, update signature key, test subscription, plus GET list-webhook-event-types.",
+  "event_vocab_examples": [
+   "payment.created",
+   "payment.updated",
+   "order.created",
+   "invoice.published",
+   "customer.created"
+  ],
+  "event_filtering": "per-subscription event-type array (event_types field); multiple subscriptions per app allowed",
+  "signature_scheme": "x-square-hmacsha256-signature header; HMAC-SHA256 over (notification URL + raw request body) keyed with the subscription's signature_key",
+  "retry_disable_policy": "Retries with exponential backoff for up to 24 hours after the originating event; after 24h the notification is discarded. No documented auto-disable.",
+  "dedup_mechanism": "event_id field in each notification body is the documented idempotency value (webhooks 'can be sent more than once'); create-subscription call itself takes an idempotency_key",
+  "learnings": "Square is the cleanest reference for attune's public subscription API: a first-class /v2/webhooks/subscriptions resource with an event_types array, a server-generated per-subscription signature_key (rotatable via a dedicated endpoint), a test-delivery endpoint, and a list-event-types discovery endpoint. Notably its Zapier app still uses polling triggers, showing the Zapier surface and the webhook API are independent decisions. Copy the discovery + test + key-rotation endpoints; include URL in the HMAC input only if you accept the extra coupling (body-only HMAC like Notion is simpler).",
+  "sources": [
+   "https://zapier.com/apps/square/integrations",
+   "https://help.zapier.com (How to get started with Square on Zapier)",
+   "https://developer.squareup.com/docs/webhooks/overview",
+   "https://developer.squareup.com/docs/webhooks/step3validate",
+   "https://developer.squareup.com/reference/square/webhook-subscriptions-api/create-webhook-subscription"
+  ]
+ },
+ {
+  "name": "Chargebee",
+  "category": "commerce",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 17,
+  "instant_triggers": 17,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Subscription",
+   "Subscription Cancellation",
+   "New Payment",
+   "Payment Failure",
+   "New Invoice"
+  ],
+  "action_total": 13,
+  "action_examples": [
+   "Create Customer",
+   "Create Subscription",
+   "Update Subscription",
+   "Pause Subscription",
+   "Finds an Existing Customer"
+  ],
+  "zapier_auth": "API key + site name (form fields: Site Name and API Key)",
+  "webhook_sub_endpoint": "dashboard-only (Settings > Configure Chargebee > API Keys and Webhooks > Webhooks tab; up to 5 webhooks per site). Events are also retrievable by polling GET https://[site].chargebee.com/api/v2/events.",
+  "event_vocab_examples": [
+   "subscription_created",
+   "subscription_cancelled",
+   "payment_succeeded",
+   "payment_failed",
+   "customer_created",
+   "card_expired",
+   "invoice_generated"
+  ],
+  "event_filtering": "per-webhook 'Events to Send' dropdown selection (all events by default, can narrow to a chosen set); max 5 webhook endpoints per site",
+  "signature_scheme": "No HMAC signature. Security options are HTTP Basic Auth on the webhook URL or a random secret key embedded in the URL path; docs suggest re-fetching the event via Retrieve an Event API to verify integrity.",
+  "retry_disable_policy": "Fixed retry schedule, up to 7 retries: 2min, +6min, +30min, +1h, +5h, +1d, +2d (last retry ~3 days 7 hours after event). Webhooks can be manually deactivated; unused test-site webhooks prompt email nagging.",
+  "dedup_mechanism": "Unique event id field in payload (docs prescribe storing processed ids for the 3d7h retry window); out-of-order delivery handled via resource_version millisecond timestamp on resources",
+  "learnings": "Chargebee shows how far you can get with an all-Instant Zapier app (all 17 visible triggers are REST-hook Instant) even when the underlying config is dashboard-only \u2014 but attune should avoid its two weakest choices: no HMAC signature (basic-auth-or-secret-URL is below current bar) and a hard 5-endpoint cap. Its snake_case resource_verb vocabulary and the documented store-event-id-for-the-retry-window dedup recipe are worth citing.",
+  "sources": [
+   "https://zapier.com/apps/chargebee/integrations",
+   "https://help.zapier.com/hc/en-us/articles/39881963334157-How-to-get-started-with-Chargebee-on-Zapier",
+   "https://apidocs.chargebee.com/docs/api/events",
+   "https://www.chargebee.com/docs/2.0/webhook_settings.html"
+  ]
+ },
+ {
+  "name": "Calendly",
+  "category": "commerce",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 9,
+  "instant_triggers": 8,
+  "polling_triggers": 1,
+  "trigger_examples": [
+   "Invitee Created or Rescheduled",
+   "Invitee Canceled",
+   "New Routing Form Submission",
+   "Contact Created",
+   "Meeting Recap Created"
+  ],
+  "action_total": 15,
+  "action_examples": [
+   "Create One-Off Meeting Link",
+   "Book Meeting for Invitee",
+   "Cancel Scheduled Event",
+   "Find Invitee by Email",
+   "Mark Invitee as No Show"
+  ],
+  "zapier_auth": "OAuth2 (log into Calendly, grant Zapier permission)",
+  "webhook_sub_endpoint": "POST https://api.calendly.com/webhook_subscriptions with body { url, events: [...], organization, scope: \"organization\"|\"user\", user?, signing_key? }; GET list (filter by organization/scope/user), GET/DELETE /webhook_subscriptions/{uuid}. Response resource includes callback_url, events[], state, retry_started_at.",
+  "event_vocab_examples": [
+   "invitee.created",
+   "invitee.canceled",
+   "routing_form_submission.created"
+  ],
+  "event_filtering": "per-subscription event-type array (events field) plus a scope dimension (organization vs user, with org/user URIs in the body)",
+  "signature_scheme": "Calendly-Webhook-Signature header, format t=<timestamp>,v1=<hex>; HMAC-SHA256 of \"<timestamp>.<raw-body>\" keyed with the caller-supplied signing_key (Stripe-style, replay-protected)",
+  "retry_disable_policy": "Subscription resource exposes state and retry_started_at fields indicating a retrying/failed state; exact backoff schedule not found in retrieved sources",
+  "dedup_mechanism": "No dedicated delivery-id header found in retrieved sources; payload carries created_at and resource URIs",
+  "learnings": "Calendly is the closest shape to what attune needs: a small CRUD /webhook_subscriptions resource where the caller supplies both the events array and the signing_key, enabling fully self-service REST hooks (n8n/activepieces/Zapier all drive it programmatically). Copy the caller-supplied-secret + t=,v1= timestamped HMAC (replay protection built in) and the scope dimension (maps to attune's tenant scoping); note its tiny 3-event vocabulary kept the Zapier trigger list almost 1:1 with webhook events.",
+  "sources": [
+   "https://zapier.com/apps/calendly/integrations",
+   "https://help.zapier.com (How to get started with Calendly on Zapier)",
+   "https://github.com/n8n-io/n8n packages/nodes-base/nodes/Calendly/v2/CalendlyTriggerV2.node.ts and CalendlyTriggerHelpers.ts",
+   "https://github.com/simstudioai/sim apps/sim/tools/calendly/create_webhook.ts",
+   "https://github.com/LeoYeAI/openclaw-master-skills skills/calendly-api/SKILL.md",
+   "https://developer.calendly.com/api-docs/c1ddc06ce1f1b-create-webhook-subscription (JS-rendered, content via mirrors above)"
+  ]
+ },
+ {
+  "name": "Slack",
+  "category": "collab",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 13,
+  "instant_triggers": 12,
+  "polling_triggers": 1,
+  "trigger_examples": [
+   "New Message Posted to Channel",
+   "New Mention",
+   "New Reaction Added in a Channel",
+   "New Channel",
+   "New User"
+  ],
+  "action_total": 35,
+  "action_examples": [
+   "Send Channel Message",
+   "Send Direct Message",
+   "Create Channel",
+   "Request Approval",
+   "Find User by Email"
+  ],
+  "zapier_auth": "OAuth2 (log into Slack, grant workspace permission; scope-gated)",
+  "webhook_sub_endpoint": "dashboard-only per app: one Events API Request URL configured in app settings (or app manifest), with an event subscription list tied to the app's granted OAuth scopes; URL verified via url_verification challenge. No public per-customer REST subscription endpoint.",
+  "event_vocab_examples": [
+   "message.channels",
+   "reaction_added",
+   "team_join",
+   "app_mention"
+  ],
+  "event_filtering": "per-app event-subscription list bound to OAuth scopes ('Subscribe to only the events you want'); all subscribed events for all installs flow to the single app endpoint",
+  "signature_scheme": "X-Slack-Signature header, value v0=<hex> = HMAC-SHA256 of \"v0:<X-Slack-Request-Timestamp>:<raw body>\" keyed with the app signing secret; timestamp checked to block replays",
+  "retry_disable_policy": "Must respond HTTP 2xx within 3 seconds; on failure retries 3 times with increasing gaps (~immediate, 1 min, 5 min) carrying x-slack-retry-num and x-slack-retry-reason headers; app event delivery is temporarily disabled if success rate falls below 5% per 60 minutes (apps under 1,000 events/hour exempt)",
+  "dedup_mechanism": "event_id (e.g. Ev123ABC456) + event_time in the outer envelope; x-slack-retry-num header identifies redelivery attempts",
+  "learnings": "Slack's model (one app-level endpoint, events bound to OAuth scopes) doesn't fit attune's per-tenant subscriptions, but three operational details are worth copying: the 3-second-ack + retry-reason header contract, the explicit success-rate-based auto-disable rule with a small-sender exemption, and the versioned v0= signature prefix that leaves room for algorithm rotation. Its mixed event naming (message.channels dotted subtype vs reaction_added snake_case) is an anti-pattern \u2014 attune should pick one style.",
+  "sources": [
+   "https://zapier.com/apps/slack/integrations",
+   "https://help.zapier.com (How to get started with Slack on Zapier)",
+   "https://api.slack.com/apis/events-api",
+   "https://api.slack.com/authentication/verifying-requests-from-slack"
+  ]
+ },
+ {
+  "name": "Discord",
+  "category": "collab",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 7,
+  "instant_triggers": 0,
+  "polling_triggers": 7,
+  "trigger_examples": [
+   "New Message Posted to Channel",
+   "New User Added",
+   "New Reaction on Message",
+   "New Forum Post",
+   "New Mention"
+  ],
+  "action_total": 10,
+  "action_examples": [
+   "Send Channel Message",
+   "Send Direct Message",
+   "Create new Forum Post",
+   "Add Role",
+   "Find User"
+  ],
+  "zapier_auth": "OAuth2 with bot install (scopes: bot identify; requires server Manage Webhooks permission)",
+  "webhook_sub_endpoint": "dashboard-only: one Webhook Events URL per app configured on the developer-portal Webhooks page; endpoint must ack a PING (type 0) with 204 before it is accepted. (Chat activity events like messages are not on this surface at all \u2014 they require a Gateway websocket bot, which is what Zapier's app uses.)",
+  "event_vocab_examples": [
+   "APPLICATION_AUTHORIZED",
+   "APPLICATION_DEAUTHORIZED",
+   "ENTITLEMENT_CREATE",
+   "LOBBY_MESSAGE_CREATE",
+   "QUEST_USER_ENROLLMENT"
+  ],
+  "event_filtering": "per-app checklist of webhook event types enabled on the single endpoint (subscribe on the same settings page)",
+  "signature_scheme": "X-Signature-Ed25519 + X-Signature-Timestamp headers; Ed25519 public-key signature over timestamp+body (not HMAC); invalid signatures must get a 401",
+  "retry_disable_policy": "Respond 204 (empty body) within 3 seconds; failures retried with exponential backoff for up to 10 minutes; Discord runs automated security probes (deliberately invalid signatures) and removes your Webhook Events URL + emails you if validation fails",
+  "dedup_mechanism": "No documented delivery-id/dedup header on webhook events in retrieved sources; envelope has version (always 1), type, and timestamp",
+  "learnings": "Discord splits real-time into Gateway (websocket, chat activity) vs webhook events (small lifecycle vocabulary), which is why its Zapier triggers are bot/polling-based with zero Instant labels \u2014 a warning that if attune's webhook vocabulary is too narrow, integrators fall back to polling. Its asymmetric Ed25519 signing (no shared secret to leak) and proactive invalid-signature probing are interesting hardening ideas, but HMAC remains the ecosystem default Zapier-style consumers expect; the 10-minute retry window is notably short.",
+  "sources": [
+   "https://zapier.com/apps/discord/integrations",
+   "https://help.zapier.com (How to get started with Discord on Zapier)",
+   "https://raw.githubusercontent.com/discord/discord-api-docs/main/developers/events/webhook-events.mdx"
+  ]
+ },
+ {
+  "name": "Notion",
+  "category": "collab",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 6,
+  "instant_triggers": 6,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Comment",
+   "New Data Source Item",
+   "Updated Content in Data Source Item",
+   "Updated Properties on a Page",
+   "Updated Content in Page"
+  ],
+  "action_total": 27,
+  "action_examples": [
+   "Create Data Source Item",
+   "Create Page",
+   "Update Data Source Item",
+   "Add Comment",
+   "Find Data Source Items"
+  ],
+  "zapier_auth": "OAuth2 (log into Notion, grant page/workspace access to Zapier)",
+  "webhook_sub_endpoint": "dashboard-only: created in the integration's connection settings (Webhooks tab > + Create a subscription: enter HTTPS URL, pick event types). Verified via a one-time POST containing a verification_token that must be echoed back to activate.",
+  "event_vocab_examples": [
+   "page.created",
+   "page.properties_updated",
+   "page.content_updated",
+   "database.schema_updated",
+   "data_source.content_updated",
+   "comment.created",
+   "comment.deleted"
+  ],
+  "event_filtering": "per-subscription event-type checklist chosen at creation (modifiable later); events also implicitly scoped to pages/databases the connection can access",
+  "signature_scheme": "X-Notion-Signature header, value sha256=<hex>; HMAC-SHA256 of the request body keyed with the subscription's verification_token",
+  "retry_disable_policy": "Aims for at-most-once delivery; on failed acknowledgment retries up to 8 times with exponential backoff, final attempt ~24 hours after the initial event",
+  "dedup_mechanism": "Top-level event id (UUID) + subscription_id + attempt_number (1-8) in every payload; related rapid edits are aggregated/debounced into single events (~1 min)",
+  "learnings": "Notion has the vocabulary attune should imitate: strict entity.verb_past_tense strings (page.created, comment.deleted) with a payload envelope carrying id, timestamp, subscription_id, entity and attempt_number \u2014 attempt_number in-band is a cheap, copyable dedup/observability win, as is event aggregation to debounce edit storms. Its verification_token handshake doubles as the HMAC key, one less secret to manage; but being dashboard-only means Zapier still gets Instant triggers while third parties can't self-serve \u2014 attune's differentiator should be Calendly/Square-style programmatic subscription with this vocabulary style.",
+  "sources": [
+   "https://zapier.com/apps/notion/integrations",
+   "https://help.zapier.com (How to get started with Notion on Zapier)",
+   "https://developers.notion.com/reference/webhooks",
+   "https://developers.notion.com/reference/webhooks-events-delivery"
+  ]
+ },
+ {
+  "name": "GitHub",
+  "category": "devops",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 20,
+  "instant_triggers": 0,
+  "polling_triggers": 20,
+  "trigger_examples": [
+   "New Issue",
+   "Issue Closed",
+   "New Pull Request",
+   "New Commit",
+   "New Release"
+  ],
+  "action_total": 20,
+  "action_examples": [
+   "Create Issue",
+   "Create Pull Request",
+   "Create Comment",
+   "Update Issue",
+   "Find Issue (search)"
+  ],
+  "zapier_auth": "OAuth2 (Zapier's SDK panel on the app page says 'Zapier handles the OAuth and scoped permissions'; app-specific auth doc not retrievable, so scheme inferred rather than directly confirmed)",
+  "webhook_sub_endpoint": "POST /repos/{owner}/{repo}/hooks with body {config:{url, secret, insecure_ssl}, events: array of strings (default [\"push\"]), active: bool}; fully programmatic plus dashboard UI; also org- and app-level hooks",
+  "event_vocab_examples": [
+   "push",
+   "issues",
+   "issue_comment",
+   "pull_request",
+   "pull_request_review",
+   "release",
+   "workflow_run",
+   "star",
+   "discussion"
+  ],
+  "event_filtering": "per-subscription event-type array (`events` array of strings per hook); fine-grained action (opened/closed/edited) is NOT filterable at subscription time \u2014 it arrives in the payload `action` field and receivers filter client-side",
+  "signature_scheme": "X-Hub-Signature-256: HMAC-SHA256 hex digest of raw body with shared secret, value prefixed 'sha256='; legacy X-Hub-Signature (HMAC-SHA1) kept for compatibility",
+  "retry_disable_policy": "GitHub does NOT automatically redeliver failed deliveries; delivery marked failed if no 2xx within 10 seconds; consumers must poll the deliveries REST API and redeliver manually/scripted",
+  "dedup_mechanism": "X-GitHub-Delivery header (globally unique GUID per event, stable across redeliveries); plus X-GitHub-Event (event name) and X-GitHub-Hook-ID headers",
+  "learnings": "Copy: the resource-noun events array + payload-level `action` sub-field is the cleanest two-tier vocabulary, and the delivery-GUID header + list-deliveries/redeliver API is the gold standard for consumer-side recovery. Avoid: GitHub's own Zapier app is 100% polling (0 Instant triggers, 24 read keys in the implementation) \u2014 proof that without a lightweight programmatic per-URL subscribe API (REST-hook style), even a webhook-rich platform ends up polling in Zapier; attune should design its subscription endpoint so Zapier can create/delete hooks per Zap. Note GitHub also ships no automatic retry, which pushes recovery cost onto every consumer \u2014 attune should do better.",
+  "sources": [
+   "https://zapier.com/apps/github/integrations",
+   "https://docs.github.com/en/rest/repos/webhooks",
+   "https://docs.github.com/en/webhooks/webhook-events-and-payloads",
+   "https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries",
+   "https://docs.github.com/en/webhooks/using-webhooks/best-practices-for-using-webhooks",
+   "https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries"
+  ]
+ },
+ {
+  "name": "GitLab",
+  "category": "devops",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 11,
+  "instant_triggers": 9,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Project Issue Event (Instant)",
+   "New Project Merge Request Event (Instant)",
+   "New Issue Comment (Instant)",
+   "New Job Event (Instant)",
+   "New Commit (Polling)"
+  ],
+  "action_total": 11,
+  "action_examples": [
+   "Create Issue",
+   "Create Merge Request",
+   "Add Note to Issue",
+   "Create Branch",
+   "Find All Merge Requests (search)"
+  ],
+  "zapier_auth": "Unconfirmed from retrieved sources (GitLab's own zapier.md doc 403'd/moved; directory page shows no auth text). GitLab API supports PAT and OAuth2; scheme not verified",
+  "webhook_sub_endpoint": "POST /projects/:id/hooks with {url required, per-event boolean flags (push_events, issues_events, merge_requests_events, note_events, job_events, pipeline_events, ...), branch_filter_strategy (wildcard|regex|all_branches), custom_headers, custom_webhook_template, signing_token, enable_ssl_verification}; also group hooks; fully programmatic + dashboard",
+  "event_vocab_examples": [
+   "object_kind: push",
+   "object_kind: tag_push",
+   "object_kind: issue",
+   "object_kind: merge_request",
+   "object_kind: note",
+   "object_kind: pipeline",
+   "X-Gitlab-Event: \"Push Hook\""
+  ],
+  "event_filtering": "per-subscription boolean flag per event class (not an array) + branch filter for push; payload carries object_kind + action (open/update/merge)",
+  "signature_scheme": "Standard Webhooks spec: webhook-signature header 'v1,{base64_signature}' = HMAC-SHA256 over '{webhook-id}.{webhook-timestamp}.{body}' when a signing token is set (GitLab 19.0+); legacy X-Gitlab-Token plain-text secret header",
+  "retry_disable_policy": "Auto-disable: webhook temporarily disabled after 4 consecutive failures, permanently disabled after 40 consecutive failures (17.11+); per-event resend API POST /projects/:id/hooks/:hook_id/events/:hook_event_id/resend (rate-limited 5/min); guidance: return 4xx only for misconfiguration, avoid 5xx",
+  "dedup_mechanism": "webhook-id header (Standard Webhooks message id, stable across redelivery) + X-Gitlab-Event-UUID (unique per non-recursive event) + Idempotency-Key on resends",
+  "learnings": "Copy: GitLab is the best modern reference \u2014 it adopted the Standard Webhooks spec (webhook-id/webhook-timestamp/webhook-signature v1,base64 HMAC-SHA256 over id.timestamp.body), which attune should adopt verbatim for interop; its 4-strikes-temporary / 40-strikes-permanent auto-disable ladder and per-event resend API are concrete, testable policies. Its 9 Instant Zapier triggers (vs GitHub's 0) show programmatic project-scoped hooks map directly to REST-hook triggers. Avoid: the boolean-flag-per-event-class subscription shape \u2014 it can't grow without schema changes; an events array scales better.",
+  "sources": [
+   "https://zapier.com/apps/gitlab/integrations",
+   "https://docs.gitlab.com/api/project_webhooks/",
+   "https://docs.gitlab.com/user/project/integrations/webhooks/",
+   "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/user/project/integrations/webhook_events.md"
+  ]
+ },
+ {
+  "name": "Sentry",
+  "category": "devops",
+  "zapier_exists": false,
+  "confidence": "medium",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "",
+  "webhook_sub_endpoint": "Two paths: (1) Integration Platform (current): webhook URL + resource subscriptions configured on an Internal/Public Integration in the dashboard (dashboard-config, not per-URL API); (2) legacy Service Hooks API: POST /api/0/projects/{organization_id_or_slug}/{project_id_or_slug}/hooks/ with body {url: string required, events: array(string) required} \u2014 requires 'servicehooks' feature flag and bearer token with project:write scope",
+  "event_vocab_examples": [
+   "Sentry-Hook-Resource: issue|error|event_alert|metric_alert|comment|installation|seer|preprod_artifact",
+   "issue action: created|resolved|assigned|archived|unresolved",
+   "service-hook events: event.alert",
+   "event.created"
+  ],
+  "event_filtering": "per-integration resource-type subscription (checkbox per resource: issue, error, comment, ...); resource arrives in Sentry-Hook-Resource header, verb in payload `action` field; legacy service hooks use an events array",
+  "signature_scheme": "Sentry-Hook-Signature: HMAC-SHA256 hex digest of the JSON body keyed by the integration's Client Secret; plus Request-ID and Sentry-Hook-Timestamp headers",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "Request-ID header (unique identifier for tracking specific events)",
+  "learnings": "Notable: Sentry has NO official Zapier app (zapier.com/apps/sentry 404s; directory search returns only unrelated 'SentryKit'/'PassEntry') despite a mature webhook platform \u2014 a gap attune can exploit by shipping a first-class Zapier connector early. Copy: the resource-in-header (Sentry-Hook-Resource) + action-in-payload split makes routing cheap without parsing the body. Avoid: gating programmatic webhook creation behind a feature flag ('servicehooks') and splitting webhooks across two half-generations (service hooks vs integration platform) \u2014 confusing for integrators.",
+  "sources": [
+   "https://zapier.com/apps/sentry/integrations (404)",
+   "https://zapier.com/api/v4/apps/?title_search=sentry",
+   "https://docs.sentry.io/organization/integrations/integration-platform/webhooks/",
+   "https://docs.sentry.io/organization/integrations/integration-platform/webhooks/issues/",
+   "https://docs.sentry.io/api/projects/register-a-new-service-hook/"
+  ]
+ },
+ {
+  "name": "PagerDuty",
+  "category": "devops",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 1,
+  "instant_triggers": 1,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New or Updated Incident (Instant)"
+  ],
+  "action_total": 5,
+  "action_examples": [
+   "Add Trigger Event",
+   "Add Acknowledge Event",
+   "Add Resolve Event",
+   "API Request (Beta)",
+   "Find User on Call (search)"
+  ],
+  "zapier_auth": "Unconfirmed from retrieved sources (support.pagerduty.com/docs/zapier now 404; directory page carries no auth text). PagerDuty REST API supports API token and OAuth2 (scoped); scheme not verified",
+  "webhook_sub_endpoint": "POST /webhook_subscriptions with {webhook_subscription: {delivery_method: {type: 'http_delivery_method', url, custom_headers}, events: array(string) min 1 unique, filter: {type: service_reference|team_reference|account_reference, id}, description, active}}; secret returned only on create response; scoped OAuth webhook_subscriptions.write; plus /enable and /ping sub-endpoints",
+  "event_vocab_examples": [
+   "incident.triggered",
+   "incident.acknowledged",
+   "incident.resolved",
+   "incident.priority_updated",
+   "incident.responder.added",
+   "incident.status_update_published",
+   "service.created",
+   "service.updated"
+  ],
+  "event_filtering": "per-subscription event-type array + a scoping filter object (service/team/account reference)",
+  "signature_scheme": "X-PagerDuty-Signature: comma-separated list of 'v1='-prefixed HMAC-SHA256 hex digests of the raw body (multiple signatures support zero-downtime secret rotation); mutual TLS and OAuth-bearer delivery also offered",
+  "retry_disable_policy": "Retries on timeout/5xx/429/connection failures, periodically for up to 48h (drops after); permanent drop on other 4xx; after 3 consecutive dropped webhooks the subscription is disabled for 24h (temporarily_disabled=true) and queued deliveries dropped; re-enable via UI or the enable API; 2xx expected within 5s (16s for custom incident actions)",
+  "dedup_mechanism": "X-Webhook-Id header \u2014 unique per webhook event, repeated on every retry attempt; explicit at-least-once delivery contract with in-order delivery per subscription up to 55KB",
+  "learnings": "Copy: PagerDuty v3 is the strongest overall template for attune's subscription API \u2014 single POST resource with url + events[] + scope filter, secret returned exactly once, versioned comma-separated multi-signature header for rotation, documented 48h retry window, 3-strikes/24h temp-disable, ping endpoint, and a stable X-Webhook-Id for dedup under at-least-once semantics. Its noun.verb(.subnoun) event names (incident.responder.added) are a good naming model. Note: even with all this, its Zapier surface is thin (1 instant trigger) \u2014 a small connector over a good API is fine.",
+  "sources": [
+   "https://zapier.com/apps/pagerduty/integrations",
+   "https://raw.githubusercontent.com/PagerDuty/api-schema/main/reference/REST/openapiv3.json",
+   "https://raw.githubusercontent.com/PagerDuty/developer-docs/main/docs/webhooks/01-Overview.md",
+   "https://raw.githubusercontent.com/PagerDuty/developer-docs/main/docs/webhooks/02-Behavior.md",
+   "https://raw.githubusercontent.com/PagerDuty/developer-docs/main/docs/webhooks/04-Signatures.md"
+  ]
+ },
+ {
+  "name": "Datadog",
+  "category": "devops",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 2,
+  "action_examples": [
+   "New Metric Post",
+   "API Request (Beta)"
+  ],
+  "zapier_auth": "Unconfirmed from retrieved sources; Datadog API generally authenticates with API key + application key, but the Zapier connection doc was not retrievable",
+  "webhook_sub_endpoint": "POST /api/v1/integration/webhooks/configuration/webhooks with {name required, url required, payload (custom template, nullable), custom_headers (JSON string, nullable), encode_as: json|form} \u2014 creates a NAMED webhook, not an event subscription; delivery is wired by mentioning @webhook-<WEBHOOK_NAME> in a monitor's notification message",
+  "event_vocab_examples": [
+   "$EVENT_TYPE values: query_alert_monitor",
+   "log_alert",
+   "event_alert",
+   "event_v2_alert",
+   "service_check",
+   "synthetics_alert",
+   "rum_alert",
+   "ci_pipelines_alert",
+   "error_tracking_alert"
+  ],
+  "event_filtering": "no per-subscription event array \u2014 routing is per-monitor via @webhook-NAME mentions in alert messages; payload is a user-defined template with $VARIABLES ($EVENT_TYPE, $ALERT_ID, $HOSTNAME, ...)",
+  "signature_scheme": "none documented \u2014 no signature header; integrators are expected to use custom headers (e.g. their own auth token) or URL auth",
+  "retry_disable_policy": "Retries only on Datadog-internal error or 5xx from the endpoint; 15-second per-request timeout; missed connections retried 5 times; no documented auto-disable",
+  "dedup_mechanism": "no dedicated delivery-id header documented; $ID / $ALERT_ID template variables in the payload are the only correlation handles",
+  "learnings": "Avoid: the notification-template model (@webhook-NAME mentions + user-defined payload template, no event subscription array, no signature, no delivery id) makes machine-consumable integrations fragile \u2014 its Zapier app is nearly empty (0 visible triggers, 2 actions) as a direct consequence. Copy: nothing structural, though the $VARIABLE payload templating is a nice power-user escape hatch attune could offer as an optional overlay on a fixed canonical payload, similar to GitLab's custom_webhook_template.",
+  "sources": [
+   "https://zapier.com/apps/datadog/integrations",
+   "https://docs.datadoghq.com/integrations/webhooks/",
+   "https://docs.datadoghq.com/api/latest/webhooks-integration/",
+   "https://docs.datadoghq.com/resources/json/full_spec_v1.json (WebhooksIntegration schema)"
+  ]
+ },
+ {
+  "name": "Opsgenie",
+  "category": "devops",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 1,
+  "action_examples": [
+   "Create Alert"
+  ],
+  "zapier_auth": "API key \u2014 Opsgenie's own doc: create a Zapier integration under Settings > Integrations, copy the API Key, and 'Paste your Opsgenie API Key into the \"API Key field\"' in Zapier",
+  "webhook_sub_endpoint": "Dashboard-first: Webhook added via Settings > Integrations UI with per-alert-action 'post to URL' mappings; integrations are also manageable programmatically via POST https://api.opsgenie.com/v2/integrations (GenieKey auth) with alert filters {conditionMatchType, conditions[]}, but there is no simple url+events[] subscription resource",
+  "event_vocab_examples": [
+   "action: Create",
+   "Acknowledge",
+   "UnAcknowledge",
+   "AddNote",
+   "AddTags",
+   "Close",
+   "Delete",
+   "Priority",
+   "Description"
+  ],
+  "event_filtering": "per-integration mapping of alert actions to the webhook URL (if alert is created -> post to URL), plus tag/custom-action qualifiers and condition filters; not an event-type array",
+  "signature_scheme": "none documented in retrieved docs \u2014 payload includes integrationId/integrationName; custom headers supported for receiver-side auth",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "no delivery-id header documented; payload carries alertId and integrationId for correlation",
+  "learnings": "Avoid: PascalCase bare-verb action vocabulary (Create, AddNote, Close) without a resource prefix \u2014 it collides as soon as a second resource type exists; attune should namespace as resource.verb. Also avoid dashboard-only subscription config with no signature and no documented retry contract: Opsgenie's Zapier app shrank to a single Create Alert action (inbound only), showing that without a clean outbound subscription API the ecosystem integration stays one-directional. Note Opsgenie is being sunset into Atlassian JSM, so weight its patterns accordingly.",
+  "sources": [
+   "https://zapier.com/apps/opsgenie/integrations",
+   "https://support.atlassian.com/opsgenie/docs/integrate-opsgenie-with-webhook/",
+   "https://support.atlassian.com/opsgenie/docs/opsgenie-edge-connector-alert-action-data/",
+   "https://docs.opsgenie.com/docs/integration-api",
+   "https://support.atlassian.com/opsgenie/docs/integrate-opsgenie-with-zapier/"
+  ]
+ },
+ {
+  "name": "Airtable",
+  "category": "collab",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "OAuth2 (Zapier migrated the app from Airtable API keys to OAuth \u2014 help article 'Latest update on migrating from Airtable API Keys to OAuth')",
+  "trigger_total": 2,
+  "instant_triggers": 0,
+  "polling_triggers": 2,
+  "trigger_examples": [
+   "New Record",
+   "New or Updated Record"
+  ],
+  "action_total": 19,
+  "action_examples": [
+   "Create Record",
+   "Update Record",
+   "Create or Update Record",
+   "Find Record",
+   "Find or Create Record",
+   "API Request (Beta)"
+  ],
+  "webhook_sub_endpoint": "POST /v0/bases/{baseId}/webhooks with body {notificationUrl, specification:{options:{filters:{dataTypes:[...], changeTypes:[add|remove|update], recordChangeScope}}}} \u2014 returns {id, macSecretBase64, expirationTime}; plus refresh (POST .../webhooks/{webhookId}/refresh), delete, enable/disable notifications, and GET list-webhook-payloads (cursor-based)",
+  "event_vocab_examples": [
+   "dataTypes: tableData",
+   "dataTypes: tableFields",
+   "dataTypes: tableMetadata",
+   "changeTypes: add",
+   "changeTypes: remove",
+   "changeTypes: update"
+  ],
+  "event_filtering": "per-subscription filter object (dataTypes + changeTypes arrays + recordChangeScope), not flat event-name strings; docs strongly recommend specifying filters",
+  "signature_scheme": "X-Airtable-Content-MAC header, value 'hmac-sha256=' + hex HMAC-SHA256 of raw body keyed with base64-decoded macSecretBase64 (secret returned only once at creation)",
+  "retry_disable_policy": "Webhooks created with OAuth/PAT expire and are disabled after 7 days unless refreshed (refresh-a-webhook or list-webhook-payloads extends life); metadata+payloads readable 7 more days after expiry; limits: 10 webhooks/base, 2 per OAuth integration per base; ping-level retry schedule not documented",
+  "dedup_mechanism": "thin notification ping + client pulls payloads via list-webhook-payloads with a monotonically increasing cursor (cursorForNextPayload); client tracks cursor so deliveries are exactly-ordered and deduplicated by design",
+  "learnings": "Airtable's ping-then-pull model (thin notification, cursor-based payload fetch) gives exactly-once ordering without idempotency headers, but it forces expiry/refresh ceremony (7-day TTL) that Zapier's REST-hook model can't use \u2014 notably Airtable's own Zapier triggers are still polling despite having a webhooks API. attune should prefer fat payloads with per-subscription event arrays so Zapier Instant triggers work, but copy the one-time-secret-at-creation pattern (macSecretBase64) and explicit filter object.",
+  "sources": [
+   "https://zapier.com/apps/airtable/integrations (embedded __NEXT_DATA__)",
+   "https://airtable.com/developers/web/api/webhooks-overview",
+   "https://raw.githubusercontent.com/gtalarico/pyairtable/main/pyairtable/models/webhook.py",
+   "https://raw.githubusercontent.com/gtalarico/pyairtable/main/docs/source/webhooks.rst"
+  ]
+ },
+ {
+  "name": "Cal.com",
+  "category": "oss",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "API key (Cal.com-generated Zapier API key; Cal.com's legacy Zapier subscription endpoints accept both API key and OAuth per repo README)",
+  "trigger_total": 5,
+  "instant_triggers": 5,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "Booking Created",
+   "Booking Cancelled",
+   "Booking Rescheduled",
+   "Meeting Ended",
+   "Out of Office Created"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "webhook_sub_endpoint": "POST https://api.cal.com/v2/webhooks with body {active, subscriberUrl, triggers:[...], payloadTemplate, secret, version}; also GET/PATCH/DELETE /v2/webhooks; Zapier app uses dedicated POST /api/integrations/zapier/addSubscription + DELETE .../deleteSubscription (REST-hook pattern)",
+  "event_vocab_examples": [
+   "BOOKING_CREATED",
+   "BOOKING_CANCELLED",
+   "BOOKING_RESCHEDULED",
+   "MEETING_ENDED",
+   "FORM_SUBMITTED",
+   "BOOKING_NO_SHOW"
+  ],
+  "event_filtering": "per-subscription array of trigger event types (triggers:[...]); webhooks can be scoped to user, event-type, or team level",
+  "signature_scheme": "x-cal-signature-256 header, HMAC-SHA256 hex of the raw payload using the per-webhook secret (secret optional); payload version in x-cal-webhook-version header (e.g. 2021-10-20)",
+  "retry_disable_policy": "General retry/auto-disable policy not documented; delegation-credential webhooks documented as retried on transient network errors and HTTP 408/429/5xx; subscriber URL validated at creation (SaaS: HTTPS only, private IPs/localhost/metadata endpoints blocked)",
+  "dedup_mechanism": "idempotencyKey field present in MEETING_STARTED/MEETING_ENDED payloads; no delivery-id header documented for other events",
+  "learnings": "Cal.com is the cleanest OSS reference for attune: a programmatic subscription endpoint (url + triggers array + optional secret), SCREAMING_SNAKE event vocabulary, x-cal-signature-256 HMAC-SHA256, payload versioning via header, and a dedicated thin addSubscription/deleteSubscription pair that powers 100%-Instant Zapier triggers. Copy the subscriber-URL SSRF validation (HTTPS-only, block private IPs) and the version header; avoid their gap of an undocumented retry/disable policy.",
+  "sources": [
+   "https://zapier.com/apps/calcom/integrations (embedded __NEXT_DATA__)",
+   "https://cal.com/docs/developing/guides/automation/webhooks",
+   "https://cal.com/docs/api-reference/v2/webhooks/create-a-webhook",
+   "https://raw.githubusercontent.com/calcom/cal.com/main/packages/app-store/zapier/README.md",
+   "https://raw.githubusercontent.com/calcom/cal.com/main/packages/app-store/zapier/api/subscriptions/addSubscription.ts"
+  ]
+ },
+ {
+  "name": "Ghost",
+  "category": "oss",
+  "zapier_exists": true,
+  "confidence": "high",
+  "zapier_auth": "API key / custom auth \u2014 Admin API URL + Admin API Key from Ghost Admin's built-in Zapier integration (TryGhost/Zapier CLI app, field key adminApiKey)",
+  "trigger_total": 10,
+  "instant_triggers": 10,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "Post Published",
+   "Page Published",
+   "Member Created",
+   "Member Updated",
+   "Member Deleted"
+  ],
+  "action_total": 5,
+  "action_examples": [
+   "Create Post",
+   "Create Member",
+   "Update Member",
+   "Find a Member",
+   "Find an Author"
+  ],
+  "webhook_sub_endpoint": "Admin UI (Settings > Advanced > Integrations > Add custom integration: one trigger event + target URL) or Admin API /webhooks/ resource (Add/Edit/Delete, stable) \u2014 one event per webhook, no events array",
+  "event_vocab_examples": [
+   "post.published",
+   "post.added",
+   "post.published.edited",
+   "member.added",
+   "member.edited",
+   "site.changed",
+   "post.tag.attached"
+  ],
+  "event_filtering": "one event per webhook registration (create N webhooks for N events); noun.verb and noun.verb.qualifier naming",
+  "signature_scheme": "X-Ghost-Signature header: 'sha256={HMAC-SHA256-hex of payload+timestamp}, t={timestamp}' using the integration secret (from webhook-trigger.js source)",
+  "retry_disable_policy": "2xx = success; up to 5 retries per delivery (got library retry limit 5, 2s request timeout); an HTTP 410 response destroys the webhook automatically; failures recorded as last_triggered_status/last_triggered_error",
+  "dedup_mechanism": "none documented \u2014 no delivery-id header or event id in the envelope",
+  "learnings": "Ghost proves a small, fully-Instant Zapier surface (10 hook triggers, 5 actions) works fine on a one-event-per-webhook model, but that model multiplies registrations \u2014 attune's events-array-per-subscription is strictly better. Worth copying: HTTP 410 as a subscriber-initiated auto-unsubscribe signal, and embedding the signing timestamp inside the signature header (sha256=..., t=...) to prevent replay. Avoid: no delivery-id means consumers cannot dedup retried deliveries.",
+  "sources": [
+   "https://zapier.com/apps/ghost/integrations (embedded __NEXT_DATA__)",
+   "https://ghost.org/docs/webhooks/",
+   "https://ghost.org/docs/admin-api/",
+   "https://ghost.org/integrations/zapier/",
+   "https://raw.githubusercontent.com/TryGhost/Ghost/main/ghost/core/core/server/services/webhooks/webhook-trigger.js",
+   "https://raw.githubusercontent.com/TryGhost/Zapier/main/app/authentication.js"
+  ]
+ },
+ {
+  "name": "Supabase",
+  "category": "oss",
+  "zapier_exists": false,
+  "confidence": "high",
+  "zapier_auth": "no official app \u2014 Supabase's own partner guide routes users through Zapier's generic PostgreSQL app using a dedicated least-privilege 'zapier' Postgres user (database credentials)",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Row (via generic PostgreSQL app, polling, 50 most-recent-rows limit)",
+   "Custom Query (via generic PostgreSQL app, polling)"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "webhook_sub_endpoint": "dashboard-only or raw SQL \u2014 Database Webhooks are pg_net trigger wrappers: CREATE TRIGGER ... AFTER INSERT ON table EXECUTE FUNCTION supabase_functions.http_request(url, method, headers, params, timeout_ms); no REST subscription endpoint with url+events array",
+  "event_vocab_examples": [
+   "INSERT",
+   "UPDATE",
+   "DELETE"
+  ],
+  "event_filtering": "per-trigger table + event selection (INSERT/UPDATE/DELETE checkboxes per table); payload carries {type, table, schema, record, old_record}",
+  "signature_scheme": "none documented \u2014 headers are caller-configurable in http_request but no built-in HMAC signing",
+  "retry_disable_policy": "not documented \u2014 pg_net is async fire-and-forget with a per-request timeout; no retry schedule or auto-disable policy in docs",
+  "dedup_mechanism": "none documented",
+  "learnings": "Supabase shows the cost of NOT having an event-subscription product: users fall back to Zapier's generic PostgreSQL polling app (50-row window, missed events) and Supabase's docs must apologize for it. Database Webhooks (pg_net) are a low-level primitive without signing, retries, or dedup \u2014 attune should not model its public webhook API on raw DB triggers; a first-class subscription resource with signing and retries is the differentiator.",
+  "sources": [
+   "https://zapier.com/apps/supabase/integrations (HTTP 404 \u2014 no app)",
+   "https://supabase.com/partners/catalog/zapier (RSC payload: PostgreSQL-app guide, 'zapier' PG user, New Row/Custom Query, 50-row limitation)",
+   "https://supabase.com/docs/guides/database/webhooks"
+  ]
+ },
+ {
+  "name": "Plausible",
+  "category": "oss",
+  "zapier_exists": false,
+  "confidence": "medium",
+  "zapier_auth": "",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 0,
+  "action_examples": [],
+  "webhook_sub_endpoint": "",
+  "event_vocab_examples": [],
+  "event_filtering": "unknown \u2014 no outbound webhook feature exists; docs offer only Stats API / Events API / Sites API (inbound + read), email reports, traffic spike/drop email alerts, and Slack reports",
+  "signature_scheme": "",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "",
+  "learnings": "Plausible has no Zapier app and no outbound webhook/subscription API at all \u2014 its notification story is email + Slack reports only, and its public APIs (Stats/Events/Sites) are pull-style. For attune this is the anti-benchmark: an analytics-adjacent OSS product with no event-push surface cannot participate in automation ecosystems; even a minimal subscription API would have unlocked a Zapier listing.",
+  "sources": [
+   "https://zapier.com/apps/plausible/integrations (HTTP 404 \u2014 no app)",
+   "https://plausible.io/docs (full docs nav: no webhooks page)",
+   "https://plausible.io/docs/traffic-spikes (email-only alerts)",
+   "https://plausible.io/docs/integration-guides",
+   "GitHub code search plausible/analytics: no zapier/webhook-subscription code paths"
+  ]
+ },
+ {
+  "name": "Novu",
+  "category": "oss",
+  "zapier_exists": false,
+  "confidence": "high",
+  "zapier_auth": "",
+  "trigger_total": 0,
+  "instant_triggers": 0,
+  "polling_triggers": 0,
+  "trigger_examples": [],
+  "action_total": 0,
+  "action_examples": [],
+  "webhook_sub_endpoint": "dashboard-only \u2014 endpoints are added in the Novu dashboard Webhooks page (URL + description + selected event types + advanced config); no public REST endpoint for outbound webhook subscriptions is documented (the 'auto-configure integration for inbound webhooks' API endpoint is for inbound provider webhooks, not subscriptions)",
+  "event_vocab_examples": [
+   "workflow.created",
+   "workflow.published",
+   "message.sent",
+   "message.delivered",
+   "message.failed",
+   "preference.updated",
+   "email.received"
+  ],
+  "event_filtering": "per-endpoint event-type selection at configuration time (choose specific event types per endpoint); noun.verb lowercase naming",
+  "signature_scheme": "Svix-style: webhook-id + webhook-timestamp + webhook-signature headers, signature 'v1,{base64 HMAC-SHA256}' verified with the svix library against the raw body",
+  "retry_disable_policy": "exponential backoff schedule: immediately, 5s, 5m, 30m, 2h, 5h, 10h, 10h; 15s response timeout; endpoint auto-disabled after all attempts fail for 5 days (manual re-enable); manual retry, bulk 'Recover Failed Messages' since a timestamp, and per-message Replay",
+  "dedup_mechanism": "webhook-id header (unique message id, stable across retries) \u2014 standard Svix delivery-id semantics",
+  "learnings": "Novu outsources webhook delivery to Svix and gets an excellent operational story for free: documented backoff schedule, 5-day auto-disable with manual re-enable, replay/recovery windows, and the webhook-id/timestamp/signature header triple that consumers can dedup on. attune should adopt this exact envelope contract (delivery-id header stable across retries + timestamped HMAC) and Novu's published retry schedule; note that even with great webhooks Novu still has no Zapier listing \u2014 a connector requires the Zapier-side app work too.",
+  "sources": [
+   "https://zapier.com/apps/novu/integrations (HTTP 404 \u2014 no app)",
+   "https://docs.novu.co/platform/developer/webhooks/webhooks.md",
+   "https://docs.novu.co/platform/developer/webhooks/event-types.md",
+   "https://docs.novu.co/llms.txt"
+  ]
+ },
+ {
+  "name": "Qualtrics",
+  "category": "forms",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 1,
+  "instant_triggers": 0,
+  "polling_triggers": 1,
+  "trigger_examples": [
+   "New Survey Response (polling)"
+  ],
+  "action_total": 3,
+  "action_examples": [
+   "Create or Update Contact",
+   "Distribute Survey via Email",
+   "API Request (Beta)"
+  ],
+  "zapier_auth": "Not stated in directory or a help article; the Qualtrics platform API itself authenticates via X-API-TOKEN header (API key) or OAuth 2.0, so the Zapier app most plausibly collects an API token + data center, but this was not directly confirmed",
+  "webhook_sub_endpoint": "POST https://{dc}.qualtrics.com/API/v3/eventsubscriptions with JSON {publicationUrl, topics, encrypt, sharedKey}; GET /eventsubscriptions (list), GET/DELETE /eventsubscriptions/{id}; requires brand administrator",
+  "event_vocab_examples": [
+   "surveyengine.completedResponse.SV_ebdf20QralHTzQF",
+   "threesixty.*",
+   "samplebrand.surveyengine.completedResponse.SV_ebdf20QralHTzQF (Topic field as delivered)"
+  ],
+  "event_filtering": "single topics STRING per subscription (not an array) \u2014 one event, optionally suffixed by resource ID, or wildcard star notation (threesixty.*); one subscription = one topic pattern",
+  "signature_scheme": "No signature header; optional sharedKey generates an HMAC embedded in the event message body (compare HMAC computed over the message body), and optionally AES-128/256-encrypts the message (base64-encoded). Delivery is x-www-form-urlencoded POST, not JSON",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "No delivery-id documented; consumers key on ResponseID/SurveyID fields in the form-encoded payload",
+  "learnings": "Mostly an anti-pattern catalog for attune: form-encoded (non-JSON) delivery, a single topic string instead of an events array, body-embedded HMAC instead of a signed header, and brand-admin-only subscription all add integrator friction \u2014 its Zapier app consequently has zero instant triggers and polls instead. The one idea worth keeping is wildcard topic patterns (prefix.* ) for subscribe-to-everything-in-a-family.",
+  "sources": [
+   "https://zapier.com/apps/qualtrics/integrations",
+   "https://api.qualtrics.com/9c31e43fef682-create-subscription",
+   "https://api.qualtrics.com/9bf03a83945b9-list-subscriptions",
+   "https://api.qualtrics.com/20ca6f856f748-retrieve-survey-responses-in-real-time",
+   "https://api.qualtrics.com/9bd146dff952e-event-subscriptions-api"
+  ]
+ },
+ {
+  "name": "Jotform",
+  "category": "forms",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 2,
+  "instant_triggers": 1,
+  "polling_triggers": 1,
+  "trigger_examples": [
+   "New Submission (Instant)",
+   "New Signed Document (polling)"
+  ],
+  "action_total": 4,
+  "action_examples": [
+   "Create Submission",
+   "Assign Form",
+   "Assign Prefilled Form",
+   "API Request (Beta)"
+  ],
+  "zapier_auth": "Login-based connect flow ('Log into Jotform to authenticate, grant Zapier permission'), with a European-datacenter selection question \u2014 OAuth-style session grant, not a pasted API key",
+  "webhook_sub_endpoint": "POST https://api.jotform.com/form/{formID}/webhooks with form-encoded webhookURL param; GET same path lists; DELETE /form/{formID}/webhooks/{webhookID}; auth via apiKey query param or APIKEY header",
+  "event_vocab_examples": [],
+  "event_filtering": "per-form endpoint, no event-type vocabulary at all \u2014 a webhook on a form receives every new submission for that form",
+  "signature_scheme": "None documented \u2014 no signature header or HMAC mentioned in the API docs or the webhook help article",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "No delivery-id/event-id documented; consumers key on submissionID in the payload",
+  "learnings": "Shows the minimum viable per-resource webhook (one URL param, no events array) is enough to power a Zapier Instant trigger, but under-specifying costs later: no signature, no event types, no retry contract documented. attune should ship signatures and an event-type array from day one rather than retrofitting.",
+  "sources": [
+   "https://zapier.com/apps/jotform/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8496003142925-How-to-get-started-with-Jotform-on-Zapier",
+   "https://api.jotform.com/docs/",
+   "https://www.jotform.com/help/245-how-to-setup-a-webhook-with-jotform/"
+  ]
+ },
+ {
+  "name": "Tally",
+  "category": "forms",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 1,
+  "instant_triggers": 1,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "New Submission (Instant)"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "Login-based connect flow ('Log into Tally to authenticate, grant Zapier permission') \u2014 OAuth-style grant",
+  "webhook_sub_endpoint": "POST https://api.tally.so/webhooks (Bearer token) with JSON {formId, url, eventTypes:[\"FORM_RESPONSE\"], signingSecret, httpHeaders:[{name,value}], externalSubscriber}; also PATCH/DELETE /webhooks/{id}, GET webhook events, POST retry webhook events",
+  "event_vocab_examples": [
+   "FORM_RESPONSE"
+  ],
+  "event_filtering": "eventTypes array per subscription (currently a single enum value FORM_RESPONSE), scoped to one formId",
+  "signature_scheme": "Tally-Signature header = base64(HMAC-SHA256(signingSecret, JSON.stringify(payload))) \u2014 no timestamp in the signed content",
+  "retry_disable_policy": "10-second response timeout expecting 2XX; on failure 5 retries at 5 min, 30 min, 1 h, 6 h, 1 day; no auto-disable documented (webhooks can be paused manually; delivery event log with manual retry endpoint)",
+  "dedup_mechanism": "eventId (UUID) plus eventType in the JSON payload",
+  "learnings": "The cleanest small-vendor shape for attune to copy: one POST /webhooks endpoint taking url + eventTypes[] + caller-supplied signingSecret + custom httpHeaders, an externalSubscriber field to tag integration-created hooks (exactly what a Zapier connector needs for cleanup), an explicit documented retry ladder, and a delivery-events log with a manual retry API. Avoid its signature construction though \u2014 HMAC over re-stringified JSON without a timestamp is fragile and replayable; sign the raw body with a timestamp instead.",
+  "sources": [
+   "https://zapier.com/apps/tally/integrations",
+   "https://help.zapier.com/hc/en-us/articles/39882352154381-How-to-get-started-with-Tally-on-Zapier",
+   "https://developers.tally.so/api-reference/endpoint/webhooks/post",
+   "https://tally.so/help/webhooks"
+  ]
+ },
+ {
+  "name": "Formbricks",
+  "category": "forms",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 3,
+  "instant_triggers": 3,
+  "polling_triggers": 0,
+  "trigger_examples": [
+   "Response Created (Instant)",
+   "Response Finished (Instant)",
+   "Response Updated (Instant)"
+  ],
+  "action_total": 0,
+  "action_examples": [],
+  "zapier_auth": "API key \u2014 Formbricks' own Zapier guide walks through pasting an API key into the Zapier connection window (API v2 uses x-api-key header)",
+  "webhook_sub_endpoint": "POST https://app.formbricks.com/api/v2/management/webhooks (x-api-key) with JSON {name, url, source: user|zapier|make|n8n, workspaceId, triggers:[...], surveyIds:[...]}; full CRUD (GET list/one, PUT, DELETE)",
+  "event_vocab_examples": [
+   "responseCreated",
+   "responseUpdated",
+   "responseFinished"
+  ],
+  "event_filtering": "triggers array of event-type enums per subscription, additionally scoped by a surveyIds array \u2014 two-axis filtering (event type x resource)",
+  "signature_scheme": "Standard Webhooks spec: webhook-id + webhook-timestamp + webhook-signature headers; signature = 'v1,' + base64(HMAC-SHA256(whsec_-prefixed secret, '{id}.{timestamp}.{body}')); server-generated secret returned at creation; 5-minute replay tolerance recommended",
+  "retry_disable_policy": "",
+  "dedup_mechanism": "webhook-id header (unique message identifier) plus webhookId and event fields in the JSON payload",
+  "learnings": "The closest OSS analog to attune and the strongest template: adopt the Standard Webhooks signature scheme (interoperable client libraries in 8+ languages for free), the source enum tagging who created the subscription (user/zapier/make/n8n) which makes connector-owned webhooks auditable, and triggers[] x surveyIds[] two-axis filtering. Also note its SSRF guard: private/internal target IPs blocked by default with an explicit self-host escape hatch \u2014 directly relevant to attune's allow_loopback_egress design. Gap to avoid: no documented retry policy.",
+  "sources": [
+   "https://zapier.com/apps/formbricks/integrations",
+   "https://formbricks.com/docs/platform/features/integrations/webhooks.md",
+   "https://formbricks.com/docs/api-v2-reference/management-api--webhooks/create-a-webhook.md",
+   "https://formbricks.com/docs/platform/features/integrations/zapier.md"
+  ]
+ },
+ {
+  "name": "Stripe",
+  "category": "commerce",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 16,
+  "instant_triggers": 11,
+  "polling_triggers": 5,
+  "trigger_examples": [
+   "New Payment (Instant)",
+   "New Customer (Instant)",
+   "Checkout Session Completed (Instant)",
+   "Invoice Payment Failed (Instant)",
+   "New Refund (polling)"
+  ],
+  "action_total": 21,
+  "action_examples": [
+   "Create Customer",
+   "Create Payment Link",
+   "Create Invoice",
+   "Cancel Subscription",
+   "Find Customer (search)"
+  ],
+  "zapier_auth": "Connect-account flow: 'Yes, Continue to Stripe' then log into Stripe and grant Zapier access (OAuth-style); using test-mode data additionally requires creating a Stripe secret API key",
+  "webhook_sub_endpoint": "POST https://api.stripe.com/v1/webhook_endpoints with url + enabled_events[] (repeated param), e.g. enabled_events[]=charge.succeeded; response includes the endpoint's signing secret (whsec_...); full CRUD on /v1/webhook_endpoints/{id}",
+  "event_vocab_examples": [
+   "charge.succeeded",
+   "charge.failed",
+   "payment_intent.succeeded",
+   "payment_method.attached",
+   "invoice.payment_failed"
+  ],
+  "event_filtering": "enabled_events array of event-type strings per endpoint (resource.action dot notation); each endpoint independently selects its event set",
+  "signature_scheme": "Stripe-Signature header 't={ts},v1={sig}': HMAC-SHA256 over signed_payload '{timestamp}.{raw_body}' keyed by the endpoint's whsec_ secret; timestamp inside the signed payload defeats replay, libraries default to 5-minute tolerance; ignore non-v1 schemes to prevent downgrade",
+  "retry_disable_policy": "Live mode: exponential backoff retries for up to 3 days; sandbox: 3 retries over a few hours; retries stop if the destination is disabled/deleted; manual resend up to 15 days (Dashboard) / 30 days (CLI); endpoints can be disabled via API (disabled flag) \u2014 no automatic-disable schedule stated in the retrieved docs",
+  "dedup_mechanism": "Unique event id \u2014 docs instruct logging processed event IDs and skipping already-logged ones; for the rare two-distinct-Event duplicates, dedup on data.object id + event.type",
+  "learnings": "The industry reference attune should copy almost verbatim: enabled_events[] per endpoint, resource.action dot-notation vocabulary, signing secret minted and returned at subscription creation, timestamp-inside-signature (t=/v1=) replay protection, days-long exponential retry, and explicit consumer guidance to dedup on event id and to return 2xx before doing work. Its Zapier app also shows the hidden-polling-trigger trick: hidden 'List X' polling reads feed dynamic dropdowns while user-facing triggers are REST hooks.",
+  "sources": [
+   "https://zapier.com/apps/stripe/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8496161863693-How-to-get-started-with-Stripe-on-Zapier",
+   "https://docs.stripe.com/webhooks",
+   "https://docs.stripe.com/webhooks.md",
+   "https://docs.stripe.com/api/webhook_endpoints/create",
+   "https://docs.stripe.com/event-destinations.md"
+  ]
+ },
+ {
+  "name": "Shopify",
+  "category": "commerce",
+  "zapier_exists": true,
+  "confidence": "high",
+  "trigger_total": 20,
+  "instant_triggers": 16,
+  "polling_triggers": 4,
+  "trigger_examples": [
+   "New Order (Instant)",
+   "New Paid Order (Instant)",
+   "Updated Product (Instant)",
+   "New Customer (Instant)",
+   "New Abandoned Cart (polling)"
+  ],
+  "action_total": 36,
+  "action_examples": [
+   "Create Order",
+   "Create Product",
+   "Update Customer",
+   "Create Draft Order",
+   "Find Order (search)"
+  ],
+  "zapier_auth": "OAuth login flow: enter the store subdomain (from admin.shopify.com/store/{name}), 'Yes, Continue to Shopify', log in and grant access; the Zapier app is a Premium (paid-plan) integration",
+  "webhook_sub_endpoint": "GraphQL Admin API webhookSubscriptionCreate mutation at POST /admin/api/{version}/graphql.json (topic enum e.g. ORDERS_CREATE + webhookSubscription{uri, format, includeFields, metafieldNamespaces}), or declarative app-config: [[webhooks.subscriptions]] topics=[\"products/update\"] uri=... in shopify.app.toml; targets: HTTPS URL, Google Pub/Sub, or Amazon EventBridge",
+  "event_vocab_examples": [
+   "orders/create",
+   "products/create",
+   "products/update",
+   "ORDERS_CREATE (GraphQL enum form)"
+  ],
+  "event_filtering": "topic-based: one topic per subscription (resource/action slash notation; SCREAMING_CASE in GraphQL); TOML topics array expands to one subscription per topic; plus per-subscription payload shaping via filter and include_fields",
+  "signature_scheme": "X-Shopify-Hmac-Sha256 header: base64-encoded HMAC-SHA256 of the raw request body keyed by the app's client secret (HTTPS deliveries only; constant-time compare; up to 1 h of dual-secret validity after secret rotation)",
+  "retry_disable_policy": "Failed deliveries retried up to 8 times within a 4-hour window; after repeated failures in a 24-hour period the subscription is removed \u2014 but only shop-specific (API-created) subscriptions are auto-deleted; app-specific (TOML-declared) subscriptions are never deleted by Shopify",
+  "dedup_mechanism": "X-Shopify-Webhook-Id header (unique composite key per delivery, documented for dedup) plus X-Shopify-Event-Id (shared across all deliveries produced by the same merchant action); X-Shopify-Triggered-At timestamp",
+  "learnings": "Copy the two-level ID design \u2014 a per-delivery Webhook-Id for consumer dedup distinct from a per-business-event Event-Id \u2014 and the metadata-header set (topic, API version, triggered-at). The 8-retries/4-hours then auto-remove policy is a concrete model for attune's disable-after-N-failures rule, with the nuance that config-declared subscriptions survive while API-created ones get culled. Avoid the dual event-name spelling (orders/create vs ORDERS_CREATE): attune should keep exactly one canonical event-token form, consistent with its append-only source vocabulary.",
+  "sources": [
+   "https://zapier.com/apps/shopify/integrations",
+   "https://help.zapier.com/hc/en-us/articles/8495935490957-How-to-get-started-with-Shopify-on-Zapier",
+   "https://shopify.dev/docs/apps/build/webhooks",
+   "https://shopify.dev/docs/apps/build/webhooks/subscribe",
+   "https://shopify.dev/docs/apps/build/webhooks/delivery-structure",
+   "https://shopify.dev/docs/apps/build/webhooks/verify-deliveries",
+   "https://shopify.dev/docs/apps/build/webhooks/troubleshooting-webhooks"
+  ]
+ }
+]

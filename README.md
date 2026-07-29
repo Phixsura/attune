@@ -220,6 +220,7 @@ internal/
 console/                     React triage UI (feature-based: src/features/*)
 sdk/node/                    Node/TypeScript ingest client (@phixsura/attune)
 sdk/go/                      Go ingest client (github.com/Phixsura/attune/sdk/go)
+integrations/zapier/         Zapier app (instant triggers + actions — docs/integrations/zapier.md)
 ```
 
 **Layering rule** — handlers never write SQL; service never writes HTTP; notify never imports service; infra never imports service or repo. A reverse import is a rejection-grade lint.
