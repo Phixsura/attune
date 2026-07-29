@@ -363,6 +363,13 @@ func extractTraceID(ctx context.Context) string {
 // (old in-flight rows). Validation happens at ingest only — never re-validate
 // s.Source here against the live set.
 func buildOutboxEnvelope(s domain.Snapshot, traceID, sourceDisplay string) ([]byte, error) {
+	return buildOutboxEnvelopeTyped(s, traceID, sourceDisplay, domain.EventFeedbackEnriched)
+}
+
+// buildOutboxEnvelopeTyped is buildOutboxEnvelope with an explicit event_type
+// — the automation subscription fan-out (#234) emits the same envelope shape
+// under feedback.created / feedback.urgent.
+func buildOutboxEnvelopeTyped(s domain.Snapshot, traceID, sourceDisplay, eventType string) ([]byte, error) {
 	type enrichedOut struct {
 		Title            string         `json:"title"`
 		DisplayTitle     string         `json:"display_title,omitempty"`
@@ -399,7 +406,7 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID, sourceDisplay string) ([]by
 	}
 	env := envelopeOut{
 		Version:     "2", // E3 metadata-driven dims: enriched = {title, attrs, is_urgent, rationale}
-		EventType:   "feedback.enriched",
+		EventType:   eventType,
 		DeliveredAt: at,
 		TraceID:     traceID,
 		Feedback: feedbackOut{
