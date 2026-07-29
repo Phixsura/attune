@@ -31,6 +31,13 @@ module.exports = {
       if (bundle.inputData.status) body.status = bundle.inputData.status
       if (bundle.inputData.title) body.title = bundle.inputData.title
       if (bundle.inputData.description) body.description = bundle.inputData.description
+      if (Object.keys(body).length === 0) {
+        throw new z.errors.Error(
+          'Set at least one of Status, Title, or Description to update the request.',
+          'InvalidInput',
+          400,
+        )
+      }
       return z
         .request({
           url: `${bundle.authData.base_url}/v1/requests/${encodeURIComponent(bundle.inputData.request_id)}`,
