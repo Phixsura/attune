@@ -549,3 +549,36 @@ func nullInt(n int) any {
 	}
 	return n
 }
+
+// RecentPayloadsByEventType returns the newest stored envelope payloads for
+// one tenant + event type, newest first. Powers the automation performList
+// samples endpoint (#234): stored payloads are schema-identical to live
+// deliveries by construction (the worker POSTs them verbatim).
+func (r *OutboxRepo) RecentPayloadsByEventType(
+	ctx context.Context,
+	tenantID, eventType string,
+	limit int,
+) ([][]byte, error) {
+	const where = "repo.OutboxRepo.RecentPayloadsByEventType"
+	rows, err := r.pool.Query(ctx, `
+		SELECT payload FROM notify_outbox
+		 WHERE tenant_id = $1
+		 AND payload->>'event_type' = $2
+		 ORDER BY id DESC
+		 LIMIT $3`, tenantID, eventType, limit)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] query failed,tenant:%s,event:%s,err:%+v",
+			where, tenantID, eventType, err.Error())
+		return nil, fmt.Errorf("recent payloads: %w", err)
+	}
+	defer rows.Close()
+	var out [][]byte
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil { // ptrext:allow scan-out-param
+			return nil, fmt.Errorf("scan payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

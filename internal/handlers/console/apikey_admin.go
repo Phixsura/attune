@@ -22,6 +22,7 @@ import (
 	consolemcpclient "github.com/Phixsura/attune/internal/handlers/console/mcpclient"
 	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
+	consolewebhooksub "github.com/Phixsura/attune/internal/handlers/console/webhooksub"
 	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
@@ -36,6 +37,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/idempotency"
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
+	webhooksubrepo "github.com/Phixsura/attune/internal/repo/webhooksub"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
@@ -160,6 +162,12 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 	mcpClients.SetAuditLogger(audit)
 	mcpClients.SetConnectionProfile(opts.MCPPublicBaseURL, opts.MCPOAuthIssuer)
 
+	hooks := consolewebhooksub.NewHandler(
+		webhooksubrepo.New(pool),
+		outboxSampleSource{repo: outboxrepo.NewOutbox(pool)},
+	)
+	hooks.SetAuditLogger(audit)
+
 	r.Group(func(g chi.Router) {
 		g.Use(apikey.MiddlewareWithProxies(apiKeys, trustedProxyHops))
 		g.Use(perKeyLimiter.Middleware)
@@ -170,7 +178,18 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 		mountAPIKeyGDPR(g, gdpr, withAPIKeyIdempotency(idempotencyStore))
 		mountAPIKeyOutbox(g, outbox, withAPIKeyIdempotency(idempotencyStore))
 		mountAPIKeyMCPClients(g, mcpClients, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyHooks(g, hooks, withAPIKeyIdempotency(idempotencyStore))
 	})
+}
+
+// outboxSampleSource adapts the outbox repo to the samples handler: stored
+// payloads are schema-identical to live deliveries by construction.
+type outboxSampleSource struct {
+	repo *outboxrepo.OutboxRepo
+}
+
+func (s outboxSampleSource) RecentEnvelopes(ctx context.Context, tenantID, eventType string, limit int) ([][]byte, error) {
+	return s.repo.RecentPayloadsByEventType(ctx, tenantID, eventType, limit)
 }
 
 func mountAPIKeyTags(g chi.Router, tags *consoletag.Handler, idem func(http.Handler) http.Handler) {
