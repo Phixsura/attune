@@ -528,6 +528,40 @@ export interface RecordCustomerRequestIssueSyncRequest {
   syncError?: string | undefined;
 }
 
+export interface AddRequestNoteAutomationRequest {
+  id: string;
+  body: string;
+  /**
+   * internal (default) -> collaboration note; public -> portal comment
+   * routed through the standard moderation pipeline.
+   */
+  visibility: string;
+}
+
+export interface ListRequestsAutomationRequest {
+  q: string;
+  status: CustomerRequestStatus[];
+  priority: CustomerRequestPriority[];
+  limit?: number | undefined;
+  cursor?: string | undefined;
+}
+
+export interface CreateRequestAutomationRequest {
+  title: string;
+  description?: string | undefined;
+  status: CustomerRequestStatus;
+  priority: CustomerRequestPriority;
+  idempotencyKey: string;
+}
+
+export interface UpdateRequestAutomationRequest {
+  id: string;
+  title?: string | undefined;
+  description?: string | undefined;
+  status?: CustomerRequestStatus | undefined;
+  priority?: CustomerRequestPriority | undefined;
+}
+
 export interface CustomerRequestService {
   ListCustomerRequests(request: ListCustomerRequestsRequest): Promise<ListCustomerRequestsResponse>;
   GetCustomerRequestScoringSettings(
@@ -567,4 +601,20 @@ export interface CustomerRequestService {
   ): Promise<CreateCustomerRequestGitHubIssueResponse>;
   UnlinkCustomerRequestIssue(request: UnlinkCustomerRequestIssueRequest): Promise<CustomerRequestDetail>;
   RecordCustomerRequestIssueSync(request: RecordCustomerRequestIssueSyncRequest): Promise<CustomerRequestDetail>;
+}
+
+/**
+ * CustomerRequestAutomationService is the API-key automation surface for
+ * customer requests (#234) — scope requests:read / requests:write. It reuses
+ * the console message shapes; only the note rpc differs (visibility routing).
+ */
+export interface CustomerRequestAutomationService {
+  /** GET /v1/requests */
+  ListRequestsAutomation(request: ListRequestsAutomationRequest): Promise<ListCustomerRequestsResponse>;
+  /** POST /v1/requests (201) */
+  CreateRequestAutomation(request: CreateRequestAutomationRequest): Promise<CustomerRequestDetail>;
+  /** PATCH /v1/requests/{id} */
+  UpdateRequestAutomation(request: UpdateRequestAutomationRequest): Promise<CustomerRequestDetail>;
+  /** POST /v1/requests/{id}/notes (201) */
+  AddRequestNoteAutomation(request: AddRequestNoteAutomationRequest): Promise<CustomerRequestDetail>;
 }

@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
+
+// WebhookSubscriptionService manages automation webhook subscriptions
+// (e.g. Zapier REST hooks) over API-key auth, scope hooks:manage.
+// One subscription per consumer hook; event_types filters the append-only
+// automation event vocabulary (feedback.created, feedback.urgent,
+// request.created, request.status_changed).
+service WebhookSubscriptionService {
+  // POST /v1/hooks (201)
+  rpc CreateWebhookSubscription(CreateWebhookSubscriptionRequest) returns (WebhookSubscription) {
+    option (google.api.http) = {
+      post: "/v1/hooks"
+      body: "*"
+    };
+  }
+  // GET /v1/hooks
+  rpc ListWebhookSubscriptions(ListWebhookSubscriptionsRequest) returns (ListWebhookSubscriptionsResponse) {
+    option (google.api.http) = {get: "/v1/hooks"};
+  }
+  // DELETE /v1/hooks/{id} (204)
+  rpc DeleteWebhookSubscription(DeleteWebhookSubscriptionRequest) returns (DeleteWebhookSubscriptionResponse) {
+    option (google.api.http) = {delete: "/v1/hooks/{id}"};
+  }
+  // GET /v1/hooks/samples/{event_type} — recent real events (or a canned
+  // static sample when the tenant has none), reverse-chronological, each
+  // item schema-identical to the live webhook payload. Serves as the
+  // Zapier performList endpoint.
+  rpc ListWebhookSamples(ListWebhookSamplesRequest) returns (ListWebhookSamplesResponse) {
+    option (google.api.http) = {get: "/v1/hooks/samples/{event_type}"};
+  }
+}
+
+// WebhookSubscription never carries the secret — it is write-only once
+// stored (same rule as NotifyTarget).
+message WebhookSubscription {
+  string id = 1;
+  string target_url = 2;
+  repeated string event_types = 3; // append-only vocabulary
+  string status = 4;               // active | disabled
+  string disabled_reason = 5;      // e.g. "gone" (consumer answered HTTP 410)
+  string consumer = 6;             // zapier | generic
+  string created_at = 7;           // RFC3339
+}
+
+message CreateWebhookSubscriptionRequest {
+  string target_url = 1 [(google.api.field_behavior) = REQUIRED]; // HTTPS (loopback exemption per config)
+  repeated string event_types = 2 [(google.api.field_behavior) = REQUIRED];
+  string secret = 3;   // >= 16 chars when provided; server generates when empty
+  string consumer = 4; // default "generic"
+}
+
+message ListWebhookSubscriptionsRequest {}
+
+message ListWebhookSubscriptionsResponse {
+  repeated WebhookSubscription subscriptions = 1;
+}
+
+message DeleteWebhookSubscriptionRequest {
+  string id = 1;
+}
+
+message DeleteWebhookSubscriptionResponse {}
+
+message ListWebhookSamplesRequest {
+  string event_type = 1;
+}
+
+// Samples are envelope objects returned as raw JSON structs so the envelope
+// (built by the delivery pipeline) stays the single source of truth.
+message ListWebhookSamplesResponse {
+  repeated google.protobuf.Struct samples = 1;
+}

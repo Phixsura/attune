@@ -25,7 +25,11 @@ export interface VerifyApiKeyResponse {
     | string
     | undefined;
   /** per-key limit, null = global */
-  rateLimitRpm?: number | undefined;
+  rateLimitRpm?:
+    | number
+    | undefined;
+  /** workspace name — connection label for automation consumers (e.g. Zapier) */
+  tenantDisplayName: string;
 }
 
 export interface ApiKey {
