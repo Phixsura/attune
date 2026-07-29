@@ -1,0 +1,8 @@
+{
+  "action": "remove_members",
+  "cohort_name": "Enterprise Accounts",
+  "cohort_id": "cohort-xyz",
+  "members": [
+    {"email": "alice@example.com", "mixpanel_distinct_id": "uid-1", "first_name": "Alice", "last_name": "Smith"}
+  ]
+}

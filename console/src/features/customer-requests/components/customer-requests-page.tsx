@@ -75,6 +75,7 @@ import {
   useUpdateCustomerRequestScoringSettings,
 } from '@/features/customer-requests/api/customer-requests'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
+import { api } from '@/lib/api-client'
 import { type Member, membersQuery } from '@/lib/members-api'
 import { cn } from '@/lib/utils'
 import {
@@ -130,6 +131,17 @@ export function CustomerRequestsPage({
   const canConfigure = permissions.can('customer_request:configure')
   const canEdit = permissions.can('customer_request:edit')
   const members = useQuery({ ...membersQuery(), enabled: canViewMembers })
+  // Inline cohort query to avoid cross-feature import (same pattern as feedback-page).
+  const cohortList = useQuery({
+    queryKey: ['cohort-sync', 'cohorts'],
+    queryFn: ({ signal }) =>
+      api<{ cohorts?: Array<{ id: string; name: string }> }>('/fb/v1/console/cohort-sync/cohorts', {
+        signal,
+      })
+        .then((r) => r.cohorts ?? [])
+        .catch(() => []),
+    staleTime: 30_000,
+  })
   const [filters, setFilters] = useState<CustomerRequestFilters>(() => ({
     ...DEFAULT_FILTERS,
     feedbackId: initialFeedbackID,
@@ -202,7 +214,12 @@ export function CustomerRequestsPage({
 
       <CustomerRequestSavedViewsBar filters={filters} onApply={setFilters} />
 
-      <CustomerRequestToolbar filters={filters} ownerOptions={ownerOptions} onChange={setFilters} />
+      <CustomerRequestToolbar
+        filters={filters}
+        ownerOptions={ownerOptions}
+        cohorts={(cohortList.data ?? []).map((c) => ({ id: c.id, name: c.name }))}
+        onChange={setFilters}
+      />
 
       {list.isPending ? (
         <CustomerRequestSkeleton />
@@ -324,15 +341,17 @@ function memberLabel(member: Member) {
 function CustomerRequestToolbar({
   filters,
   ownerOptions,
+  cohorts,
   onChange,
 }: {
   filters: CustomerRequestFilters
   ownerOptions: OwnerFilterOption[]
+  cohorts: Array<{ id: string; name: string }>
   onChange: (filters: CustomerRequestFilters) => void
 }) {
   const { t } = useTranslation()
   return (
-    <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(15rem,1fr)_repeat(5,11rem)]">
+    <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(15rem,1fr)_repeat(6,10rem)]">
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -484,6 +503,24 @@ function CustomerRequestToolbar({
           </SelectItem>
         </SelectContent>
       </Select>
+      {cohorts.length > 0 && (
+        <Select
+          value={filters.cohortId ?? '__all'}
+          onValueChange={(v) => onChange({ ...filters, cohortId: v === '__all' ? undefined : v })}
+        >
+          <SelectTrigger aria-label={t('cohort_sync.filter.all')}>
+            <SelectValue placeholder={t('cohort_sync.filter.all')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t('cohort_sync.filter.all')}</SelectItem>
+            {cohorts.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </div>
   )
 }

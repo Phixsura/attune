@@ -1,0 +1,10 @@
+{
+  "action": "members",
+  "cohort_name": "Enterprise Accounts",
+  "cohort_id": "cohort-xyz",
+  "mixpanel_session_id": "session-001",
+  "members": [
+    {"email": "alice@example.com", "mixpanel_distinct_id": "uid-1", "first_name": "Alice", "last_name": "Smith"},
+    {"email": "bob@example.com", "mixpanel_distinct_id": "uid-2", "first_name": "Bob", "last_name": "Jones"}
+  ]
+}

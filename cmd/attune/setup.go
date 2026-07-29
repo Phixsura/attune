@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/handlers/console"
+	consolecohortsync "github.com/Phixsura/attune/internal/handlers/console/cohortsync"
 	consolecustomerrequest "github.com/Phixsura/attune/internal/handlers/console/customerrequest"
 	"github.com/Phixsura/attune/internal/handlers/console/enrichconfig"
 	consoleenrichmentruntime "github.com/Phixsura/attune/internal/handlers/console/enrichmentruntime"
@@ -73,6 +75,7 @@ import (
 	auditlogviewsvc "github.com/Phixsura/attune/internal/service/auditlogview"
 	authmodesvc "github.com/Phixsura/attune/internal/service/authmode"
 	breakglasssvc "github.com/Phixsura/attune/internal/service/breakglass"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	customerrequestsvc "github.com/Phixsura/attune/internal/service/customerrequest"
 	customerrequestviewsvc "github.com/Phixsura/attune/internal/service/customerrequestview"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -210,6 +213,7 @@ func buildConsoleRouter(
 	llm llmclient.LLMClient,
 	enrichRuntime *enrichruntimesvc.Service,
 	sources domain.SourceSet,
+	cohortSyncSvc *cohortsyncservice.Service,
 ) (chi.Router, error) {
 	if cfg.ConsoleBaseURL == "" {
 		return nil, fmt.Errorf("console requires console.base_url")
@@ -307,7 +311,7 @@ func buildConsoleRouter(
 	)
 	wireRequestNotificationHandlers(router, pool, secrets, cfg.ConsoleBaseURL, idempotencyRepo, auditLogSvc)
 	router.SetPublicVisibilityHandler(buildPublicVisibilityHandler(pool, auditLogSvc))
-	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets), nil
+	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets, cohortSyncSvc), nil
 }
 
 type consoleAuditTarget func(*auditlogsvc.Service)
@@ -390,9 +394,10 @@ func configureConsoleRouter(
 	adminRepo *admin.Repo,
 	feedbackRepo *feedback.FeedbackRepo,
 	secrets *secretstore.TinkStore,
+	cohortSyncSvc *cohortsyncservice.Service,
 ) chi.Router {
 	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
-	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets)
+	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets, cohortSyncSvc)
 	return router.Mount()
 }
 
@@ -412,9 +417,10 @@ func buildSearchHandler(
 	return searchHandler
 }
 
-func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo, secrets *secretstore.TinkStore) {
+func attachOptionalHandlers(router *console.Router, pool *pgxpool.Pool, cfg *config.Config, settingsRepo *systemsettingsrepo.Repo, auditLogSvc *auditlogsvc.Service, signer *console.Signer, tenantRepo *tenant.TenantRepo, adminRepo *admin.Repo, secrets *secretstore.TinkStore, cohortSyncSvc *cohortsyncservice.Service) {
 	attachOutboxHandler(router, pool, auditLogSvc)
 	attachExternalSyncHandler(router, pool, auditLogSvc, secrets)
+	attachCohortSyncHandler(router, cfg, cohortSyncSvc, auditLogSvc)
 	attachAuditEvidenceHandler(router, pool, cfg, auditLogSvc)
 	attachMCPClientHandler(router, cfg, pool, auditLogSvc)
 	attachPreflightHandler(router, cfg, pool)
@@ -430,6 +436,15 @@ func attachExternalSyncHandler(router *console.Router, pool *pgxpool.Pool, audit
 	svc := externalsyncsvc.New(externalsyncrepo.New(pool), secrets)
 	svc.SetAuditLogger(audit)
 	router.SetExternalSyncHandler(console.NewExternalSyncHandler(svc))
+}
+
+func attachCohortSyncHandler(router *console.Router, cfg *config.Config, svc *cohortsyncservice.Service, audit *auditlogsvc.Service) {
+	if svc == nil {
+		return
+	}
+	svc.SetAuditLogger(audit)
+	webhookBaseURL := strings.TrimRight(cfg.ConsoleBaseURL, "/")
+	router.SetCohortSyncHandler(consolecohortsync.NewHandler(svc, webhookBaseURL))
 }
 
 // attachOutboxHandler wires the notify dead-queue console handler (#33). Kept

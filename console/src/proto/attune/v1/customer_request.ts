@@ -373,6 +373,7 @@ export interface ListCustomerRequestsRequest {
   limit?: number | undefined;
   cursor?: string | undefined;
   feedbackId?: string | undefined;
+  cohortId?: string | undefined;
 }
 
 export interface ListCustomerRequestsResponse {

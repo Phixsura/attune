@@ -78,6 +78,7 @@ import {
 } from '@/features/feedback/lib/terminal-failure-workbench'
 import { meQuery } from '@/features/session/api/get-me'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
+import { api } from '@/lib/api-client'
 import { useDisplayName } from '@/lib/i18n-resolve'
 import type { FeedbackFilter } from '@/proto/attune/v1/batch'
 import type { Dimension } from '@/proto/attune/v1/common'
@@ -160,6 +161,15 @@ export function FeedbackPage({
   const displayOf = useDisplayName()
   const { can } = usePermissions()
   const me = useQuery(meQuery())
+  const cohortList = useQuery({
+    queryKey: ['cohort-sync', 'cohorts'],
+    queryFn: ({ signal }) =>
+      api<{ cohorts?: Array<{ id: string; name: string }> }>('/fb/v1/console/cohort-sync/cohorts', {
+        signal,
+      })
+        .then((r) => r.cohorts ?? [])
+        .catch(() => []),
+  })
   const canViewLLMConfig = can('llm_config:view')
   const canViewRuntimeConfig = can('settings:enrichment_runtime:view')
   const portalHref = me.data?.tenant?.slug
@@ -172,6 +182,7 @@ export function FeedbackPage({
 
   const [attrFilters, setAttrFilters] = useState<Record<string, string>>({})
   const [tagFilter, setTagFilter] = useState<string>('')
+  const [cohortFilter, setCohortFilter] = useState<string>('')
   const [workflowFilter, setWorkflowFilter] = useState<string>('')
   const [enrichmentFilter, setEnrichmentFilter] = useState<string>('')
   const [sourceFilter, setSourceFilter] = useState<string>(initialSourceFilter)
@@ -257,6 +268,7 @@ export function FeedbackPage({
       source: sourceFilter || undefined,
       type: typeFilter || undefined,
       tag: tagFilter || undefined,
+      cohort_id: cohortFilter || undefined,
       workflowState: workflowFilter || undefined,
       enrichmentStatus: effectiveEnrichmentStatus || undefined,
       terminalFailedOnly: queueMode === 'terminal' ? true : undefined,
@@ -271,6 +283,7 @@ export function FeedbackPage({
   }, [
     attrFilters,
     tagFilter,
+    cohortFilter,
     urgentOnly,
     workflowFilter,
     enrichmentFilter,
@@ -364,6 +377,7 @@ export function FeedbackPage({
   const activeFilterCount =
     Object.values(attrFilters).filter((value) => value && value !== '__all').length +
     (tagFilter ? 1 : 0) +
+    (cohortFilter ? 1 : 0) +
     (workflowFilter ? 1 : 0) +
     (enrichmentFilter ? 1 : 0) +
     (sourceFilter !== initialSourceFilter ? 1 : 0) +
@@ -548,6 +562,17 @@ export function FeedbackPage({
       })
     }
 
+    if (cohortFilter) {
+      const cohortName =
+        (cohortList.data ?? []).find((c) => c.id === cohortFilter)?.name ?? cohortFilter
+      chips.push({
+        key: 'cohort',
+        label: t('cohort_sync.tabs.cohorts'),
+        value: cohortName,
+        onRemove: () => setCohortFilter(''),
+      })
+    }
+
     if (workflowLabel) {
       chips.push({
         key: 'workflow',
@@ -687,6 +712,7 @@ export function FeedbackPage({
     searchMode,
     sortMode,
     tagFilter,
+    cohortFilter,
     tagList,
     t,
     typeFilter,
@@ -793,6 +819,7 @@ export function FeedbackPage({
   const clearFilters = () => {
     setAttrFilters({})
     setTagFilter('')
+    setCohortFilter('')
     setWorkflowFilter('')
     setEnrichmentFilter('')
     setSourceFilter(initialSourceFilter)
@@ -903,6 +930,9 @@ export function FeedbackPage({
                 dims={dims}
                 attrFilters={attrFilters}
                 tagFilter={tagFilter}
+                cohortFilter={cohortFilter}
+                cohorts={(cohortList.data ?? []).map((c) => ({ id: c.id, name: c.name }))}
+                onCohortChange={setCohortFilter}
                 workflowFilter={workflowFilter}
                 enrichmentFilter={enrichmentFilter}
                 sourceFilter={sourceFilter}
@@ -1287,11 +1317,14 @@ function FilterBar({
   dims,
   attrFilters,
   tagFilter,
+  cohortFilter,
   workflowFilter,
   enrichmentFilter,
   sourceFilter,
   typeFilter,
   tags,
+  cohorts,
+  onCohortChange,
   workflowStates,
   urgentOnly,
   q,
@@ -1311,6 +1344,7 @@ function FilterBar({
   dims: Dimension[]
   attrFilters: Record<string, string>
   tagFilter: string
+  cohortFilter: string
   workflowFilter: string
   enrichmentFilter: string
   sourceFilter: string
@@ -1323,6 +1357,8 @@ function FilterBar({
   semanticIsLoading: boolean
   onAttrChange: (dim: string, value: string) => void
   onTagChange: (tagId: string) => void
+  cohorts: Array<{ id: string; name: string }>
+  onCohortChange: (cohortId: string) => void
   onWorkflowChange: (stateId: string) => void
   onEnrichmentChange: (status: string) => void
   onSourceChange: (source: string) => void
@@ -1499,6 +1535,27 @@ function FilterBar({
             </SelectContent>
           </Select>
         )}
+        <Select
+          value={cohortFilter || '__all'}
+          onValueChange={(v) => onCohortChange(v === '__all' ? '' : v)}
+          disabled={cohorts.length === 0}
+        >
+          <SelectTrigger
+            className="h-10 w-full bg-background"
+            aria-label={t('cohort_sync.filter.all')}
+            title={cohorts.length === 0 ? t('cohort_sync.filter.empty_hint') : undefined}
+          >
+            <SelectValue placeholder={t('cohort_sync.filter.all')} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all">{t('cohort_sync.filter.all')}</SelectItem>
+            {cohorts.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {activeStates.length > 0 && (
           <Select
             value={workflowFilter || '__all'}

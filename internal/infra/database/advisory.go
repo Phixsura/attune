@@ -21,6 +21,7 @@ const (
 	LockAuditPruner       int64 = -1084146451328471054 // fnv64("attune:audit_pruner")
 	LockIdempotencyPruner int64 = -715602170255445448  // fnv64("attune:idempotency_pruner")
 	LockMCPPruner         int64 = -3870184609201921041 // fnv64("attune:mcp_pruner")
+	LockCohortSyncCleanup int64 = -319529342502280686  // fnv64("attune:cohort_sync_cleanup")
 )
 
 // AdvisoryLock holds a session-level advisory lock on a dedicated connection.
@@ -105,6 +106,9 @@ func init() {
 	}
 	if fnv64("attune:mcp_pruner") != LockMCPPruner {
 		panic("LockMCPPruner mismatch")
+	}
+	if fnv64("attune:cohort_sync_cleanup") != LockCohortSyncCleanup {
+		panic("LockCohortSyncCleanup mismatch")
 	}
 }
 

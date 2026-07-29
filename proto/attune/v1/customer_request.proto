@@ -476,6 +476,7 @@ message ListCustomerRequestsRequest {
   optional int32 limit = 8;
   optional string cursor = 9;
   optional int64 feedback_id = 10;
+  optional string cohort_id = 11;
 }
 
 message ListCustomerRequestsResponse {

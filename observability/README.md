@@ -80,6 +80,12 @@ exposition plus the portable assets in this directory.
 | `attune_external_sync_lag_seconds` | gauge | `provider`, `object_type` | age of the latest successful external sync cursor by provider and object type (#214) |
 | `attune_external_sync_conflicts_total` | counter | `provider`, `object_type`, `resolution` | external sync conflicts resolved or ignored by resolution (#214) |
 | `attune_external_sync_dead_runs` | gauge | `provider`, `object_type` | external sync runs exhausted after retries and requiring operator attention (#214) |
+| `attune_cohort_sync_webhook_requests_total` | counter | `provider`, `status` | cohort sync webhook requests by provider and outcome (#233) |
+| `attune_cohort_sync_members_changed_total` | counter | `provider`, `action` | cohort membership changes by provider and add/remove action (#233) |
+| `attune_cohort_sync_runs_total` | counter | `provider`, `trigger`, `status` | cohort sync runs by provider, trigger, and status (#233) |
+| `attune_cohort_sync_active_members` | gauge | `provider` | active cohort members by provider (#233) |
+| `attune_cohort_sync_stale_members_cleaned_total` | counter | — | stale cohort memberships cleaned up by TTL (#233) |
+| `attune_cohort_sync_run_duration_seconds` | histogram | `provider`, `trigger` | cohort sync run latency (#233) |
 | `attune_workflow_transitions_total` | counter | `tenant`, `result` | workflow state transitions by outcome — `success` / `invalid` / `error` (#29) |
 | `attune_workflow_batch_size` | histogram | — | number of feedback items per batch-transition call (#29) |
 | `attune_batch_jobs_claimed_total` | counter | `tenant` | async batch jobs claimed by workers (#30) |

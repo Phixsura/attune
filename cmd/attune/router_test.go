@@ -120,11 +120,12 @@ func TestBuildRouterMinimalServerSurface(t *testing.T) {
 		chi.NewRouter(),
 		nil,
 		nil,
-		nil,
+		nil, // inboundManager
 		nil,
 		nil,
 		nil,
 		domain.DefaultSourceSet(),
+		nil, // cohortSyncSvc
 	)
 	if err != nil {
 		t.Fatalf("buildRouter: %v", err)

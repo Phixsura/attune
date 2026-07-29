@@ -51,6 +51,11 @@ import (
 	// the production registry population point.
 	_ "github.com/Phixsura/attune/internal/externalsync/adapter/githubissue"
 	_ "github.com/Phixsura/attune/internal/externalsync/adapter/jiraissue"
+
+	// #233 cohortsync adapters self-register via init(); cmd/attune owns
+	// the production registry population point.
+	_ "github.com/Phixsura/attune/internal/cohortsync/adapter/amplitude"
+	_ "github.com/Phixsura/attune/internal/cohortsync/adapter/mixpanel"
 )
 
 // subcommands routes each CLI verb to its handler. `server` ignores its args

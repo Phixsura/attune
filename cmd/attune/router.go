@@ -53,6 +53,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	"github.com/Phixsura/attune/internal/service/ingest"
 	portalsvc "github.com/Phixsura/attune/internal/service/portal"
@@ -84,6 +85,7 @@ func buildRouter(
 	enrichRuntime *enrichruntimesvc.Service,
 	ingestor *ingest.Ingestor,
 	sources domain.SourceSet,
+	cohortSyncSvc *cohortsyncservice.Service,
 ) (chi.Router, error) {
 	const where = "main.buildRouter"
 	r := chi.NewRouter()
@@ -145,6 +147,7 @@ func buildRouter(
 		apiKeys,
 		inboundMux,
 		inboundSecrets,
+		cohortSyncSvc,
 		versionMW,
 		rateLimiter,
 		perKeyRateLimiter,
@@ -158,7 +161,7 @@ func buildRouter(
 	// proxy forwards external traffic here. Disabled gracefully
 	// when ConsoleSessionKey is empty (single-process dev defaults).
 	if cfg.ConsoleSessionKey != "" {
-		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, inboundManager, adminRepo, llm, enrichRuntime, sources)
+		consoleRouter, err := buildConsoleRouter(cfg, pool, inboundSecrets, inboundSources, inboundManager, adminRepo, llm, enrichRuntime, sources, cohortSyncSvc)
 		if err != nil {
 			return nil, fmt.Errorf("build console: %w", err)
 		}

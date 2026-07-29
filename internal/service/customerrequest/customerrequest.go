@@ -154,6 +154,7 @@ type ListInput struct {
 	Limit         int
 	Cursor        string
 	FeedbackID    int64
+	CohortID      *string
 }
 
 type ScoringSettingsInput struct {
@@ -330,6 +331,7 @@ func (s *Service) List(ctx context.Context, in ListInput) (repo.ListResult, erro
 		Limit:         in.Limit,
 		Cursor:        in.Cursor,
 		FeedbackID:    in.FeedbackID,
+		CohortID:      in.CohortID,
 	})
 }
 

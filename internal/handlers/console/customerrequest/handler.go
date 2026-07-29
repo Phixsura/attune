@@ -90,6 +90,7 @@ func (h *Handler) List(
 		Limit:         int(req.GetLimit()),
 		Cursor:        req.GetCursor(),
 		FeedbackID:    req.GetFeedbackId(),
+		CohortID:      req.CohortId,
 	})
 	if err != nil {
 		return h.listError(ctx, err)
@@ -695,6 +696,9 @@ func BindListRequest(r *http.Request, req *attunev1.ListCustomerRequestsRequest)
 	}
 	if cursor := strings.TrimSpace(q.Get("cursor")); cursor != "" {
 		req.Cursor = ptrext.Of(cursor)
+	}
+	if cohortID := strings.TrimSpace(q.Get("cohort_id")); cohortID != "" {
+		req.CohortId = ptrext.Of(cohortID)
 	}
 	return bindListFeedbackID(q, req)
 }

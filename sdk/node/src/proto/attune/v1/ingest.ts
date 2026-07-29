@@ -236,6 +236,7 @@ export interface ListFeedbackRequest {
   qualitySignal?: string | undefined;
   source?: string | undefined;
   type?: string | undefined;
+  cohortId?: string | undefined;
 }
 
 export interface ListFeedbackResponse {

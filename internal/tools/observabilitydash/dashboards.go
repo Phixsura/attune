@@ -271,6 +271,7 @@ func operationsDashboard() dashboard {
 		}, "short", gp(0, 43, 24, 8)),
 		rowPanel(22, "External sync", 51),
 		externalSyncHealthPanel(),
+		cohortSyncHealthPanel(),
 		rowPanel(24, "Database migrations", 60),
 		statDesc(25, "Pending migrations", "Unapplied migrations at last startup. Non-zero after startup means migrations are failing or the binary has new migrations not yet applied.", `attune_migration_pending`, "short", gp(0, 61, 6, 4), greenWarnRed(1, 5)),
 		statDesc(26, "Checksum drift", "Migration files modified after apply. Should always be zero — any non-zero value is a release hygiene violation requiring investigation.", zero(`increase(attune_migration_checksum_drift_total[$__range])`), "short", gp(6, 61, 6, 4), greenRed(1)),
@@ -307,6 +308,17 @@ func externalSyncHealthPanel() panel {
 		targetExpr("E", `sum by (provider, object_type, resolution) (rate(attune_external_sync_conflicts_total[$__rate_interval]))`, "conflicts / {{provider}} / {{object_type}} / {{resolution}}"),
 		targetExpr("F", `sum by (provider, object_type) (attune_external_sync_dead_runs)`, "dead / {{provider}} / {{object_type}}"),
 	}, "short", gp(0, 52, 24, 8))
+}
+
+func cohortSyncHealthPanel() panel {
+	return seriesDesc(24, "Cohort sync health", "Cohort sync webhook requests, membership changes, run outcomes, active members, and stale cleanup. Use this to verify provider push health and membership freshness.", []target{
+		targetExpr("A", `sum by (provider, status) (rate(attune_cohort_sync_webhook_requests_total[$__rate_interval]))`, "webhook / {{provider}} / {{status}}"),
+		targetExpr("B", `sum by (provider, action) (rate(attune_cohort_sync_members_changed_total[$__rate_interval]))`, "members / {{provider}} / {{action}}"),
+		targetExpr("C", `sum by (provider, trigger, status) (rate(attune_cohort_sync_runs_total[$__rate_interval]))`, "runs / {{provider}} / {{trigger}} / {{status}}"),
+		targetExpr("D", `sum by (provider) (attune_cohort_sync_active_members)`, "active / {{provider}}"),
+		targetExpr("E", `rate(attune_cohort_sync_stale_members_cleaned_total[$__rate_interval])`, "stale cleaned"),
+		targetExpr("F", `histogram_quantile(0.95, sum by (provider, trigger, le) (rate(attune_cohort_sync_run_duration_seconds_bucket[$__rate_interval])))`, "p95 duration / {{provider}} / {{trigger}}"),
+	}, "short", gp(0, 92, 24, 8))
 }
 
 func securityDashboard() dashboard {

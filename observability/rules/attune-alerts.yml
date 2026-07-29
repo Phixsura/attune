@@ -675,3 +675,37 @@ groups:
           dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline"
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneembeddingqueuedepthhigh"
           action: "Check embedding worker health and provider latency. Scale workers if queue is growing. Check for poison tasks."
+
+  - name: attune.alerts.cohortsync
+    rules:
+      - alert: AttuneCohortSyncSourceError
+        expr: |
+          sum by (provider) (rate(attune_cohort_sync_runs_total{status="failed"}[30m])) > 0
+          and
+          sum by (provider) (rate(attune_cohort_sync_runs_total{status="succeeded"}[30m])) == 0
+        for: 30m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Cohort sync source has been failing for 30+ minutes"
+          description: "Provider {{ $labels.provider }} has only failed sync runs in the last 30 minutes. Check Console > Integrations > Cohort Sync for error details."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunecohortsyncsourceerror"
+          action: "Open Console > Integrations > Cohort Sync, identify the failing source, check the last error, and verify the provider webhook configuration and credentials."
+
+      - alert: AttuneCohortSyncWebhookErrors
+        expr: |
+          sum by (provider) (rate(attune_cohort_sync_webhook_requests_total{status="error"}[10m])) > 0.1
+        for: 15m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Cohort sync webhook error rate elevated"
+          description: "Provider {{ $labels.provider }} webhook error rate is {{ $value | humanize }}/s over 10m."
+          dashboard: "Attune Operations"
+          dashboard_url: "/d/attune-operations/attune-operations"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunecohortsyncwebhookerrors"
+          action: "Check webhook handler logs for auth failures, parse errors, or provider misconfiguration. Verify the source credentials and provider webhook URL."

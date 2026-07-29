@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Phixsura/attune/internal/cohortsync"
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/externalsync"
 	"github.com/Phixsura/attune/internal/handlers"
@@ -44,6 +45,7 @@ import (
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	cohortsyncrepo "github.com/Phixsura/attune/internal/repo/cohortsync"
 	enrichmentruntimerepo "github.com/Phixsura/attune/internal/repo/enrichmentruntime"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/feedback"
@@ -60,6 +62,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	digestsvc "github.com/Phixsura/attune/internal/service/digest"
 	embeddingsvc "github.com/Phixsura/attune/internal/service/embedding"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -170,8 +173,8 @@ func runServer() error {
 	if err := syncCustomWebhooks(ctx, cfg.CustomWebhooks, runtimeDeps.tenantRepo, runtimeDeps.notifyTargetRepo); err != nil {
 		return fmt.Errorf("sync custom webhooks: %w", err)
 	}
-	batchJobWorker := startRuntimeWorkers(ctx, pool, cfg, runtimeDeps, secrets)
-	defer batchJobWorker.Stop()
+	workers := startRuntimeWorkers(ctx, pool, cfg, runtimeDeps, secrets)
+	defer workers.batchJobWorker.Stop()
 
 	ingestHandler := handlers.NewIngestHandler(runtimeDeps.ingestor, runtimeDeps.sources)
 
@@ -192,7 +195,7 @@ func runServer() error {
 	r, err := buildRouter(
 		ctx, cfg, ingestHandler, runtimeDeps.apiKeys, pool, ready, runtimeDeps.llm,
 		inb.subRouter, inb.secrets, inb.sources, inb.manager, inb.adminRepo, runtimeDeps.enrichRuntime,
-		runtimeDeps.ingestor, runtimeDeps.sources,
+		runtimeDeps.ingestor, runtimeDeps.sources, workers.cohortSyncService,
 	)
 	if err != nil {
 		return err
@@ -236,11 +239,17 @@ func applyRuntimeHardening(cfg *config.Config) {
 	externalsync.SetEgressPolicy(egress)
 	llmclient.SetEgressPolicy(egress)
 	replydraftsvc.SetEgressPolicy(egress)
+	cohortsync.SetEgressPolicy(egress)
 	zendeskclient.SetEgressPolicy(egress)
 	intercomclient.SetEgressPolicy(egress)
 	// Trusted-proxy hop count for client-IP resolution outside the API-key
 	// middleware (audit actor IP, etc.).
 	nethardening.SetTrustedProxyHops(cfg.Security.TrustedProxyHops)
+}
+
+type runtimeWorkerResult struct {
+	batchJobWorker    *batchjob.Worker
+	cohortSyncService *cohortsyncservice.Service
 }
 
 func startRuntimeWorkers(
@@ -249,7 +258,7 @@ func startRuntimeWorkers(
 	cfg *config.Config,
 	runtimeDeps runtimeServices,
 	secrets *secretstore.TinkStore,
-) *batchjob.Worker {
+) runtimeWorkerResult {
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as MarkDone
 	// (at-least-once); a background worker drains them.
 	runtimeDeps.enricher.SetOutbox(runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo)
@@ -262,6 +271,9 @@ func startRuntimeWorkers(
 	externalSyncService := externalsyncsvc.New(externalsyncrepo.New(pool), secrets)
 	externalSyncWorker := externalsyncsvc.NewWorker(externalSyncService)
 	safego(ctx, "external_sync", func() { externalSyncWorker.Run(ctx) })
+
+	cohortSyncService := cohortsyncservice.New(cohortsyncrepo.New(pool), secrets)
+	safego(ctx, "cohort_sync_cleanup", func() { cohortSyncService.RunCleanupLoop(ctx, pool, cohortsyncservice.DefaultCleanupInterval) })
 	safego(ctx, "outbox_lag_refresher", func() { runOutboxLagRefresher(ctx, runtimeDeps.outboxRepo) })
 	safego(ctx, "audit_pruner", func() {
 		runAuditPruner(ctx, pool, auditlogsvc.New(auditlogrepo.New(pool)), cfg.AuditRetention, cfg.AuditPruneInterval)
@@ -273,8 +285,9 @@ func startRuntimeWorkers(
 		runMCPPruner(ctx, pool, mcpPruneInterval, mcpSessionIdleLimit)
 	})
 
-	return startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets,
+	bjw := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets,
 		cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
+	return runtimeWorkerResult{batchJobWorker: bjw, cohortSyncService: cohortSyncService}
 }
 
 func setupRuntimeServices(

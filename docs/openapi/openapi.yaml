@@ -1308,6 +1308,368 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/cohorts:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_ListCohorts
+            parameters:
+                - name: sourceId
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCohortsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/cohorts/{cohortId}/members:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_ListCohortMembers
+            parameters:
+                - name: cohortId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCohortMembersResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/cohorts/{cohortId}/runs:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_ListCohortSyncRuns
+            parameters:
+                - name: cohortId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCohortSyncRunsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/cohorts/{id}:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_GetCohort
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Cohort'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        patch:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_UpdateCohort
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateCohortRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Cohort'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/cohorts/{id}:sync:
+        post:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_SyncCohort
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/SyncCohortRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SyncCohortResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/health:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_GetCohortSyncHealth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CohortSyncHealth'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/sources:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_ListCohortSources
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCohortSourcesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_CreateCohortSource
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateCohortSourceRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CohortSource'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/sources/{id}:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_GetCohortSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CohortSource'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        delete:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_DeleteCohortSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteCohortSourceResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        patch:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_UpdateCohortSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateCohortSourceRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CohortSource'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/sources/{id}:test:
+        post:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_TestCohortSource
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/TestCohortSourceRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TestCohortSourceResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/cohort-sync/sources/{sourceId}/events:
+        get:
+            tags:
+                - CohortSyncService
+            operationId: CohortSyncService_ListCohortSyncEvents
+            parameters:
+                - name: sourceId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCohortSyncEventsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/customer-requests:
         get:
             tags:
@@ -1395,6 +1757,10 @@ paths:
                   schema:
                     type: string
                 - name: feedbackId
+                  in: query
+                  schema:
+                    type: string
+                - name: cohortId
                   in: query
                   schema:
                     type: string
@@ -3321,6 +3687,10 @@ paths:
                   schema:
                     type: string
                 - name: type
+                  in: query
+                  schema:
+                    type: string
+                - name: cohortId
                   in: query
                   schema:
                     type: string
@@ -10874,6 +11244,182 @@ components:
                 sampleTitle:
                     type: string
             description: ClusterSummary is a condensed view of a feedback cluster.
+        Cohort:
+            type: object
+            properties:
+                id:
+                    type: string
+                cohortSourceId:
+                    type: string
+                externalCohortId:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                staleTtlDays:
+                    type: integer
+                    format: int32
+                memberCount:
+                    type: integer
+                    format: int32
+                enabled:
+                    type: boolean
+                lastSyncedAt:
+                    type: string
+                    format: date-time
+                lastError:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                updatedAt:
+                    type: string
+                    format: date-time
+                sourceName:
+                    type: string
+                sourceProvider:
+                    type: string
+        CohortMembership:
+            type: object
+            properties:
+                id:
+                    type: string
+                externalUserId:
+                    type: string
+                email:
+                    type: string
+                displayName:
+                    type: string
+                joinedAt:
+                    type: string
+                    format: date-time
+                lastSeenAt:
+                    type: string
+                    format: date-time
+        CohortSource:
+            type: object
+            properties:
+                id:
+                    type: string
+                provider:
+                    type: string
+                name:
+                    type: string
+                authType:
+                    type: string
+                baseUrl:
+                    type: string
+                enabled:
+                    type: boolean
+                status:
+                    type: string
+                lastSyncAt:
+                    type: string
+                    format: date-time
+                lastError:
+                    type: string
+                webhookUrl:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                updatedAt:
+                    type: string
+                    format: date-time
+                webhookUrls:
+                    type: array
+                    items:
+                        type: string
+                lastTestedAt:
+                    type: string
+                    format: date-time
+                lastTestOk:
+                    type: boolean
+        CohortSyncEvent:
+            type: object
+            properties:
+                id:
+                    type: string
+                cohortSourceId:
+                    type: string
+                provider:
+                    type: string
+                eventType:
+                    type: string
+                status:
+                    type: string
+                membersCount:
+                    type: integer
+                    format: int32
+                failureReason:
+                    type: string
+                runId:
+                    type: string
+                receivedAt:
+                    type: string
+                    format: date-time
+                createdAt:
+                    type: string
+                    format: date-time
+        CohortSyncHealth:
+            type: object
+            properties:
+                sourceCount:
+                    type: integer
+                    format: int32
+                activeSources:
+                    type: integer
+                    format: int32
+                errorSources:
+                    type: integer
+                    format: int32
+                cohortCount:
+                    type: integer
+                    format: int32
+                totalActiveMembers:
+                    type: integer
+                    format: int32
+                lastSyncAt:
+                    type: string
+                    format: date-time
+                syncsLast24h:
+                    type: integer
+                    format: int32
+                disabledSources:
+                    type: integer
+                    format: int32
+        CohortSyncRun:
+            type: object
+            properties:
+                id:
+                    type: string
+                cohortId:
+                    type: string
+                trigger:
+                    type: string
+                status:
+                    type: string
+                membersAdded:
+                    type: integer
+                    format: int32
+                membersRemoved:
+                    type: integer
+                    format: int32
+                membersTotal:
+                    type: integer
+                    format: int32
+                errorMessage:
+                    type: string
+                startedAt:
+                    type: string
+                    format: date-time
+                finishedAt:
+                    type: string
+                    format: date-time
+                createdAt:
+                    type: string
+                    format: date-time
         ConfirmPublicNotificationContactRequest:
             required:
                 - tenantSlug
@@ -11004,6 +11550,27 @@ components:
                 retryAfterSeconds:
                     type: integer
                     format: int32
+        CreateCohortSourceRequest:
+            type: object
+            properties:
+                provider:
+                    type: string
+                name:
+                    type: string
+                authType:
+                    type: string
+                credential:
+                    type: string
+                webhookSecret:
+                    type: string
+                baseUrl:
+                    type: string
+                providerConfigJson:
+                    type: string
+                enabled:
+                    type: boolean
+                pullCredential:
+                    type: string
         CreateCustomerRequestGitHubIssueRequest:
             required:
                 - id
@@ -12176,6 +12743,9 @@ components:
                 accountProfile:
                     $ref: '#/components/schemas/CustomerRequestAccountProfile'
         DeleteApiKeyResponse:
+            type: object
+            properties: {}
+        DeleteCohortSourceResponse:
             type: object
             properties: {}
         DeleteCustomerRequestSavedViewResponse:
@@ -14654,6 +15224,43 @@ components:
                 totalCount:
                     type: integer
                     format: int32
+        ListCohortMembersResponse:
+            type: object
+            properties:
+                members:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CohortMembership'
+        ListCohortSourcesResponse:
+            type: object
+            properties:
+                sources:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CohortSource'
+        ListCohortSyncEventsResponse:
+            type: object
+            properties:
+                events:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CohortSyncEvent'
+        ListCohortSyncRunsResponse:
+            type: object
+            properties:
+                runs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/CohortSyncRun'
+                nextCursor:
+                    type: string
+        ListCohortsResponse:
+            type: object
+            properties:
+                cohorts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/Cohort'
         ListCustomerRequestSavedViewsResponse:
             type: object
             properties:
@@ -17644,6 +18251,16 @@ components:
                     type: string
                 reason:
                     type: string
+        SyncCohortRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        SyncCohortResponse:
+            type: object
+            properties:
+                run:
+                    $ref: '#/components/schemas/CohortSyncRun'
         Tag:
             type: object
             properties:
@@ -17712,6 +18329,18 @@ components:
                     items:
                         type: string
                 remediationHint:
+                    type: string
+        TestCohortSourceRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+        TestCohortSourceResponse:
+            type: object
+            properties:
+                ok:
+                    type: boolean
+                error:
                     type: string
         TestExternalConnectionRequest:
             type: object
@@ -17858,6 +18487,37 @@ components:
             properties:
                 key:
                     $ref: '#/components/schemas/ApiKey'
+        UpdateCohortRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                description:
+                    type: string
+                staleTtlDays:
+                    type: integer
+                    format: int32
+                enabled:
+                    type: boolean
+        UpdateCohortSourceRequest:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                enabled:
+                    type: boolean
+                credential:
+                    type: string
+                baseUrl:
+                    type: string
+                providerConfigJson:
+                    type: string
+                pullCredential:
+                    type: string
         UpdateCustomerRequestRequest:
             required:
                 - id
@@ -18702,6 +19362,10 @@ tags:
          dashboard and its bounded sample drill-downs.
     - name: ClustersService
       description: ClustersService provides semantic cluster views for the console (#25).
+    - name: CohortSyncService
+      description: |-
+        CohortSyncService manages tenant-scoped cohort source connections,
+         cohort definitions, and sync run history.
     - name: CustomerRequestService
     - name: DigestSubscriptionService
       description: |-

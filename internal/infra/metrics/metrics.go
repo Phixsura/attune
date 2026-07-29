@@ -328,6 +328,60 @@ var ExternalSyncDeadRuns = prometheus.NewGaugeVec(
 	[]string{"provider", "object_type"},
 )
 
+// CohortSyncWebhookRequestsTotal counts cohort sync webhook requests.
+var CohortSyncWebhookRequestsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_cohort_sync_webhook_requests_total",
+		Help: "Cohort sync webhook requests by provider and status.",
+	},
+	[]string{"provider", "status"},
+)
+
+// CohortSyncMembersChangedTotal counts cohort membership changes.
+var CohortSyncMembersChangedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_cohort_sync_members_changed_total",
+		Help: "Cohort membership changes by provider and action.",
+	},
+	[]string{"provider", "action"},
+)
+
+// CohortSyncRunsTotal counts cohort sync runs.
+var CohortSyncRunsTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_cohort_sync_runs_total",
+		Help: "Cohort sync runs by provider, trigger, and status.",
+	},
+	[]string{"provider", "trigger", "status"},
+)
+
+// CohortSyncActiveMembers gauges active cohort members.
+var CohortSyncActiveMembers = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_cohort_sync_active_members",
+		Help: "Active cohort members by provider.",
+	},
+	[]string{"provider"},
+)
+
+// CohortSyncStaleCleanedTotal counts cleaned stale memberships.
+var CohortSyncStaleCleanedTotal = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Name: "attune_cohort_sync_stale_members_cleaned_total",
+		Help: "Total stale cohort memberships cleaned up.",
+	},
+)
+
+// CohortSyncRunDurationSeconds measures cohort sync run latency.
+var CohortSyncRunDurationSeconds = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_cohort_sync_run_duration_seconds",
+		Help:    "Duration of cohort sync runs by provider and trigger.",
+		Buckets: prometheus.ExponentialBuckets(0.1, 2, 12), // 0.1s to ~200s
+	},
+	[]string{"provider", "trigger"},
+)
+
 // ClaimContentionTotal counts when an enricher tryClaim hit a row that
 // another worker had already claimed. Useful health signal — high
 // contention = consider tuning enricher_batch / interval.
@@ -1109,6 +1163,12 @@ var allMetrics = []prometheus.Collector{
 	ExternalSyncLagSeconds,
 	ExternalSyncConflictsTotal,
 	ExternalSyncDeadRuns,
+	CohortSyncWebhookRequestsTotal,
+	CohortSyncMembersChangedTotal,
+	CohortSyncRunsTotal,
+	CohortSyncActiveMembers,
+	CohortSyncStaleCleanedTotal,
+	CohortSyncRunDurationSeconds,
 	ClaimContentionTotal,
 	IngestRateLimitTotal,
 	TriageDecisionsTotal,
@@ -1223,6 +1283,12 @@ func registeredMetricNamesCore() []string {
 		"attune_external_sync_lag_seconds",
 		"attune_external_sync_conflicts_total",
 		"attune_external_sync_dead_runs",
+		"attune_cohort_sync_webhook_requests_total",
+		"attune_cohort_sync_members_changed_total",
+		"attune_cohort_sync_runs_total",
+		"attune_cohort_sync_active_members",
+		"attune_cohort_sync_stale_members_cleaned_total",
+		"attune_cohort_sync_run_duration_seconds",
 		"attune_claim_contention_total",
 		"attune_ingest_rate_limit_total",
 		"attune_triage_decisions_total",

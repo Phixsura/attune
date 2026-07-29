@@ -1198,3 +1198,64 @@ attune migrations baseline --version N [--force]
 - [`observability/README.md`](../observability/README.md) -- metric contract
   and dashboard details.
 - [CLAUDE.md](../CLAUDE.md) -- engineering guidelines (for contributors).
+
+## Cohort Sync (Amplitude & Mixpanel)
+
+Cohort sync imports named cohorts from Amplitude and Mixpanel so
+operators can filter feedback and customer requests by audience
+membership.
+
+### Setup: Amplitude
+
+1. In Console → Integrations → Cohort Sync, click **Add Source**.
+2. Select **Amplitude**, enter a name, and paste your Amplitude API key.
+3. Click **Test Connection** to verify.
+4. In Amplitude → Data → Destinations, add a **Custom REST** destination.
+5. Set the list endpoint URLs to:
+   - Create: `https://<attune-host>/v1/cohort-sync/amplitude/<tenant_id>/<source_id>/create`
+   - Add: `https://<attune-host>/v1/cohort-sync/amplitude/<tenant_id>/<source_id>/add`
+   - Remove: `https://<attune-host>/v1/cohort-sync/amplitude/<tenant_id>/<source_id>/remove`
+6. Use **Basic Auth** with the API key as username and empty password.
+7. Sync a cohort from Amplitude — it will auto-create in Attune.
+
+### Setup: Mixpanel
+
+1. In Console → Integrations → Cohort Sync, click **Add Source**.
+2. Select **Mixpanel**, enter a name, and paste your Mixpanel credentials.
+3. Click **Test Connection** to verify.
+4. In Mixpanel → Integrations → Custom Webhook, add a new connection.
+5. Set the webhook URL to:
+   `https://<attune-host>/v1/cohort-sync/mixpanel/<tenant_id>/<source_id>`
+6. Optionally configure Basic Auth with the credentials.
+7. Select a cohort and start syncing.
+
+### Filtering by cohort
+
+Once cohorts are synced, use the **Cohort** filter dropdown in the
+Feedback list or Customer Request list to show only items from users
+in a specific cohort. The filter works by matching
+`user_feedback.subject_key` against `cohort_memberships.external_user_id`.
+
+Ensure your ingest calls include a `sourceUser` field that matches
+the user ID used in Amplitude/Mixpanel.
+
+### Stale membership
+
+When a user leaves a cohort, their membership is soft-deleted with a
+configurable TTL (default 30 days). After the TTL expires, a daily
+cleanup job removes the row. Adjust the TTL per-cohort in Console.
+
+### Adding a new cohort sync provider
+
+To add a third cohort analytics provider (e.g. PostHog):
+
+1. Create `internal/cohortsync/adapter/<provider>/adapter.go`
+2. Implement the `cohortsync.Provider` interface:
+   - `Provider()` — return the provider token (lowercase, e.g. "posthog")
+   - `Check(ctx, conn)` — verify credentials via a lightweight API call
+   - `ParseWebhook(body, headers, secret)` — normalize incoming webhook
+   - `PullCohort(ctx, conn, cohortID)` — fetch full membership
+3. Register via `init()`: `core.Register("posthog", "PostHog", factory)`
+4. Add blank import in `cmd/attune/main.go`
+5. Extend `chk_cohort_sources_provider` CHECK constraint (migration)
+6. Add fixture test data in `adapter/<provider>/testdata/`

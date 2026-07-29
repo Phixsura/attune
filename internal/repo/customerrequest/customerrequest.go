@@ -375,6 +375,7 @@ type ListFilter struct {
 	Limit         int
 	Cursor        string
 	FeedbackID    int64
+	CohortID      *string
 	EvidenceLimit int
 }
 
@@ -748,6 +749,22 @@ func buildListQuery(filter ListFilter, limit, offset int) (string, []any) {
 			WHERE fl.tenant_id = cr.tenant_id
 			  AND fl.request_id = cr.id
 			  AND fl.feedback_id = $%d
+		)`, len(args)))
+	}
+	if filter.CohortID != nil {
+		args = append(args, ptrext.Indirect(filter.CohortID))
+		clauses = append(clauses, fmt.Sprintf(`EXISTS (
+			SELECT 1
+			FROM customer_request_feedback_links fl
+			JOIN user_feedback f ON f.tenant_id = fl.tenant_id AND f.id = fl.feedback_id
+			JOIN cohort_memberships cm
+			  ON cm.tenant_id = f.tenant_id
+			  AND cm.external_user_id = f.subject_key
+			  AND cm.cohort_id = $%d::uuid
+			  AND cm.left_at IS NULL
+			WHERE fl.tenant_id = cr.tenant_id
+			  AND fl.request_id = cr.id
+			  AND f.subject_key <> ''
 		)`, len(args)))
 	}
 	args = append(args, limit, offset)

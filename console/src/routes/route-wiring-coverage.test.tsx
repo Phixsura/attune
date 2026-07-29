@@ -175,7 +175,7 @@ describe('route wiring coverage', () => {
     [TagsRoute, 1],
     [LLMConfigurationRoute, 2],
     [EnrichmentRuntimeRoute, 1],
-    [ControlTowerRoute, 3],
+    [ControlTowerRoute, 4],
     [APIKeysIntegrationRoute, 1],
     [DigestRoute, 1],
     [ExternalSyncRoute, 2],

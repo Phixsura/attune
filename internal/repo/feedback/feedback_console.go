@@ -52,6 +52,7 @@ type ConsoleListOpts struct {
 	EnrichedFrom       *time.Time
 	EnrichedTo         *time.Time
 	QualitySignal      *string
+	CohortID           *string // UUID string; nil = no filter; filter feedback by cohort membership
 }
 
 // ConsoleListRow is the projection sent to the console list view.
@@ -147,6 +148,9 @@ func (qb *queryBuilder) applyStateFilters(opts ConsoleListOpts) {
 	}
 	if opts.TagID != nil {
 		qb.and("EXISTS (SELECT 1 FROM feedback_tag_assignments fta WHERE fta.feedback_id = id AND fta.tag_id = " + qb.addArg(ptrext.Indirect(opts.TagID)) + "::uuid)")
+	}
+	if opts.CohortID != nil {
+		qb.and("subject_key <> '' AND EXISTS (SELECT 1 FROM cohort_memberships cm WHERE cm.tenant_id = $1 AND cm.cohort_id = " + qb.addArg(ptrext.Indirect(opts.CohortID)) + "::uuid AND cm.external_user_id = subject_key AND cm.left_at IS NULL)")
 	}
 	if opts.WorkflowStateID != nil {
 		qb.and("workflow_state_id = " + qb.addArg(ptrext.Indirect(opts.WorkflowStateID)) + "::uuid")

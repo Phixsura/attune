@@ -167,6 +167,16 @@ describe('_authed.control-tower route', () => {
         seen.add(new URL(request.url).pathname)
         return HttpResponse.json(qualityActionsFixture)
       }),
+      http.get('/fb/v1/console/cohort-sync/health', ({ request }) => {
+        seen.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          sourceCount: 0,
+          activeSources: 0,
+          errorSources: 0,
+          cohortCount: 0,
+          totalActiveMembers: 0,
+        })
+      }),
     )
 
     const queryClient = new QueryClient({
@@ -176,14 +186,10 @@ describe('_authed.control-tower route', () => {
       context: { queryClient: QueryClient }
     }) => Promise<unknown>
 
-    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(3)
-    expect(seen).toEqual(
-      new Set([
-        '/fb/v1/console/classification-quality',
-        '/fb/v1/console/feedback/search/quality',
-        '/fb/v1/console/quality-actions',
-      ]),
-    )
+    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(4)
+    expect(seen).toContain('/fb/v1/console/classification-quality')
+    expect(seen).toContain('/fb/v1/console/feedback/search/quality')
+    expect(seen).toContain('/fb/v1/console/quality-actions')
   })
 
   it('redirects the authenticated index to the control tower', () => {

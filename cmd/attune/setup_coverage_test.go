@@ -20,7 +20,7 @@ func TestBuildConsoleRouter(t *testing.T) {
 			ConsoleSessionKey: strings.Repeat("a", 32),
 		})
 
-		router, err := buildConsoleRouter(cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+		router, err := buildConsoleRouter(cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		require.Error(t, err)
 		require.Nil(t, router)
 	})
@@ -31,7 +31,7 @@ func TestBuildConsoleRouter(t *testing.T) {
 			ConsoleSessionKey: strings.Repeat("b", 32),
 		})
 
-		router, err := buildConsoleRouter(cfg, nil, nil, nil, nil, nil, nil, nil, nil)
+		router, err := buildConsoleRouter(cfg, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 		require.NoError(t, err)
 		require.NotNil(t, router)
 	})

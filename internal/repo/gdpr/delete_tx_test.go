@@ -113,9 +113,10 @@ func TestDelete_FullErasureFlow(t *testing.T) {
 	tx := &gdprTx{
 		queries: []pgx.Rows{subjectRows()},
 		rows:    []fakeRow{{values: countsRowValues()}},
-		// Exec order: reply_delivery_attempts, llm_audit, notify_outbox,
-		// user_feedback, then per-table dedup+anonymize (2 tables × 2).
+		// Exec order: cohort_memberships, reply_delivery_attempts, llm_audit,
+		// notify_outbox, user_feedback, then per-table dedup+anonymize (2 tables × 2).
 		execTags: []pgconn.CommandTag{
+			pgconn.NewCommandTag("DELETE 0"), // cohort_memberships
 			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 1"),
 			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 2"),
 			pgconn.NewCommandTag("DELETE 0"), pgconn.NewCommandTag("UPDATE 3"),
@@ -157,12 +158,13 @@ func TestDelete_ErrorLegs(t *testing.T) {
 	// Each Exec position failing must fail the erasure loudly — a
 	// silently-skipped DELETE would leave PII behind.
 	for failAt, wantMsg := range map[int]string{
-		1: "reply_delivery_attempts",
-		2: "llm_audit",
-		3: "notify_outbox",
-		4: "user_feedback",
-		5: "dedup customer_request_customer_links",
-		6: "anonymize customer_request_customer_links",
+		1: "cohort memberships",
+		2: "reply_delivery_attempts",
+		3: "llm_audit",
+		4: "notify_outbox",
+		5: "user_feedback",
+		6: "dedup customer_request_customer_links",
+		7: "anonymize customer_request_customer_links",
 	} {
 		t.Run(wantMsg, func(t *testing.T) {
 			tx := &gdprTx{

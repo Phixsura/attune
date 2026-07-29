@@ -140,7 +140,8 @@
     "mcp_clients": "MCP 客户端",
     "system_readiness": "系统就绪",
     "reliability": "可靠性总览",
-    "security": "安全设置"
+    "security": "安全设置",
+    "cohort_sync": "人群同步"
   },
   "public_visibility": {
     "subtitle": "统一管理公开入口、审核队列和公开字段边界。",
@@ -4725,6 +4726,126 @@
     "pagination": {
       "prev": "上一页",
       "next": "下一页"
+    }
+  },
+  "cohort_sync": {
+    "title": "人群同步",
+    "subtitle": "从 Amplitude 和 Mixpanel 导入人群，按受众成员关系筛选反馈和客户需求",
+    "tabs": {
+      "sources": "来源",
+      "cohorts": "人群"
+    },
+    "source": {
+      "create": "添加来源",
+      "edit": "编辑来源",
+      "delete": "删除来源",
+      "delete_confirm": "确定要删除来源「{{name}}」吗？关联的所有人群和成员数据将被永久删除。",
+      "test": "测试连接",
+      "test_ok": "连接成功",
+      "test_fail": "连接失败: {{error}}",
+      "provider": "提供商",
+      "name": "名称",
+      "credential": "Webhook 认证密钥",
+      "credential_help": "用于验证来自提供商的 webhook 推送",
+      "credential_edit_placeholder": "留空保持不变",
+      "pull_credential": "拉取凭证（可选）",
+      "pull_credential_help_amplitude": "Amplitude API Key 和 Secret Key（格式：api_key:secret_key），用于测试连接和手动同步",
+      "pull_credential_help_mixpanel": "Mixpanel 服务账号凭证（格式：username:secret），用于测试连接和手动同步",
+      "base_url": "自定义 API 地址",
+      "enabled": "启用",
+      "webhook_urls": "Webhook 地址",
+      "no_sources": "尚未配置人群来源",
+      "no_sources_desc": "连接 Amplitude 或 Mixpanel 开始导入人群成员",
+      "status": {
+        "active": "活跃",
+        "disabled": "已禁用",
+        "error": "错误"
+      },
+      "last_sync": "最后同步",
+      "status_label": "状态",
+      "name_placeholder": "我的 Amplitude 项目",
+      "webhook_url_labels": {
+        "amplitude_create": "创建地址",
+        "amplitude_add": "添加地址",
+        "amplitude_remove": "移除地址",
+        "default": "Webhook 地址"
+      },
+      "credential_note": "此密钥由您自行设定，用于 attune 验证来自提供商的请求",
+      "waiting_first": "等待首个 webhook"
+    },
+    "cohort": {
+      "no_cohorts": "尚未同步任何人群",
+      "no_cohorts_desc": "人群将在 Amplitude 或 Mixpanel 推送成员数据后出现",
+      "sync_now": "立即同步",
+      "sync_ok": "同步完成: +{{added}} -{{removed}}，共 {{total}} 名成员",
+      "members": "成员",
+      "member_count": "{{count}} 名成员",
+      "detail": "人群详情",
+      "runs": "同步记录",
+      "edit": "编辑人群",
+      "ttl_days": "过期天数",
+      "description": "描述",
+      "no_members": "暂无成员",
+      "enable": "启用人群",
+      "disable": "禁用人群",
+      "member_id": "用户 ID",
+      "member_email": "邮箱"
+    },
+    "run": {
+      "trigger": {
+        "webhook": "自动推送",
+        "manual": "手动同步"
+      },
+      "status": {
+        "succeeded": "成功",
+        "failed": "失败",
+        "skipped": "已跳过",
+        "running": "运行中"
+      },
+      "error": "错误",
+      "trigger_label": "触发方式",
+      "status_label": "状态",
+      "changes": "变更"
+    },
+    "health": {
+      "sources": "来源",
+      "cohorts": "人群",
+      "members": "活跃成员",
+      "error_banner": "有 {{count}} 个来源出现错误，请检查错误详情",
+      "last_sync": "最后同步"
+    },
+    "filter": {
+      "all": "全部人群",
+      "empty_hint": "尚未同步人群。前往集成 > 人群同步进行配置。"
+    },
+    "onboarding": {
+      "title": "快速上手",
+      "step1": "在 attune 中添加一个来源（选择提供商、填写认证密钥）",
+      "step2": "将生成的 Webhook 地址复制到 Amplitude 或 Mixpanel 的人群同步目标配置中",
+      "step3": "在提供商中触发一次同步，attune 会自动接收并创建人群",
+      "docs": "文档",
+      "created_title": "来源创建成功",
+      "created_desc": "将以下 Webhook 地址配置到您的提供商中，人群成员数据将自动推送到 attune。",
+      "next_steps": "下一步操作",
+      "next1": "复制上方 Webhook 地址",
+      "next2": "在 Amplitude / Mixpanel 中添加 attune 为同步目标，粘贴地址",
+      "next3": "点击「测试连接」验证配置是否正确"
+    },
+    "events": {
+      "title": "Webhook 事件",
+      "no_events": "暂无 webhook 事件",
+      "time": "时间",
+      "type": "类型"
+    },
+    "errors": {
+      "name_taken": "来源名称已存在",
+      "credential_required": "认证密钥不能为空",
+      "sync_running": "当前有同步正在运行，请稍后再试",
+      "delete_while_running": "无法删除正在同步的来源",
+      "hint_auth": "→ 请检查认证密钥是否正确",
+      "hint_timeout": "→ 提供商 API 响应超时，请稍后重试",
+      "hint_rate_limit": "→ 触发了速率限制，请降低同步频率",
+      "hint_empty_snapshot": "→ 提供商返回空数据，请检查 cohort 在提供商侧是否正常"
     }
   }
 }
