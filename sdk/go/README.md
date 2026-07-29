@@ -218,7 +218,11 @@ Tags: `ListTags` / `CreateTag` / `UpdateTag` / `ArchiveTag`. Workflow:
 `ListOutboxDeliveries` / `RetryOutboxDelivery` plus `NewOutboxDeliveryPager`.
 MCP clients: `ListMCPClients` / `CreateMCPClient` / `GetMCPClient` /
 `RevokeMCPClient` / `UpdateMCPClient` / `ReplaceMCPClientToolPolicies` /
-`RevokeMCPRefreshGrant` / `RevokeMCPSession`. Update is replace-semantics —
+`RevokeMCPRefreshGrant` / `RevokeMCPSession`. Webhook subscriptions
+(`hooks:manage`): `CreateWebhookSubscription` / `ListWebhookSubscriptions` /
+`DeleteWebhookSubscription` / `ListWebhookSamples`. Customer requests
+(`requests:read` / `requests:write`): `ListRequests` / `CreateRequest` /
+`UpdateRequest` / `AddRequestNote`. Update is replace-semantics —
 send the full desired state, not just changed fields. Management `POST`s now
 auto-generate stable idempotency keys, so the same retry policy safely applies
 to machine-safe writes such as tag creation, workflow seeding, GDPR job
