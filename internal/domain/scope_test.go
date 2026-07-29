@@ -76,7 +76,7 @@ func TestScope_String(t *testing.T) {
 }
 
 func TestAllScopes_Count(t *testing.T) {
-	assert.Equal(t, 31, len(AllScopes), "should have 31 scopes")
+	assert.Equal(t, 34, len(AllScopes), "should have 34 scopes")
 }
 
 func TestMCPScopes(t *testing.T) {
@@ -141,4 +141,16 @@ func TestGDPRScopes(t *testing.T) {
 		assert.True(t, HasScope(granted, ScopeGDPRExport))
 		assert.True(t, HasScope(granted, ScopeGDPRDelete))
 	})
+}
+
+func TestAutomationScopes(t *testing.T) {
+	for _, s := range []Scope{ScopeHooksManage, ScopeRequestsRead, ScopeRequestsWrite} {
+		assert.True(t, s.IsValid(), "%s should be valid", s)
+	}
+	assert.True(t, HasExplicitScope([]Scope{ScopeRequestsWrite}, ScopeRequestsRead),
+		"requests:write must imply requests:read")
+	assert.False(t, HasExplicitScope([]Scope{}, ScopeHooksManage),
+		"legacy empty-scope keys must NOT get hooks:manage")
+	assert.False(t, HasExplicitScope([]Scope{ScopeNotifyWrite}, ScopeHooksManage),
+		"notify:write must not imply hooks:manage")
 }
