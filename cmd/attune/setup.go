@@ -68,6 +68,7 @@ import (
 	systemsettingsrepo "github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
+	"github.com/Phixsura/attune/internal/repo/webhooksub"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
@@ -333,6 +334,7 @@ func buildCustomerRequestHandler(
 	service := customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc)
 	service.SetNotificationSink(notifications)
 	service.SetIssueCreateRunStore(externalsyncrepo.New(pool))
+	service.SetAutomationSink(webhooksub.New(pool), outboxrepo.NewOutbox(pool))
 	handler := console.NewCustomerRequestHandler(service)
 	handler.SetSavedViewService(customerrequestviewsvc.New(customerrequestviewrepo.New(settingsRepo)))
 	return handler
