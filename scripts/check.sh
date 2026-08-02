@@ -41,6 +41,27 @@ bash scripts/lint-integration-layout.sh
 step "lint-maturity-contract"
 bash scripts/lint-maturity-contract.sh
 
+step "lint-product-readiness-contract"
+bash scripts/lint-product-readiness-contract.sh
+
+step "sdk-parity"
+node scripts/check-sdk-parity.mjs
+
+step "connector-conformance"
+node scripts/check-connector-conformance.mjs
+
+step "api-consistency"
+node scripts/check-api-consistency.mjs
+
+step "import-export-workbench"
+node scripts/check-import-export-workbench.mjs
+
+step "integration-catalog"
+node scripts/check-integration-catalog.mjs
+
+step "upgrade-diagnostics"
+node scripts/check-upgrade-diagnostics.mjs
+
 step "lint-http-response-emission"
 bash scripts/lint-http-response-emission.sh
 

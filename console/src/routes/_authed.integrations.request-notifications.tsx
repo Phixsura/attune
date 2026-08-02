@@ -3,6 +3,7 @@ import {
   requestNotificationDeliveriesQuery,
   requestNotificationSenderQuery,
   requestNotificationSettingsQuery,
+  requestNotificationStatusEvidenceQuery,
   requestNotificationWebhookTargetsQuery,
 } from '@/features/request-notifications/api/request-notifications'
 import { RequestNotificationsPage } from '@/features/request-notifications/components/request-notifications-page'
@@ -17,6 +18,7 @@ export const Route = createFileRoute('/_authed/integrations/request-notification
       context.queryClient.ensureQueryData(requestNotificationSenderQuery()),
       context.queryClient.ensureQueryData(requestNotificationWebhookTargetsQuery()),
       context.queryClient.ensureQueryData(requestNotificationDeliveriesQuery(25)),
+      context.queryClient.ensureQueryData(requestNotificationStatusEvidenceQuery()),
     ])
   },
 })

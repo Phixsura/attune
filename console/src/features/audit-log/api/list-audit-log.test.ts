@@ -1,7 +1,11 @@
 import { QueryClient } from '@tanstack/react-query'
 import { HttpResponse, http } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { auditLogInfiniteQuery, downloadAuditLogCsv } from '@/features/audit-log/api/list-audit-log'
+import {
+  auditLogInfiniteQuery,
+  auditLogQuery,
+  downloadAuditLogCsv,
+} from '@/features/audit-log/api/list-audit-log'
 import { server } from '@/testing/mocks/server'
 
 vi.mock('@/lib/blob-download', () => ({
@@ -163,5 +167,59 @@ describe('auditLogInfiniteQuery', () => {
       ),
     )
     await expect(downloadAuditLogCsv({})).rejects.toThrow('HTTP 500')
+  })
+})
+
+describe('auditLogQuery', () => {
+  it('builds a finite snapshot query for governance readiness evidence', async () => {
+    const seen: string[] = []
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        const url = new URL(request.url)
+        seen.push(url.search)
+        return HttpResponse.json({
+          items: [
+            {
+              id: 'audit-1',
+              actorType: 'admin',
+              actorId: 'user-1',
+              action: 'member.update_role',
+              targetType: 'member',
+              targetId: 'member-1',
+              summary: 'Updated role',
+              createdAt: '2026-07-01T00:00:00Z',
+            },
+          ],
+        })
+      }),
+    )
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const rows = await qc.fetchQuery(
+      auditLogQuery({
+        actions: ['member.invite', 'member.update_role'],
+        limit: 20,
+        targetType: 'member',
+      }),
+    )
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ action: 'member.update_role', targetType: 'member' })
+    expect(seen[0]).toContain('action=member.invite')
+    expect(seen[0]).toContain('action=member.update_role')
+    expect(seen[0]).toContain('targetType=member')
+    expect(seen[0]).toContain('limit=20')
+  })
+
+  it('returns an empty snapshot when items are omitted', async () => {
+    let search = ''
+    server.use(
+      http.get('/fb/v1/console/audit-log', ({ request }) => {
+        search = new URL(request.url).search
+        return HttpResponse.json({})
+      }),
+    )
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await expect(qc.fetchQuery(auditLogQuery({}))).resolves.toEqual([])
+    expect(search).toBe('')
   })
 })

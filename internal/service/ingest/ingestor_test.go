@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/infra/trace"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	feedbackrepo "github.com/Phixsura/attune/internal/repo/feedback"
 	"github.com/Phixsura/attune/internal/service/enrich"
@@ -71,6 +72,37 @@ func TestIngestRowSubmitsEnrichmentJob(t *testing.T) {
 	if submitter.jobs[0].ID != 7 {
 		t.Fatalf("submitted job id = %d, want 7", submitter.jobs[0].ID)
 	}
+	if submitter.jobs[0].TraceID == "" {
+		t.Fatal("submitted job trace id must not be empty")
+	}
+	if repo.lastInsert.SignalTraceID != submitter.jobs[0].TraceID {
+		t.Fatalf("persisted signal trace %q != submitted trace %q", repo.lastInsert.SignalTraceID, submitter.jobs[0].TraceID)
+	}
+}
+
+func TestIngestRowUsesSourceSignalTraceForPersistenceAndJob(t *testing.T) {
+	repo := ptrext.Of(fakeFeedbackRepo{insertID: 9})
+	submitter := ptrext.Of(fakeSubmitter{})
+	ingestor := NewIngestor(repo, submitter, nil)
+	ctx := trace.WithID(context.Background(), "request-trace-1")
+
+	id, err := ingestor.IngestRow(ctx, "tenant-1", uuid.Nil, domain.IngestInput{
+		Content:    "checkout is broken",
+		Source:     "api",
+		SourceMeta: map[string]any{"source_event_id": "zendesk-ticket-42"},
+	})
+	if err != nil {
+		t.Fatalf("IngestRow err = %v", err)
+	}
+	if id != 9 {
+		t.Fatalf("id = %d, want 9", id)
+	}
+	if repo.lastInsert.SignalTraceID != "zendesk-ticket-42" {
+		t.Fatalf("signal trace = %q, want source event", repo.lastInsert.SignalTraceID)
+	}
+	if len(submitter.jobs) != 1 || submitter.jobs[0].TraceID != "zendesk-ticket-42" {
+		t.Fatalf("job trace = %+v, want source event trace", submitter.jobs)
+	}
 }
 
 func TestIngestRowQueueSubmitFailureDoesNotFailRequest(t *testing.T) {
@@ -93,22 +125,20 @@ func TestIngestRowQueueSubmitFailureDoesNotFailRequest(t *testing.T) {
 // InsertIdempotent: first key+hash inserts; a replay with the same hash dedups;
 // the same key with a different hash conflicts.
 type fakeFeedbackRepo struct {
-	insertID int64
-	inserts  int
-	seen     map[string][]byte
-	ids      map[string]int64
+	insertID   int64
+	inserts    int
+	seen       map[string][]byte
+	ids        map[string]int64
+	lastInsert domain.IngestInput
 }
 
 func (f *fakeFeedbackRepo) Insert(
-	context.Context,
-	string,
-	string,
-	string,
-	string,
-	string,
-	domain.IngestInput,
+	_ context.Context,
+	_, _, _, _, _ string,
+	in domain.IngestInput,
 ) (int64, error) {
 	f.inserts++
+	f.lastInsert = in
 	return f.insertID, nil
 }
 
@@ -122,6 +152,7 @@ func (f *fakeFeedbackRepo) InsertIdempotent(
 		f.seen = map[string][]byte{}
 		f.ids = map[string]int64{}
 	}
+	f.lastInsert = in
 	if h, ok := f.seen[in.IdempotencyKey]; ok {
 		if !bytes.Equal(h, idemHash) {
 			return 0, false, feedbackrepo.ErrIdempotencyConflict

@@ -16,7 +16,12 @@ import {
   CustomerRequestStatus,
   type CustomerRequestSummary,
 } from '@/proto/attune/v1/customer_request'
-import type { FeedbackDetail, ReplyDraftWorkflow } from '@/proto/attune/v1/ingest'
+import {
+  type FeedbackDetail,
+  FeedbackIdentityRecommendedAction,
+  FeedbackIdentityResolutionStrength,
+  type ReplyDraftWorkflow,
+} from '@/proto/attune/v1/ingest'
 import { expectNoA11yViolations } from '@/testing/a11y'
 import { server } from '@/testing/mocks/server'
 import { fireEvent, renderWithProviders, screen, waitFor, within } from '@/testing/test-utils'
@@ -425,6 +430,31 @@ describe('FeedbackDetailSheet', () => {
     expect(feedbackDetailSheetTestables.portalSubmissionText('  value  ', true)).toBe('value')
     expect(feedbackDetailSheetTestables.isPortalRecord({ ok: true })).toBe(true)
     expect(feedbackDetailSheetTestables.isPortalRecord(['nope'])).toBe(false)
+    expect(feedbackDetailSheetTestables.identityEvidenceKindLabel('email', keyT)).toBe(
+      'feedback.detail.identity_kind_email',
+    )
+    expect(feedbackDetailSheetTestables.identityEvidenceKindLabel('unknown', keyT)).toBe(
+      'feedback.detail.identity_kind_unknown',
+    )
+    expect(feedbackDetailSheetTestables.signalTraceStatusLabel('completed', keyT)).toBe(
+      'feedback.signal_trace.status.completed',
+    )
+    expect(feedbackDetailSheetTestables.signalTraceStageLabel('notification', keyT)).toBe(
+      'feedback.signal_trace.stages.notification',
+    )
+    expect(feedbackDetailSheetTestables.signalTraceEventKindLabel('llm_call', keyT)).toBe(
+      'feedback.signal_trace.event_kinds.llm_call',
+    )
+    expect(
+      feedbackDetailSheetTestables.traceMetadataSummary({
+        display_id: 'CR-7',
+        model_id: 'gpt-4o',
+        ignored: 'no',
+      }),
+    ).toEqual([
+      ['display_id', 'CR-7'],
+      ['model_id', 'gpt-4o'],
+    ])
   })
 
   it('id set → renders feedback fields after the detail query resolves', async () => {
@@ -446,7 +476,41 @@ describe('FeedbackDetailSheet', () => {
           userId: 'u-1',
           pageUrl: '',
           createdAt: '2026-06-07T10:00:00Z',
-          sourceMeta: null,
+          sourceMeta: { email: 'ada@example.com' },
+          accountContext: {
+            accountKey: 'acct:acme',
+            accountDisplay: 'Acme Corp',
+            source: 'source_meta',
+          },
+          identityEvidence: {
+            sourceUser: 'u-1',
+            mergeCandidateCount: 4,
+            hasEmail: true,
+            hasExternalId: true,
+            hasSourceContactId: true,
+            hasCrmId: false,
+            hasSupportId: false,
+            assessment: {
+              strength:
+                FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_STRONG,
+              recommendedAction:
+                FeedbackIdentityRecommendedAction.FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_MERGE,
+              missingKinds: ['crm_id', 'support_id'],
+              riskReasons: ['missing_system_context'],
+              stableKeyCount: 3,
+              sourceCount: 4,
+            },
+            keys: [
+              { kind: 'source_user', value: 'u-1', source: 'user_id' },
+              { kind: 'email', value: 'ada@example.com', source: 'source_meta.email' },
+              { kind: 'external_id', value: 'ext-42', source: 'source_meta.externalId' },
+              {
+                kind: 'source_contact_id',
+                value: 'contact-7',
+                source: 'source_meta.contact.sourceContactId',
+              },
+            ],
+          },
           attachments: [],
           enrichmentError: '',
         }),
@@ -461,6 +525,94 @@ describe('FeedbackDetailSheet', () => {
     expect(screen.getByText(/AI 中文解读/i)).toBeInTheDocument()
     expect(screen.getByText(/AI rationale/i)).toBeInTheDocument()
     expect(screen.getAllByTitle('原文语言：英文').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('账户上下文').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('acct:acme')).toBeInTheDocument()
+    expect(screen.getAllByText('Acme Corp').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('身份图证据')).toBeInTheDocument()
+    expect(screen.getByText('4 个合并候选')).toBeInTheDocument()
+    expect(screen.getByText('解析质量')).toBeInTheDocument()
+    expect(screen.getByText('进入合并复核')).toBeInTheDocument()
+    expect(screen.getByText('3 个稳定键 · 4 个来源路径')).toBeInTheDocument()
+    expect(screen.getByText('ada@example.com')).toBeInTheDocument()
+    expect(screen.getByText('ext-42')).toBeInTheDocument()
+    expect(screen.getByText('来自 source_meta.contact.sourceContactId')).toBeInTheDocument()
+  })
+
+  it('renders the feedback signal trace evidence chain', async () => {
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () => HttpResponse.json(feedbackRow('42'))),
+      http.get('/fb/v1/console/feedback/:id/signal-trace', () =>
+        HttpResponse.json({
+          feedbackId: '42',
+          signalTraceId: 'trace-42',
+          source: 'web',
+          terminalStatus: 'pending',
+          complete: false,
+          missingStages: ['survey'],
+          generatedAt: '2026-08-01T10:00:00Z',
+          stages: [
+            {
+              key: 'source_event',
+              label: 'Source event',
+              status: 'completed',
+              eventCount: 1,
+              lastEventAt: '2026-08-01T10:00:00Z',
+            },
+            {
+              key: 'enrichment',
+              label: 'AI enrichment',
+              status: 'completed',
+              eventCount: 2,
+              lastEventAt: '2026-08-01T10:01:00Z',
+            },
+            {
+              key: 'request',
+              label: 'Customer request',
+              status: 'pending',
+              eventCount: 1,
+              lastEventAt: '2026-08-01T10:02:00Z',
+            },
+            {
+              key: 'notification',
+              label: 'Customer notification',
+              status: 'missing',
+              eventCount: 0,
+            },
+            { key: 'survey', label: 'Survey follow-up', status: 'missing', eventCount: 0 },
+          ],
+          events: [
+            {
+              stage: 'source_event',
+              kind: 'source_captured',
+              status: 'completed',
+              traceId: 'trace-42',
+              summary: 'Feedback source event captured',
+              occurredAt: '2026-08-01T10:00:00Z',
+              metadata: { source: 'web' },
+            },
+            {
+              stage: 'request',
+              kind: 'request_linked',
+              status: 'pending',
+              traceId: '',
+              summary: 'Feedback linked to request CR-7',
+              occurredAt: '2026-08-01T10:02:00Z',
+              metadata: { display_id: 'CR-7', request_id: 'req-7' },
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    expect(await screen.findByText('端到端证据链')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByText('trace-42').length).toBeGreaterThan(0))
+    expect(screen.getByText('缺少阶段：调查复盘')).toBeInTheDocument()
+    expect(screen.getByText('需求关联')).toBeInTheDocument()
+    expect(screen.getByText('CR-7')).toBeInTheDocument()
   })
 
   it('treats array-valued dimensions as classification signal', async () => {
@@ -488,6 +640,103 @@ describe('FeedbackDetailSheet', () => {
 
     await waitFor(() => expect(screen.getAllByText('分类已就绪').length).toBeGreaterThanOrEqual(1))
     expect(screen.queryByText('暂未分类')).not.toBeInTheDocument()
+  })
+
+  it('edits owner, SLA due date, and note from the assignment section', async () => {
+    const firstDue = '2026-08-02T08:00:00Z'
+    const nextDueLocal = '2026-08-03T09:30'
+    let payload: Record<string, unknown> | null = null
+    server.use(
+      http.get('/fb/v1/console/feedback/:id', () =>
+        HttpResponse.json(
+          feedbackRow('42', {
+            assignment: {
+              feedbackId: '42',
+              owner: {
+                memberId: 'member-1',
+                memberType: 'oidc_user',
+                userId: 'owner-1',
+                email: 'ada@example.com',
+                role: 'member',
+              },
+              assignedAt: '2026-08-01T08:00:00Z',
+              assignedBy: 'operator-1',
+              slaDueAt: firstDue,
+              slaStatus: 'on_track',
+              note: 'Initial owner',
+            },
+          }),
+        ),
+      ),
+      http.get('/fb/v1/console/members', () =>
+        HttpResponse.json({
+          members: [
+            {
+              id: 'member-1',
+              memberType: 'oidc_user',
+              userId: 'owner-1',
+              email: 'ada@example.com',
+              role: 'member',
+            },
+            {
+              id: 'member-2',
+              memberType: 'oidc_user',
+              userId: 'owner-2',
+              email: 'grace@example.com',
+              role: 'admin',
+            },
+          ],
+        }),
+      ),
+      http.patch('/fb/v1/console/feedback/:id/assignment', async ({ request }) => {
+        payload = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          feedbackId: '42',
+          owner: {
+            memberId: 'member-2',
+            memberType: 'oidc_user',
+            userId: 'owner-2',
+            email: 'grace@example.com',
+            role: 'admin',
+          },
+          assignedAt: '2026-08-01T09:00:00Z',
+          assignedBy: 'operator-1',
+          slaDueAt: payload.slaDueAt,
+          slaStatus: 'on_track',
+          note: payload.note,
+        })
+      }),
+    )
+    const { user } = renderWithProviders(
+      <FeedbackDetailSheet id="42" dims={dims} availableTags={[]} onOpenChange={vi.fn()} />,
+    )
+
+    const assignmentHeading = await screen.findByRole('heading', { name: '责任与 SLA' })
+    const section = assignmentHeading.closest('section')
+    expect(section).not.toBeNull()
+    const assignment = within(section as HTMLElement)
+    expect(assignment.getAllByText('ada@example.com').length).toBeGreaterThanOrEqual(1)
+
+    await waitFor(() =>
+      expect(assignment.getByRole('combobox', { name: '负责人' })).not.toBeDisabled(),
+    )
+    await user.click(assignment.getByRole('combobox', { name: '负责人' }))
+    await user.click(await screen.findByRole('option', { name: 'grace@example.com' }))
+    fireEvent.change(assignment.getByLabelText('SLA 截止'), {
+      target: { value: nextDueLocal },
+    })
+    await user.clear(assignment.getByLabelText('处理备注'))
+    await user.type(assignment.getByLabelText('处理备注'), 'Escalate enterprise impact')
+    await user.click(assignment.getByRole('button', { name: '保存分派' }))
+
+    await waitFor(() => expect(payload).not.toBeNull())
+    expect(payload).toEqual({
+      feedbackId: '42',
+      ownerMemberId: 'member-2',
+      slaDueAt: new Date(nextDueLocal).toISOString(),
+      note: 'Escalate enterprise impact',
+    })
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('分派已保存'))
   })
 
   it('hides customer-request linking controls when the operator lacks edit permission', async () => {
@@ -1424,10 +1673,10 @@ describe('FeedbackDetailSheet', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /编辑/ })).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
-    const editor = screen.getByRole('textbox')
+    const editor = screen.getByDisplayValue('Human edited reply')
     await userEvent.clear(editor)
     await userEvent.type(editor, 'Edited but rejected by server')
-    await userEvent.click(screen.getByRole('button', { name: /保存/ }))
+    await userEvent.click(screen.getByRole('button', { name: '保存回复草稿' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('保存失败'))
     await userEvent.click(screen.getByRole('button', { name: /取消/ }))
 
@@ -1664,10 +1913,10 @@ describe('FeedbackDetailSheet', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: /编辑/ })).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
-    const editor = screen.getByRole('textbox')
+    const editor = screen.getByDisplayValue('Human edited reply')
     await userEvent.clear(editor)
     await userEvent.type(editor, 'Updated human edit')
-    await userEvent.click(screen.getByRole('button', { name: /保存/ }))
+    await userEvent.click(screen.getByRole('button', { name: '保存回复草稿' }))
 
     await waitFor(() =>
       expect(requestBody).toMatchObject({
@@ -1770,10 +2019,10 @@ describe('FeedbackDetailSheet', () => {
     await userEvent.click(screen.getByRole('button', { name: /批准/ }))
     await waitFor(() => expect(screen.getAllByText('已批准').length).toBeGreaterThanOrEqual(1))
     await userEvent.click(screen.getByRole('button', { name: /编辑/ }))
-    const editor = screen.getByRole('textbox')
+    const editor = screen.getByDisplayValue('AI suggested reply')
     await userEvent.clear(editor)
     await userEvent.type(editor, 'Second edit after approval')
-    await userEvent.click(screen.getByRole('button', { name: /保存/ }))
+    await userEvent.click(screen.getByRole('button', { name: '保存回复草稿' }))
 
     await waitFor(() =>
       expect(editBody).toMatchObject({
@@ -2309,6 +2558,7 @@ function customerRequestSummary(
     decisionScore: 67,
     decisionScoreExplanation:
       'priority=high feedback=1 customers=1 accounts=1 votes=0 revenue_cents=0 delivery_health=no_links',
+    decisionScoreFactors: [],
     deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS,
     syncedIssueCount: 0,
     staleIssueCount: 0,
@@ -2331,5 +2581,6 @@ function customerRequestDetail(request: CustomerRequestSummary) {
     notes: [],
     duplicates: [],
     accountProfiles: [],
+    decisionRecords: [],
   }
 }

@@ -50,6 +50,7 @@ import (
 	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
 	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
 	consolerequestnotification "github.com/Phixsura/attune/internal/handlers/console/requestnotification"
+	consolesurvey "github.com/Phixsura/attune/internal/handlers/console/survey"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -103,6 +104,7 @@ var (
 	NewCustomerRequestHandler     = consolecustomerrequest.NewHandler
 	NewPublicVisibilityHandler    = consolepublicvisibility.NewHandler
 	NewRequestNotificationHandler = consolerequestnotification.NewHandler
+	NewSurveyHandler              = consolesurvey.NewHandler
 	NewDigestSubscriptionHandler  = digestsubscription.NewHandler
 	NewOutboxHandler              = consoleoutbox.NewHandler
 	NewTagHandler                 = consoletag.NewHandler
@@ -141,6 +143,7 @@ var (
 //	 POST /feedback/search/events -> dispatcher.Bind(feedback.SearchHandler.RecordSearchEvent)
 //	 GET /quality-actions -> dispatcher.Bind(feedback.QualityActionHandler.ListQualityActions)
 //	 POST /quality-actions/update -> dispatcher.Bind(feedback.QualityActionHandler.UpdateQualityAction)
+//	 GET /feedback/{id}/signal-trace -> dispatcher.Bind(feedback.Handler.GetSignalTrace)
 //	 GET /feedback/{id} -> dispatcher.Bind(feedback.Handler.Get)
 //	 GET /usage -> dispatcher.Bind(usage.Handler.Get)
 //	 GET /llm-usage -> dispatcher.Bind(usage.Handler.GetLLMUsage)
@@ -184,6 +187,7 @@ type Router struct {
 	customerRequests     *consolecustomerrequest.Handler
 	publicVisibility     *consolepublicvisibility.Handler
 	requestNotifications *consolerequestnotification.Handler
+	surveys              *consolesurvey.Handler
 	feedbackJob          *feedbackjob.Handler
 	gdpr                 *consolegdpr.Handler
 	usage                *usage.UsageHandler
@@ -359,6 +363,7 @@ func (r *Router) mountSession(m chi.Router) {
 	r.mountCustomerRequests(m)
 	r.mountPublicVisibility(m)
 	r.mountRequestNotifications(m)
+	r.mountSurveys(m)
 	r.mountFeedback(m)
 	r.mountReplySendHook(m)
 	m.Group(func(u chi.Router) {
@@ -386,6 +391,29 @@ func (r *Router) mountSession(m chi.Router) {
 			),
 			r.feedback.GetClassificationQualitySamples,
 			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetClassificationQualitySamplesRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		u.Get("/classification-quality/review-learning", dispatcher.Bind(
+			"console.FeedbackHandler.GetClassificationReviewLearning",
+			dispatcher.Query(
+				func() *attunev1.GetClassificationReviewLearningRequest {
+					return ptrext.Of(attunev1.GetClassificationReviewLearningRequest{})
+				},
+				feedback.BindClassificationReviewLearningRequest,
+			),
+			r.feedback.GetClassificationReviewLearning,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetClassificationReviewLearningRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		u.With(r.requireMember).Post("/classification-quality/reviews", dispatcher.Bind(
+			"console.FeedbackHandler.RecordClassificationReview",
+			dispatcher.JSON(func() *attunev1.RecordClassificationReviewRequest {
+				return ptrext.Of(attunev1.RecordClassificationReviewRequest{})
+			}),
+			r.feedback.RecordClassificationReview,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecordClassificationReviewRequest) (*session.AuthCtx, error) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
@@ -440,6 +468,10 @@ func (r *Router) SetRequestNotificationHandler(h *consolerequestnotification.Han
 	r.requestNotifications = h
 }
 
+func (r *Router) SetSurveyHandler(h *consolesurvey.Handler) {
+	r.surveys = h
+}
+
 func (r *Router) mountPublicVisibility(m chi.Router) {
 	if r.publicVisibility == nil {
 		return
@@ -452,10 +484,298 @@ func (r *Router) mountPublicVisibility(m chi.Router) {
 	})
 }
 
+func (r *Router) mountSurveys(m chi.Router) {
+	if r.surveys == nil {
+		return
+	}
+	m.Route("/surveys", func(sr chi.Router) {
+		sr.With(r.requireDelegatedAdmin).Get("/campaigns", dispatcher.Bind(
+			"console.SurveyHandler.ListCampaigns",
+			dispatcher.Query(
+				func() *attunev1.ListSurveyCampaignsRequest {
+					return ptrext.Of(attunev1.ListSurveyCampaignsRequest{})
+				},
+				consolesurvey.BindListSurveyCampaigns,
+			),
+			r.surveys.ListCampaigns,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSurveyCampaignsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Post("/campaigns", dispatcher.Bind(
+			"console.SurveyHandler.CreateCampaign",
+			dispatcher.JSON(func() *attunev1.CreateSurveyCampaignRequest {
+				return ptrext.Of(attunev1.CreateSurveyCampaignRequest{})
+			}),
+			r.surveys.CreateCampaign,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateSurveyCampaignRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Patch("/campaigns/{id}", dispatcher.Bind(
+			"console.SurveyHandler.UpdateCampaign",
+			dispatcher.Combine(
+				func() *attunev1.UpdateSurveyCampaignRequest {
+					return ptrext.Of(attunev1.UpdateSurveyCampaignRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.UpdateSurveyCampaignRequest],
+				dispatcher.Param("id", func(req *attunev1.UpdateSurveyCampaignRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.surveys.UpdateCampaign,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateSurveyCampaignRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Post("/campaigns/{id}:archive", dispatcher.Bind(
+			"console.SurveyHandler.ArchiveCampaign",
+			dispatcher.Path(
+				func() *attunev1.ArchiveSurveyCampaignRequest {
+					return ptrext.Of(attunev1.ArchiveSurveyCampaignRequest{})
+				},
+				dispatcher.Param("id", func(req *attunev1.ArchiveSurveyCampaignRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.surveys.ArchiveCampaign,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ArchiveSurveyCampaignRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Post("/campaigns/{campaign_id}/hosted-links", dispatcher.Bind(
+			"console.SurveyHandler.CreateHostedLink",
+			dispatcher.Combine(
+				func() *attunev1.CreateSurveyHostedLinkRequest {
+					return ptrext.Of(attunev1.CreateSurveyHostedLinkRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.CreateSurveyHostedLinkRequest],
+				dispatcher.Param("campaign_id", func(req *attunev1.CreateSurveyHostedLinkRequest, id string) {
+					req.CampaignId = id
+				}),
+			),
+			r.surveys.CreateHostedLink,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateSurveyHostedLinkRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Post("/campaigns/{campaign_id}/recipients:preview", dispatcher.Bind(
+			"console.SurveyHandler.PreviewRecipients",
+			dispatcher.Combine(
+				func() *attunev1.PreviewSurveyRecipientsRequest {
+					return ptrext.Of(attunev1.PreviewSurveyRecipientsRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.PreviewSurveyRecipientsRequest],
+				dispatcher.Param("campaign_id", func(req *attunev1.PreviewSurveyRecipientsRequest, id string) {
+					req.CampaignId = id
+				}),
+			),
+			r.surveys.PreviewRecipients,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.PreviewSurveyRecipientsRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Post("/campaigns/{campaign_id}:sendTestEmail", dispatcher.Bind(
+			"console.SurveyHandler.SendTestEmail",
+			dispatcher.Combine(
+				func() *attunev1.SendSurveyTestEmailRequest {
+					return ptrext.Of(attunev1.SendSurveyTestEmailRequest{})
+				},
+				dispatcher.JSONBody[*attunev1.SendSurveyTestEmailRequest],
+				dispatcher.Param("campaign_id", func(req *attunev1.SendSurveyTestEmailRequest, id string) {
+					req.CampaignId = id
+				}),
+			),
+			r.surveys.SendTestEmail,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SendSurveyTestEmailRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdmin).Get("/campaigns/{campaign_id}/health", dispatcher.Bind(
+			"console.SurveyHandler.CampaignHealth",
+			dispatcher.Path(
+				func() *attunev1.GetSurveyCampaignHealthRequest {
+					return ptrext.Of(attunev1.GetSurveyCampaignHealthRequest{})
+				},
+				dispatcher.Param("campaign_id", func(req *attunev1.GetSurveyCampaignHealthRequest, id string) {
+					req.CampaignId = id
+				}),
+			),
+			r.surveys.CampaignHealth,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetSurveyCampaignHealthRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Post("/provider-events:record", dispatcher.Bind(
+			"console.SurveyHandler.RecordProviderEvent",
+			dispatcher.JSON(func() *attunev1.RecordSurveyProviderEventRequest {
+				return ptrext.Of(attunev1.RecordSurveyProviderEventRequest{})
+			}),
+			r.surveys.RecordProviderEvent,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecordSurveyProviderEventRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		sr.With(r.requireDelegatedAdminStrict).Post("/invitations/{id}:retry", dispatcher.Bind(
+			"console.SurveyHandler.RetryInvitationDelivery",
+			dispatcher.Path(
+				func() *attunev1.RetrySurveyInvitationDeliveryRequest {
+					return ptrext.Of(attunev1.RetrySurveyInvitationDeliveryRequest{})
+				},
+				dispatcher.Param("id", func(req *attunev1.RetrySurveyInvitationDeliveryRequest, id string) {
+					req.Id = id
+				}),
+			),
+			r.surveys.RetryInvitationDelivery,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RetrySurveyInvitationDeliveryRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		r.mountSurveyInsights(sr)
+	})
+}
+
+func (r *Router) mountSurveyInsights(sr chi.Router) {
+	sr.With(r.requireDelegatedAdmin).Get("/invitations", dispatcher.Bind(
+		"console.SurveyHandler.ListInvitations",
+		dispatcher.Query(
+			func() *attunev1.ListSurveyInvitationsRequest {
+				return ptrext.Of(attunev1.ListSurveyInvitationsRequest{})
+			},
+			consolesurvey.BindListSurveyInvitations,
+		),
+		r.surveys.ListInvitations,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSurveyInvitationsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/responses", dispatcher.Bind(
+		"console.SurveyHandler.ListResponses",
+		dispatcher.Query(
+			func() *attunev1.ListSurveyResponsesRequest {
+				return ptrext.Of(attunev1.ListSurveyResponsesRequest{})
+			},
+			consolesurvey.BindListSurveyResponses,
+		),
+		r.surveys.ListResponses,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListSurveyResponsesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/analytics", dispatcher.Bind(
+		"console.SurveyHandler.Analytics",
+		dispatcher.Query(
+			func() *attunev1.GetSurveyAnalyticsRequest {
+				return ptrext.Of(attunev1.GetSurveyAnalyticsRequest{})
+			},
+			consolesurvey.BindSurveyAnalytics,
+		),
+		r.surveys.Analytics,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetSurveyAnalyticsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/analytics/trend", dispatcher.Bind(
+		"console.SurveyHandler.AnalyticsTrend",
+		dispatcher.Query(
+			func() *attunev1.GetSurveyAnalyticsTrendRequest {
+				return ptrext.Of(attunev1.GetSurveyAnalyticsTrendRequest{})
+			},
+			consolesurvey.BindSurveyAnalyticsTrend,
+		),
+		r.surveys.AnalyticsTrend,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetSurveyAnalyticsTrendRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/analytics/segments", dispatcher.Bind(
+		"console.SurveyHandler.AnalyticsSegments",
+		dispatcher.Query(
+			func() *attunev1.GetSurveyAnalyticsSegmentsRequest {
+				return ptrext.Of(attunev1.GetSurveyAnalyticsSegmentsRequest{})
+			},
+			consolesurvey.BindSurveyAnalyticsSegments,
+		),
+		r.surveys.AnalyticsSegments,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetSurveyAnalyticsSegmentsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/analytics/insights", dispatcher.Bind(
+		"console.SurveyHandler.AnalyticsInsights",
+		dispatcher.Query(
+			func() *attunev1.GetSurveyAnalyticsInsightsRequest {
+				return ptrext.Of(attunev1.GetSurveyAnalyticsInsightsRequest{})
+			},
+			consolesurvey.BindSurveyAnalyticsInsights,
+		),
+		r.surveys.AnalyticsInsights,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetSurveyAnalyticsInsightsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdminStrict).Patch("/responses/{response_id}/low-score-review", dispatcher.Bind(
+		"console.SurveyHandler.UpdateLowScoreReview",
+		dispatcher.Combine(
+			func() *attunev1.UpdateSurveyLowScoreReviewRequest {
+				return ptrext.Of(attunev1.UpdateSurveyLowScoreReviewRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.UpdateSurveyLowScoreReviewRequest],
+			dispatcher.Param("response_id", func(req *attunev1.UpdateSurveyLowScoreReviewRequest, id string) {
+				req.ResponseId = id
+			}),
+		),
+		r.surveys.UpdateLowScoreReview,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateSurveyLowScoreReviewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdminStrict).Post("/responses/low-score-reviews:batchUpdate", dispatcher.Bind(
+		"console.SurveyHandler.BatchUpdateLowScoreReviews",
+		dispatcher.Custom(
+			func() *attunev1.BatchUpdateSurveyLowScoreReviewsRequest {
+				return ptrext.Of(attunev1.BatchUpdateSurveyLowScoreReviewsRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.BatchUpdateSurveyLowScoreReviewsRequest],
+		),
+		r.surveys.BatchUpdateLowScoreReviews,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchUpdateSurveyLowScoreReviewsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdminStrict).Post("/responses/low-score-reviews:assign", dispatcher.Bind(
+		"console.SurveyHandler.AssignLowScoreReviews",
+		dispatcher.Custom(
+			func() *attunev1.AssignSurveyLowScoreReviewsRequest {
+				return ptrext.Of(attunev1.AssignSurveyLowScoreReviewsRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.AssignSurveyLowScoreReviewsRequest],
+		),
+		r.surveys.AssignLowScoreReviews,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AssignSurveyLowScoreReviewsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdminStrict).Post("/responses/low-score-reviews:escalate", dispatcher.Bind(
+		"console.SurveyHandler.EscalateLowScoreReviews",
+		dispatcher.Custom(
+			func() *attunev1.EscalateSurveyLowScoreReviewsRequest {
+				return ptrext.Of(attunev1.EscalateSurveyLowScoreReviewsRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.EscalateSurveyLowScoreReviewsRequest],
+		),
+		r.surveys.EscalateLowScoreReviews,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.EscalateSurveyLowScoreReviewsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+}
+
 func (r *Router) mountRequestNotifications(m chi.Router) {
 	if r.requestNotifications == nil {
 		return
 	}
+	r.mountRequestNotificationBatchPublishing(m)
 	m.Route("/request-notifications", func(rn chi.Router) {
 		rn.With(r.requireDelegatedAdmin).Get("/settings", dispatcher.Bind(
 			"console.RequestNotificationHandler.GetSettings",
@@ -484,6 +804,29 @@ func (r *Router) mountRequestNotifications(m chi.Router) {
 		r.mountRequestNotificationSubscribers(rn)
 		r.mountRequestNotificationProviderEvents(rn)
 	})
+}
+
+func (r *Router) mountRequestNotificationBatchPublishing(m chi.Router) {
+	m.With(r.requireMember).Post("/request-notifications:batch-preview", dispatcher.Bind(
+		"console.RequestNotificationHandler.BatchPreview",
+		dispatcher.JSON(func() *attunev1.BatchPreviewRequestNotificationsRequest {
+			return ptrext.Of(attunev1.BatchPreviewRequestNotificationsRequest{})
+		}),
+		r.requestNotifications.BatchPreview,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchPreviewRequestNotificationsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.With(r.requireDelegatedAdminStrict).Post("/request-notifications:batch-publish", dispatcher.Bind(
+		"console.RequestNotificationHandler.BatchPublish",
+		dispatcher.JSON(func() *attunev1.BatchPublishRequestUpdatesRequest {
+			return ptrext.Of(attunev1.BatchPublishRequestUpdatesRequest{})
+		}),
+		r.requestNotifications.BatchPublish,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchPublishRequestUpdatesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountRequestNotificationSender(rn chi.Router) {
@@ -612,6 +955,16 @@ func (r *Router) mountRequestNotificationPublishing(rn chi.Router) {
 }
 
 func (r *Router) mountRequestNotificationDeliveries(rn chi.Router) {
+	rn.With(r.requireDelegatedAdmin).Get("/status-evidence", dispatcher.Bind(
+		"console.RequestNotificationHandler.GetStatusEvidence",
+		dispatcher.Empty(func() *attunev1.GetRequestNotificationStatusEvidenceRequest {
+			return ptrext.Of(attunev1.GetRequestNotificationStatusEvidenceRequest{})
+		}),
+		r.requestNotifications.GetStatusEvidence,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetRequestNotificationStatusEvidenceRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 	rn.With(r.requireDelegatedAdmin).Get("/deliveries", dispatcher.Bind(
 		"console.RequestNotificationHandler.ListDeliveries",
 		dispatcher.Query(
@@ -935,6 +1288,19 @@ func (r *Router) mountCustomerRequestReads(cr chi.Router) {
 		}),
 		r.customerRequests.GetScoringSettings,
 		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetCustomerRequestScoringSettingsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	cr.Get("/account-summary", dispatcher.Bind(
+		"console.CustomerRequestHandler.GetAccountSummary",
+		dispatcher.Query(
+			func() *attunev1.GetCustomerRequestAccountSummaryRequest {
+				return ptrext.Of(attunev1.GetCustomerRequestAccountSummaryRequest{})
+			},
+			consolecustomerrequest.BindAccountSummaryRequest,
+		),
+		r.customerRequests.GetAccountSummary,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetCustomerRequestAccountSummaryRequest) (*session.AuthCtx, error) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))
@@ -2532,7 +2898,7 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
-		// /terminal-failures, /stats and /batch/tags must come BEFORE /{id}; source order keeps the intent clear.
+		// /terminal-failures, /stats, /identity-review and /batch/tags must come BEFORE /{id}; source order keeps the intent clear.
 		f.Get("/terminal-failures", dispatcher.Bind(
 			"console.FeedbackHandler.GetTerminalFailureWorkbench",
 			dispatcher.Empty(func() *attunev1.GetTerminalFailureWorkbenchRequest {
@@ -2543,6 +2909,17 @@ func (r *Router) mountFeedback(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		f.Get("/triage-command-center", dispatcher.Bind(
+			"console.FeedbackHandler.GetTriageCommandCenter",
+			dispatcher.Empty(func() *attunev1.GetFeedbackTriageCommandCenterRequest {
+				return ptrext.Of(attunev1.GetFeedbackTriageCommandCenterRequest{})
+			}),
+			r.feedback.GetTriageCommandCenter,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackTriageCommandCenterRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+		r.mountFeedbackIdentityReviewRoutes(f)
 		f.Get("/stats", dispatcher.Bind(
 			"console.FeedbackHandler.Stats",
 			dispatcher.Empty(func() *attunev1.GetFeedbackStatsRequest { return ptrext.Of(attunev1.GetFeedbackStatsRequest{}) }),
@@ -2576,6 +2953,23 @@ func (r *Router) mountFeedback(m chi.Router) {
 			))
 		}
 		r.mountFeedbackBatchRoutes(f)
+		r.mountFeedbackAssignmentRoutes(f)
+		f.Get("/{id}/signal-trace", dispatcher.Bind(
+			"console.FeedbackHandler.GetSignalTrace",
+			dispatcher.Combine(
+				func() *attunev1.GetFeedbackSignalTraceRequest {
+					return ptrext.Of(attunev1.GetFeedbackSignalTraceRequest{})
+				},
+				dispatcher.ParamInt64("id", func(req *attunev1.GetFeedbackSignalTraceRequest, id int64) {
+					req.FeedbackId = id
+				}, "id must be an integer"),
+				feedback.BindFeedbackSignalTraceRequest,
+			),
+			r.feedback.GetSignalTrace,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackSignalTraceRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
 		f.Get("/{id}", dispatcher.Bind(
 			"console.FeedbackHandler.Get",
 			dispatcher.Path(
@@ -2649,6 +3043,54 @@ func (r *Router) mountFeedback(m chi.Router) {
 			}),
 		))
 	})
+}
+
+func (r *Router) mountFeedbackIdentityReviewRoutes(f chi.Router) {
+	f.Get("/identity-review", dispatcher.Bind(
+		"console.FeedbackHandler.GetIdentityReview",
+		dispatcher.Empty(func() *attunev1.GetFeedbackIdentityReviewRequest {
+			return ptrext.Of(attunev1.GetFeedbackIdentityReviewRequest{})
+		}),
+		r.feedback.GetIdentityReview,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackIdentityReviewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.Get("/identity-review/subjects/{subject_id}", dispatcher.Bind(
+		"console.FeedbackHandler.GetIdentitySubject",
+		dispatcher.Path(
+			func() *attunev1.GetFeedbackIdentitySubjectRequest {
+				return ptrext.Of(attunev1.GetFeedbackIdentitySubjectRequest{})
+			},
+			dispatcher.Param("subject_id", func(req *attunev1.GetFeedbackIdentitySubjectRequest, id string) {
+				req.SubjectId = id
+			}),
+		),
+		r.feedback.GetIdentitySubject,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackIdentitySubjectRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.Post("/identity-review/merge", dispatcher.Bind(
+		"console.FeedbackHandler.MergeIdentityReview",
+		dispatcher.JSON(func() *attunev1.MergeFeedbackIdentityReviewRequest {
+			return ptrext.Of(attunev1.MergeFeedbackIdentityReviewRequest{})
+		}),
+		r.feedback.MergeIdentityReview,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.MergeFeedbackIdentityReviewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.Post("/identity-review/split", dispatcher.Bind(
+		"console.FeedbackHandler.SplitIdentityReview",
+		dispatcher.JSON(func() *attunev1.SplitFeedbackIdentityReviewRequest {
+			return ptrext.Of(attunev1.SplitFeedbackIdentityReviewRequest{})
+		}),
+		r.feedback.SplitIdentityReview,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.SplitFeedbackIdentityReviewRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountFeedbackReplyDraftRoutes(f chi.Router) {
@@ -2885,6 +3327,127 @@ func (r *Router) mountFeedbackBatchRoutes(f chi.Router) {
 			}),
 		))
 	}
+}
+
+func (r *Router) mountFeedbackAssignmentRoutes(f chi.Router) {
+	f.With(r.requireMember).Get("/assignment/escalations", dispatcher.Bind(
+		"console.FeedbackHandler.GetFeedbackAssignmentEscalations",
+		dispatcher.Query(
+			func() *attunev1.GetFeedbackAssignmentEscalationsRequest {
+				return ptrext.Of(attunev1.GetFeedbackAssignmentEscalationsRequest{})
+			},
+			func(r *http.Request, req *attunev1.GetFeedbackAssignmentEscalationsRequest) error {
+				if lim := r.URL.Query().Get("limit"); lim != "" {
+					parsed, err := strconv.ParseInt(lim, 10, 32)
+					if err != nil {
+						return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "limit must be an integer")
+					}
+					req.Limit = ptrext.Of(int32(parsed))
+				}
+				return nil
+			},
+		),
+		r.feedback.GetFeedbackAssignmentEscalations,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackAssignmentEscalationsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Get("/assignment/policy", dispatcher.Bind(
+		"console.FeedbackHandler.GetFeedbackAssignmentPolicy",
+		dispatcher.Empty(func() *attunev1.GetFeedbackAssignmentPolicyRequest {
+			return ptrext.Of(attunev1.GetFeedbackAssignmentPolicyRequest{})
+		}),
+		r.feedback.GetFeedbackAssignmentPolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetFeedbackAssignmentPolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireDelegatedAdminStrict).Put("/assignment/policy", dispatcher.Bind(
+		"console.FeedbackHandler.UpdateFeedbackAssignmentPolicy",
+		dispatcher.JSON(func() *attunev1.UpdateFeedbackAssignmentPolicyRequest {
+			return ptrext.Of(attunev1.UpdateFeedbackAssignmentPolicyRequest{})
+		}),
+		r.feedback.UpdateFeedbackAssignmentPolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateFeedbackAssignmentPolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireDelegatedAdminStrict).Get("/assignment/policy/revisions", dispatcher.Bind(
+		"console.FeedbackHandler.ListFeedbackAssignmentPolicyRevisions",
+		dispatcher.Empty(func() *attunev1.ListFeedbackAssignmentPolicyRevisionsRequest {
+			return ptrext.Of(attunev1.ListFeedbackAssignmentPolicyRevisionsRequest{})
+		}),
+		r.feedback.ListFeedbackAssignmentPolicyRevisions,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListFeedbackAssignmentPolicyRevisionsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireDelegatedAdminStrict).Post("/assignment/policy:dry-run", dispatcher.Bind(
+		"console.FeedbackHandler.DryRunFeedbackAssignmentPolicy",
+		dispatcher.JSON(func() *attunev1.DryRunFeedbackAssignmentPolicyRequest {
+			return ptrext.Of(attunev1.DryRunFeedbackAssignmentPolicyRequest{})
+		}),
+		r.feedback.DryRunFeedbackAssignmentPolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.DryRunFeedbackAssignmentPolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireDelegatedAdminStrict).Post("/assignment/policy:restore", dispatcher.Bind(
+		"console.FeedbackHandler.RestoreFeedbackAssignmentPolicy",
+		dispatcher.JSON(func() *attunev1.RestoreFeedbackAssignmentPolicyRequest {
+			return ptrext.Of(attunev1.RestoreFeedbackAssignmentPolicyRequest{})
+		}),
+		r.feedback.RestoreFeedbackAssignmentPolicy,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RestoreFeedbackAssignmentPolicyRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Post("/assignment:recommend", dispatcher.Bind(
+		"console.FeedbackHandler.RecommendFeedbackAssignment",
+		dispatcher.JSON(func() *attunev1.RecommendFeedbackAssignmentRequest {
+			return ptrext.Of(attunev1.RecommendFeedbackAssignmentRequest{})
+		}),
+		r.feedback.RecommendFeedbackAssignment,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.RecommendFeedbackAssignmentRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Post("/assignment:apply-recommendations", dispatcher.Bind(
+		"console.FeedbackHandler.ApplyFeedbackAssignmentRecommendations",
+		dispatcher.JSON(func() *attunev1.ApplyFeedbackAssignmentRecommendationsRequest {
+			return ptrext.Of(attunev1.ApplyFeedbackAssignmentRecommendationsRequest{})
+		}),
+		r.feedback.ApplyFeedbackAssignmentRecommendations,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ApplyFeedbackAssignmentRecommendationsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Post("/assignment:batch", dispatcher.Bind(
+		"console.FeedbackHandler.BatchAssignFeedback",
+		dispatcher.JSON(func() *attunev1.BatchAssignFeedbackRequest {
+			return ptrext.Of(attunev1.BatchAssignFeedbackRequest{})
+		}),
+		r.feedback.BatchAssignFeedback,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.BatchAssignFeedbackRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	f.With(r.requireMember).Patch("/{id}/assignment", dispatcher.Bind(
+		"console.FeedbackHandler.AssignFeedback",
+		dispatcher.Combine(
+			func() *attunev1.AssignFeedbackRequest {
+				return ptrext.Of(attunev1.AssignFeedbackRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.AssignFeedbackRequest],
+			dispatcher.ParamInt64("id", func(req *attunev1.AssignFeedbackRequest, id int64) {
+				req.FeedbackId = id
+			}, "id must be an integer"),
+		),
+		r.feedback.AssignFeedback,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.AssignFeedbackRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountFeedbackTagRoutes(f chi.Router) {

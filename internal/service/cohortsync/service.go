@@ -543,11 +543,8 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 		return nil, fmt.Errorf("%w: %s", ErrValidation, errMsg)
 	}
 
-	// Full-snapshot uses InsertExclusiveRun inside ApplyMembershipDelta
-	// (the partial unique index enforces at most one running run).
-	// We pass OlderThan = now so MarkDeparted runs after upsert — the
-	// upserted members have last_seen_at = NOW() which is >= OlderThan,
-	// so only genuinely absent members get marked departed.
+	// ApplyMembershipDelta picks one database-side snapshot cutoff and reuses
+	// it for both last_seen_at and stale reconciliation.
 	result, err := s.repo.ApplyMembershipDelta(ctx, repo.ApplyInput{
 		TenantID:     tenantID,
 		CohortID:     cohort.ID,
@@ -555,7 +552,6 @@ func (s *Service) ApplyFullSnapshot(ctx context.Context, tenantID string, source
 		Trigger:      trigger,
 		Members:      adds,
 		StaleTTLDays: cohort.StaleTTLDays,
-		OlderThan:    time.Now(),
 		IsSnapshot:   true,
 	})
 	if err != nil {

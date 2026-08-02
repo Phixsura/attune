@@ -28,25 +28,47 @@ import type {
   TestInboundConnectionResponse,
 } from '../../src/proto/attune/v1/inbound_source'
 import type {
+  FeedbackAssignment,
+  FeedbackAssignmentEscalationQueue,
+  FeedbackAssignmentPolicy,
+  FeedbackAssignmentPolicyRevision,
+  FeedbackAssignmentPolicyRule,
+  FeedbackAssignmentRecommendation,
   FeedbackDetail,
+  FeedbackSignalTrace,
   ReplyDraftWorkflow,
   ReplySendHook,
   ReplySendHookDelivery,
   ReplySendHookHealth,
 } from '../../src/proto/attune/v1/ingest'
+import type { LLMChannel } from '../../src/proto/attune/v1/llm_config'
+import type { QualityAction } from '../../src/proto/attune/v1/quality_action'
 import type { Tag } from '../../src/proto/attune/v1/tag'
 import {
   consoleA11yApiKeyPresets,
   consoleA11yApiKeyScopes,
   consoleA11yApiKeysList,
+  consoleA11yAuditEntry,
   consoleA11yAuditEvidenceCreate,
   consoleA11yAuditEvidenceReady,
   consoleA11yAuditLog,
   consoleA11yAuthProviders,
+  consoleA11yClassificationQuality,
+  consoleA11yClassificationReviewLearning,
+  consoleA11yCustomerRequestAccountSummary,
+  consoleA11yCustomerRequestDetail,
+  consoleA11yCustomerRequestsList,
   consoleA11yEnrichConfigResponse,
+  consoleA11yFeedbackAssignmentEscalations,
   consoleA11yFeedbackDetail,
+  consoleA11yFeedbackIdentityMerge,
+  consoleA11yFeedbackIdentityReview,
+  consoleA11yFeedbackIdentitySplit,
+  consoleA11yFeedbackIdentitySubjectDetail,
   consoleA11yFeedbackItems,
+  consoleA11yFeedbackSignalTrace,
   consoleA11yFeedbackStats,
+  consoleA11yFeedbackTriageCommandCenter,
   consoleA11yGdprDelete,
   consoleA11yGdprExportReady,
   consoleA11yGdprExportStart,
@@ -60,17 +82,30 @@ import {
   consoleA11yMcpClientUpdate,
   consoleA11yMcpToolPolicyUpdate,
   consoleA11yMe,
+  consoleA11yMembers,
   consoleA11yModerationSubjects,
+  consoleA11yNotifyTargets,
   consoleA11yOutboxDeliveries,
   consoleA11yOutboxRetry,
   consoleA11yPortalFeedbackDetail,
   consoleA11yPublicVisibilityPolicy,
+  consoleA11yQualityActions,
   consoleA11yReplyDraftWorkflow,
   consoleA11yReplySendHook,
   consoleA11yReplySendHookDeliveries,
   consoleA11yRetryEnrichmentResponse,
+  consoleA11ySearchQuality,
   consoleA11yServiceAccount,
   consoleA11yServiceAccountsList,
+  consoleA11ySurveyAnalytics,
+  consoleA11ySurveyAnalyticsInsights,
+  consoleA11ySurveyAnalyticsSegments,
+  consoleA11ySurveyAnalyticsTrend,
+  consoleA11ySurveyCampaign,
+  consoleA11ySurveyCampaignHealth,
+  consoleA11ySurveyInvitation,
+  consoleA11ySurveyRecipientPreview,
+  consoleA11ySurveyResponse,
   consoleA11yTagsResponse,
   consoleA11yTerminalFeedbackDetail,
   consoleA11yTerminalWorkbench,
@@ -98,6 +133,12 @@ export type ApiMockDiagnostics = {
     path: string
   }>
   providerInstallationRequests: Array<{
+    body: unknown
+    method: string
+    path: string
+  }>
+  customerRequestListRequests: string[]
+  surveyRequests: Array<{
     body: unknown
     method: string
     path: string
@@ -134,9 +175,12 @@ export async function installConsoleApiMocks(
     providerInstallationRequests: [],
     replyDraftRequests: [],
     replySendHookRequests: [],
+    customerRequestListRequests: [],
+    surveyRequests: [],
     unhandledRequests: [],
     semanticSearchRequests: [],
   }
+  const assignmentPolicy = createAssignmentPolicyState()
   const state: ApiMockState = {
     auditLogViews: [],
     feedbackDetails: {
@@ -153,7 +197,10 @@ export async function installConsoleApiMocks(
     replySendHook: clone(consoleA11yReplySendHook),
     replySendHookDeliveries: clone(consoleA11yReplySendHookDeliveries),
     externalSync: createExternalSyncState(),
+    qualityActions: clone(consoleA11yQualityActions),
     serviceAccounts: clone(consoleA11yServiceAccountsList.items),
+    assignmentPolicy,
+    assignmentPolicyRevisions: [policyRevisionFromAssignmentPolicy(assignmentPolicy)],
     tags: clone(consoleA11yTagsResponse.tags),
   }
 
@@ -191,13 +238,67 @@ async function handleRoute(
     await fulfillJson(route, consoleA11yAuthProviders)
     return true
   }
+  if (method === 'GET' && path === '/auth/sso/mode') {
+    await fulfillJson(route, { mode: 'hybrid' })
+    return true
+  }
+  if (method === 'GET' && path === '/auth/breakglass/tokens') {
+    await fulfillJson(route, {
+      tokens: [
+        {
+          id: 'bg-token-a11y',
+          admin_email: 'admin@example.com',
+          expires_at: '2099-07-06T12:30:00Z',
+          issued_by: 'user-a11y',
+          issued_at: '2026-07-05T11:30:00Z',
+          status: 'valid',
+          allowed_ips: ['203.0.113.0/24'],
+        },
+      ],
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/auth/breakglass/lockouts') {
+    await fulfillJson(route, { lockouts: [] })
+    return true
+  }
 
   if (method === 'GET' && path === '/enrich-config') {
     await fulfillJson(route, consoleA11yEnrichConfigResponse)
     return true
   }
+  if (method === 'GET' && path === '/classification-quality') {
+    await fulfillJson(route, consoleA11yClassificationQuality)
+    return true
+  }
+  if (method === 'GET' && path === '/classification-quality/review-learning') {
+    await fulfillJson(route, consoleA11yClassificationReviewLearning)
+    return true
+  }
+  if (method === 'POST' && path === '/classification-quality/reviews') {
+    await fulfillJson(route, {
+      event: {
+        eventId: 'classification-review-e2e',
+        feedbackId: '101',
+        outcome: 'accepted',
+        signalReason: 'low_confidence_rate_spike',
+        correctionJson: '{}',
+        reviewedAt: '2026-07-30T09:10:00Z',
+      },
+      learning: consoleA11yClassificationReviewLearning,
+    })
+    return true
+  }
   if (method === 'GET' && path === '/tags') {
     await fulfillJson(route, { tags: state.tags })
+    return true
+  }
+  if (method === 'GET' && path === '/members') {
+    await fulfillJson(route, { members: consoleA11yMembers })
+    return true
+  }
+  if (method === 'GET' && path === '/notify-targets') {
+    await fulfillJson(route, consoleA11yNotifyTargets)
     return true
   }
   if (method === 'GET' && path === '/clusters') {
@@ -212,6 +313,59 @@ async function handleRoute(
     await fulfillJson(route, consoleA11yWorkflowStatesResponse)
     return true
   }
+  if (method === 'GET' && path === '/surveys/campaigns') {
+    await fulfillJson(route, { campaigns: [consoleA11ySurveyCampaign] })
+    return true
+  }
+  if (method === 'GET' && path === '/surveys/analytics') {
+    await fulfillJson(route, consoleA11ySurveyAnalytics)
+    return true
+  }
+  if (method === 'GET' && path === '/surveys/analytics/trend') {
+    await fulfillJson(route, { buckets: consoleA11ySurveyAnalyticsTrend })
+    return true
+  }
+  if (method === 'GET' && path === '/surveys/analytics/segments') {
+    await fulfillJson(route, { segments: consoleA11ySurveyAnalyticsSegments })
+    return true
+  }
+  if (method === 'GET' && path === '/surveys/analytics/insights') {
+    await fulfillJson(route, { insights: consoleA11ySurveyAnalyticsInsights })
+    return true
+  }
+  if (method === 'GET' && path.startsWith('/surveys/campaigns/') && path.endsWith('/health')) {
+    await fulfillJson(route, consoleA11ySurveyCampaignHealth)
+    return true
+  }
+  if (method === 'GET' && path === '/surveys/invitations') {
+    await fulfillJson(route, { invitations: [consoleA11ySurveyInvitation] })
+    return true
+  }
+  if (method === 'POST' && path.endsWith('/recipients:preview')) {
+    const body = readJsonBody(route)
+    diagnostics.surveyRequests.push({ method, path, body })
+    await fulfillJson(route, consoleA11ySurveyRecipientPreview)
+    return true
+  }
+  if (method === 'POST' && path.endsWith(':sendTestEmail')) {
+    const body = readJsonBody(route)
+    diagnostics.surveyRequests.push({ method, path, body })
+    await fulfillJson(route, {
+      ok: true,
+      provider: 'postmark',
+      sentAt: '2026-07-30T01:20:00Z',
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/surveys/responses') {
+    const accountKey = url.searchParams.get('account_key')?.trim()
+    const responses =
+      accountKey && accountKey !== consoleA11ySurveyResponse.accountContext?.accountKey
+        ? []
+        : [consoleA11ySurveyResponse]
+    await fulfillJson(route, { responses })
+    return true
+  }
   if (method === 'GET' && path === '/public-visibility/policy') {
     await fulfillJson(route, consoleA11yPublicVisibilityPolicy)
     return true
@@ -222,6 +376,138 @@ async function handleRoute(
   }
   if (method === 'GET' && path === '/public-visibility/views') {
     await fulfillJson(route, { views: [] })
+    return true
+  }
+  if (method === 'GET' && path === '/request-notifications/settings') {
+    await fulfillJson(route, {
+      tenantId: consoleA11yMe.tenant.id,
+      emailEnabled: true,
+      webhookEnabled: true,
+      enabledEventTypes: {
+        'request.status_changed': true,
+        'request.shipped': true,
+      },
+      statusPolicy: {
+        open: true,
+        planned: true,
+        in_progress: true,
+        shipped: true,
+        cancelled: false,
+      },
+      defaultConsentMode: 'explicit_opt_in',
+      requirePublicUpdateForStatus: true,
+      maxRecipientsWithoutConfirm: 100,
+      tenantHourlySendLimit: 1000,
+      contactDailySendLimit: 10,
+      updatedBy: consoleA11yMe.user.openId,
+      createdAt: '2026-07-16T00:00:00Z',
+      updatedAt: '2026-07-16T00:00:00Z',
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/request-notifications/sender') {
+    await fulfillJson(route, {
+      id: 'rn-sender-a11y',
+      fromName: 'Attune',
+      fromEmailRedacted: 'n***@example.test',
+      replyToRedacted: 's***@example.test',
+      domain: 'example.test',
+      dkimStatus: 'verified',
+      spfStatus: 'verified',
+      dmarcStatus: 'verified',
+      provider: 'email',
+      status: 'verified',
+      createdAt: '2026-07-16T00:00:00Z',
+      updatedAt: '2026-07-16T00:00:00Z',
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/request-notifications/webhook-targets') {
+    await fulfillJson(route, {
+      targets: [
+        {
+          id: 'rn-target-a11y',
+          name: 'Customer CRM',
+          url: 'https://hooks.example.test/request-notifications',
+          urlHost: 'hooks.example.test',
+          signatureVersion: 'v1',
+          eventMask: { 'request.shipped': true },
+          includeRecipientIdentity: true,
+          status: 'active',
+          createdAt: '2026-07-16T00:00:00Z',
+          updatedAt: '2026-07-16T00:00:00Z',
+        },
+      ],
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/request-notifications/deliveries') {
+    await fulfillJson(route, {
+      deliveries: [
+        {
+          id: 'rn-delivery-a11y',
+          eventId: 'rn-event-a11y',
+          channel: 'REQUEST_NOTIFICATION_CHANNEL_EMAIL',
+          status: 'failed',
+          attempts: 2,
+          lastError: 'temporary provider outage',
+          failureKind: 'provider_5xx',
+          deadReason: '',
+          retriedBy: '',
+          traceId: 'trace-rn-a11y',
+          destinationHash: 'sha256:rn-a11y',
+          createdAt: '2026-07-16T00:00:00Z',
+          manualRetryCount: 0,
+        },
+      ],
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/request-notifications/status-evidence') {
+    await fulfillJson(route, {
+      items: [
+        {
+          requestStatus: 'shipped',
+          expectedCustomers: 4,
+          notifiedCustomers: 2,
+          failedCustomers: 1,
+          suppressedCustomers: 1,
+          recoveryPendingCustomers: 1,
+          eventCount: 2,
+          lastEventAt: '2026-07-16T00:00:00Z',
+        },
+      ],
+    })
+    return true
+  }
+  if (method === 'POST' && path === '/request-notifications:batch-preview') {
+    await fulfillJson(route, {
+      totalMatched: 2,
+      eligibleRecipients: 4,
+      excludedRecipients: 1,
+      items: [
+        {
+          requestId: '11111111-1111-1111-1111-111111111111',
+          eligibleRecipients: 4,
+          excludedRecipients: 1,
+        },
+      ],
+      failed: [{ requestId: 'bad-request', code: 'validation', message: 'invalid request id' }],
+    })
+    return true
+  }
+  if (method === 'POST' && path === '/request-notifications:batch-publish') {
+    await fulfillJson(
+      route,
+      {
+        totalMatched: 2,
+        succeeded: 1,
+        skipped: 0,
+        events: [{ id: 'rn-event-batch-a11y', status: 'pending' }],
+        failed: [{ requestId: 'bad-request', code: 'validation', message: 'invalid request id' }],
+      },
+      201,
+    )
     return true
   }
   if (method === 'GET' && path === '/inbound/sources') {
@@ -362,17 +648,110 @@ async function handleRoute(
   if (method === 'GET' && path === '/feedback') {
     const terminalOnly = url.searchParams.get('terminal_failed_only') === 'true'
     const source = url.searchParams.get('source')
-    await fulfillJson(route, feedbackListResponse(state, terminalOnly, source))
+    const accountKey = url.searchParams.get('account_key')?.trim()
+    await fulfillJson(route, feedbackListResponse(state, terminalOnly, source, accountKey))
     return true
   }
   if (method === 'GET' && path === '/feedback/stats') {
     await fulfillJson(route, consoleA11yFeedbackStats)
     return true
   }
+  if (method === 'GET' && path === '/usage') {
+    await fulfillJson(route, {
+      periodStart: '2026-07-01T00:00:00Z',
+      periodEnd: '2026-07-31T23:59:59Z',
+      total: '72',
+      quota: '100',
+      series: [{ bucket: '2026-07-01T00:00:00Z', value: '72' }],
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/llm-usage') {
+    await fulfillJson(route, {
+      periodStart: '2026-07-01T00:00:00Z',
+      periodEnd: '2026-07-31T23:59:59Z',
+      granularity: 'week',
+      series: [],
+      promptTokens: '12000',
+      completionTokens: '4000',
+      costUsd: 2.34,
+      calls: '20',
+      errors: '1',
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/feedback/triage-command-center') {
+    await fulfillJson(route, consoleA11yFeedbackTriageCommandCenter)
+    return true
+  }
+  if (method === 'GET' && path === '/feedback/assignment/escalations') {
+    await fulfillJson(route, assignmentEscalationQueue(state))
+    return true
+  }
+  if (method === 'GET' && path === '/feedback/identity-review') {
+    await fulfillJson(route, consoleA11yFeedbackIdentityReview)
+    return true
+  }
+  if (method === 'GET' && path.startsWith('/feedback/identity-review/subjects/')) {
+    await fulfillJson(route, consoleA11yFeedbackIdentitySubjectDetail)
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/identity-review/merge') {
+    await fulfillJson(route, consoleA11yFeedbackIdentityMerge)
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/identity-review/split') {
+    await fulfillJson(route, consoleA11yFeedbackIdentitySplit)
+    return true
+  }
   if (method === 'POST' && path === '/feedback/search') {
     const body = readJsonBody(route)
     diagnostics.semanticSearchRequests.push(body)
     await fulfillJson(route, semanticSearchResponse(body))
+    return true
+  }
+  if (method === 'GET' && path === '/feedback/search/quality') {
+    await fulfillJson(route, consoleA11ySearchQuality)
+    return true
+  }
+  if (method === 'GET' && path === '/quality-actions') {
+    await fulfillJson(route, { actions: clone(state.qualityActions) })
+    return true
+  }
+  if (method === 'POST' && path === '/quality-actions/update') {
+    const body = readJsonBody(route) as Partial<QualityAction> | null
+    const actionKey = body?.actionKey?.trim()
+    if (!actionKey) {
+      await fulfillError(route, 'quality action key is required', 400)
+      return true
+    }
+    const existing = state.qualityActions.find((action) => action.actionKey === actionKey)
+    const now = '2026-07-30T09:10:00Z'
+    const status = body?.status ?? existing?.status ?? 'open'
+    const updated: QualityAction = {
+      actionId: existing?.actionId ?? `qa-action-${state.qualityActions.length + 1}`,
+      actionKey,
+      signal: body?.signal ?? existing?.signal ?? actionKey,
+      status,
+      severity: body?.severity ?? existing?.severity ?? 'watch',
+      targetPath: body?.targetPath ?? existing?.targetPath ?? '/control-tower',
+      metricLabel: body?.metricLabel ?? existing?.metricLabel ?? '',
+      metricValue: body?.metricValue ?? existing?.metricValue ?? '',
+      recommendationKey: body?.recommendationKey ?? existing?.recommendationKey ?? '',
+      evidenceJson: body?.evidenceJson ?? existing?.evidenceJson ?? '{}',
+      createdAt: existing?.createdAt ?? now,
+      lastSeenAt: now,
+      acknowledgedAt: status === 'acknowledged' ? now : (existing?.acknowledgedAt ?? ''),
+      resolvedAt: status === 'resolved' ? now : (existing?.resolvedAt ?? ''),
+      dismissedAt: status === 'dismissed' ? now : (existing?.dismissedAt ?? ''),
+      updatedAt: now,
+      updatedBy: consoleA11yMe.user.openId,
+    }
+    state.qualityActions = [
+      updated,
+      ...state.qualityActions.filter((action) => action.actionKey !== actionKey),
+    ]
+    await fulfillJson(route, { action: clone(updated) })
     return true
   }
   if (method === 'GET' && path === '/feedback/terminal-failures') {
@@ -413,6 +792,239 @@ async function handleRoute(
     await route.fulfill({ status: 204 })
     return true
   }
+  if (method === 'POST' && path === '/feedback/assignment:batch') {
+    const body = readJsonBody(route) as {
+      feedbackIds?: string[]
+      ownerMemberIdSet?: boolean
+      ownerMemberId?: string
+      slaDueAtSet?: boolean
+      slaDueAt?: string
+      note?: string
+    } | null
+    const ids = body?.feedbackIds ?? []
+    for (const feedbackId of ids) {
+      const detail = state.feedbackDetails[feedbackId]
+      if (!detail) continue
+      const owner = consoleA11yMembers.find((member) => member.id === body?.ownerMemberId)
+      const current = detail.assignment
+      detail.assignment = {
+        feedbackId,
+        owner: body?.ownerMemberIdSet ? assignmentOwner(owner) : current?.owner,
+        assignedAt: body?.ownerMemberIdSet ? '2026-06-24T09:15:00Z' : current?.assignedAt,
+        assignedBy: 'user-a11y',
+        slaDueAt: body?.slaDueAtSet ? body.slaDueAt || undefined : current?.slaDueAt,
+        slaStatus: body?.slaDueAtSet && !body.slaDueAt ? 'missing_due_date' : 'on_track',
+        note: body?.note ?? current?.note ?? '',
+      }
+    }
+    await fulfillJson(route, {
+      totalMatched: ids.length,
+      succeeded: ids.length,
+      failed: [],
+    })
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/transition/batch') {
+    const body = readJsonBody(route) as {
+      feedbackIds?: string[]
+      toStateId?: string
+    } | null
+    const target = consoleA11yWorkflowStatesResponse.states.find(
+      (workflowState) => workflowState.id === body?.toStateId,
+    )
+    const ids = body?.feedbackIds ?? []
+    for (const feedbackId of ids) {
+      const detail = state.feedbackDetails[feedbackId]
+      if (!detail || !target) continue
+      detail.workflowState = target
+      detail.allowedNextStates = consoleA11yWorkflowStatesResponse.states.filter(
+        (workflowState) => workflowState.id !== target.id,
+      )
+    }
+    await fulfillJson(route, {
+      succeeded: target ? ids.length : 0,
+      failed: [],
+    })
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/assignment:recommend') {
+    const body = readJsonBody(route) as { feedbackIds?: string[] } | null
+    const ids = body?.feedbackIds ?? []
+    const recommendations = ids.flatMap((feedbackId) => {
+      const detail = state.feedbackDetails[feedbackId]
+      const recommendation = detail
+        ? assignmentRecommendation(detail, state.assignmentPolicy)
+        : null
+      return recommendation ? [recommendation] : []
+    })
+    await fulfillJson(route, {
+      totalMatched: ids.length,
+      recommendations,
+      failed: ids
+        .filter((feedbackId) => !state.feedbackDetails[feedbackId])
+        .map((feedbackId) => ({
+          feedbackId,
+          code: 'NOT_FOUND',
+          message: 'feedback not found',
+        })),
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/feedback/assignment/policy') {
+    await fulfillJson(route, state.assignmentPolicy)
+    return true
+  }
+  if (method === 'PUT' && path === '/feedback/assignment/policy') {
+    const body = readJsonBody(route) as {
+      rules?: FeedbackAssignmentPolicyRule[]
+      note?: string
+    } | null
+    state.assignmentPolicy = {
+      rules: body?.rules ?? [],
+      version: state.assignmentPolicy.version + 1,
+      updatedBy: 'admin@example.com',
+      note: body?.note ?? '',
+    }
+    state.assignmentPolicyRevisions = [
+      policyRevisionFromAssignmentPolicy(state.assignmentPolicy),
+      ...state.assignmentPolicyRevisions,
+    ].slice(0, 20)
+    await fulfillJson(route, state.assignmentPolicy)
+    return true
+  }
+  if (method === 'GET' && path === '/feedback/assignment/policy/revisions') {
+    await fulfillJson(route, { revisions: state.assignmentPolicyRevisions })
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/assignment/policy:dry-run') {
+    const body = readJsonBody(route) as {
+      feedbackIds?: string[]
+      rules?: FeedbackAssignmentPolicyRule[]
+    } | null
+    const ids = body?.feedbackIds ?? []
+    const draftPolicy: FeedbackAssignmentPolicy = {
+      rules: body?.rules ?? [],
+      version: state.assignmentPolicy.version + 1,
+      updatedBy: 'preview',
+      note: '',
+    }
+    const impacts = ids.flatMap((feedbackId) => {
+      const detail = state.feedbackDetails[feedbackId]
+      if (!detail) return []
+      const current = assignmentRecommendation(detail, state.assignmentPolicy)
+      const draft = assignmentRecommendation(detail, draftPolicy)
+      if (!current && !draft) return []
+      return [assignmentPolicyDryRunImpact(feedbackId, current, draft)]
+    })
+    const changed = impacts.filter((impact) => impact.changed).length
+    await fulfillJson(route, {
+      totalMatched: ids.length,
+      changed,
+      recommendations: ids.flatMap((feedbackId) => {
+        const detail = state.feedbackDetails[feedbackId]
+        if (!detail) return []
+        const recommendation = assignmentRecommendation(detail, draftPolicy)
+        return recommendation ? [recommendation] : []
+      }),
+      failed: ids
+        .filter((feedbackId) => !state.feedbackDetails[feedbackId])
+        .map((feedbackId) => ({
+          feedbackId,
+          code: 'NOT_FOUND',
+          message: 'feedback not found',
+        })),
+      impacts,
+    })
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/assignment/policy:restore') {
+    const body = readJsonBody(route) as { version?: number } | null
+    const revision = state.assignmentPolicyRevisions.find((item) => item.version === body?.version)
+    const restoredRules = revision?.rules ?? createAssignmentPolicyState().rules
+    state.assignmentPolicy = {
+      rules: restoredRules,
+      version: state.assignmentPolicy.version + 1,
+      updatedBy: 'admin@example.com',
+      note: `Restored feedback assignment policy version ${body?.version ?? 1}`,
+    }
+    state.assignmentPolicyRevisions = [
+      policyRevisionFromAssignmentPolicy(state.assignmentPolicy),
+      ...state.assignmentPolicyRevisions,
+    ].slice(0, 20)
+    await fulfillJson(route, state.assignmentPolicy)
+    return true
+  }
+  if (method === 'POST' && path === '/feedback/assignment:apply-recommendations') {
+    const body = readJsonBody(route) as {
+      feedbackIds?: string[]
+      ownerMemberId?: string
+      note?: string
+    } | null
+    const ids = body?.feedbackIds ?? []
+    const applied: FeedbackAssignmentRecommendation[] = []
+    for (const feedbackId of ids) {
+      const detail = state.feedbackDetails[feedbackId]
+      if (!detail) continue
+      const recommendation = assignmentRecommendation(detail, state.assignmentPolicy)
+      if (!recommendation) continue
+      applied.push(recommendation)
+      const defaultOwner = recommendation.recommendedOwnerMemberId
+        ? consoleA11yMembers.find((member) => member.id === recommendation.recommendedOwnerMemberId)
+        : undefined
+      const owner = body?.ownerMemberId
+        ? consoleA11yMembers.find((member) => member.id === body.ownerMemberId)
+        : defaultOwner
+      detail.assignment = {
+        feedbackId,
+        owner: owner ? assignmentOwner(owner) : detail.assignment?.owner,
+        assignedAt: owner ? '2026-06-24T09:15:00Z' : detail.assignment?.assignedAt,
+        assignedBy: 'user-a11y',
+        slaDueAt: recommendation.recommendedSlaDueAt,
+        slaStatus: 'on_track',
+        note: `Assignment policy: ${recommendation.ruleName} (${recommendation.ownerLane}, ${recommendation.slaHours}h). ${body?.note ?? ''}`.trim(),
+      }
+    }
+    await fulfillJson(route, {
+      totalMatched: ids.length,
+      succeeded: applied.length,
+      skipped: 0,
+      failed: [],
+      applied,
+    })
+    return true
+  }
+  if (method === 'PATCH' && path.match(/^\/feedback\/[^/]+\/assignment$/)) {
+    const feedbackId = path.split('/')[2]
+    const body = readJsonBody(route) as {
+      ownerMemberId?: string
+      slaDueAt?: string
+      note?: string
+    } | null
+    const owner = consoleA11yMembers.find((member) => member.id === body?.ownerMemberId)
+    const assignment: FeedbackAssignment = {
+      feedbackId,
+      owner: owner
+        ? {
+            memberId: owner.id,
+            memberType: owner.memberType,
+            userId: owner.userId,
+            email: owner.email,
+            role: owner.role,
+          }
+        : undefined,
+      assignedAt: owner ? '2026-06-24T09:10:00Z' : undefined,
+      assignedBy: 'user-a11y',
+      slaDueAt: body?.slaDueAt || undefined,
+      slaStatus: body?.slaDueAt ? 'on_track' : 'missing_due_date',
+      note: body?.note ?? '',
+    }
+    const detail = state.feedbackDetails[feedbackId]
+    if (detail) {
+      detail.assignment = assignment
+    }
+    await fulfillJson(route, assignment)
+    return true
+  }
   if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/retry-enrichment$/)) {
     if (options.fail?.feedbackRetryEnrichment) {
       await fulfillError(route, options.fail.feedbackRetryEnrichment, 500)
@@ -421,12 +1033,73 @@ async function handleRoute(
     await fulfillJson(route, consoleA11yRetryEnrichmentResponse, 202)
     return true
   }
+  if (method === 'GET' && path.match(/^\/feedback\/[^/]+\/signal-trace$/)) {
+    const feedbackId = path.split('/')[2]
+    await fulfillJson(route, signalTraceForFeedback(feedbackId))
+    return true
+  }
   if (method === 'GET' && path.match(/^\/feedback\/[^/]+$/)) {
     const feedbackId = path.split('/')[2]
     const detail = state.feedbackDetails[feedbackId]
     await fulfillJson(route, detail ? clone(detail) : null, detail ? 200 : 404)
     return true
   }
+
+  if (method === 'GET' && path === '/customer-requests') {
+    diagnostics.customerRequestListRequests.push(url.search)
+    const accountKey = url.searchParams.get('account_key')?.trim()
+    const requests =
+      accountKey && accountKey !== 'acct:acme'
+        ? []
+        : clone(consoleA11yCustomerRequestsList.requests)
+    await fulfillJson(route, { requests })
+    return true
+  }
+  if (method === 'GET' && path === '/customer-requests/account-summary') {
+    const accountKey = url.searchParams.get('account_key')?.trim()
+    const summary =
+      accountKey && accountKey !== 'acct:acme'
+        ? {
+            accountKey,
+            requestCount: 0,
+            feedbackCount: 0,
+            customerCount: 0,
+            voteCount: 0,
+            issueCount: 0,
+            syncedIssueCount: 0,
+            staleIssueCount: 0,
+            failedIssueCount: 0,
+            pendingIssueCount: 0,
+            manualIssueCount: 0,
+            revenueImpactCents: '0',
+            revenueCurrency: 'USD',
+            highPriorityRequestCount: 0,
+            shippedRequestCount: 0,
+            staleOrFailedIssueCount: 0,
+            averageDecisionScore: 0,
+            topDecisionScore: 0,
+            decisionSignals: [],
+            events: [],
+            timeline: [],
+          }
+        : clone(consoleA11yCustomerRequestAccountSummary)
+    await fulfillJson(route, summary)
+    return true
+  }
+  if (method === 'GET' && path === '/customer-requests/saved-views') {
+    await fulfillJson(route, { views: [] })
+    return true
+  }
+  if (method === 'GET' && path.match(/^\/customer-requests\/[^/]+$/)) {
+    const requestID = path.split('/')[2]
+    const detail =
+      requestID === consoleA11yCustomerRequestDetail.request?.id
+        ? clone(consoleA11yCustomerRequestDetail)
+        : null
+    await fulfillJson(route, detail, detail ? 200 : 404)
+    return true
+  }
+
   if (method === 'POST' && path.match(/^\/feedback\/[^/]+\/reply-draft\/edit$/)) {
     const body = readJsonBody(route)
     diagnostics.replyDraftRequests.push({ method, path, body })
@@ -469,8 +1142,86 @@ async function handleRoute(
     return true
   }
 
+  if (method === 'GET' && path === '/system/preflight') {
+    await fulfillJson(route, {
+      status: 'warn',
+      elapsed: '42ms',
+      checks: [
+        {
+          name: 'database',
+          category: 'database',
+          status: 'pass',
+          message: 'Database reachable',
+          remediation: '',
+        },
+        {
+          name: 'worker',
+          category: 'worker',
+          status: 'warn',
+          message: 'Replay queue needs review',
+          remediation: 'Run the replay drill before release.',
+        },
+        {
+          name: 'secrets:tink_keyset',
+          category: 'encryption',
+          status: 'pass',
+          message: 'Tink keyset parsed and primary key available',
+          remediation: '',
+        },
+        {
+          name: 'secrets:decryptability',
+          category: 'backup',
+          status: 'pass',
+          message: 'Managed secret samples decrypted',
+          remediation: '',
+        },
+      ],
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/system/recovery') {
+    await fulfillJson(route, {
+      status: 'pass',
+      message: 'Last restore drill passed',
+      freshnessWindowSeconds: 604800,
+      ageSeconds: 3600,
+      lastRun: {
+        ranAt: '2026-08-01T09:00:00Z',
+        status: 'pass',
+        backupRef: 'nightly-backup',
+        durationMs: 1234,
+      },
+    })
+    return true
+  }
+  if (method === 'GET' && path === '/system/release') {
+    await fulfillJson(route, {
+      serviceVersion: '5d6ea83',
+      environment: 'production',
+      profile: 'production',
+      lifecycleState: 'supported',
+      ownerTeam: 'Platform',
+      compatibilityRules: [
+        { key: 'additive', label: 'Additive' },
+        { key: 'breaking', label: 'Breaking' },
+      ],
+      glossary: [
+        { key: 'environment', label: 'Environment' },
+        { key: 'owner', label: 'Owner' },
+      ],
+      runbookUrl: 'https://github.com/Phixsura/attune/blob/main/docs/private-deploy.md',
+      escalationUrl: 'https://github.com/Phixsura/attune/issues/new/choose',
+      startedAt: '2026-08-01T09:00:00Z',
+    })
+    return true
+  }
+
   if (method === 'GET' && path === '/api-keys') {
     await fulfillJson(route, consoleA11yApiKeysList)
+    return true
+  }
+  if (method === 'GET' && path === '/llm/channels') {
+    await fulfillJson(route, { items: consoleA11yLLMChannels() })
     return true
   }
   if (method === 'GET' && path === '/service-accounts') {
@@ -676,6 +1427,36 @@ async function handleRoute(
   }
 
   if (method === 'GET' && path === '/audit-log') {
+    if (url.searchParams.get('targetType') === 'member') {
+      await fulfillJson(route, {
+        items: [
+          {
+            ...consoleA11yAuditEntry,
+            action: 'member.update_role',
+            id: 'audit-member-a11y',
+            summary: 'Updated member role for governance readiness verification.',
+            targetId: 'member-a11y-pm',
+            targetType: 'member',
+          },
+        ],
+      })
+      return true
+    }
+    if (url.searchParams.get('targetType') === 'public_moderation_subject') {
+      await fulfillJson(route, {
+        items: [
+          {
+            ...consoleA11yAuditEntry,
+            action: 'moderation.hide',
+            id: 'audit-public-moderation-a11y',
+            summary: 'Hid public moderation subject for field-level permission verification.',
+            targetId: 'moderation-a11y-pending',
+            targetType: 'public_moderation_subject',
+          },
+        ],
+      })
+      return true
+    }
     await fulfillJson(route, consoleA11yAuditLog)
     return true
   }
@@ -928,7 +1709,10 @@ type ApiMockState = {
   replySendHook: ReplySendHook
   replySendHookDeliveries: ReplySendHookDelivery[]
   externalSync: ExternalSyncMockState
+  qualityActions: QualityAction[]
   serviceAccounts: ServiceAccount[]
+  assignmentPolicy: FeedbackAssignmentPolicy
+  assignmentPolicyRevisions: FeedbackAssignmentPolicyRevision[]
   tags: Tag[]
 }
 
@@ -1011,6 +1795,51 @@ function createSlackChannelsState(): SlackChannel[] {
     },
     { id: 'C-SUPPORT', name: 'support', isPrivate: true, isArchived: false, isShared: false },
   ]
+}
+
+function createAssignmentPolicyState(): FeedbackAssignmentPolicy {
+  return {
+    version: 1,
+    updatedBy: 'system',
+    note: 'Default assignment policy',
+    rules: [
+      assignmentPolicyRule('urgent_open', 'Urgent open feedback', 'support_triage', 'critical', 24),
+      assignmentPolicyRule('terminal_failures', 'Terminal AI failures', 'ai_ops', 'high', 48),
+      assignmentPolicyRule('stalled_active', 'Active work at risk', 'product_owner', 'high', 168),
+      assignmentPolicyRule('identity_debt', 'Identity evidence debt', 'data_quality', 'medium', 96),
+      assignmentPolicyRule('untriaged', 'Untriaged intake', 'triage_dri', 'high', 72),
+    ],
+  }
+}
+
+function policyRevisionFromAssignmentPolicy(
+  policy: FeedbackAssignmentPolicy,
+): FeedbackAssignmentPolicyRevision {
+  return {
+    version: policy.version,
+    updatedAt: policy.updatedAt,
+    updatedBy: policy.updatedBy,
+    note: policy.note,
+    rules: clone(policy.rules),
+  }
+}
+
+function assignmentPolicyRule(
+  ruleKey: string,
+  ruleName: string,
+  ownerLane: string,
+  severity: string,
+  slaHours: number,
+): FeedbackAssignmentPolicyRule {
+  return {
+    ruleKey,
+    ruleName,
+    ownerLane,
+    severity,
+    slaHours,
+    enabled: true,
+    rationale: 'Mocked assignment policy rule.',
+  }
 }
 
 function sortInboundSources(sources: InboundSource[]): InboundSource[] {
@@ -1220,6 +2049,18 @@ function feedbackDetailWithReplyDraft(
   }
 }
 
+function signalTraceForFeedback(feedbackId: string): FeedbackSignalTrace {
+  return {
+    ...clone(consoleA11yFeedbackSignalTrace),
+    feedbackId,
+    signalTraceId: `trace-${feedbackId}`,
+    events: consoleA11yFeedbackSignalTrace.events.map((event) => ({
+      ...event,
+      traceId: event.traceId ? `trace-${feedbackId}` : event.traceId,
+    })),
+  }
+}
+
 function syncReplyDraftFeedbackDetail(state: ApiMockState) {
   const detail = state.feedbackDetails['feedback-101']
   if (!detail) return
@@ -1229,7 +2070,12 @@ function syncReplyDraftFeedbackDetail(state: ApiMockState) {
   )
 }
 
-function feedbackListResponse(state: ApiMockState, terminalOnly: boolean, source?: string | null) {
+function feedbackListResponse(
+  state: ApiMockState,
+  terminalOnly: boolean,
+  source?: string | null,
+  accountKey?: string,
+) {
   const items = [
     state.feedbackDetails['feedback-101'],
     state.feedbackDetails['feedback-201'],
@@ -1240,15 +2086,122 @@ function feedbackListResponse(state: ApiMockState, terminalOnly: boolean, source
     ? items.filter((item) => item.source === source)
     : items.filter((item) => item.source !== 'portal')
 
+  const accountScopedItems = accountKey
+    ? scopedItems.filter((item) => item.accountContext?.accountKey === accountKey)
+    : scopedItems
+
   const filteredItems = terminalOnly
-    ? scopedItems.filter(
+    ? accountScopedItems.filter(
         (item) => item.enrichmentStatus === 'failed' && (item.enrichmentAttempts ?? 0) >= 5,
       )
-    : scopedItems
+    : accountScopedItems
 
   return {
     items: filteredItems.map((item) => clone(item)),
   }
+}
+
+function assignmentEscalationQueue(state: ApiMockState): FeedbackAssignmentEscalationQueue {
+  const generatedAt = consoleA11yFeedbackAssignmentEscalations.generatedAt
+  const now = new Date(generatedAt)
+  const source = Object.values(state.feedbackDetails).filter(
+    (item) => item.workflowState?.category !== 'closed',
+  )
+  const items = source
+    .flatMap((item) => {
+      const reasons = assignmentEscalationReasons(item, now)
+      if (reasons.length === 0) return []
+      const dueAt = item.assignment?.slaDueAt ? new Date(item.assignment.slaDueAt) : null
+      const hoursUntilDue =
+        dueAt && !Number.isNaN(dueAt.getTime())
+          ? Math.trunc((dueAt.getTime() - now.getTime()) / 3_600_000)
+          : undefined
+      return [
+        {
+          feedbackId: item.id,
+          title: item.enrichedDisplayTitle || item.enrichedTitle || item.content.slice(0, 96),
+          source: item.source,
+          type: item.type,
+          isUrgent: item.isUrgent,
+          createdAt: item.createdAt,
+          assignment: {
+            feedbackId: item.id,
+            ...(item.assignment ?? {}),
+            assignedBy: item.assignment?.assignedBy ?? '',
+            note: item.assignment?.note ?? '',
+            slaStatus: assignmentSlaStatus(item, now),
+          },
+          escalationReasons: reasons,
+          hoursUntilDue,
+          priority: assignmentEscalationPriority(reasons),
+          accountContext: item.accountContext,
+        },
+      ]
+    })
+    .sort(assignmentEscalationSort)
+
+  return {
+    generatedAt,
+    overdueCount: String(items.filter((item) => item.escalationReasons.includes('overdue')).length),
+    dueSoonCount: String(
+      items.filter((item) => item.escalationReasons.includes('due_soon')).length,
+    ),
+    missingOwnerCount: String(
+      items.filter((item) => item.escalationReasons.includes('missing_owner')).length,
+    ),
+    missingSlaCount: String(
+      items.filter((item) => item.escalationReasons.includes('missing_sla')).length,
+    ),
+    items,
+  }
+}
+
+function assignmentEscalationReasons(item: FeedbackDetail, now: Date) {
+  const reasons: string[] = []
+  const dueAt = item.assignment?.slaDueAt ? new Date(item.assignment.slaDueAt) : null
+  if (!dueAt || Number.isNaN(dueAt.getTime())) {
+    reasons.push('missing_sla')
+  } else if (dueAt.getTime() < now.getTime()) {
+    reasons.push('overdue')
+  } else if (dueAt.getTime() < now.getTime() + 12 * 3_600_000) {
+    reasons.push('due_soon')
+  }
+  if (!item.assignment?.owner) {
+    reasons.push('missing_owner')
+  }
+  return reasons
+}
+
+function assignmentSlaStatus(item: FeedbackDetail, now: Date) {
+  const dueAt = item.assignment?.slaDueAt ? new Date(item.assignment.slaDueAt) : null
+  if (!dueAt || Number.isNaN(dueAt.getTime())) return 'missing_due_date'
+  if (dueAt.getTime() < now.getTime()) return 'overdue'
+  if (dueAt.getTime() < now.getTime() + 12 * 3_600_000) return 'due_soon'
+  return 'on_track'
+}
+
+function assignmentEscalationPriority(reasons: string[]) {
+  if (reasons.includes('overdue')) return 'critical'
+  if (reasons.includes('missing_owner') || reasons.includes('missing_sla')) return 'high'
+  if (reasons.includes('due_soon')) return 'medium'
+  return 'low'
+}
+
+function assignmentEscalationSort(
+  left: FeedbackAssignmentEscalationQueue['items'][number],
+  right: FeedbackAssignmentEscalationQueue['items'][number],
+) {
+  const rank = (item: FeedbackAssignmentEscalationQueue['items'][number]) => {
+    if (item.escalationReasons.includes('overdue')) return 0
+    if (item.escalationReasons.includes('missing_owner')) return 1
+    if (item.escalationReasons.includes('missing_sla')) return 2
+    if (item.escalationReasons.includes('due_soon')) return 3
+    return 4
+  }
+  const rankDelta = rank(left) - rank(right)
+  if (rankDelta !== 0) return rankDelta
+  if (left.isUrgent !== right.isUrgent) return left.isUrgent ? -1 : 1
+  return left.feedbackId.localeCompare(right.feedbackId)
 }
 
 function resolveFeedbackTag(
@@ -1413,6 +2366,29 @@ function replySendHookHealth(deliveries: ReplySendHookDelivery[]): ReplySendHook
     retryable: String(deliveries.filter((delivery) => delivery.retryable).length),
     total: String(deliveries.length),
   }
+}
+
+function consoleA11yLLMChannels(): LLMChannel[] {
+  return [
+    {
+      authMode: 'bearer',
+      baseUrl: 'https://api.openai.com/v1',
+      createdAt: '2026-06-24T08:00:00Z',
+      credentialKeyId: 'tink-key-a11y',
+      hasApiKey: true,
+      id: 'llm-a11y',
+      lastError: '',
+      lastTestStatus: 'pass',
+      lastTestedAt: '2026-07-11T12:00:00Z',
+      name: 'Primary LLM',
+      priority: 1,
+      protocol: 'openai-responses',
+      status: 'enabled',
+      timeoutSeconds: 30,
+      updatedAt: '2026-07-11T12:00:00Z',
+      weight: 1,
+    },
+  ]
 }
 
 function createExternalSyncState(): ExternalSyncMockState {
@@ -1826,6 +2802,81 @@ function semanticSearchResponse(body: unknown) {
       embeddingModel: fallback ? '' : 'text-embedding-3-small',
     },
   }
+}
+
+function assignmentOwner(
+  member: (typeof consoleA11yMembers)[number] | undefined,
+): FeedbackAssignment['owner'] {
+  if (!member) {
+    return undefined
+  }
+  return {
+    memberId: member.id,
+    memberType: member.memberType,
+    userId: member.userId,
+    email: member.email,
+    role: member.role,
+  }
+}
+
+function assignmentRecommendation(
+  detail: FeedbackDetail,
+  policy: FeedbackAssignmentPolicy,
+): FeedbackAssignmentRecommendation | null {
+  const urgent = detail.isUrgent
+  const ruleKey = urgent ? 'urgent_open' : 'untriaged'
+  const fallback = urgent
+    ? assignmentPolicyRule('urgent_open', 'Urgent open feedback', 'support_triage', 'critical', 24)
+    : assignmentPolicyRule('untriaged', 'Untriaged intake', 'triage_dri', 'high', 72)
+  const configuredRule = policy.rules.find((item) => item.ruleKey === ruleKey)
+  if (configuredRule && !configuredRule.enabled) {
+    return null
+  }
+  const rule = configuredRule ?? fallback
+  return {
+    feedbackId: String(detail.id),
+    ruleKey,
+    ruleName: rule.ruleName,
+    ownerLane: rule.ownerLane,
+    severity: rule.severity,
+    slaHours: rule.slaHours,
+    recommendedSlaDueAt: recommendedDueAt(rule.slaHours),
+    rationale: 'Mocked assignment policy recommendation.',
+    alreadySatisfied: false,
+    currentAssignment: detail.assignment,
+    recommendedOwnerMemberId: rule.defaultOwnerMemberId,
+  }
+}
+
+function assignmentPolicyDryRunImpact(
+  feedbackId: string,
+  current: FeedbackAssignmentRecommendation | null,
+  draft: FeedbackAssignmentRecommendation | null,
+) {
+  return {
+    feedbackId,
+    currentRuleKey: current?.ruleKey ?? '',
+    currentRuleName: current?.ruleName ?? '',
+    currentOwnerLane: current?.ownerLane ?? '',
+    currentSlaHours: current?.slaHours ?? 0,
+    currentOwnerMemberId: current?.recommendedOwnerMemberId,
+    draftRuleKey: draft?.ruleKey ?? '',
+    draftRuleName: draft?.ruleName ?? '',
+    draftOwnerLane: draft?.ownerLane ?? '',
+    draftSlaHours: draft?.slaHours ?? 0,
+    draftOwnerMemberId: draft?.recommendedOwnerMemberId,
+    changed:
+      current?.ruleKey !== draft?.ruleKey ||
+      current?.ownerLane !== draft?.ownerLane ||
+      current?.slaHours !== draft?.slaHours ||
+      current?.recommendedOwnerMemberId !== draft?.recommendedOwnerMemberId,
+  }
+}
+
+function recommendedDueAt(slaHours: number): string {
+  const dueAt = new Date('2026-08-01T09:30:00Z')
+  dueAt.setUTCHours(dueAt.getUTCHours() + slaHours)
+  return dueAt.toISOString().replace('.000Z', 'Z')
 }
 
 async function fulfillJson(route: Route, payload: unknown, status = 200) {

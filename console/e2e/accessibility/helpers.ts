@@ -20,6 +20,8 @@ type AxeResults = {
   violations: AxeViolation[]
 }
 
+type AxeContext = Document | Element
+
 export type ConsoleDiagnostics = {
   messages: string[]
   failedApiResponses: string[]
@@ -108,23 +110,27 @@ export async function expectOpaqueBackground(page: Page, selector: string, label
   expect(alpha, `${label} background must be opaque; got ${color}`).toBe(1)
 }
 
-export async function expectNoAxeViolations(page: Page) {
+export async function expectNoAxeViolations(page: Page, contextSelector?: string) {
   await page.addScriptTag({ content: axeSource })
-  const results = await page.evaluate<AxeResults>(async () => {
+  const results = await page.evaluate<AxeResults, string | undefined>(async (selector) => {
     const axe = (
       window as unknown as {
         axe: {
-          run: (context: Document, options: object) => Promise<AxeResults>
+          run: (context: AxeContext, options: object) => Promise<AxeResults>
         }
       }
     ).axe
-    return axe.run(document, {
+    const context = selector ? document.querySelector(selector) : document
+    if (!context) {
+      throw new Error(`axe context not found: ${selector}`)
+    }
+    return axe.run(context, {
       resultTypes: ['violations'],
       rules: {
         region: { enabled: true },
       },
     })
-  })
+  }, contextSelector)
 
   const blockingViolations = results.violations.filter((violation) => violation.impact !== 'minor')
 

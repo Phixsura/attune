@@ -98,14 +98,17 @@ func (p *gdprPool) Exec(context.Context, string, ...any) (pgconn.CommandTag, err
 	return pgconn.CommandTag{}, errors.New("unexpected pool Exec")
 }
 
-// countsRowValues builds the 8-way COUNT row deleteLockedSubject scans.
+// countsRowValues builds the COUNT row deleteLockedSubject scans.
 func countsRowValues() []any {
-	return []any{2, 3, 4, 5, 1, 1, 1, 1}
+	return []any{2, 3, 4, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1}
 }
 
-// subjectRows returns the FOR UPDATE subject listing (id + display).
+// subjectRows returns the FOR UPDATE subject listing.
 func subjectRows() pgx.Rows {
-	return &fakeRows{rows: [][]any{{int64(11), "Alice"}, {int64(12), "Alice"}}}
+	return &fakeRows{rows: [][]any{
+		{int64(11), "Alice", "sha256:alice"},
+		{int64(12), "Alice", "sha256:alice"},
+	}}
 }
 
 func TestDelete_FullErasureFlow(t *testing.T) {
@@ -113,10 +116,13 @@ func TestDelete_FullErasureFlow(t *testing.T) {
 	tx := &gdprTx{
 		queries: []pgx.Rows{subjectRows()},
 		rows:    []fakeRow{{values: countsRowValues()}},
-		// Exec order: cohort_memberships, reply_delivery_attempts, llm_audit,
-		// notify_outbox, user_feedback, then per-table dedup+anonymize (2 tables × 2).
+		// Exec order: cohort memberships, survey-linked rows,
+		// feedback-linked rows, then per-table dedup+anonymize.
 		execTags: []pgconn.CommandTag{
 			pgconn.NewCommandTag("DELETE 0"), // cohort_memberships
+			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 1"),
+			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 1"),
+			pgconn.NewCommandTag("DELETE 1"),
 			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 1"),
 			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 2"),
 			pgconn.NewCommandTag("DELETE 0"), pgconn.NewCommandTag("UPDATE 3"),
@@ -158,13 +164,20 @@ func TestDelete_ErrorLegs(t *testing.T) {
 	// Each Exec position failing must fail the erasure loudly — a
 	// silently-skipped DELETE would leave PII behind.
 	for failAt, wantMsg := range map[int]string{
-		1: "cohort memberships",
-		2: "reply_delivery_attempts",
-		3: "llm_audit",
-		4: "notify_outbox",
-		5: "user_feedback",
-		6: "dedup customer_request_customer_links",
-		7: "anonymize customer_request_customer_links",
+		1:  "cohort memberships",
+		2:  "survey_recovery_notifications",
+		3:  "survey_low_score_reviews",
+		4:  "survey_provider_events",
+		5:  "survey_responses",
+		6:  "survey_invitations",
+		7:  "reply_delivery_attempts",
+		8:  "llm_audit",
+		9:  "notify_outbox",
+		10: "user_feedback",
+		11: "dedup customer_request_customer_links",
+		12: "anonymize customer_request_customer_links",
+		13: "dedup customer_request_votes",
+		14: "anonymize customer_request_votes",
 	} {
 		t.Run(wantMsg, func(t *testing.T) {
 			tx := &gdprTx{
@@ -302,16 +315,18 @@ func TestExport_IncludesCustomerRequestIdentityRows(t *testing.T) {
 	linkRow := []byte(`{"id":"l1"}`)
 	voteRow := []byte(`{"id":"v1"}`)
 	p := &exportPool{queries: []pgx.Rows{
-		// subjectInfo listing (id + display).
-		&fakeRows{rows: [][]any{{int64(11), "Alice"}}},
+		// subjectInfo listing.
+		&fakeRows{rows: [][]any{{int64(11), "Alice", "sha256:alice"}}},
 		// exportSubjectRows call order: feedback, tags, feedbackAudit,
 		// llmAudit, replyDrafts, replyDraftRevisions, replyDraftEvents,
-		// customer links, votes, replyDeliveryAttempts.
+		// customer links, votes, replyDeliveryAttempts, subjectInfo for
+		// survey anchors.
 		&fakeRows{}, &fakeRows{}, &fakeRows{}, &fakeRows{},
 		&fakeRows{}, &fakeRows{}, &fakeRows{},
 		&fakeRows{rows: [][]any{{linkRow}}},
 		&fakeRows{rows: [][]any{{voteRow}}},
 		&fakeRows{},
+		&fakeRows{rows: [][]any{{int64(11), "Alice", "sha256:alice"}}},
 	}}
 	r := &Repo{pool: p}
 

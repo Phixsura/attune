@@ -63,6 +63,21 @@ func (r *Repo) Set(ctx context.Context, tenantID, key, value, updatedBy string) 
 	return nil
 }
 
+// SetTx upserts a setting inside an existing transaction.
+func (r *Repo) SetTx(ctx context.Context, tx pgx.Tx, tenantID, key, value, updatedBy string) error {
+	_, err := tx.Exec(ctx,
+		`INSERT INTO system_settings (tenant_id, key, value, updated_at, updated_by)
+		 VALUES ($1, $2, $3, NOW(), $4)
+		 ON CONFLICT (tenant_id, key) DO UPDATE
+		 SET value = EXCLUDED.value, updated_at = NOW(), updated_by = EXCLUDED.updated_by`,
+		tenantID, key, value, updatedBy,
+	)
+	if err != nil {
+		return fmt.Errorf("systemsettings.SetTx: %w", err)
+	}
+	return nil
+}
+
 // GetAuthMode retrieves the auth mode for a tenant, defaulting to hybrid.
 func (r *Repo) GetAuthMode(ctx context.Context, tenantID string) (domain.AuthMode, error) {
 	value, err := r.Get(ctx, tenantID, KeyAuthMode)

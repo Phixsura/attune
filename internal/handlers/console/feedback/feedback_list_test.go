@@ -144,13 +144,14 @@ func TestBindListRequestSkipsEmptyDynamicAttrs(t *testing.T) {
 	t.Parallel()
 
 	req := ptrext.Of(attunev1.ListFeedbackRequest{})
-	httpReq := httptest.NewRequest(http.MethodGet, "/feedback?severity=&severity=critical&limit=20", nil)
+	httpReq := httptest.NewRequest(http.MethodGet, "/feedback?severity=&severity=critical&limit=20&account_key=acct:acme", nil)
 
 	require.NoError(t, BindListRequest(httpReq, req))
 	require.Len(t, req.GetAttrs(), 1)
 	require.Equal(t, "severity", req.GetAttrs()[0].GetDim())
 	require.Equal(t, "critical", req.GetAttrs()[0].GetValue())
 	require.Equal(t, int32(20), req.GetLimit())
+	require.Equal(t, "acct:acme", req.GetAccountKey())
 }
 
 func TestQueryFloat64(t *testing.T) {

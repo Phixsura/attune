@@ -149,7 +149,7 @@ export function TagCombobox({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        aria-label={`${t('tags.feedback_section.add')} ${t('tags.feedback_section.title')}`}
+        aria-label={t('tags.combobox.label')}
         className="w-64 p-0"
         onOpenAutoFocus={(e) => {
           e.preventDefault()
@@ -203,7 +203,7 @@ export function TagCombobox({
             <div
               role="option"
               aria-disabled="true"
-              aria-selected={false}
+              aria-selected="false"
               tabIndex={-1}
               className="px-2 py-4 text-center text-sm text-muted-foreground"
             >

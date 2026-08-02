@@ -339,28 +339,18 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 			"reply_delivery_attempts":         data.Counts.ReplyDeliveryAttemptCount,
 			"customer_request_customer_links": data.Counts.CustomerLinkCount,
 			"customer_request_votes":          data.Counts.VoteCount,
+			"survey_invitations":              data.Counts.SurveyInvitationCount,
+			"survey_responses":                data.Counts.SurveyResponseCount,
+			"survey_low_score_reviews":        data.Counts.SurveyLowScoreReviewCount,
+			"survey_provider_events":          data.Counts.SurveyProviderEventCount,
+			"survey_recovery_notifications":   data.Counts.SurveyRecoveryNotificationCount,
 		},
 	}
 	if err := writeJSONFile(zw, "manifest.json", manifest); err != nil {
 		return nil, err
 	}
-	sections := []struct {
-		name string
-		rows []json.RawMessage
-	}{
-		{"feedback.jsonl", data.FeedbackRows},
-		{"feedback_tags.jsonl", data.FeedbackTagRows},
-		{"feedback_audit_log.jsonl", data.FeedbackAuditRows},
-		{"llm_audit.jsonl", data.LLMAuditRows},
-		{"reply_drafts.jsonl", data.ReplyDraftRows},
-		{"reply_draft_revisions.jsonl", data.ReplyDraftRevisionRows},
-		{"reply_draft_events.jsonl", data.ReplyDraftEventRows},
-		{"reply_delivery_attempts.jsonl", data.ReplyDeliveryAttemptRows},
-		{"customer_request_customer_links.jsonl", data.CustomerLinkRows},
-		{"customer_request_votes.jsonl", data.VoteRows},
-	}
-	for _, sec := range sections {
-		if err := writeJSONLinesFile(zw, sec.name, sec.rows); err != nil {
+	for _, file := range gdprJSONLFiles(data) {
+		if err := writeJSONLinesFile(zw, file.name, file.rows); err != nil {
 			return nil, err
 		}
 	}
@@ -368,6 +358,31 @@ func buildZIP(tenantID string, data *gdprrepo.ExportData) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+type gdprJSONLFile struct {
+	name string
+	rows []json.RawMessage
+}
+
+func gdprJSONLFiles(data *gdprrepo.ExportData) []gdprJSONLFile {
+	return []gdprJSONLFile{
+		{name: "feedback.jsonl", rows: data.FeedbackRows},
+		{name: "feedback_tags.jsonl", rows: data.FeedbackTagRows},
+		{name: "feedback_audit_log.jsonl", rows: data.FeedbackAuditRows},
+		{name: "llm_audit.jsonl", rows: data.LLMAuditRows},
+		{name: "reply_drafts.jsonl", rows: data.ReplyDraftRows},
+		{name: "reply_draft_revisions.jsonl", rows: data.ReplyDraftRevisionRows},
+		{name: "reply_draft_events.jsonl", rows: data.ReplyDraftEventRows},
+		{name: "reply_delivery_attempts.jsonl", rows: data.ReplyDeliveryAttemptRows},
+		{name: "customer_request_customer_links.jsonl", rows: data.CustomerLinkRows},
+		{name: "customer_request_votes.jsonl", rows: data.VoteRows},
+		{name: "survey_invitations.jsonl", rows: data.SurveyInvitationRows},
+		{name: "survey_responses.jsonl", rows: data.SurveyResponseRows},
+		{name: "survey_low_score_reviews.jsonl", rows: data.SurveyLowScoreReviewRows},
+		{name: "survey_provider_events.jsonl", rows: data.SurveyProviderEventRows},
+		{name: "survey_recovery_notifications.jsonl", rows: data.SurveyRecoveryNotificationRows},
+	}
 }
 
 func auditCounts(counts gdprrepo.Counts) map[string]int {
@@ -384,6 +399,11 @@ func auditCounts(counts gdprrepo.Counts) map[string]int {
 		// Anonymized in place (identity scrubbed, aggregates kept).
 		"customer_request_customer_links": counts.CustomerLinkCount,
 		"customer_request_votes":          counts.VoteCount,
+		"survey_invitations":              counts.SurveyInvitationCount,
+		"survey_responses":                counts.SurveyResponseCount,
+		"survey_low_score_reviews":        counts.SurveyLowScoreReviewCount,
+		"survey_provider_events":          counts.SurveyProviderEventCount,
+		"survey_recovery_notifications":   counts.SurveyRecoveryNotificationCount,
 	}
 }
 
@@ -423,18 +443,23 @@ func zipFilename(subjectKey string, generatedAt time.Time) string {
 
 func requestSummaryProto(item gdprrepo.Request) *attunev1.GdprRequestSummary {
 	resp := ptrext.Of(attunev1.GdprRequestSummary{
-		RequestId:          item.ID,
-		RequestType:        requestTypeProto(item.RequestType),
-		Status:             requestStatusProto(item.Status),
-		SubjectKey:         item.SubjectKey,
-		SubjectDisplay:     item.SubjectDisplay,
-		CreatedBy:          item.CreatedBy,
-		FeedbackCount:      int32(item.Counts.FeedbackCount),
-		TagAssignmentCount: int32(item.Counts.TagAssignmentCount),
-		FeedbackAuditCount: int32(item.Counts.FeedbackAuditCount),
-		LlmAuditCount:      int32(item.Counts.LLMAuditCount),
-		OutboxCount:        int32(item.Counts.OutboxCount),
-		CreatedAt:          item.CreatedAt.UTC().Format(time.RFC3339),
+		RequestId:                       item.ID,
+		RequestType:                     requestTypeProto(item.RequestType),
+		Status:                          requestStatusProto(item.Status),
+		SubjectKey:                      item.SubjectKey,
+		SubjectDisplay:                  item.SubjectDisplay,
+		CreatedBy:                       item.CreatedBy,
+		FeedbackCount:                   int32(item.Counts.FeedbackCount),
+		TagAssignmentCount:              int32(item.Counts.TagAssignmentCount),
+		FeedbackAuditCount:              int32(item.Counts.FeedbackAuditCount),
+		LlmAuditCount:                   int32(item.Counts.LLMAuditCount),
+		OutboxCount:                     int32(item.Counts.OutboxCount),
+		SurveyInvitationCount:           int32(item.Counts.SurveyInvitationCount),
+		SurveyResponseCount:             int32(item.Counts.SurveyResponseCount),
+		SurveyLowScoreReviewCount:       int32(item.Counts.SurveyLowScoreReviewCount),
+		SurveyProviderEventCount:        int32(item.Counts.SurveyProviderEventCount),
+		SurveyRecoveryNotificationCount: int32(item.Counts.SurveyRecoveryNotificationCount),
+		CreatedAt:                       item.CreatedAt.UTC().Format(time.RFC3339),
 	})
 	if item.StartedAt != nil {
 		resp.StartedAt = ptrext.Of(item.StartedAt.UTC().Format(time.RFC3339))

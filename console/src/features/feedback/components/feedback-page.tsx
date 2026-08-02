@@ -8,10 +8,12 @@ import {
   ChevronDown,
   Clock3,
   ExternalLink,
+  Fingerprint,
   Inbox,
   Loader2,
   RotateCcw,
   Search,
+  ShieldCheck,
   Sparkles,
   Target,
   TriangleAlert,
@@ -43,11 +45,33 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
+import {
+  feedbackAssignmentPolicyQuery,
+  feedbackAssignmentPolicyRevisionsQuery,
+  useDryRunFeedbackAssignmentPolicy,
+  useRestoreFeedbackAssignmentPolicy,
+  useUpdateFeedbackAssignmentPolicy,
+} from '@/features/feedback/api/assignment-policy'
+import {
+  useApplyFeedbackAssignmentRecommendations,
+  useRecommendFeedbackAssignment,
+} from '@/features/feedback/api/assignment-recommendations'
+import { useBatchAssignFeedback } from '@/features/feedback/api/batch-assign-feedback'
 import { useBatchDeleteFeedback } from '@/features/feedback/api/batch-delete'
 import { useBatchRetryEnrichment } from '@/features/feedback/api/batch-retry-enrichment'
 import { useBatchUpdateTags } from '@/features/feedback/api/batch-update-tags'
+import { feedbackAssignmentEscalationsQuery } from '@/features/feedback/api/get-feedback-assignment-escalations'
 import type { FeedbackDetail } from '@/features/feedback/api/get-feedback-detail'
+import {
+  type FeedbackIdentityReview,
+  type FeedbackIdentitySubject as FeedbackIdentitySubjectDetailData,
+  feedbackIdentityReviewQuery,
+  feedbackIdentitySubjectQuery,
+  useMergeFeedbackIdentityReview,
+  useSplitFeedbackIdentityReview,
+} from '@/features/feedback/api/get-feedback-identity-review'
 import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
+import { feedbackTriageCommandCenterQuery } from '@/features/feedback/api/get-feedback-triage-command-center'
 import { terminalFailureWorkbenchQuery } from '@/features/feedback/api/get-terminal-failure-workbench'
 import {
   type AttrFilterEntry,
@@ -55,6 +79,17 @@ import {
   type FeedbackListFilters,
   feedbackListInfiniteQuery,
 } from '@/features/feedback/api/list-feedback-infinite'
+import { AssignmentEscalationQueue } from '@/features/feedback/components/assignment-escalation-queue'
+import { AssignmentPolicyPanel } from '@/features/feedback/components/assignment-policy-panel'
+import { AssignmentRecommendationDialog } from '@/features/feedback/components/assignment-recommendation-dialog'
+import { BatchAssignmentDialog } from '@/features/feedback/components/batch-assignment-dialog'
+import {
+  BatchOperatorCommandCenter,
+  type OperatorBatchFailure,
+  type OperatorBatchResult,
+} from '@/features/feedback/components/batch-operator-command-center'
+import { BatchRequestNotificationDialog } from '@/features/feedback/components/batch-request-notification-dialog'
+import { BatchResult } from '@/features/feedback/components/batch-result'
 import { ClustersCard } from '@/features/feedback/components/clusters-card'
 import { DeleteFeedbackDialog } from '@/features/feedback/components/delete-feedback-dialog'
 import { FeedbackDetailSheet } from '@/features/feedback/components/detail-sheet'
@@ -63,6 +98,7 @@ import { LanguageBadge } from '@/features/feedback/components/language-badge'
 import { RetryEnrichmentDialog } from '@/features/feedback/components/retry-enrichment-dialog'
 import { SelectionActionBar } from '@/features/feedback/components/selection-action-bar'
 import { TerminalFailureWorkbenchPanel } from '@/features/feedback/components/terminal-failure-workbench'
+import { TriageCommandCenterPanel } from '@/features/feedback/components/triage-command-center'
 import { useRowSelection } from '@/features/feedback/hooks/use-row-selection'
 import {
   useRecordSearchEvent,
@@ -80,8 +116,22 @@ import { meQuery } from '@/features/session/api/get-me'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { api } from '@/lib/api-client'
 import { useDisplayName } from '@/lib/i18n-resolve'
+import { membersQuery } from '@/lib/members-api'
 import type { FeedbackFilter } from '@/proto/attune/v1/batch'
 import type { Dimension } from '@/proto/attune/v1/common'
+import {
+  type ApplyFeedbackAssignmentRecommendationsRequest,
+  type BatchAssignFeedbackRequest,
+  type DryRunFeedbackAssignmentPolicyRequest,
+  type FeedbackIdentityMergeCandidate,
+  type FeedbackIdentityNeedsEvidenceItem,
+  FeedbackIdentityResolutionStrength,
+  type FeedbackIdentityReviewedMerge,
+  type FeedbackIdentitySubject,
+  type FeedbackTriageLane,
+  type RestoreFeedbackAssignmentPolicyRequest,
+  type UpdateFeedbackAssignmentPolicyRequest,
+} from '@/proto/attune/v1/ingest'
 import type {
   SearchEvidence,
   SemanticSearchHit,
@@ -93,6 +143,7 @@ import type { WorkflowState } from '@/proto/attune/v1/workflow'
 type FeedbackSortMode = 'newest' | 'urgent' | 'active'
 type FeedbackQueueMode = 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
 type FeedbackSearchMode = 'keyword' | 'semantic'
+type TranslateFn = ReturnType<typeof useTranslation>['t']
 
 interface SearchHitMeta {
   rank: number
@@ -107,6 +158,7 @@ interface SearchHitMeta {
 }
 
 type BatchTransitionFeedbackMutation = {
+  isPending?: boolean
   mutate: (
     variables: { feedbackIds: string[]; toStateId: string; comment: string },
     options?: {
@@ -172,6 +224,8 @@ export function FeedbackPage({
   })
   const canViewLLMConfig = can('llm_config:view')
   const canViewRuntimeConfig = can('settings:enrichment_runtime:view')
+  const canViewMembers = can('settings:members:view')
+  const canConfigureAssignmentPolicy = can('settings:workflow:edit')
   const portalHref = me.data?.tenant?.slug
     ? `/portal/${encodeURIComponent(me.data.tenant.slug)}`
     : null
@@ -187,6 +241,7 @@ export function FeedbackPage({
   const [enrichmentFilter, setEnrichmentFilter] = useState<string>('')
   const [sourceFilter, setSourceFilter] = useState<string>(initialSourceFilter)
   const [typeFilter, setTypeFilter] = useState<string>(initialTypeFilter)
+  const [accountKeyFilter, setAccountKeyFilter] = useState<string>('')
   const [urgentOnly, setUrgentOnly] = useState(false)
   const [qInput, setQInput] = useState('')
   const [searchMode, setSearchMode] = useState<FeedbackSearchMode>('keyword')
@@ -198,6 +253,7 @@ export function FeedbackPage({
   const [qualityFilters, setQualityFilters] = useState(initialQualityFilters ?? {})
   const qDeferred = useDeferredValue(qInput)
   const [detailId, setDetailId] = useState<string | null>(null)
+  const [selectedIdentitySubjectId, setSelectedIdentitySubjectId] = useState('')
   const detailRestoreFocusRef = useRef<HTMLElement | null>(null)
   const openDetail = useCallback((feedbackId: string, restoreFocusTo?: HTMLElement) => {
     detailRestoreFocusRef.current = restoreFocusTo ?? null
@@ -214,6 +270,8 @@ export function FeedbackPage({
     setSourceFilter(initialSourceFilter)
     setTypeFilter(initialTypeFilter)
   }, [initialScopeFilterKey, initialSourceFilter, initialTypeFilter])
+  const triageCommandCenter = useQuery(feedbackTriageCommandCenterQuery())
+  const assignmentEscalations = useQuery(feedbackAssignmentEscalationsQuery(25))
   const terminalWorkbench = useQuery({
     ...terminalFailureWorkbenchQuery(),
     enabled: showTerminalWorkbench,
@@ -267,6 +325,7 @@ export function FeedbackPage({
       urgent: urgentOnly ? true : undefined,
       source: sourceFilter || undefined,
       type: typeFilter || undefined,
+      accountKey: accountKeyFilter.trim() || undefined,
       tag: tagFilter || undefined,
       cohort_id: cohortFilter || undefined,
       workflowState: workflowFilter || undefined,
@@ -289,6 +348,7 @@ export function FeedbackPage({
     enrichmentFilter,
     sourceFilter,
     typeFilter,
+    accountKeyFilter,
     queueMode,
     qualityFilters,
   ])
@@ -311,6 +371,10 @@ export function FeedbackPage({
   )
 
   const list = useInfiniteQuery(feedbackListInfiniteQuery(filters))
+  const identityReview = useQuery(feedbackIdentityReviewQuery())
+  const identitySubject = useQuery(feedbackIdentitySubjectQuery(selectedIdentitySubjectId))
+  const identityMerge = useMergeFeedbackIdentityReview()
+  const identitySplit = useSplitFeedbackIdentityReview()
   const semanticSearch = useSemanticSearch()
   const recordSearchEvent = useRecordSearchEvent()
   const listItems = list.data?.pages.flatMap((p) => p.items) ?? []
@@ -372,6 +436,43 @@ export function FeedbackPage({
       semanticResponse?.runId,
     ],
   )
+  const handleApplyTriageLane = useCallback(
+    (lane: FeedbackTriageLane) => {
+      const params = new URLSearchParams(lane.filterQuery)
+      const isUrgent = params.get('urgent') === 'true'
+      const workflowCategory = params.get('workflow_category')
+      const terminalFailedOnly = params.get('terminal_failed_only') === 'true'
+
+      setQInput('')
+      setSearchMode('keyword')
+      setSemanticResponse(null)
+      setSemanticQuery('')
+      setSemanticFilterKey('')
+      semanticSearch.reset()
+      setUrgentOnly(isUrgent)
+      setEnrichmentFilter('')
+      setWorkflowFilter('')
+
+      if (terminalFailedOnly) {
+        setQueueMode('terminal')
+        return
+      }
+      if (isUrgent) {
+        setQueueMode('urgent')
+        return
+      }
+      if (workflowCategory === 'active') {
+        setQueueMode('active')
+        return
+      }
+      if (workflowCategory === 'open') {
+        setQueueMode('ready')
+        return
+      }
+      setQueueMode('all')
+    },
+    [semanticSearch],
+  )
   const items = isSemanticResponseCurrent ? semanticItems : listItems
   const stats = useQuery(feedbackStatsQuery())
   const activeFilterCount =
@@ -382,6 +483,7 @@ export function FeedbackPage({
     (enrichmentFilter ? 1 : 0) +
     (sourceFilter !== initialSourceFilter ? 1 : 0) +
     (typeFilter !== initialTypeFilter ? 1 : 0) +
+    (accountKeyFilter.trim() ? 1 : 0) +
     (qualityFilters.ids?.length ? 1 : 0) +
     (qualityFilters.confidenceLte != null ? 1 : 0) +
     (qualityFilters.createdFrom || qualityFilters.createdTo ? 1 : 0) +
@@ -398,6 +500,7 @@ export function FeedbackPage({
       enrichmentFilter ||
       sourceFilter ||
       typeFilter ||
+      accountKeyFilter.trim() ||
       qualityFilters.ids?.length ||
       qualityFilters.confidenceLte != null ||
       qualityFilters.createdFrom ||
@@ -449,13 +552,41 @@ export function FeedbackPage({
   const hasQueueScopedEmpty = items.length > 0 && displayedItems.length === 0
 
   const itemIds = useMemo(() => displayedItems.map((i) => i.id), [displayedItems])
-  const { selected, toggle, toggleAll, clear, isAllSelected } = useRowSelection(itemIds)
+  const { selected, toggle, toggleAll, clear, selectOnly, isAllSelected } = useRowSelection(itemIds)
+  const assignmentPolicyPreviewIds = useMemo(() => {
+    const selectedIds = Array.from(selected)
+    if (selectedIds.length > 0) return selectedIds
+    return itemIds.slice(0, 100)
+  }, [itemIds, selected])
 
   const batchUpdate = useBatchUpdateTags()
+  const batchAssign = useBatchAssignFeedback()
+  const recommendationPreview = useRecommendFeedbackAssignment()
+  const recommendationApply = useApplyFeedbackAssignmentRecommendations()
+  const assignmentPolicy = useQuery(feedbackAssignmentPolicyQuery())
+  const assignmentPolicyRevisions = useQuery({
+    ...feedbackAssignmentPolicyRevisionsQuery(),
+    enabled: canConfigureAssignmentPolicy,
+  })
+  const updateAssignmentPolicy = useUpdateFeedbackAssignmentPolicy()
+  const dryRunAssignmentPolicy = useDryRunFeedbackAssignmentPolicy()
+  const restoreAssignmentPolicy = useRestoreFeedbackAssignmentPolicy()
   const batchRetry = useBatchRetryEnrichment()
   const batchDelete = useBatchDeleteFeedback()
+  const [commandCenterOpen, setCommandCenterOpen] = useState(false)
+  const [latestBatchResult, setLatestBatchResult] = useState<OperatorBatchResult | null>(null)
+  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
+  const [requestNotificationDialogOpen, setRequestNotificationDialogOpen] = useState(false)
+  const [requestNotificationDialogCount, setRequestNotificationDialogCount] = useState(0)
+  const [recommendationDialogOpen, setRecommendationDialogOpen] = useState(false)
   const [retryDialogOpen, setRetryDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const members = useQuery({
+    ...membersQuery(),
+    enabled:
+      (assignmentDialogOpen || recommendationDialogOpen || canConfigureAssignmentPolicy) &&
+      canViewMembers,
+  })
   const handlePromoteToCustomerRequest = useCallback(() => {
     const feedbackIDs = Array.from(selected)
     /* v8 ignore next -- @preserve: the promote action is only rendered while rows are selected. */
@@ -467,6 +598,7 @@ export function FeedbackPage({
         merge_target_id: undefined,
         promote_feedback_ids: feedbackIDs.join(','),
         feedback_id: undefined,
+        account_key: undefined,
       },
     })
   }, [navigate, selected])
@@ -520,6 +652,10 @@ export function FeedbackPage({
   const selectedTerminalFailures = useMemo(() => {
     return items.filter((i) => selected.has(i.id) && isTerminalFailure(i))
   }, [items, selected])
+  const dismissState = useMemo(() => findDismissWorkflowState(stateList), [stateList])
+  const dismissStateLabel = dismissState
+    ? displayOf(dismissState.displayName) || dismissState.name
+    : undefined
 
   const removableTags = useMemo(() => {
     const selectedItems = items.filter((i) => selected.has(i.id))
@@ -609,6 +745,16 @@ export function FeedbackPage({
         value: feedbackTypeLabel(typeFilter, t),
         tone: 'active',
         onRemove: () => setTypeFilter(initialTypeFilter),
+      })
+    }
+
+    if (accountKeyFilter.trim()) {
+      chips.push({
+        key: 'account',
+        label: t('feedback.filter.account_key'),
+        value: accountKeyFilter.trim(),
+        tone: 'active',
+        onRemove: () => setAccountKeyFilter(''),
       })
     }
 
@@ -705,6 +851,7 @@ export function FeedbackPage({
     initialQueueMode,
     initialSourceFilter,
     initialTypeFilter,
+    accountKeyFilter,
     qualityFilters,
     sourceFilter,
     queueMode,
@@ -718,45 +865,261 @@ export function FeedbackPage({
     typeFilter,
     urgentOnly,
     workflowLabel,
+    cohortList.data,
   ])
 
-  const handleBatchAdd = (tagId: string) => {
-    batchUpdate.mutate(
-      { feedbackIds: Array.from(selected), addTagIds: [tagId], removeTagIds: [] },
+  const recordBatchSuccess = (
+    action: OperatorBatchResult['action'],
+    total: number,
+    succeeded: number,
+    skipped = 0,
+    failed: OperatorBatchFailure[] = [],
+  ) => {
+    setLatestBatchResult({ action, total, succeeded, skipped, failed })
+  }
+
+  const recordBatchError = (
+    action: OperatorBatchResult['action'],
+    feedbackIds: string[],
+    err: unknown,
+  ) => {
+    const message = err instanceof Error ? err.message : t('common.error')
+    setLatestBatchResult({
+      action,
+      total: feedbackIds.length,
+      succeeded: 0,
+      skipped: 0,
+      failed: feedbackIds.map((feedbackId) => ({
+        feedbackId,
+        code: 'BATCH_MUTATION_FAILED',
+        message,
+      })),
+    })
+    toast.error(message)
+  }
+
+  const focusLatestBatchFailures = () => {
+    const failedIds = latestBatchResult?.failed.map((failure) => failure.feedbackId) ?? []
+    if (failedIds.length === 0) return
+    setQualityFilters((old) => ({ ...old, ids: failedIds }))
+    selectOnly(failedIds)
+    setCommandCenterOpen(false)
+    toast.info(t('feedback.batch.operator.focus_failed_toast', { count: failedIds.length }))
+  }
+
+  const handleOpenCommandCenter = () => {
+    /* v8 ignore next -- @preserve: rendered only while rows are selected. */
+    if (selected.size === 0) return
+    setCommandCenterOpen(true)
+  }
+
+  const handleBatchNotify = () => {
+    setRequestNotificationDialogCount(selected.size)
+    setCommandCenterOpen(false)
+    setRequestNotificationDialogOpen(true)
+  }
+
+  const handleBatchNotifyCompleted = (result: OperatorBatchResult) => {
+    setLatestBatchResult(result)
+    setRequestNotificationDialogOpen(false)
+    clear()
+  }
+
+  const handleBatchDismiss = () => {
+    const feedbackIds = Array.from(selected)
+    if (feedbackIds.length === 0) return
+    if (!dismissState) {
+      toast.error(t('feedback.batch.operator.dismiss_blocked_toast'))
+      return
+    }
+    batchTransition.mutate(
+      { feedbackIds, toStateId: dismissState.id, comment: '' },
       {
         onSuccess: (res) => {
+          setCommandCenterOpen(false)
+          recordBatchSuccess('dismiss', feedbackIds.length, res.succeeded)
+          toast.success(t('feedback.batch.operator.dismiss_success', { count: res.succeeded }))
+          clear()
+        },
+        onError: (err) => recordBatchError('dismiss', feedbackIds, err),
+      },
+    )
+  }
+
+  const handleBatchAdd = (tagId: string) => {
+    const feedbackIds = Array.from(selected)
+    batchUpdate.mutate(
+      { feedbackIds, addTagIds: [tagId], removeTagIds: [] },
+      {
+        onSuccess: (res) => {
+          recordBatchSuccess('tag', feedbackIds.length, res.affected)
           toast.success(t('feedback.batch.success', { count: res.affected }))
           clear()
         },
-        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+        onError: (err) => recordBatchError('tag', feedbackIds, err),
       },
     )
   }
 
   const handleBatchRemove = (tagId: string) => {
+    const feedbackIds = Array.from(selected)
     batchUpdate.mutate(
-      { feedbackIds: Array.from(selected), addTagIds: [], removeTagIds: [tagId] },
+      { feedbackIds, addTagIds: [], removeTagIds: [tagId] },
       {
         onSuccess: (res) => {
+          recordBatchSuccess('tag', feedbackIds.length, res.affected)
           toast.success(t('feedback.batch.success', { count: res.affected }))
           clear()
         },
-        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+        onError: (err) => recordBatchError('tag', feedbackIds, err),
       },
     )
   }
 
   const handleBatchTransition = (toStateId: string) => {
+    const feedbackIds = Array.from(selected)
     batchTransition.mutate(
-      { feedbackIds: Array.from(selected), toStateId, comment: '' },
+      { feedbackIds, toStateId, comment: '' },
       {
         onSuccess: (res) => {
+          recordBatchSuccess('dismiss', feedbackIds.length, res.succeeded)
           toast.success(t('feedback.batch.transition_success', { count: res.succeeded }))
           clear()
         },
+        onError: (err) => recordBatchError('dismiss', feedbackIds, err),
+      },
+    )
+  }
+
+  const handleBatchAssign = () => {
+    /* v8 ignore next -- @preserve: the assign action is only rendered while rows are selected. */
+    if (selected.size === 0) return
+    setCommandCenterOpen(false)
+    setAssignmentDialogOpen(true)
+  }
+
+  const handleRecommendAssignment = () => {
+    const feedbackIds = Array.from(selected)
+    /* v8 ignore next -- @preserve: the recommend action is only rendered while rows are selected. */
+    if (feedbackIds.length === 0) return
+    setCommandCenterOpen(false)
+    setRecommendationDialogOpen(true)
+    recommendationPreview.mutate(
+      { feedbackIds },
+      {
         onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
       },
     )
+  }
+
+  const confirmBatchAssignment = (request: Omit<BatchAssignFeedbackRequest, 'feedbackIds'>) => {
+    const feedbackIds = Array.from(selected)
+    batchAssign.mutate(
+      { ...request, feedbackIds },
+      {
+        onSuccess: (res) => {
+          setAssignmentDialogOpen(false)
+          recordBatchSuccess(
+            'assign',
+            feedbackIds.length,
+            res.succeeded,
+            0,
+            normalizeOperatorFailures(res.failed),
+          )
+          if (res.failed.length === 0) {
+            toast.success(t('feedback.batch.assign_success', { count: res.succeeded }))
+          } else if (res.succeeded > 0) {
+            toast.warning(
+              t('feedback.batch.assign_partial', {
+                succeeded: res.succeeded,
+                failed: res.failed.length,
+              }),
+            )
+          } else {
+            toast.error(t('feedback.batch.assign_failed'))
+          }
+          clear()
+        },
+        onError: (err) => recordBatchError('assign', feedbackIds, err),
+      },
+    )
+  }
+
+  const confirmAssignmentRecommendations = (
+    request: Omit<ApplyFeedbackAssignmentRecommendationsRequest, 'feedbackIds'>,
+  ) => {
+    const feedbackIds = Array.from(selected)
+    recommendationApply.mutate(
+      { ...request, feedbackIds },
+      {
+        onSuccess: (res) => {
+          setRecommendationDialogOpen(false)
+          recordBatchSuccess(
+            'recommend',
+            feedbackIds.length,
+            res.succeeded,
+            res.skipped,
+            normalizeOperatorFailures(res.failed),
+          )
+          if (res.failed.length === 0) {
+            toast.success(
+              t('feedback.batch.recommend_success', {
+                succeeded: res.succeeded,
+                skipped: res.skipped,
+              }),
+            )
+          } else if (res.succeeded > 0 || res.skipped > 0) {
+            toast.warning(
+              t('feedback.batch.recommend_partial', {
+                succeeded: res.succeeded,
+                skipped: res.skipped,
+                failed: res.failed.length,
+              }),
+            )
+          } else {
+            toast.error(t('feedback.batch.recommend_apply_failed'))
+          }
+          clear()
+        },
+        onError: (err) => recordBatchError('recommend', feedbackIds, err),
+      },
+    )
+  }
+
+  const confirmAssignmentPolicy = (request: UpdateFeedbackAssignmentPolicyRequest) => {
+    updateAssignmentPolicy.mutate(request, {
+      onSuccess: () => toast.success(t('feedback.assignment_policy.saved')),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error ? err.message : t('feedback.assignment_policy.save_failed'),
+        ),
+    })
+  }
+
+  const previewAssignmentPolicy = (request: DryRunFeedbackAssignmentPolicyRequest) => {
+    dryRunAssignmentPolicy.mutate(request, {
+      onSuccess: (res) =>
+        toast.success(
+          t('feedback.assignment_policy.preview_done', {
+            changed: res.changed,
+            total: res.totalMatched,
+          }),
+        ),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error ? err.message : t('feedback.assignment_policy.preview_failed_toast'),
+        ),
+    })
+  }
+
+  const restoreAssignmentPolicyRevision = (request: RestoreFeedbackAssignmentPolicyRequest) => {
+    restoreAssignmentPolicy.mutate(request, {
+      onSuccess: () => toast.success(t('feedback.assignment_policy.restored')),
+      onError: (err) =>
+        toast.error(
+          err instanceof Error ? err.message : t('feedback.assignment_policy.restore_failed'),
+        ),
+    })
   }
 
   const handleBatchRetryEnrichment = () => {
@@ -765,6 +1128,7 @@ export function FeedbackPage({
       toast.error(t('feedback.batch.no_terminal_failures'))
       return
     }
+    setCommandCenterOpen(false)
     setRetryDialogOpen(true)
   }
 
@@ -773,6 +1137,13 @@ export function FeedbackPage({
     batchRetry.mutate(ids, {
       onSuccess: (res) => {
         setRetryDialogOpen(false)
+        recordBatchSuccess(
+          'retry',
+          ids.length,
+          res.succeeded,
+          0,
+          normalizeOperatorFailures(res.failed),
+        )
         if (res.failed.length === 0) {
           toast.success(t('feedback.batch.retry_enrichment_success', { count: res.succeeded }))
         } else if (res.succeeded > 0) {
@@ -790,7 +1161,7 @@ export function FeedbackPage({
       /* v8 ignore next -- @preserve: the mutation aggregates per-item failures with allSettled. */
       onError: (err) => {
         setRetryDialogOpen(false)
-        toast.error(err instanceof Error ? err.message : t('common.error'))
+        recordBatchError('retry', ids, err)
       },
     })
   }
@@ -798,6 +1169,7 @@ export function FeedbackPage({
   const handleBatchDelete = () => {
     /* v8 ignore next -- @preserve: the delete action is only rendered while rows are selected. */
     if (selected.size === 0) return
+    setCommandCenterOpen(false)
     setDeleteDialogOpen(true)
   }
 
@@ -806,15 +1178,78 @@ export function FeedbackPage({
     batchDelete.mutate(ids, {
       onSuccess: (res) => {
         setDeleteDialogOpen(false)
+        recordBatchSuccess('dismiss', ids.length, res.succeeded)
         toast.success(t('feedback.batch.delete_success', { count: res.succeeded }))
         clear()
       },
       onError: (err) => {
         setDeleteDialogOpen(false)
-        toast.error(err instanceof Error ? err.message : t('common.error'))
+        recordBatchError('dismiss', ids, err)
       },
     })
   }
+
+  const handleIdentityMerge = useCallback(
+    (candidate: FeedbackIdentityMergeCandidate) => {
+      const feedbackIds = candidate.evidence.map((item) => item.feedbackId).filter(Boolean)
+      if (feedbackIds.length < 2) {
+        toast.error(t('feedback.identity_review.merge_need_two'))
+        return
+      }
+      identityMerge.mutate(
+        {
+          identityKind: candidate.identityKind,
+          identityValue: candidate.identityValue,
+          feedbackIds,
+          note: '',
+        },
+        {
+          onSuccess: (res) => {
+            toast.success(
+              t('feedback.identity_review.merge_success', {
+                name: res.subject?.displayName || candidate.identityValue,
+              }),
+            )
+          },
+          onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+        },
+      )
+    },
+    [identityMerge, t],
+  )
+
+  const handleIdentitySplit = useCallback(
+    (merge: FeedbackIdentityReviewedMerge) => {
+      const subjectId = merge.subject?.id
+      if (!subjectId) {
+        toast.error(t('feedback.identity_review.split_missing_subject'))
+        return
+      }
+      identitySplit.mutate(
+        {
+          subjectId,
+          identityKind: merge.identityKind,
+          identityValue: merge.identityValue,
+          note: '',
+        },
+        {
+          onSuccess: () => {
+            toast.success(
+              t('feedback.identity_review.split_success', { name: merge.identityValue }),
+            )
+          },
+          onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+        },
+      )
+    },
+    [identitySplit, t],
+  )
+
+  const handleIdentitySubjectSelect = useCallback((subject: FeedbackIdentitySubject) => {
+    if (subject.id) {
+      setSelectedIdentitySubjectId(subject.id)
+    }
+  }, [])
 
   const clearFilters = () => {
     setAttrFilters({})
@@ -824,6 +1259,7 @@ export function FeedbackPage({
     setEnrichmentFilter('')
     setSourceFilter(initialSourceFilter)
     setTypeFilter(initialTypeFilter)
+    setAccountKeyFilter('')
     setQualityFilters({})
     setUrgentOnly(false)
     setQueueMode(initialQueueMode)
@@ -937,6 +1373,7 @@ export function FeedbackPage({
                 enrichmentFilter={enrichmentFilter}
                 sourceFilter={sourceFilter}
                 typeFilter={typeFilter}
+                accountKeyFilter={accountKeyFilter}
                 tags={tagList}
                 workflowStates={stateList}
                 urgentOnly={urgentOnly}
@@ -949,6 +1386,7 @@ export function FeedbackPage({
                 onEnrichmentChange={setEnrichmentFilter}
                 onSourceChange={setSourceFilter}
                 onTypeChange={setTypeFilter}
+                onAccountKeyChange={setAccountKeyFilter}
                 onUrgentToggle={() => setUrgentOnly((value) => !value)}
                 onQ={handleQueryChange}
                 onSearchModeChange={handleSearchModeChange}
@@ -998,6 +1436,47 @@ export function FeedbackPage({
       </section>
 
       <section className="space-y-4">
+        <TriageCommandCenterPanel
+          data={triageCommandCenter.data}
+          isLoading={triageCommandCenter.isPending}
+          isError={triageCommandCenter.isError}
+          errorMessage={
+            triageCommandCenter.error instanceof Error
+              ? triageCommandCenter.error.message
+              : t('common.error')
+          }
+          onRetry={() => void triageCommandCenter.refetch()}
+          onOpenFeedback={handleOpenFeedbackDetail}
+          onApplyLane={handleApplyTriageLane}
+        />
+        <AssignmentEscalationQueue
+          data={assignmentEscalations.data}
+          isLoading={assignmentEscalations.isPending}
+          isError={assignmentEscalations.isError}
+          errorMessage={
+            assignmentEscalations.error instanceof Error
+              ? assignmentEscalations.error.message
+              : t('common.error')
+          }
+          onRetry={() => void assignmentEscalations.refetch()}
+          onOpenFeedback={handleOpenFeedbackDetail}
+        />
+        <AssignmentPolicyPanel
+          policy={assignmentPolicy.data}
+          members={members.data ?? []}
+          canEdit={canConfigureAssignmentPolicy}
+          isLoading={assignmentPolicy.isPending}
+          isMembersLoading={canViewMembers && members.isPending}
+          isSaving={updateAssignmentPolicy.isPending}
+          isPreviewing={dryRunAssignmentPolicy.isPending}
+          isRestoring={restoreAssignmentPolicy.isPending}
+          previewFeedbackIds={assignmentPolicyPreviewIds}
+          dryRun={dryRunAssignmentPolicy.data}
+          revisions={assignmentPolicyRevisions.data?.revisions}
+          onSave={confirmAssignmentPolicy}
+          onDryRun={previewAssignmentPolicy}
+          onRestore={restoreAssignmentPolicyRevision}
+        />
         {showTerminalWorkbench && (
           <TerminalFailureWorkbenchPanel
             data={terminalWorkbench.data}
@@ -1012,6 +1491,34 @@ export function FeedbackPage({
             onOpenFeedback={handleOpenFeedbackDetail}
           />
         )}
+        <IdentityReviewPanel
+          data={identityReview.data}
+          isLoading={identityReview.isPending}
+          isError={identityReview.isError}
+          errorMessage={
+            identityReview.error instanceof Error ? identityReview.error.message : t('common.error')
+          }
+          onRetry={() => void identityReview.refetch()}
+          onOpenFeedback={handleOpenFeedbackDetail}
+          onMergeCandidate={handleIdentityMerge}
+          isMergingCandidate={identityMerge.isPending}
+          onSplitMerge={handleIdentitySplit}
+          isSplittingMerge={identitySplit.isPending}
+          selectedSubjectId={selectedIdentitySubjectId}
+          subjectDetail={identitySubject.data}
+          isSubjectDetailLoading={
+            identitySubject.isFetching && selectedIdentitySubjectId.length > 0
+          }
+          isSubjectDetailError={identitySubject.isError}
+          subjectDetailErrorMessage={
+            identitySubject.error instanceof Error
+              ? identitySubject.error.message
+              : t('common.error')
+          }
+          onSelectSubject={handleIdentitySubjectSelect}
+          onCloseSubject={() => setSelectedIdentitySubjectId('')}
+          onRetrySubject={() => void identitySubject.refetch()}
+        />
 
         <Card className="gap-0 overflow-hidden rounded-[1.2rem] border-border/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(249,250,251,0.985))] py-0 shadow-[0_28px_72px_-52px_rgba(15,23,42,0.22)]">
           <CardHeader className="border-b border-border/55 bg-[linear-gradient(180deg,rgba(248,250,252,0.82),rgba(255,255,255,0.92))] px-5 py-4 sm:px-6">
@@ -1110,6 +1617,9 @@ export function FeedbackPage({
                           onBatchAdd={handleBatchAdd}
                           onBatchRemove={handleBatchRemove}
                           onBatchTransition={handleBatchTransition}
+                          onBatchAssign={handleBatchAssign}
+                          onRecommendAssignment={handleRecommendAssignment}
+                          onOpenCommandCenter={handleOpenCommandCenter}
                           onBatchDelete={handleBatchDelete}
                           onBatchRetryEnrichment={handleBatchRetryEnrichment}
                           onPromoteToCustomerRequest={handlePromoteToCustomerRequest}
@@ -1118,6 +1628,23 @@ export function FeedbackPage({
                         />
                       </div>
                     )}
+                    {latestBatchResult ? (
+                      <div className="border-b border-border/50 px-4 py-3.5 sm:px-5">
+                        <BatchResult
+                          totalMatched={latestBatchResult.total}
+                          succeeded={latestBatchResult.succeeded}
+                          skipped={latestBatchResult.skipped}
+                          failed={latestBatchResult.failed}
+                          onDismiss={() => setLatestBatchResult(null)}
+                          onRetry={
+                            latestBatchResult.failed.length > 0
+                              ? focusLatestBatchFailures
+                              : undefined
+                          }
+                          retryLabel={t('feedback.batch.operator.focus_failed')}
+                        />
+                      </div>
+                    ) : null}
                     <div className="border-b border-border/50 px-4 py-3.5 sm:px-5">
                       {isSemanticResponseCurrent && semanticResponse?.usedKeywordFallback ? (
                         <SemanticFallbackBanner reason={semanticResponse.fallbackReason} />
@@ -1277,6 +1804,53 @@ export function FeedbackPage({
         renderAuditLog={renderAuditLog}
       />
 
+      <BatchOperatorCommandCenter
+        open={commandCenterOpen}
+        count={selected.size}
+        selectedFeedbackIds={Array.from(selected)}
+        dismissStateLabel={dismissStateLabel}
+        terminalFailureCount={selectedTerminalFailures.length}
+        latestResult={latestBatchResult}
+        isDismissing={batchTransition.isPending}
+        onOpenChange={setCommandCenterOpen}
+        onLinkRequest={handlePromoteToCustomerRequest}
+        onAssign={handleBatchAssign}
+        onDismiss={handleBatchDismiss}
+        onNotify={handleBatchNotify}
+        onRetryTerminalFailures={handleBatchRetryEnrichment}
+        onFocusFailed={focusLatestBatchFailures}
+        onClearResult={() => setLatestBatchResult(null)}
+      />
+
+      <BatchAssignmentDialog
+        open={assignmentDialogOpen}
+        count={selected.size}
+        members={members.data ?? []}
+        isMembersLoading={canViewMembers && members.isPending}
+        isLoading={batchAssign.isPending}
+        onConfirm={confirmBatchAssignment}
+        onCancel={() => setAssignmentDialogOpen(false)}
+      />
+
+      <BatchRequestNotificationDialog
+        open={requestNotificationDialogOpen}
+        selectedFeedbackCount={requestNotificationDialogCount}
+        onCancel={() => setRequestNotificationDialogOpen(false)}
+        onCompleted={handleBatchNotifyCompleted}
+      />
+
+      <AssignmentRecommendationDialog
+        open={recommendationDialogOpen}
+        count={selected.size}
+        response={recommendationPreview.data}
+        members={members.data ?? []}
+        isMembersLoading={canViewMembers && members.isPending}
+        isPreviewLoading={recommendationPreview.isPending}
+        isApplying={recommendationApply.isPending}
+        onConfirm={confirmAssignmentRecommendations}
+        onCancel={() => setRecommendationDialogOpen(false)}
+      />
+
       <RetryEnrichmentDialog
         open={retryDialogOpen}
         count={selectedTerminalFailures.length}
@@ -1294,6 +1868,43 @@ export function FeedbackPage({
       />
     </div>
   )
+}
+
+function normalizeOperatorFailures(
+  failures: Array<{
+    code?: string
+    error?: string
+    feedbackId?: string
+    id?: string
+    message?: string
+  }>,
+): OperatorBatchFailure[] {
+  return failures.map((failure) => ({
+    feedbackId: failure.feedbackId ?? failure.id ?? '',
+    code: failure.code ?? 'BATCH_ITEM_FAILED',
+    message: failure.message ?? failure.error ?? '',
+  }))
+}
+
+function findDismissWorkflowState(states: WorkflowState[]) {
+  const candidates = states.filter((state) => !state.archived && isDismissCategory(state.category))
+  if (candidates.length === 0) return undefined
+  const preferredNames = [
+    'dismiss',
+    'dismissed',
+    'closed',
+    'done',
+    'cancelled',
+    'canceled',
+    'terminal',
+  ]
+  return (
+    candidates.find((state) => preferredNames.includes(state.name.toLowerCase())) ?? candidates[0]
+  )
+}
+
+function isDismissCategory(category: string) {
+  return ['done', 'closed', 'terminal', 'cancelled', 'canceled'].includes(category.toLowerCase())
 }
 
 function qualityFilterSyncKey(filters: FeedbackPageProps['initialQualityFilters']) {
@@ -1322,6 +1933,7 @@ function FilterBar({
   enrichmentFilter,
   sourceFilter,
   typeFilter,
+  accountKeyFilter,
   tags,
   cohorts,
   onCohortChange,
@@ -1336,6 +1948,7 @@ function FilterBar({
   onEnrichmentChange,
   onSourceChange,
   onTypeChange,
+  onAccountKeyChange,
   onUrgentToggle,
   onQ,
   onSearchModeChange,
@@ -1349,6 +1962,7 @@ function FilterBar({
   enrichmentFilter: string
   sourceFilter: string
   typeFilter: string
+  accountKeyFilter: string
   tags: Tag[]
   workflowStates: WorkflowState[]
   urgentOnly: boolean
@@ -1363,6 +1977,7 @@ function FilterBar({
   onEnrichmentChange: (status: string) => void
   onSourceChange: (source: string) => void
   onTypeChange: (type: string) => void
+  onAccountKeyChange: (accountKey: string) => void
   onUrgentToggle: () => void
   onQ: (v: string) => void
   onSearchModeChange: (mode: FeedbackSearchMode) => void
@@ -1443,7 +2058,7 @@ function FilterBar({
           label={t('feedback.filter.quick.urgent')}
         />
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-7">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-8">
         <Select
           value={sourceFilter || '__all'}
           onValueChange={(v) => onSourceChange(v === '__all' ? '' : v)}
@@ -1482,6 +2097,13 @@ function FilterBar({
             ))}
           </SelectContent>
         </Select>
+        <Input
+          value={accountKeyFilter}
+          onChange={(event) => onAccountKeyChange(event.target.value)}
+          placeholder={t('feedback.filter.account_key_placeholder')}
+          aria-label={t('feedback.filter.account_key')}
+          className="h-10 bg-background"
+        />
         {dims
           .filter((d) => d.kind === 'single' && d.taxonomy.length > 0)
           .map((d) => (
@@ -1882,6 +2504,8 @@ function FeedbackTable({
           const title = f.enrichedDisplayTitle || f.enrichedTitle || `#${f.id}`
           const isSelected = selected.has(f.id)
           const rowTags = f.tags ?? []
+          const accountLabel =
+            f.accountContext?.accountDisplay || f.accountContext?.accountKey || ''
           const searchMeta = searchMetaById?.get(f.id)
           const workflowCategory = f.workflowState?.category ?? ''
           const filledDims = dims.filter((d) => {
@@ -1938,6 +2562,11 @@ function FeedbackTable({
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                   {f.source ? <StatusMetaChip value={feedbackSourceRowLabel(f.source, t)} /> : null}
                   {f.type ? <StatusMetaChip value={feedbackTypeLabel(f.type, t)} /> : null}
+                  {accountLabel ? (
+                    <StatusMetaChip
+                      value={t('feedback.row.account_context', { value: accountLabel })}
+                    />
+                  ) : null}
                   <StatusMetaChip valueNode={<LanguageBadge language={f.language} />} />
                   {filledDims.length === 0 ? (
                     <StatusMetaChip value={t('feedback.row.unclassified_short')} />
@@ -2163,6 +2792,592 @@ function WorkbenchFact({ label, value }: { label: string; value: string }) {
       <span className="font-medium text-foreground">{value}</span>
     </div>
   )
+}
+
+function IdentityReviewPanel({
+  data,
+  isLoading,
+  isError,
+  errorMessage,
+  onRetry,
+  onOpenFeedback,
+  onMergeCandidate,
+  isMergingCandidate,
+  onSplitMerge,
+  isSplittingMerge,
+  selectedSubjectId,
+  subjectDetail,
+  isSubjectDetailLoading,
+  isSubjectDetailError,
+  subjectDetailErrorMessage,
+  onSelectSubject,
+  onCloseSubject,
+  onRetrySubject,
+}: {
+  data?: FeedbackIdentityReview
+  isLoading: boolean
+  isError: boolean
+  errorMessage: string
+  onRetry: () => void
+  onOpenFeedback: (feedbackId: string, restoreFocusTo?: HTMLElement) => void
+  onMergeCandidate: (candidate: FeedbackIdentityMergeCandidate) => void
+  isMergingCandidate: boolean
+  onSplitMerge: (merge: FeedbackIdentityReviewedMerge) => void
+  isSplittingMerge: boolean
+  selectedSubjectId: string
+  subjectDetail?: FeedbackIdentitySubjectDetailData
+  isSubjectDetailLoading: boolean
+  isSubjectDetailError: boolean
+  subjectDetailErrorMessage: string
+  onSelectSubject: (subject: FeedbackIdentitySubject) => void
+  onCloseSubject: () => void
+  onRetrySubject: () => void
+}) {
+  const { t } = useTranslation()
+  const summary = data?.summary
+  const topCandidate = data?.mergeCandidates?.[0]
+  const needsEvidence = data?.needsEvidence?.[0]
+  const recentMerge = data?.recentMerges?.[0]
+  const subjectRoster = data?.subjectRoster
+  return (
+    <Card className="rounded-[1.15rem] border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(248,250,252,0.985))] py-0 shadow-[0_24px_58px_-48px_rgba(15,23,42,0.2)]">
+      <CardContent className="space-y-4 px-5 py-4 sm:px-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-1">
+            <div className="inline-flex items-center gap-2 text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+              <Fingerprint className="size-3.5" />
+              {t('feedback.identity_review.eyebrow')}
+            </div>
+            <h2 className="text-base font-semibold tracking-tight">
+              {t('feedback.identity_review.title')}
+            </h2>
+          </div>
+          <Button variant="outline" size="sm" onClick={onRetry} disabled={isLoading}>
+            {isLoading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RotateCcw className="size-4" />
+            )}
+            {t('common.refresh')}
+          </Button>
+        </div>
+        {isError ? (
+          <div className="flex items-center gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            <AlertCircle className="size-4" />
+            <span>{errorMessage}</span>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-5">
+            <IdentityReviewStat
+              label={t('feedback.identity_review.merge_candidates')}
+              value={String(summary?.mergeCandidateCount ?? 0)}
+            />
+            <IdentityReviewStat
+              label={t('feedback.identity_review.needs_evidence')}
+              value={String(summary?.needsEvidenceCount ?? 0)}
+            />
+            <IdentityReviewStat
+              label={t('feedback.identity_review.scanned')}
+              value={String(summary?.scannedFeedbackCount ?? 0)}
+            />
+            <IdentityReviewStat
+              label={t('feedback.identity_review.recent_merges')}
+              value={String(data?.recentMerges?.length ?? 0)}
+            />
+            <IdentityReviewStat
+              label={t('feedback.identity_review.active_subjects')}
+              value={String(subjectRoster?.activeSubjectCount ?? 0)}
+            />
+          </div>
+        )}
+        <div className="grid gap-3 xl:grid-cols-4">
+          <IdentityMergeCandidateCard
+            candidate={topCandidate}
+            onOpenFeedback={onOpenFeedback}
+            onMergeCandidate={onMergeCandidate}
+            isMerging={isMergingCandidate}
+          />
+          <IdentityNeedsEvidenceCard item={needsEvidence} onOpenFeedback={onOpenFeedback} />
+          <IdentityRecentMergeCard
+            merge={recentMerge}
+            onSplitMerge={onSplitMerge}
+            isSplitting={isSplittingMerge}
+          />
+          <IdentitySubjectRosterCard
+            roster={subjectRoster}
+            selectedSubjectId={selectedSubjectId}
+            onSelectSubject={onSelectSubject}
+          />
+        </div>
+        {selectedSubjectId ? (
+          <IdentitySubjectDetailPanel
+            detail={subjectDetail}
+            isLoading={isSubjectDetailLoading}
+            isError={isSubjectDetailError}
+            errorMessage={subjectDetailErrorMessage}
+            onOpenFeedback={onOpenFeedback}
+            onClose={onCloseSubject}
+            onRetry={onRetrySubject}
+          />
+        ) : null}
+      </CardContent>
+    </Card>
+  )
+}
+
+function IdentityReviewStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[0.9rem] border border-border/60 bg-background px-3 py-2.5">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+function IdentityMergeCandidateCard({
+  candidate,
+  onOpenFeedback,
+  onMergeCandidate,
+  isMerging,
+}: {
+  candidate?: FeedbackIdentityMergeCandidate
+  onOpenFeedback: (feedbackId: string, restoreFocusTo?: HTMLElement) => void
+  onMergeCandidate: (candidate: FeedbackIdentityMergeCandidate) => void
+  isMerging: boolean
+}) {
+  const { t } = useTranslation()
+  if (!candidate) {
+    return <IdentityReviewEmpty title={t('feedback.identity_review.no_candidates')} />
+  }
+  return (
+    <div className="space-y-3 rounded-[0.95rem] border border-border/60 bg-background px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">
+            {t('feedback.identity_review.best_candidate')}
+          </div>
+          <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+            {identityReviewKindLabel(candidate.identityKind, t)} - {candidate.identityValue}
+          </div>
+        </div>
+        <StatusMetaChip value={identityReviewStrengthLabel(candidate.strength, t)} />
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <StatusMetaChip
+          value={t('feedback.identity_review.feedback_count', { count: candidate.feedbackCount })}
+        />
+        <StatusMetaChip
+          value={t('feedback.identity_review.source_count', { count: candidate.sourceCount })}
+        />
+      </div>
+      <IdentityReviewEvidenceButtons
+        evidence={candidate.evidence}
+        onOpenFeedback={onOpenFeedback}
+      />
+      <Button
+        type="button"
+        size="sm"
+        className="w-full justify-center"
+        disabled={isMerging || candidate.evidence.length < 2}
+        onClick={() => onMergeCandidate(candidate)}
+      >
+        {isMerging ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <ShieldCheck className="size-4" />
+        )}
+        {isMerging
+          ? t('feedback.identity_review.merge_pending')
+          : t('feedback.identity_review.approve_merge')}
+      </Button>
+    </div>
+  )
+}
+
+function IdentityNeedsEvidenceCard({
+  item,
+  onOpenFeedback,
+}: {
+  item?: FeedbackIdentityNeedsEvidenceItem
+  onOpenFeedback: (feedbackId: string, restoreFocusTo?: HTMLElement) => void
+}) {
+  const { t } = useTranslation()
+  if (!item) {
+    return <IdentityReviewEmpty title={t('feedback.identity_review.no_weak_evidence')} />
+  }
+  return (
+    <div className="space-y-3 rounded-[0.95rem] border border-amber-200/70 bg-amber-50/35 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">
+            {t('feedback.identity_review.needs_evidence_item')}
+          </div>
+          <div className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+            {item.evidence?.excerpt}
+          </div>
+        </div>
+        <StatusMetaChip
+          value={t('feedback.identity_review.stable_keys', {
+            count: item.assessment?.stableKeyCount ?? 0,
+          })}
+        />
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {t('feedback.identity_review.missing_kinds', {
+          value: (item.assessment?.missingKinds ?? [])
+            .slice(0, 3)
+            .map((kind) => identityReviewKindLabel(kind, t))
+            .join(', '),
+        })}
+      </div>
+      {item.evidence ? (
+        <IdentityReviewEvidenceButtons evidence={[item.evidence]} onOpenFeedback={onOpenFeedback} />
+      ) : null}
+    </div>
+  )
+}
+
+function IdentityRecentMergeCard({
+  merge,
+  onSplitMerge,
+  isSplitting,
+}: {
+  merge?: FeedbackIdentityReviewedMerge
+  onSplitMerge: (merge: FeedbackIdentityReviewedMerge) => void
+  isSplitting: boolean
+}) {
+  const { t } = useTranslation()
+  if (!merge) {
+    return <IdentityReviewEmpty title={t('feedback.identity_review.no_recent_merges')} />
+  }
+  return (
+    <div className="space-y-3 rounded-[0.95rem] border border-emerald-200/70 bg-emerald-50/35 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">
+            {t('feedback.identity_review.recent_merge_item')}
+          </div>
+          <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+            {identityReviewKindLabel(merge.identityKind, t)} - {merge.identityValue}
+          </div>
+        </div>
+        <StatusMetaChip
+          value={t('feedback.identity_review.feedback_count', { count: merge.evidenceCount })}
+        />
+      </div>
+      <div className="min-w-0 text-xs leading-5 text-muted-foreground">
+        <span className="font-medium text-foreground">{merge.subject?.displayName}</span>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-full justify-center"
+        disabled={isSplitting || !merge.subject?.id}
+        onClick={() => onSplitMerge(merge)}
+      >
+        {isSplitting ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <RotateCcw className="size-4" />
+        )}
+        {isSplitting
+          ? t('feedback.identity_review.split_pending')
+          : t('feedback.identity_review.undo_merge')}
+      </Button>
+    </div>
+  )
+}
+
+function IdentitySubjectRosterCard({
+  roster,
+  selectedSubjectId,
+  onSelectSubject,
+}: {
+  roster?: FeedbackIdentityReview['subjectRoster']
+  selectedSubjectId: string
+  onSelectSubject: (subject: FeedbackIdentitySubject) => void
+}) {
+  const { t } = useTranslation()
+  const subjects = roster?.subjects ?? []
+  if (subjects.length === 0) {
+    return <IdentityReviewEmpty title={t('feedback.identity_review.no_subjects')} />
+  }
+  return (
+    <div className="space-y-3 rounded-[0.95rem] border border-sky-200/70 bg-sky-50/35 px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">
+            {t('feedback.identity_review.subject_roster_item')}
+          </div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            {t('feedback.identity_review.subject_roster_summary', {
+              identities: roster?.activeIdentityCount ?? 0,
+              evidence: roster?.evidenceCount ?? 0,
+            })}
+          </div>
+        </div>
+        <StatusMetaChip
+          value={t('feedback.identity_review.subject_count', {
+            count: roster?.activeSubjectCount ?? subjects.length,
+          })}
+        />
+      </div>
+      <div className="divide-y divide-border/60">
+        {subjects.slice(0, 3).map((subject) => (
+          <button
+            key={subject.id}
+            type="button"
+            className="block w-full min-w-0 py-2 text-left first:pt-0 last:pb-0"
+            onClick={() => onSelectSubject(subject)}
+          >
+            <div className="truncate text-xs font-semibold text-foreground">
+              {subject.displayName || subject.primaryIdentityValue || subject.id}
+            </div>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              <StatusMetaChip
+                value={t('feedback.identity_review.identity_count', {
+                  count: subject.identityCount,
+                })}
+              />
+              <StatusMetaChip
+                value={t('feedback.identity_review.evidence_count', {
+                  count: subject.evidenceCount,
+                })}
+              />
+            </div>
+            {selectedSubjectId === subject.id ? (
+              <div className="mt-1 text-[11px] font-medium text-primary">
+                {t('feedback.identity_review.subject_selected')}
+              </div>
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function IdentitySubjectDetailPanel({
+  detail,
+  isLoading,
+  isError,
+  errorMessage,
+  onOpenFeedback,
+  onClose,
+  onRetry,
+}: {
+  detail?: FeedbackIdentitySubjectDetailData
+  isLoading: boolean
+  isError: boolean
+  errorMessage: string
+  onOpenFeedback: (feedbackId: string, restoreFocusTo?: HTMLElement) => void
+  onClose: () => void
+  onRetry: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <section className="space-y-4 rounded-[0.95rem] border border-border/70 bg-background px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">
+            {t('feedback.identity_review.subject_detail_title')}
+          </div>
+          <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+            {detail?.subject?.displayName ||
+              detail?.subject?.primaryIdentityValue ||
+              detail?.subject?.id ||
+              t('feedback.identity_review.subject_detail_loading')}
+          </div>
+        </div>
+        <Button type="button" variant="ghost" size="icon" onClick={onClose}>
+          <X className="size-4" />
+          <span className="sr-only">{t('feedback.identity_review.close_subject_detail')}</span>
+        </Button>
+      </div>
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          {t('feedback.identity_review.subject_detail_loading')}
+        </div>
+      ) : null}
+      {isError ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          <AlertCircle className="size-4" />
+          <span>{errorMessage}</span>
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+            {t('feedback.identity_review.subject_detail_retry')}
+          </Button>
+        </div>
+      ) : null}
+      {detail ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div className="space-y-2">
+            <div className="text-xs font-semibold text-muted-foreground uppercase">
+              {t('feedback.identity_review.subject_identities')}
+            </div>
+            {detail.identities.length > 0 ? (
+              <div className="divide-y divide-border/60">
+                {detail.identities.slice(0, 5).map((identity) => (
+                  <div key={identity.id} className="py-2 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="break-all font-mono text-xs">
+                        {identityReviewKindLabel(identity.kind, t)} - {identity.value}
+                      </span>
+                      <StatusMetaChip
+                        value={
+                          identity.revoked
+                            ? t('feedback.identity_review.subject_identity_revoked')
+                            : t('feedback.identity_review.subject_identity_active')
+                        }
+                      />
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {t('feedback.identity_review.evidence_count', {
+                        count: identity.evidenceCount,
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <IdentityReviewEmpty title={t('feedback.identity_review.no_subject_identities')} />
+            )}
+          </div>
+          <div className="space-y-2">
+            <div className="text-xs font-semibold text-muted-foreground uppercase">
+              {t('feedback.identity_review.subject_timeline')}
+            </div>
+            {detail.events.length > 0 ? (
+              <div className="divide-y divide-border/60">
+                {detail.events.slice(0, 5).map((event) => (
+                  <div key={event.id} className="py-2 first:pt-0 last:pb-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Clock3 className="size-3.5 text-muted-foreground" />
+                      <span className="text-xs font-semibold">
+                        {identitySubjectEventLabel(event.action, t)}
+                      </span>
+                      <StatusMetaChip
+                        value={t('feedback.identity_review.feedback_count', {
+                          count: event.evidenceCount,
+                        })}
+                      />
+                    </div>
+                    <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                      {identityReviewKindLabel(event.identityKind, t)} - {event.identityValue}
+                    </div>
+                    {event.evidence.length > 0 ? (
+                      <div className="mt-2 space-y-1.5">
+                        {event.evidence.slice(0, 2).map((item) => (
+                          <button
+                            key={item.feedbackId}
+                            type="button"
+                            className="block w-full rounded-md border border-border/55 bg-muted/20 px-3 py-2 text-left transition hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={(clickEvent) =>
+                              onOpenFeedback(String(item.feedbackId), clickEvent.currentTarget)
+                            }
+                          >
+                            <span className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-muted-foreground">
+                              <ShieldCheck className="size-3.5" />
+                              {t('feedback.identity_review.open_evidence', {
+                                id: item.feedbackId,
+                              })}
+                              <span>{item.source}</span>
+                            </span>
+                            <span className="mt-1 line-clamp-2 block text-xs leading-5 text-foreground">
+                              {item.excerpt}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <IdentityReviewEmpty title={t('feedback.identity_review.no_subject_events')} />
+            )}
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function IdentityReviewEvidenceButtons({
+  evidence,
+  onOpenFeedback,
+}: {
+  evidence: FeedbackIdentityMergeCandidate['evidence']
+  onOpenFeedback: (feedbackId: string, restoreFocusTo?: HTMLElement) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {evidence.slice(0, 3).map((item) => (
+        <Button
+          key={item.feedbackId}
+          variant="outline"
+          size="sm"
+          className="h-8 rounded-full px-2.5 text-xs"
+          onClick={(event) => onOpenFeedback(String(item.feedbackId), event.currentTarget)}
+        >
+          <ShieldCheck className="size-3.5" />
+          {t('feedback.identity_review.open_evidence', { id: item.feedbackId })}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+function IdentityReviewEmpty({ title }: { title: string }) {
+  return (
+    <div className="rounded-[0.95rem] border border-dashed border-border/70 bg-muted/10 px-4 py-4 text-sm text-muted-foreground">
+      {title}
+    </div>
+  )
+}
+
+function identityReviewStrengthLabel(strength: FeedbackIdentityResolutionStrength, t: TranslateFn) {
+  if (
+    strength === FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_STRONG
+  ) {
+    return t('feedback.identity_review.strength_strong')
+  }
+  if (
+    strength === FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_MEDIUM
+  ) {
+    return t('feedback.identity_review.strength_medium')
+  }
+  return t('feedback.identity_review.strength_weak')
+}
+
+function identityReviewKindLabel(kind: string, t: TranslateFn) {
+  switch (kind) {
+    case 'email':
+      return t('feedback.detail.identity_kind_email')
+    case 'external_id':
+      return t('feedback.detail.identity_kind_external_id')
+    case 'source_contact_id':
+      return t('feedback.detail.identity_kind_source_contact_id')
+    case 'crm_id':
+      return t('feedback.detail.identity_kind_crm_id')
+    case 'support_id':
+      return t('feedback.detail.identity_kind_support_id')
+    default:
+      return t('feedback.detail.identity_kind_unknown')
+  }
+}
+
+function identitySubjectEventLabel(action: string, t: TranslateFn) {
+  switch (action) {
+    case 'review_merge':
+      return t('feedback.identity_review.subject_event_merge')
+    case 'split':
+      return t('feedback.identity_review.subject_event_split')
+    default:
+      return t('feedback.identity_review.subject_event_unknown')
+  }
 }
 
 function QueueLaneBanner({

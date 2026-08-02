@@ -20,6 +20,7 @@ const keyFixture = {
   allowedCidrs: [],
   usageCount: '0',
   environment: '',
+  serviceAccountId: 'sa-1',
 }
 
 const serviceAccountFixture = {
@@ -57,14 +58,57 @@ describe('ApiKeysPage user flow', () => {
 
     const { container, user } = renderWithProviders(<ApiKeysPage />)
 
-    await screen.findByText('prod ingest', {}, { timeout: 5_000 })
+    await screen.findAllByText('prod ingest', {}, { timeout: 5_000 })
     expect(screen.getByText('Key 总数')).toBeInTheDocument()
     expect(screen.getByText('Key 治理建议')).toBeInTheDocument()
+    const adoptionKit = await screen.findByTestId('developer-api-adoption-kit')
+    expect(within(adoptionKit).getByText('开发者 API 采用包')).toBeInTheDocument()
+    expect(
+      within(adoptionKit).getByText(
+        '0 scopes / 0 presets / 1 active keys / 1 service accounts / 14/14 artifacts verified',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(adoptionKit).getByText('1 developer adoption lanes are blocked'),
+    ).toBeInTheDocument()
+    const sdkParityGate = await screen.findByTestId('developer-sdk-parity-gate')
+    expect(within(sdkParityGate).getByText('开发者 SDK parity gate')).toBeInTheDocument()
+    expect(
+      within(sdkParityGate).getByText(
+        '35/35 shared methods / verifier on / 0 browser-safe keys / 6/6 release gates',
+      ),
+    ).toBeInTheDocument()
+    expect(within(sdkParityGate).getByText('1 SDK parity lanes need hardening')).toBeInTheDocument()
+    const apiConsistencyContract = await screen.findByTestId('developer-api-consistency-contract')
+    expect(
+      within(apiConsistencyContract).getByText('开发者 API consistency contract'),
+    ).toBeInTheDocument()
+    expect(
+      within(apiConsistencyContract).getByText(
+        '3/3 public pagination surfaces / 3/3 console mirrors / 3/3 filters / 3/3 sort enums / verifier on',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(apiConsistencyContract).getByText('developer API consistency contract is verified'),
+    ).toBeInTheDocument()
+    const importExportWorkbench = await screen.findByTestId('developer-import-export-workbench')
+    expect(
+      within(importExportWorkbench).getByText('开发者 import/export 工作台'),
+    ).toBeInTheDocument()
+    expect(
+      within(importExportWorkbench).getByText(
+        '2/2 formats / 4 templates / 4/4 required mappings / dry-run 37 create 2 update 1 reject / 4 recovery classes / verifier on',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(importExportWorkbench).getByText('developer import/export workbench is verified'),
+    ).toBeInTheDocument()
     await screen.findByText('服务账号目录', {}, { timeout: 5_000 })
     await screen.findByText('ci-bot', {}, { timeout: 5_000 })
-    expect(screen.getByText('ak_live_1234…')).toBeInTheDocument()
-    expect(screen.getByRole('table', { name: 'API key 列表' })).toBeInTheDocument()
-    expect(screen.getByText('可用')).toBeInTheDocument()
+    const apiKeyTable = screen.getByRole('table', { name: 'API key 列表' })
+    expect(apiKeyTable).toBeInTheDocument()
+    expect(within(apiKeyTable).getByText('ak_live_1234…')).toBeInTheDocument()
+    expect(within(apiKeyTable).getByText('可用')).toBeInTheDocument()
     await expectNoA11yViolations(container)
 
     const createButton = screen.getByRole('button', { name: '+ 签发新 key' })
@@ -92,7 +136,7 @@ describe('ApiKeysPage user flow', () => {
     await expectNoA11yViolations(document.body)
     await user.click(screen.getByRole('button', { name: '关闭' }))
     expect(createButton).toHaveFocus()
-    const revokeButton = screen.getByRole('button', { name: '撤销 API key prod ingest' })
+    const revokeButton = screen.getAllByRole('button', { name: '撤销 API key prod ingest' })[0]
     revokeButton.focus()
     await user.keyboard('[Enter]')
     const revokeDialog = screen.getByRole('dialog', { name: '撤销这把 key？' })
@@ -146,7 +190,7 @@ describe('ApiKeysPage user flow', () => {
 
     const { user } = renderWithProviders(<ApiKeysPage />)
 
-    await screen.findByText('prod ingest', {}, { timeout: 5_000 })
+    await screen.findAllByText('prod ingest', {}, { timeout: 5_000 })
     await user.click(screen.getByRole('button', { name: '+ 签发新 key' }))
     const createDialog = screen.getByRole('dialog', { name: '签发新 API key' })
     await user.type(within(createDialog).getByLabelText('用途备注'), 'ci ingest')
@@ -155,7 +199,7 @@ describe('ApiKeysPage user flow', () => {
 
     vi.mocked(toast.error).mockClear()
     await user.click(within(createDialog).getByTestId('create-key-cancel'))
-    await user.click(screen.getByRole('button', { name: '撤销 API key prod ingest' }))
+    await user.click(screen.getAllByRole('button', { name: '撤销 API key prod ingest' })[0])
     const revokeDialog = screen.getByRole('dialog', { name: '撤销这把 key？' })
     await user.click(within(revokeDialog).getByTestId('revoke-key-confirm'))
 

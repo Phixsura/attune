@@ -21,6 +21,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
@@ -49,9 +50,46 @@ type AuditEntry struct {
 	CreatedAt time.Time
 }
 
+type DecisionRecord struct {
+	AuditID                 int64
+	Action                  string
+	ActorType               string
+	ActorID                 string
+	Summary                 string
+	CreatedAt               time.Time
+	StatusChanged           bool
+	OldStatus               repo.Status
+	NewStatus               repo.Status
+	PriorityChanged         bool
+	OldPriority             repo.Priority
+	NewPriority             repo.Priority
+	OwnerChanged            bool
+	OldOwnerMemberID        string
+	NewOwnerMemberID        string
+	TitleChanged            bool
+	DescriptionChanged      bool
+	HasDecisionSnapshot     bool
+	DecisionScore           int
+	DecisionScoreFactors    []repo.DecisionScoreFactor
+	DeliveryHealth          repo.DeliveryHealth
+	SupportingFeedbackCount int
+	CustomerCount           int
+	AccountCount            int
+	VoteCount               int
+	RevenueImpactCents      int64
+	RevenueCurrency         string
+	DecisionRationale       string
+	OwnerMemberID           string
+	OwnerDisplay            string
+	EvidenceBundleRef       string
+	PublicSafeState         string
+	PublicSafeReasons       []string
+}
+
 type Detail struct {
-	Request      repo.Detail
-	AuditEntries []AuditEntry
+	Request         repo.Detail
+	AuditEntries    []AuditEntry
+	DecisionRecords []DecisionRecord
 }
 
 type Service struct {
@@ -60,6 +98,7 @@ type Service struct {
 	audit         *auditlogsvc.Service
 	notifications notificationSink
 	issueCreates  issueCreateRunStore
+	surveys       surveySink
 }
 
 // requestRepo is the repo surface the service consumes — an interface so
@@ -68,6 +107,7 @@ type Service struct {
 type requestRepo interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 	List(ctx context.Context, filter repo.ListFilter) (repo.ListResult, error)
+	GetAccountSummary(ctx context.Context, filter repo.ListFilter) (repo.AccountSummary, error)
 	GetDetail(ctx context.Context, tenantID string, id uuid.UUID, evidenceLimit int) (*repo.Detail, error)
 	GetDetailTx(ctx context.Context, tx pgx.Tx, tenantID string, id uuid.UUID, evidenceLimit int) (*repo.Detail, error)
 	GetOwner(ctx context.Context, tenantID string, ownerID uuid.UUID) (*repo.Owner, error)
@@ -142,6 +182,23 @@ func (s *Service) SetIssueCreateRunStore(store issueCreateRunStore) {
 	s.issueCreates = store
 }
 
+type SurveyRequestResolvedEvent struct {
+	TenantID  string
+	RequestID uuid.UUID
+	OldStatus string
+	NewStatus string
+	Title     string
+	ActorID   string
+}
+
+type surveySink interface {
+	RecordRequestResolved(ctx context.Context, event SurveyRequestResolvedEvent) (int, error)
+}
+
+func (s *Service) SetSurveySink(sink surveySink) {
+	s.surveys = sink
+}
+
 type ListInput struct {
 	TenantID      string
 	Query         string
@@ -155,6 +212,23 @@ type ListInput struct {
 	Cursor        string
 	FeedbackID    int64
 	CohortID      *string
+	AccountKey    string
+}
+
+type AccountSummaryInput struct {
+	TenantID      string
+	Query         string
+	Statuses      []repo.Status
+	Priorities    []repo.Priority
+	OwnerMemberID *uuid.UUID
+	Visibility    repo.Visibility
+	Sort          repo.Sort
+	Direction     repo.Direction
+	FeedbackID    int64
+	CohortID      *string
+	AccountKey    string
+	TimelineLimit int
+	EventLimit    int
 }
 
 type ScoringSettingsInput struct {
@@ -332,6 +406,30 @@ func (s *Service) List(ctx context.Context, in ListInput) (repo.ListResult, erro
 		Cursor:        in.Cursor,
 		FeedbackID:    in.FeedbackID,
 		CohortID:      in.CohortID,
+		AccountKey:    strings.TrimSpace(in.AccountKey),
+	})
+}
+
+func (s *Service) GetAccountSummary(ctx context.Context, in AccountSummaryInput) (repo.AccountSummary, error) {
+	tenantID := strings.TrimSpace(in.TenantID)
+	accountKey := strings.TrimSpace(in.AccountKey)
+	if tenantID == "" || accountKey == "" {
+		return repo.AccountSummary{}, ErrValidation
+	}
+	return s.repo.GetAccountSummary(ctx, repo.ListFilter{
+		TenantID:      tenantID,
+		Query:         in.Query,
+		Statuses:      in.Statuses,
+		Priorities:    in.Priorities,
+		OwnerMemberID: in.OwnerMemberID,
+		Visibility:    defaultVisibility(in.Visibility),
+		Sort:          defaultSort(in.Sort),
+		Direction:     defaultDirection(in.Direction),
+		FeedbackID:    in.FeedbackID,
+		CohortID:      in.CohortID,
+		AccountKey:    accountKey,
+		Limit:         in.TimelineLimit,
+		EventLimit:    in.EventLimit,
 	})
 }
 
@@ -439,7 +537,32 @@ func (s *Service) Update(ctx context.Context, in UpdateInput) (*Detail, error) {
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	s.recordSurveyRequestResolved(ctx, normalized.Actor, beforeSummary, afterSummary)
 	return s.detail(ctx, normalized.TenantID, normalized.ID, 50)
+}
+
+func (s *Service) recordSurveyRequestResolved(
+	ctx context.Context,
+	actor auditlogsvc.Actor,
+	before repo.Summary,
+	after repo.Summary,
+) {
+	const where = "service.customerrequest.recordSurveyRequestResolved"
+	if s.surveys == nil || before.Status == after.Status {
+		return
+	}
+	_, err := s.surveys.RecordRequestResolved(ctx, SurveyRequestResolvedEvent{
+		TenantID:  after.TenantID,
+		RequestID: after.ID,
+		OldStatus: string(before.Status),
+		NewStatus: string(after.Status),
+		Title:     after.Title,
+		ActorID:   actor.ID,
+	})
+	if err != nil {
+		logext.Warnf(ctx, "[%s] survey trigger failed,tenant_id:%s,request_id:%s,err:%+v",
+			where, after.TenantID, after.ID, err.Error())
+	}
 }
 
 func (s *Service) PromoteFeedback(ctx context.Context, in PromoteInput) (*Detail, error) {
@@ -1097,13 +1220,18 @@ func (s *Service) promoteInTransaction(ctx context.Context, in PromoteInput) (*D
 	// identity in source_meta — link those customers so the promoted
 	// request already knows who asked and what they are worth.
 	autoLinked := s.autoLinkCustomersTx(ctx, tx, in.TenantID, created.ID, in.FeedbackIDs, in.Actor.ID)
-	after := createAuditMetadata(ptrext.Indirect(created), in.IdempotencyKey)
+	createdDetail, err := s.repo.GetDetailTx(ctx, tx, in.TenantID, created.ID, 0)
+	if err != nil {
+		return nil, err
+	}
+	auditSummary := createdDetail.Summary
+	after := createAuditMetadata(auditSummary, in.IdempotencyKey)
 	after["feedback_ids"] = in.FeedbackIDs
 	after["feedback_count"] = len(in.FeedbackIDs)
 	if autoLinked > 0 {
 		after["auto_linked_customers"] = autoLinked
 	}
-	if err := s.recordAuditTx(ctx, tx, in.Actor, "customer_request.promote_feedback", ptrext.Indirect(created),
+	if err := s.recordAuditTx(ctx, tx, in.Actor, "customer_request.promote_feedback", auditSummary,
 		"Promoted feedback to customer request", after); err != nil {
 		return nil, err
 	}
@@ -1797,6 +1925,7 @@ func (s *Service) detail(ctx context.Context, tenantID string, id uuid.UUID, evi
 		return nil, err
 	}
 	out.AuditEntries = make([]AuditEntry, 0, len(result.Items))
+	out.DecisionRecords = make([]DecisionRecord, 0, len(result.Items))
 	for _, item := range result.Items {
 		out.AuditEntries = append(out.AuditEntries, AuditEntry{
 			ID:        item.ID,
@@ -1806,6 +1935,9 @@ func (s *Service) detail(ctx context.Context, tenantID string, id uuid.UUID, evi
 			Summary:   item.Summary,
 			CreatedAt: item.CreatedAt,
 		})
+		if record, ok := decisionRecordFromAudit(item); ok {
+			out.DecisionRecords = append(out.DecisionRecords, record)
+		}
 	}
 	return out, nil
 }
@@ -1835,7 +1967,7 @@ func (s *Service) recordAuditTx(
 		TargetType: "customer_request",
 		TargetID:   target.ID.String(),
 		Summary:    summary,
-		After:      after,
+		After:      withDecisionSnapshot(after, target),
 	})
 }
 
@@ -1937,6 +2069,310 @@ func scoringSettingsAuditFields(settings repo.ScoringSettings) map[string]any {
 		"vote_cap":                settings.VoteCap,
 		"revenue_cents_per_point": settings.RevenueCentsPerPoint,
 		"revenue_cap":             settings.RevenueCap,
+	}
+}
+
+func withDecisionSnapshot(after any, summary repo.Summary) map[string]any {
+	payload := auditPayloadFromAny(after)
+	for key, value := range decisionSnapshotAuditFields(summary) {
+		payload[key] = value
+	}
+	return payload
+}
+
+func auditPayloadFromAny(value any) map[string]any {
+	out := make(map[string]any)
+	if value == nil {
+		return out
+	}
+	typed, ok := value.(map[string]any)
+	if !ok {
+		out["metadata"] = value
+		return out
+	}
+	for key, item := range typed {
+		out[key] = item
+	}
+	return out
+}
+
+func decisionSnapshotAuditFields(summary repo.Summary) map[string]any {
+	return map[string]any{
+		"decision_score":            summary.DecisionScore,
+		"decision_score_factors":    decisionScoreFactorAuditFields(summary.DecisionScoreFactors),
+		"delivery_health":           summary.DeliveryHealth,
+		"supporting_feedback_count": summary.SupportingFeedbackCount,
+		"customer_count":            summary.CustomerCount,
+		"account_count":             summary.AccountCount,
+		"vote_count":                summary.VoteCount,
+		"revenue_impact_cents":      summary.RevenueImpactCents,
+		"revenue_currency":          summary.RevenueCurrency,
+		"decision_rationale":        decisionRationale(summary),
+		"owner_member_id":           uuidPtrString(summary.OwnerMemberID),
+		"owner_display":             decisionOwnerDisplay(summary),
+		"evidence_bundle_ref":       decisionEvidenceBundleRef(summary),
+		"public_safe_state":         decisionPublicSafeState(summary),
+		"public_safe_reasons":       decisionPublicSafeReasons(summary),
+	}
+}
+
+func decisionRationale(summary repo.Summary) string {
+	if summary.DecisionScoreExplanation != "" {
+		return summary.DecisionScoreExplanation
+	}
+	return fmt.Sprintf(
+		"score=%d feedback=%d customers=%d accounts=%d delivery_health=%s",
+		summary.DecisionScore,
+		summary.SupportingFeedbackCount,
+		summary.CustomerCount,
+		summary.AccountCount,
+		summary.DeliveryHealth,
+	)
+}
+
+func decisionOwnerDisplay(summary repo.Summary) string {
+	if summary.Owner == nil {
+		return ""
+	}
+	owner := ptrext.Indirect(summary.Owner)
+	if strings.TrimSpace(owner.Email) != "" {
+		return strings.TrimSpace(owner.Email)
+	}
+	if strings.TrimSpace(owner.UserID) != "" {
+		return strings.TrimSpace(owner.UserID)
+	}
+	if strings.TrimSpace(owner.Role) != "" {
+		return strings.TrimSpace(owner.Role)
+	}
+	return owner.ID.String()
+}
+
+func decisionEvidenceBundleRef(summary repo.Summary) string {
+	if summary.ID == uuid.Nil {
+		return ""
+	}
+	displayID := strings.TrimSpace(summary.DisplayID)
+	if displayID == "" {
+		displayID = summary.ID.String()
+	}
+	return fmt.Sprintf("customer-request/%s/evidence/%s", summary.ID.String(), displayID)
+}
+
+func decisionPublicSafeState(summary repo.Summary) string {
+	if summary.ArchivedAt != nil || summary.MergedIntoRequestID != nil || summary.Status == repo.StatusCancelled {
+		return "internal_only"
+	}
+	if len(decisionPublicSafeReasons(summary)) > 0 {
+		return "needs_review"
+	}
+	return "public_safe"
+}
+
+func decisionPublicSafeReasons(summary repo.Summary) []string {
+	reasons := make([]string, 0, 4)
+	if summary.HiddenFeedbackCount > 0 {
+		reasons = append(reasons, "hidden_feedback")
+	}
+	if summary.RevenueImpactCents > 0 {
+		reasons = append(reasons, "revenue_context")
+	}
+	if summary.SupportingFeedbackCount == 0 {
+		reasons = append(reasons, "missing_evidence")
+	}
+	if summary.DeliveryHealth == repo.DeliveryHealthFailed {
+		reasons = append(reasons, "failed_delivery_link")
+	}
+	return reasons
+}
+
+func decisionScoreFactorAuditFields(factors []repo.DecisionScoreFactor) []map[string]any {
+	out := make([]map[string]any, 0, len(factors))
+	for _, factor := range factors {
+		out = append(out, map[string]any{
+			"kind":                 factor.Kind,
+			"raw_count":            factor.RawCount,
+			"raw_value_cents":      factor.RawValueCents,
+			"weight":               factor.Weight,
+			"cap":                  factor.Cap,
+			"unit_cents":           factor.UnitCents,
+			"contribution":         factor.Contribution,
+			"capped":               factor.Capped,
+			"contributes_to_score": factor.ContributesToScore,
+		})
+	}
+	return out
+}
+
+func decisionRecordFromAudit(entry auditlogrepo.Entry) (DecisionRecord, bool) {
+	if entry.TargetType != "customer_request" || !strings.HasPrefix(entry.Action, "customer_request.") {
+		return DecisionRecord{}, false
+	}
+	record := DecisionRecord{
+		AuditID:   entry.ID,
+		Action:    entry.Action,
+		ActorType: entry.ActorType,
+		ActorID:   entry.ActorID,
+		Summary:   entry.Summary,
+		CreatedAt: entry.CreatedAt,
+	}
+	payload := auditPayloadFromJSON(entry.AfterJSON)
+	record = applyDecisionRecordChanges(payload, record)
+	record = applyDecisionRecordSnapshot(payload, record)
+	return record, true
+}
+
+func auditPayloadFromJSON(raw json.RawMessage) map[string]any {
+	if len(raw) == 0 {
+		return map[string]any{}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return map[string]any{}
+	}
+	return payload
+}
+
+func applyDecisionRecordChanges(payload map[string]any, record DecisionRecord) DecisionRecord {
+	oldStatus, hasOldStatus := auditString(payload, "old_status")
+	newStatus, hasNewStatus := auditString(payload, "new_status")
+	record.StatusChanged = (hasOldStatus || hasNewStatus) && oldStatus != newStatus
+	record.OldStatus = repo.Status(oldStatus)
+	record.NewStatus = repo.Status(newStatus)
+	oldPriority, hasOldPriority := auditString(payload, "old_priority")
+	newPriority, hasNewPriority := auditString(payload, "new_priority")
+	record.PriorityChanged = (hasOldPriority || hasNewPriority) && oldPriority != newPriority
+	record.OldPriority = repo.Priority(oldPriority)
+	record.NewPriority = repo.Priority(newPriority)
+	oldOwner, hasOldOwner := auditString(payload, "old_owner_member_id")
+	newOwner, hasNewOwner := auditString(payload, "new_owner_member_id")
+	record.OldOwnerMemberID = oldOwner
+	record.NewOwnerMemberID = newOwner
+	record.OwnerChanged = (hasOldOwner || hasNewOwner) && oldOwner != newOwner
+	record.TitleChanged, _ = auditBool(payload, "title_changed")
+	record.DescriptionChanged, _ = auditBool(payload, "description_changed")
+	return record
+}
+
+func applyDecisionRecordSnapshot(payload map[string]any, record DecisionRecord) DecisionRecord {
+	score, ok := auditInt(payload, "decision_score")
+	record.HasDecisionSnapshot = ok
+	record.DecisionScore = score
+	record.DecisionScoreFactors = auditDecisionScoreFactors(payload["decision_score_factors"])
+	deliveryHealth, _ := auditString(payload, "delivery_health")
+	record.DeliveryHealth = repo.DeliveryHealth(deliveryHealth)
+	record.SupportingFeedbackCount, _ = auditInt(payload, "supporting_feedback_count")
+	record.CustomerCount, _ = auditInt(payload, "customer_count")
+	record.AccountCount, _ = auditInt(payload, "account_count")
+	record.VoteCount, _ = auditInt(payload, "vote_count")
+	record.RevenueImpactCents, _ = auditInt64(payload, "revenue_impact_cents")
+	record.RevenueCurrency, _ = auditString(payload, "revenue_currency")
+	record.DecisionRationale, _ = auditString(payload, "decision_rationale")
+	record.OwnerMemberID, _ = auditString(payload, "owner_member_id")
+	record.OwnerDisplay, _ = auditString(payload, "owner_display")
+	record.EvidenceBundleRef, _ = auditString(payload, "evidence_bundle_ref")
+	record.PublicSafeState, _ = auditString(payload, "public_safe_state")
+	record.PublicSafeReasons = auditStringList(payload["public_safe_reasons"])
+	return record
+}
+
+func auditStringList(value any) []string {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, fmt.Sprint(item))
+	}
+	return out
+}
+
+func auditDecisionScoreFactors(value any) []repo.DecisionScoreFactor {
+	items, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]repo.DecisionScoreFactor, 0, len(items))
+	for _, item := range items {
+		if factor, ok := auditDecisionScoreFactor(item); ok {
+			out = append(out, factor)
+		}
+	}
+	return out
+}
+
+func auditDecisionScoreFactor(value any) (repo.DecisionScoreFactor, bool) {
+	payload, ok := value.(map[string]any)
+	if !ok {
+		return repo.DecisionScoreFactor{}, false
+	}
+	kind, _ := auditString(payload, "kind")
+	factor := repo.DecisionScoreFactor{Kind: repo.DecisionScoreFactorKind(kind)}
+	factor.RawCount, _ = auditInt(payload, "raw_count")
+	factor.RawValueCents, _ = auditInt64(payload, "raw_value_cents")
+	factor.Weight, _ = auditInt(payload, "weight")
+	factor.Cap, _ = auditInt(payload, "cap")
+	factor.UnitCents, _ = auditInt64(payload, "unit_cents")
+	factor.Contribution, _ = auditInt(payload, "contribution")
+	factor.Capped, _ = auditBool(payload, "capped")
+	factor.ContributesToScore, _ = auditBool(payload, "contributes_to_score")
+	return factor, factor.Kind != ""
+}
+
+func auditString(payload map[string]any, key string) (string, bool) {
+	value, ok := payload[key]
+	if !ok {
+		return "", false
+	}
+	if value == nil {
+		return "", true
+	}
+	typed, ok := value.(string)
+	if ok {
+		return typed, true
+	}
+	return fmt.Sprint(value), true
+}
+
+func auditBool(payload map[string]any, key string) (bool, bool) {
+	value, ok := payload[key]
+	if !ok {
+		return false, false
+	}
+	typed, ok := value.(bool)
+	return typed, ok
+}
+
+func auditInt(payload map[string]any, key string) (int, bool) {
+	value, ok := payload[key]
+	if !ok {
+		return 0, false
+	}
+	asInt, ok := auditInt64Value(value)
+	return int(asInt), ok
+}
+
+func auditInt64(payload map[string]any, key string) (int64, bool) {
+	value, ok := payload[key]
+	if !ok {
+		return 0, false
+	}
+	return auditInt64Value(value)
+}
+
+func auditInt64Value(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float64:
+		return int64(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		return parsed, err == nil
+	default:
+		return 0, false
 	}
 }
 

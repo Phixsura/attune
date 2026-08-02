@@ -1,4 +1,15 @@
-import { ArrowRight, ClipboardList, Loader2, RefreshCw, Tags, Trash2, X } from 'lucide-react'
+import {
+  ArrowRight,
+  ClipboardList,
+  Command,
+  Loader2,
+  RefreshCw,
+  Sparkles,
+  Tags,
+  Trash2,
+  UserRound,
+  X,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { TagCombobox } from '@/components/tag/tag-combobox'
 import { Button } from '@/components/ui/button'
@@ -21,6 +32,9 @@ export function SelectionActionBar({
   onBatchAdd,
   onBatchRemove,
   onBatchTransition,
+  onBatchAssign,
+  onRecommendAssignment,
+  onOpenCommandCenter,
   onBatchDelete,
   onBatchRetryEnrichment,
   onPromoteToCustomerRequest,
@@ -38,6 +52,9 @@ export function SelectionActionBar({
   onBatchAdd: (tagId: string) => void
   onBatchRemove: (tagId: string) => void
   onBatchTransition?: (toStateId: string) => void
+  onBatchAssign?: () => void
+  onRecommendAssignment?: () => void
+  onOpenCommandCenter?: () => void
   onBatchDelete?: () => void
   onBatchRetryEnrichment?: () => void
   onPromoteToCustomerRequest?: () => void
@@ -130,6 +147,42 @@ export function SelectionActionBar({
             ))}
           </SelectContent>
         </Select>
+      ) : null}
+
+      {onOpenCommandCenter ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={onOpenCommandCenter}
+        >
+          <Command className="h-3.5 w-3.5" />
+          {t('feedback.batch.operator.open')}
+        </Button>
+      ) : null}
+
+      {onBatchAssign ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={onBatchAssign}
+        >
+          <UserRound className="h-3.5 w-3.5" />
+          {t('feedback.batch.assign')}
+        </Button>
+      ) : null}
+
+      {onRecommendAssignment ? (
+        <Button
+          variant="secondary"
+          size="sm"
+          className="h-7 gap-1.5 text-xs"
+          onClick={onRecommendAssignment}
+        >
+          <Sparkles className="h-3.5 w-3.5" />
+          {t('feedback.batch.recommend')}
+        </Button>
       ) : null}
 
       {onPromoteToCustomerRequest ? (

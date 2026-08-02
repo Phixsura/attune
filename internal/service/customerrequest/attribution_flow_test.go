@@ -146,6 +146,16 @@ func (f *fakeRequestRepo) GetDetail(context.Context, string, uuid.UUID, int) (*r
 	return ptrext.Of(repo.Detail{}), nil
 }
 
+func (f *fakeRequestRepo) GetDetailTx(context.Context, pgx.Tx, string, uuid.UUID, int) (*repo.Detail, error) {
+	if f.detailErr != nil {
+		return nil, f.detailErr
+	}
+	if f.detail != nil {
+		return f.detail, nil
+	}
+	return ptrext.Of(repo.Detail{}), nil
+}
+
 func intercomMeta(email, name string) map[string]any {
 	return map[string]any{
 		"intercom_workspace_id":          "ws1",

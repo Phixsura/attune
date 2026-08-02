@@ -1,0 +1,21 @@
+{
+  "provider": "github",
+  "eventType": "issues.edited",
+  "rawPayload": {
+    "issue": {
+      "number": 214,
+      "title": "Add replay evidence to connector health"
+    },
+    "repository": {
+      "full_name": "acme/console"
+    }
+  },
+  "normalized": {
+    "type": "customer_request",
+    "action": "upsert",
+    "externalId": "github:acme/console:214",
+    "title": "Add replay evidence to connector health",
+    "status": "open",
+    "source": "github"
+  }
+}

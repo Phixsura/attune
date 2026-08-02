@@ -40,6 +40,7 @@ import { Route as NotifyTargetsRoute } from './_authed.integrations.notify-targe
 import { Route as PublicVisibilityRoute } from './_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from './_authed.integrations.reply-send-hook'
 import { Route as RequestNotificationsRoute } from './_authed.integrations.request-notifications'
+import { Route as SurveysRoute } from './_authed.integrations.surveys'
 import { Route as LegacyLLMConfigRoute } from './_authed.llm-config'
 import { Route as LegacyLLMUsageRoute } from './_authed.llm-usage'
 import { Route as MCPClientsRoute } from './_authed.mcp-clients'
@@ -122,6 +123,7 @@ describe('route wiring coverage', () => {
     [ReplySendHookRoute, { adminOnly: true }],
     [DigestRoute, { permission: 'settings:digest:view' }],
     [RequestNotificationsRoute, { adminOnly: true }],
+    [SurveysRoute, { adminOnly: true }],
   ])('runs route access guard for %s', (route, access) => {
     const context = { queryClient: {} }
 
@@ -166,7 +168,8 @@ describe('route wiring coverage', () => {
     [GuardPoliciesRoute, 1],
     [MembersRoute, 1],
     [DeadDeliveriesRoute, 1],
-    [ReliabilityRoute, 9],
+    [ReliabilityRoute, 15],
+    [SecurityRoute, 19],
     [ClassificationQualityRoute, 1],
     [LLMUsageRoute, 1],
     [SearchQualityRoute, 1],
@@ -175,7 +178,7 @@ describe('route wiring coverage', () => {
     [TagsRoute, 1],
     [LLMConfigurationRoute, 2],
     [EnrichmentRuntimeRoute, 1],
-    [ControlTowerRoute, 4],
+    [ControlTowerRoute, 5],
     [APIKeysIntegrationRoute, 1],
     [DigestRoute, 1],
     [ExternalSyncRoute, 2],
@@ -183,6 +186,7 @@ describe('route wiring coverage', () => {
     [NotifyTargetsRoute, 1],
     [PublicVisibilityRoute, 1],
     [ReplySendHookRoute, 1],
+    [SurveysRoute, 4],
     [MCPClientsRoute, 1],
   ])('preloads route data for %s', async (route, expectedCalls) => {
     const ensureQueryData = vi.fn().mockResolvedValue(undefined)
@@ -199,7 +203,7 @@ describe('route wiring coverage', () => {
       context: { queryClient: { ensureQueryData } },
     })
 
-    expect(ensureQueryData).toHaveBeenCalledTimes(4)
+    expect(ensureQueryData).toHaveBeenCalledTimes(5)
   })
 
   it.each([

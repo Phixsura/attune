@@ -50,11 +50,19 @@ import {
   useGdprOperations,
   useVerifyGdprStepUp,
 } from '@/features/gdpr/api/gdpr-control'
+import { buildRetentionLegalHoldWorkflow } from '@/features/gdpr/retention-legal-hold-workflow'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useRestoreFocusOnClose } from '@/hooks/use-restore-focus-on-close'
 import { restoreFocusWhenReady } from '@/lib/focus'
-import { GdprExportStatus, GdprRequestStatus, GdprRequestType } from '@/proto/attune/v1/gdpr'
+import {
+  GdprExportStatus,
+  type GdprExportStatusResponse,
+  GdprRequestStatus,
+  type GdprRequestSummary,
+  GdprRequestType,
+} from '@/proto/attune/v1/gdpr'
+import { RetentionLegalHoldWorkflowCard } from './retention-legal-hold-workflow-card'
 
 type RequestFilter = '' | 'delete' | 'export'
 
@@ -103,13 +111,17 @@ export function GDPRPage() {
     () => requestsQuery.data?.pages.flatMap((page) => page.items) ?? [],
     [requestsQuery.data],
   )
+  const retentionWorkflow = buildRetentionLegalHoldWorkflow({
+    operations: operationsQuery.data,
+    requests: requestsQuery.data ? requests : undefined,
+  })
 
   const exportSummary = useMemo(() => {
     const data = exportStatusQuery.data
     if (!data) return null
     return {
       statusLabel: exportStatusLabel(data.status, t),
-      counts: `${data.feedbackCount}/${data.tagAssignmentCount}/${data.feedbackAuditCount}/${data.llmAuditCount}`,
+      counts: gdprExportCountSummary(data),
       error: data.error,
     }
   }, [exportStatusQuery.data, t])
@@ -172,6 +184,7 @@ export function GDPRPage() {
             feedback: resp.feedbackCount,
             llmAudit: resp.llmAuditCount,
             outbox: resp.outboxCount ?? 0,
+            survey: surveyGdprCount(resp),
             executeAfter: formatTimestamp(resp.executeAfter),
           }),
         )
@@ -321,6 +334,8 @@ export function GDPRPage() {
             </>
           }
         />
+
+        <RetentionLegalHoldWorkflowCard workflow={retentionWorkflow} />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
           <div className="min-w-0 space-y-6">
@@ -501,8 +516,7 @@ export function GDPRPage() {
                           ) : null}
                         </TableCell>
                         <TableCell className="font-mono text-xs text-muted-foreground">
-                          {item.feedbackCount}/{item.tagAssignmentCount}/{item.feedbackAuditCount}/
-                          {item.llmAuditCount}/{item.outboxCount ?? 0}
+                          {gdprRequestCountSummary(item)}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           <div>{formatTimestamp(item.createdAt)}</div>
@@ -837,6 +851,53 @@ function MetricCard({ label, value }: { label: string; value: string }) {
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 text-base font-semibold">{value}</div>
     </div>
+  )
+}
+
+type GdprCountSource =
+  | GdprExportStatusResponse
+  | GdprRequestSummary
+  | {
+      feedbackCount: number
+      tagAssignmentCount: number
+      feedbackAuditCount: number
+      llmAuditCount: number
+      outboxCount?: number
+      surveyInvitationCount?: number
+      surveyResponseCount?: number
+      surveyLowScoreReviewCount?: number
+      surveyProviderEventCount?: number
+      surveyRecoveryNotificationCount?: number
+    }
+
+function gdprExportCountSummary(item: GdprExportStatusResponse) {
+  return [
+    item.feedbackCount,
+    item.tagAssignmentCount,
+    item.feedbackAuditCount,
+    item.llmAuditCount,
+    surveyGdprCount(item),
+  ].join('/')
+}
+
+function gdprRequestCountSummary(item: GdprRequestSummary) {
+  return [
+    item.feedbackCount,
+    item.tagAssignmentCount,
+    item.feedbackAuditCount,
+    item.llmAuditCount,
+    item.outboxCount ?? 0,
+    surveyGdprCount(item),
+  ].join('/')
+}
+
+function surveyGdprCount(item: GdprCountSource) {
+  return (
+    (item.surveyInvitationCount ?? 0) +
+    (item.surveyResponseCount ?? 0) +
+    (item.surveyLowScoreReviewCount ?? 0) +
+    (item.surveyProviderEventCount ?? 0) +
+    (item.surveyRecoveryNotificationCount ?? 0)
   )
 }
 

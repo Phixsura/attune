@@ -6,6 +6,7 @@ package feedback
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -121,6 +122,56 @@ func Test_inboundSourceIDFromMeta(t *testing.T) {
 				require.NotNil(t, got)
 				require.Equal(t, *tt.want, *got)
 			}
+		})
+	}
+}
+
+func TestSignalTraceIDFromSourceMeta(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("x", maxSignalTraceIDLen+8)
+	tests := []struct {
+		name     string
+		meta     map[string]any
+		fallback string
+		want     string
+	}{
+		{
+			name:     "source signal trace wins",
+			meta:     map[string]any{"signalTraceId": " source-trace-1 "},
+			fallback: "fallback-trace",
+			want:     "source-trace-1",
+		},
+		{
+			name:     "event id wins over fallback",
+			meta:     map[string]any{"event_id": "evt-42"},
+			fallback: "fallback-trace",
+			want:     "evt-42",
+		},
+		{
+			name:     "fallback used when metadata has no candidate",
+			meta:     map[string]any{"browser": "safari"},
+			fallback: "fallback-trace",
+			want:     "fallback-trace",
+		},
+		{
+			name:     "control characters are stripped",
+			meta:     map[string]any{"trace_id": "trace-\n42"},
+			fallback: "fallback-trace",
+			want:     "trace-42",
+		},
+		{
+			name:     "long ids are bounded",
+			meta:     map[string]any{"trace_id": long},
+			fallback: "fallback-trace",
+			want:     strings.Repeat("x", maxSignalTraceIDLen),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tt.want, SignalTraceIDFromSourceMeta(tt.meta, tt.fallback))
 		})
 	}
 }

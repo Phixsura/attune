@@ -18,6 +18,7 @@ interface BatchResultProps {
   failed: BatchItemFailure[]
   onDismiss?: () => void
   onRetry?: () => void
+  retryLabel?: string
 }
 
 // BatchResult — displays batch operation results with success/partial/failure states.
@@ -29,6 +30,7 @@ export function BatchResult({
   failed,
   onDismiss,
   onRetry,
+  retryLabel,
 }: BatchResultProps) {
   const { t } = useTranslation()
   const [showFailures, setShowFailures] = useState(false)
@@ -111,7 +113,7 @@ export function BatchResult({
         <div className="mt-3 flex gap-2">
           {onRetry && failed.length > 0 && (
             <Button variant="outline" size="sm" onClick={onRetry}>
-              {t('feedback.batch.retry_failed')}
+              {retryLabel ?? t('feedback.batch.retry_failed')}
             </Button>
           )}
           {onDismiss && (

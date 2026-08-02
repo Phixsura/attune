@@ -9,7 +9,7 @@
     "includes": [
       "src/**/*.{ts,tsx,js,jsx,json,jsonc}",
       "e2e/**/*.{ts,tsx,js,jsx,json,jsonc}",
-      "scripts/public-board-smoke.mjs",
+      "scripts/*.mjs",
       "vite.config.ts",
       "playwright.config.ts",
       "biome.json",

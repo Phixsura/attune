@@ -78,6 +78,7 @@ type NotificationEnvelope struct {
 	EventType          string         `json:"event_type"`
 	TenantID           string         `json:"tenant_id"`
 	Request            map[string]any `json:"request,omitempty"`
+	Survey             map[string]any `json:"survey,omitempty"`
 	Update             map[string]any `json:"update,omitempty"`
 	Recipient          map[string]any `json:"recipient,omitempty"`
 	WebhookTarget      map[string]any `json:"webhook_target,omitempty"`

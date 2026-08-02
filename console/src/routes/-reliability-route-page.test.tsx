@@ -38,6 +38,69 @@ const preflightReport = {
   ],
 }
 
+const consistencyCustomerRequest = {
+  id: 'req-1',
+  displayId: 'CR-1',
+  displayNumber: '1',
+  title: 'Keyboard focus restore',
+  status: 1,
+  priority: 3,
+  supportingFeedbackCount: 2,
+  customerCount: 1,
+  linkedIssueCount: 1,
+  hiddenFeedbackCount: 0,
+  firstFeedbackAt: '2026-07-01T00:00:00Z',
+  latestFeedbackAt: '2026-07-02T00:00:00Z',
+  createdAt: '2026-07-01T00:00:00Z',
+  updatedAt: '2026-07-02T00:00:00Z',
+  accountCount: 1,
+  voteCount: 1,
+  duplicateRequestCount: 0,
+  revenueImpactCents: '100000',
+  revenueCurrency: 'USD',
+  decisionScore: 42,
+  decisionScoreExplanation: 'feedback=2 delivery_health=synced',
+  deliveryHealth: 1,
+  syncedIssueCount: 1,
+  staleIssueCount: 0,
+  failedIssueCount: 0,
+  pendingIssueCount: 0,
+  manualIssueCount: 0,
+  decisionScoreFactors: [],
+}
+
+const consistencySurveyAnalytics = {
+  invitationCount: 4,
+  deliveredCount: 3,
+  suppressedCount: 1,
+  completedCount: 2,
+  lowScoreCount: 1,
+  averageScore: 3.5,
+  responseRate: 0.5,
+  scoreDistribution: [],
+  suppressionReasonDistribution: [],
+  averageResponseSeconds: 5400,
+  positiveScoreCount: 1,
+  positiveScoreRate: 0.5,
+  openLowScoreReviewCount: 1,
+  overdueLowScoreReviewCount: 1,
+  notStartedCount: 1,
+  openedCount: 1,
+  expiredCount: 0,
+  unassignedLowScoreReviewCount: 1,
+  criticalLowScoreReviewCount: 0,
+  pendingCustomerContactReviewCount: 1,
+  oldestOpenLowScoreReviewDueAt: '2026-07-29T01:00:00Z',
+  overdueRecoveryQueueCount: 1,
+  unassignedRecoveryQueueCount: 1,
+  pendingContactRecoveryQueueCount: 0,
+  missingRootCauseRecoveryQueueCount: 0,
+  missingActionRecoveryQueueCount: 0,
+  pendingDeliveryCount: 0,
+  delayedDeliveryCount: 0,
+  rejectedDeliveryCount: 0,
+}
+
 function renderReliabilityPage() {
   const rootRoute = createRootRoute()
   const indexRoute = createRoute({
@@ -402,6 +465,59 @@ describe('ReliabilityRoutePage', () => {
           ],
         })
       }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '2026-07-01T00:00:00Z',
+          periodEnd: '2026-07-31T23:59:59Z',
+          total: '2',
+          urgentCount: '1',
+          dims: [],
+        }),
+      ),
+      http.get('/fb/v1/console/request-notifications/status-evidence', () =>
+        HttpResponse.json({
+          items: [
+            {
+              requestStatus: 'shipped',
+              expectedCustomers: 4,
+              notifiedCustomers: 2,
+              failedCustomers: 1,
+              suppressedCustomers: 1,
+              recoveryPendingCustomers: 1,
+              eventCount: 2,
+              lastEventAt: '2026-07-16T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/usage', () =>
+        HttpResponse.json({
+          periodStart: '2026-07-01T00:00:00Z',
+          periodEnd: '2026-07-31T23:59:59Z',
+          total: '72',
+          quota: '100',
+          series: [{ bucket: '2026-07-01T00:00:00Z', value: '72' }],
+        }),
+      ),
+      http.get('/fb/v1/console/llm-usage', () =>
+        HttpResponse.json({
+          periodStart: '2026-07-01T00:00:00Z',
+          periodEnd: '2026-07-31T23:59:59Z',
+          granularity: 'week',
+          series: [],
+          promptTokens: '12000',
+          completionTokens: '4000',
+          costUsd: 2.34,
+          calls: '20',
+          errors: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/customer-requests', () =>
+        HttpResponse.json({ requests: [consistencyCustomerRequest] }),
+      ),
+      http.get('/fb/v1/console/surveys/analytics', () =>
+        HttpResponse.json(consistencySurveyAnalytics),
+      ),
     )
 
     const { container, user } = renderReliabilityPage()
@@ -410,12 +526,42 @@ describe('ReliabilityRoutePage', () => {
       expect(screen.getByText('1 个活跃 · 1 个非活跃，共 2 个。')).toBeInTheDocument()
       expect(screen.getByText('5d6ea83')).toBeInTheDocument()
     })
-    expect(screen.getByText('supported')).toBeInTheDocument()
+    expect(screen.getAllByText('supported').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('恢复')).toBeInTheDocument()
-    expect(screen.getByText(/Last restore drill passed \(today\)/)).toBeInTheDocument()
+    expect(screen.getAllByText(/Last restore drill passed \(today\)/).length).toBeGreaterThan(0)
     expect(screen.getByText(/备份 nightly-backup/)).toBeInTheDocument()
     expect(screen.getByText(/耗时 1\.2s/)).toBeInTheDocument()
     expect(screen.getByText(/新鲜度窗口 7d/)).toBeInTheDocument()
+    expect(screen.getByText('Backup / restore drill evidence')).toBeInTheDocument()
+    expect(screen.getByText('Tenant One / nightly-backup / supported')).toBeInTheDocument()
+    expect(screen.getByText('backup and restore evidence is verified')).toBeInTheDocument()
+    expect(screen.getByText('backup=nightly-backup / age=0s / window=7d')).toBeInTheDocument()
+    expect(screen.getByText('pass restore / 1.2s')).toBeInTheDocument()
+    expect(screen.getByText('Data consistency checks')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        screen.getByText('Tenant One / 2 feedback / 1 requests / 2 survey completions'),
+      ).toBeInTheDocument()
+    })
+    expect(screen.getByText('2 consistency checks need attention')).toBeInTheDocument()
+    expect(
+      screen.getByText('72 ingested / 2 feedback records / 1 usage buckets'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('2 supporting feedback / 1 requests / 0 orphaned requests'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('2 notified / 4 expected / 1 request statuses')).toBeInTheDocument()
+    expect(screen.getByText('1 low-score / 1 open reviews / 1 overdue')).toBeInTheDocument()
+    expect(screen.getByText('Pipeline SLO ledger')).toBeInTheDocument()
+    expect(
+      screen.getByText('Tenant One / 72 ingested / 20 enrich calls / 1 sync rows'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('3 pipeline SLOs need attention')).toBeInTheDocument()
+    expect(screen.getByText('72 ingested / 1 buckets / 72.0% quota used')).toBeInTheDocument()
+    expect(screen.getByText('20 calls / 1 errors / 5.0% error rate')).toBeInTheDocument()
+    expect(
+      screen.getByText('1 synced / 0 stale / 0 failed / 0 pending / 0 manual'),
+    ).toBeInTheDocument()
     expect(screen.getByText('5 rules')).toBeInTheDocument()
     expect(screen.getByText('Canonical terms')).toBeInTheDocument()
     expect(
@@ -508,6 +654,12 @@ describe('ReliabilityRoutePage', () => {
         }),
       ),
       http.get('/fb/v1/console/outbox/deliveries', () => HttpResponse.json({ deliveries: [] })),
+      http.get('/fb/v1/console/customer-requests', () =>
+        HttpResponse.json({ requests: [consistencyCustomerRequest] }),
+      ),
+      http.get('/fb/v1/console/surveys/analytics', () =>
+        HttpResponse.json(consistencySurveyAnalytics),
+      ),
     )
 
     renderReliabilityPage()

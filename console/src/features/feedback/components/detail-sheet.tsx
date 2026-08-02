@@ -5,15 +5,18 @@ import { zhCN } from 'date-fns/locale'
 import type { TFunction } from 'i18next'
 import {
   AlertCircle,
+  CalendarClock,
   Check,
   CheckCircle,
   ClipboardList,
   Copy,
   ExternalLink,
+  Fingerprint,
   GitCompareArrows,
   History,
   ListChecks,
   Loader2,
+  Mail,
   PencilLine,
   Plus,
   RefreshCw,
@@ -23,9 +26,10 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  UserRound,
   XCircle,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { DimensionChips, UrgentDot } from '@/components/dim/dimension-chips'
@@ -42,6 +46,13 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -50,10 +61,15 @@ import {
 } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { WorkflowStateBadge } from '@/components/workflow/workflow-state-badge'
+import { useAssignFeedback } from '@/features/feedback/api/assign-feedback'
 import {
   type FeedbackDetail,
   feedbackDetailQuery,
 } from '@/features/feedback/api/get-feedback-detail'
+import {
+  type FeedbackSignalTrace,
+  feedbackSignalTraceQuery,
+} from '@/features/feedback/api/get-feedback-signal-trace'
 import {
   useApproveReplyDraft,
   useRegenerateReplyDraft,
@@ -83,6 +99,7 @@ import {
 } from '@/lib/customer-request-api'
 import { restoreFocusWhenReady } from '@/lib/focus'
 import { useDisplayName } from '@/lib/i18n-resolve'
+import { type Member, membersQuery } from '@/lib/members-api'
 import { cn } from '@/lib/utils'
 import type { Dimension } from '@/proto/attune/v1/common'
 import {
@@ -94,7 +111,17 @@ import {
   CustomerRequestVisibility,
   SortDirection,
 } from '@/proto/attune/v1/customer_request'
-import type { ReplyDraftWorkflow } from '@/proto/attune/v1/ingest'
+import type {
+  FeedbackAssignment,
+  FeedbackIdentityAssessment,
+  FeedbackIdentityEvidence,
+  FeedbackIdentityKey,
+} from '@/proto/attune/v1/ingest'
+import {
+  FeedbackIdentityRecommendedAction,
+  FeedbackIdentityResolutionStrength,
+  type ReplyDraftWorkflow,
+} from '@/proto/attune/v1/ingest'
 import type { Tag } from '@/proto/attune/v1/tag'
 
 type FeedbackWorkbenchMode = 'all' | 'urgent' | 'active' | 'failed' | 'terminal' | 'ready'
@@ -247,6 +274,10 @@ function DetailBody({
   const hasFailureSnapshot = terminalFailureSnapshotPresent(data)
   const portalSubmission = portalSubmissionMeta(data.sourceMeta)
   const canPromoteCustomerRequest = permissions.can('customer_request:edit')
+  const signalTrace = useQuery({
+    ...feedbackSignalTraceQuery(String(data.id)),
+    enabled: String(data.id).trim().length > 0,
+  })
   return (
     <div className="space-y-5">
       <Card className="border-border/60 shadow-none">
@@ -281,6 +312,13 @@ function DetailBody({
               )
             }
           />
+          {data.accountContext?.accountKey ? (
+            <SummaryItem
+              label={t('feedback.detail.account_context')}
+              value={data.accountContext.accountDisplay || data.accountContext.accountKey}
+              mono={false}
+            />
+          ) : null}
           <SummaryItem
             label={t('feedback.detail.ai_state')}
             valueNode={<DetailBadge tone={summaryState.tone} label={summaryState.label} compact />}
@@ -312,6 +350,14 @@ function DetailBody({
           tone={workbenchCue.tone}
         />
       ) : null}
+
+      <AssignmentSection data={data} />
+
+      <SignalTraceSection
+        trace={signalTrace.data}
+        isPending={signalTrace.isPending}
+        isError={signalTrace.isError}
+      />
 
       {hasFailureSnapshot ? (
         <Section label={t('feedback.detail.failure_snapshot')}>
@@ -473,6 +519,14 @@ function DetailBody({
             />
           ) : null}
 
+          {data.accountContext?.accountKey ? (
+            <AccountContextSection context={data.accountContext} />
+          ) : null}
+
+          {data.identityEvidence ? (
+            <IdentityEvidenceSection evidence={data.identityEvidence} />
+          ) : null}
+
           <Section label={t('feedback.detail.source')}>
             <dl className="space-y-3">
               <FactRow label={t('feedback.detail.source')} value={data.source || '—'} mono />
@@ -518,6 +572,468 @@ function DetailBody({
       </div>
     </div>
   )
+}
+
+function AccountContextSection({
+  context,
+}: {
+  context: NonNullable<FeedbackDetail['accountContext']>
+}) {
+  const { t } = useTranslation()
+  return (
+    <Section label={t('feedback.detail.account_context')}>
+      <dl className="space-y-3">
+        <FactRow label={t('feedback.detail.account_key')} value={context.accountKey || '—'} mono />
+        <FactRow
+          label={t('feedback.detail.account_display')}
+          value={context.accountDisplay || context.accountKey || '—'}
+        />
+        <FactRow
+          label={t('feedback.detail.account_source')}
+          value={context.source || 'source_meta'}
+          mono
+        />
+      </dl>
+    </Section>
+  )
+}
+
+function AssignmentSection({ data }: { data: FeedbackDetail }) {
+  const { t } = useTranslation()
+  const permissions = usePermissions()
+  const canEdit = permissions.can('feedback:edit')
+  const canViewMembers = permissions.can('settings:members:view')
+  const members = useQuery({ ...membersQuery(), enabled: canViewMembers })
+  const assign = useAssignFeedback(String(data.id))
+  const currentOwnerID = data.assignment?.owner?.memberId ?? 'unassigned'
+  const currentDueAt = toDateTimeLocal(data.assignment?.slaDueAt)
+  const currentNote = data.assignment?.note ?? ''
+  const [ownerMemberID, setOwnerMemberID] = useState(currentOwnerID)
+  const [slaDueAt, setSLADueAt] = useState(currentDueAt)
+  const [note, setNote] = useState(currentNote)
+
+  useEffect(() => {
+    setOwnerMemberID(currentOwnerID)
+    setSLADueAt(currentDueAt)
+    setNote(currentNote)
+  }, [currentOwnerID, currentDueAt, currentNote])
+
+  const ownerOptions = assignmentOwnerOptions(members.data ?? [], data.assignment)
+  const status = data.assignment?.slaStatus || 'missing_due_date'
+  const dirty =
+    ownerMemberID !== currentOwnerID || slaDueAt !== currentDueAt || note.trim() !== currentNote
+  const canSave = canEdit && dirty && !assign.isPending
+  const ownerLabel = data.assignment?.owner
+    ? assignmentOwnerLabel(data.assignment.owner)
+    : t('feedback.assignment.unassigned')
+  const dueLabel = data.assignment?.slaDueAt
+    ? format(new Date(data.assignment.slaDueAt), 'PPP HH:mm', { locale: zhCN })
+    : t('feedback.assignment.no_due_date')
+
+  const onSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!canSave) return
+    assign.mutate(
+      {
+        feedbackId: String(data.id),
+        ownerMemberId: ownerMemberID === 'unassigned' ? '' : ownerMemberID,
+        slaDueAt: slaDueAt ? new Date(slaDueAt).toISOString() : '',
+        note: note.trim(),
+      },
+      {
+        onSuccess: () => toast.success(t('feedback.assignment.saved')),
+        onError: (err) =>
+          toast.error(err instanceof Error ? err.message : t('feedback.assignment.save_failed')),
+      },
+    )
+  }
+
+  return (
+    <Section label={t('feedback.assignment.title')}>
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <AssignmentFact
+            icon={<UserRound className="size-4" />}
+            label={t('feedback.assignment.owner')}
+            value={ownerLabel}
+          />
+          <AssignmentFact
+            icon={<CalendarClock className="size-4" />}
+            label={t('feedback.assignment.sla_due_at')}
+            value={dueLabel}
+          />
+          <AssignmentFact
+            icon={<ShieldCheck className="size-4" />}
+            label={t('feedback.assignment.sla_status')}
+            value={assignmentStatusLabel(status, t)}
+            tone={assignmentStatusTone(status)}
+          />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_16rem]">
+          <div className="space-y-2">
+            <label
+              htmlFor="feedback-assignment-owner"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              {t('feedback.assignment.owner')}
+            </label>
+            <Select
+              value={ownerMemberID}
+              onValueChange={setOwnerMemberID}
+              disabled={!canEdit || !canViewMembers || members.isPending}
+            >
+              <SelectTrigger
+                id="feedback-assignment-owner"
+                aria-label={t('feedback.assignment.owner')}
+              >
+                <SelectValue placeholder={t('feedback.assignment.unassigned')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unassigned">{t('feedback.assignment.unassigned')}</SelectItem>
+                {ownerOptions.map((owner) => (
+                  <SelectItem key={owner.id} value={owner.id}>
+                    {owner.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!canViewMembers ? (
+              <p className="text-xs text-muted-foreground">
+                {t('feedback.assignment.members_unavailable')}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="feedback-assignment-due"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              {t('feedback.assignment.sla_due_at')}
+            </label>
+            <Input
+              id="feedback-assignment-due"
+              type="datetime-local"
+              value={slaDueAt}
+              onChange={(event) => setSLADueAt(event.target.value)}
+              disabled={!canEdit}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label
+            htmlFor="feedback-assignment-note"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            {t('feedback.assignment.note')}
+          </label>
+          <textarea
+            id="feedback-assignment-note"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            maxLength={1000}
+            disabled={!canEdit}
+            className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+            placeholder={t('feedback.assignment.note_placeholder')}
+          />
+        </div>
+
+        <div className="flex flex-col gap-2 border-t border-border/60 pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-muted-foreground">
+            {canEdit ? t('feedback.assignment.audit_hint') : t('feedback.assignment.readonly_hint')}
+          </p>
+          <Button type="submit" disabled={!canSave} className="self-start sm:self-auto">
+            {assign.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Check className="size-4" />
+            )}
+            {t('feedback.assignment.save')}
+          </Button>
+        </div>
+      </form>
+    </Section>
+  )
+}
+
+const signalTraceSkeletonStageKeys = [
+  'source-event',
+  'enrichment',
+  'request',
+  'notification',
+  'survey',
+] as const
+
+function SignalTraceSection({
+  trace,
+  isPending,
+  isError,
+}: {
+  trace?: FeedbackSignalTrace
+  isPending: boolean
+  isError: boolean
+}) {
+  const { t } = useTranslation()
+  return (
+    <Section label={t('feedback.signal_trace.title')}>
+      {isPending ? (
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-72 max-w-full" />
+          <div className="grid gap-2 md:grid-cols-5">
+            {signalTraceSkeletonStageKeys.map((key) => (
+              <Skeleton key={key} className="h-20" />
+            ))}
+          </div>
+        </div>
+      ) : isError ? (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/25 bg-destructive/5 px-3 py-3 text-sm text-destructive">
+          <AlertCircle className="mt-0.5 size-4 shrink-0" />
+          <span>{t('feedback.signal_trace.load_failed')}</span>
+        </div>
+      ) : trace ? (
+        <div className="space-y-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="inline-flex min-w-0 items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+              <Fingerprint className="size-4 shrink-0 text-muted-foreground" />
+              <span className="truncate font-mono text-xs text-foreground">
+                {trace.signalTraceId || '—'}
+              </span>
+            </div>
+            <TraceStatusPill status={trace.terminalStatus} />
+          </div>
+
+          {trace.missingStages.length > 0 ? (
+            <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span>
+                {t('feedback.signal_trace.missing_stages', {
+                  stages: trace.missingStages
+                    .map((stage) => signalTraceStageLabel(stage, t))
+                    .join(', '),
+                })}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="grid gap-2 md:grid-cols-5">
+            {trace.stages.map((stage) => (
+              <TraceStageCell key={stage.key} stage={stage} />
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground">
+              <History className="size-3.5" />
+              <span>{t('feedback.signal_trace.timeline')}</span>
+            </div>
+            {trace.events.length > 0 ? (
+              <ol className="space-y-2">
+                {trace.events.map((event) => (
+                  <TraceEventRow key={traceEventKey(event)} event={event} />
+                ))}
+              </ol>
+            ) : (
+              <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-3 text-sm text-muted-foreground">
+                {t('feedback.signal_trace.no_events')}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-border/70 bg-muted/10 px-3 py-3 text-sm text-muted-foreground">
+          {t('feedback.signal_trace.empty')}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function TraceStageCell({ stage }: { stage: FeedbackSignalTrace['stages'][number] }) {
+  const { t } = useTranslation()
+  return (
+    <div className={cn('rounded-md border px-3 py-3', traceStatusSurfaceClass(stage.status))}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 text-xs font-medium text-foreground">
+          {signalTraceStageLabel(stage.key, t, stage.label)}
+        </div>
+        <TraceStatusIcon status={stage.status} />
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-2 text-xs text-muted-foreground">
+        <span>{t('feedback.signal_trace.event_count', { count: stage.eventCount })}</span>
+        {stage.lastEventAt ? <span>{compactDateTime(stage.lastEventAt)}</span> : null}
+      </div>
+    </div>
+  )
+}
+
+function TraceEventRow({ event }: { event: FeedbackSignalTrace['events'][number] }) {
+  const { t } = useTranslation()
+  const meta = traceMetadataSummary(event.metadata)
+  return (
+    <li className="grid gap-2 rounded-md border border-border/60 bg-muted/10 px-3 py-3 md:grid-cols-[9.5rem_minmax(0,1fr)]">
+      <div className="flex items-start gap-2 text-xs text-muted-foreground">
+        <TraceStatusIcon status={event.status} />
+        <div className="min-w-0">
+          <div>{compactDateTime(event.occurredAt)}</div>
+          <div className="mt-1 truncate font-mono">{event.traceId || event.stage}</div>
+        </div>
+      </div>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-foreground">
+            {signalTraceEventKindLabel(event.kind, t)}
+          </span>
+          <TraceStatusPill status={event.status} compact />
+          <span className="rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+            {signalTraceStageLabel(event.stage, t)}
+          </span>
+        </div>
+        {event.summary ? (
+          <p className="mt-1 break-words text-sm text-muted-foreground">{event.summary}</p>
+        ) : null}
+        {meta.length > 0 ? (
+          <dl className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {meta.map(([key, value]) => (
+              <div key={key} className="inline-flex min-w-0 gap-1">
+                <dt className="font-medium">{traceMetadataLabel(key, t)}:</dt>
+                <dd className="max-w-56 truncate font-mono">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+      </div>
+    </li>
+  )
+}
+
+function traceEventKey(event: FeedbackSignalTrace['events'][number]) {
+  const metadata = event.metadata ? JSON.stringify(event.metadata) : ''
+  return [
+    event.stage,
+    event.kind,
+    event.status,
+    event.occurredAt,
+    event.traceId,
+    event.summary,
+    metadata,
+  ].join('|')
+}
+
+function TraceStatusPill({ status, compact = false }: { status: string; compact?: boolean }) {
+  const { t } = useTranslation()
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border font-medium',
+        compact ? 'px-2 py-0.5 text-[11px]' : 'px-2.5 py-1 text-xs',
+        traceStatusPillClass(status),
+      )}
+    >
+      <TraceStatusIcon status={status} />
+      {signalTraceStatusLabel(status, t)}
+    </span>
+  )
+}
+
+function TraceStatusIcon({ status }: { status: string }) {
+  const normalized = normalizeSignalTraceStatus(status)
+  if (normalized === 'failed') return <XCircle className="size-3.5 shrink-0" />
+  if (normalized === 'pending') return <Loader2 className="size-3.5 shrink-0" />
+  if (normalized === 'missing') return <AlertCircle className="size-3.5 shrink-0" />
+  if (normalized === 'completed') return <CheckCircle className="size-3.5 shrink-0" />
+  return <ListChecks className="size-3.5 shrink-0" />
+}
+
+function AssignmentFact({
+  icon,
+  label,
+  value,
+  tone = 'muted',
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string
+  tone?: 'muted' | 'good' | 'warn' | 'danger'
+}) {
+  return (
+    <div className="min-w-0 space-y-1.5 rounded-lg border border-border/50 bg-muted/10 px-3 py-3">
+      <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        {icon}
+        {label}
+      </div>
+      <div
+        className={cn(
+          'truncate text-sm font-medium',
+          tone === 'good' && 'text-emerald-700',
+          tone === 'warn' && 'text-amber-700',
+          tone === 'danger' && 'text-destructive',
+          tone === 'muted' && 'text-foreground',
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function assignmentOwnerOptions(members: Member[], assignment?: FeedbackAssignment) {
+  const owners = new Map<string, { id: string; label: string }>()
+  for (const member of members) {
+    if (member.memberType === 'invite' || member.role === 'viewer') continue
+    owners.set(member.id, { id: member.id, label: memberLabel(member) })
+  }
+  const current = assignment?.owner
+  if (current?.memberId && !owners.has(current.memberId)) {
+    owners.set(current.memberId, {
+      id: current.memberId,
+      label: assignmentOwnerLabel(current),
+    })
+  }
+  return Array.from(owners.values()).sort((a, b) => a.label.localeCompare(b.label))
+}
+
+function assignmentOwnerLabel(owner: NonNullable<FeedbackAssignment['owner']>) {
+  return owner.email || owner.userId || owner.memberId
+}
+
+function memberLabel(member: Member) {
+  return member.email || member.userId || member.id
+}
+
+function toDateTimeLocal(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (input: number) => String(input).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function assignmentStatusLabel(status: string, t: TFunction) {
+  switch (status) {
+    case 'overdue':
+      return t('feedback.assignment.status.overdue')
+    case 'due_soon':
+      return t('feedback.assignment.status.due_soon')
+    case 'on_track':
+      return t('feedback.assignment.status.on_track')
+    default:
+      return t('feedback.assignment.status.missing_due_date')
+  }
+}
+
+function assignmentStatusTone(status: string): 'muted' | 'good' | 'warn' | 'danger' {
+  switch (status) {
+    case 'overdue':
+      return 'danger'
+    case 'due_soon':
+      return 'warn'
+    case 'on_track':
+      return 'good'
+    default:
+      return 'muted'
+  }
 }
 
 function CustomerRequestLinksSection({ feedbackId }: { feedbackId: string }) {
@@ -753,6 +1269,238 @@ function RequestLinkSkeleton() {
   )
 }
 
+function IdentityEvidenceSection({ evidence }: { evidence?: FeedbackIdentityEvidence }) {
+  const { t } = useTranslation()
+  const keys = evidence?.keys ?? []
+  return (
+    <Section label={t('feedback.detail.identity_evidence')}>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex items-center gap-2 text-sm font-medium">
+            <Fingerprint className="size-4 text-primary" />
+            {t('feedback.detail.identity_candidate_count', {
+              count: evidence?.mergeCandidateCount ?? 0,
+            })}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <IdentityCoverageChip
+              active={Boolean(evidence?.hasEmail)}
+              label={t('feedback.detail.identity_kind_email')}
+            />
+            <IdentityCoverageChip
+              active={Boolean(evidence?.hasExternalId)}
+              label={t('feedback.detail.identity_kind_external_id')}
+            />
+            <IdentityCoverageChip
+              active={Boolean(evidence?.hasSourceContactId)}
+              label={t('feedback.detail.identity_kind_source_contact_id')}
+            />
+          </div>
+        </div>
+
+        <IdentityAssessmentCard assessment={evidence?.assessment} />
+
+        {keys.length > 0 ? (
+          <dl className="space-y-2">
+            {keys.map((key) => (
+              <IdentityEvidenceRow key={`${key.kind}:${key.source}:${key.value}`} item={key} />
+            ))}
+          </dl>
+        ) : (
+          <div className="rounded-lg border border-dashed border-border/70 bg-muted/10 px-4 py-4 text-sm text-muted-foreground">
+            {t('feedback.detail.identity_empty')}
+          </div>
+        )}
+      </div>
+    </Section>
+  )
+}
+
+function IdentityAssessmentCard({ assessment }: { assessment?: FeedbackIdentityAssessment }) {
+  const { t } = useTranslation()
+  if (!assessment) {
+    return null
+  }
+  const missingKinds = assessment.missingKinds
+    .map((kind) => identityEvidenceKindLabel(kind, t))
+    .join('、')
+  const risks = assessment.riskReasons
+    .slice(0, 3)
+    .map((reason) => identityRiskReasonLabel(reason, t))
+  return (
+    <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3 text-xs">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex items-center gap-2 font-medium">
+          <ShieldCheck className="size-3.5 text-primary" />
+          {t('feedback.detail.identity_resolution_title')}
+        </div>
+        <span
+          className={cn(
+            'rounded-full border px-2 py-0.5 font-medium',
+            identityStrengthTone(assessment.strength),
+          )}
+        >
+          {identityStrengthLabel(assessment.strength, t)}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <FactPill
+          label={t('feedback.detail.identity_recommended_action')}
+          value={identityRecommendedActionLabel(assessment.recommendedAction, t)}
+        />
+        <FactPill
+          label={t('feedback.detail.identity_resolution_coverage')}
+          value={t('feedback.detail.identity_resolution_counts', {
+            stable: assessment.stableKeyCount,
+            sources: assessment.sourceCount,
+          })}
+        />
+      </div>
+      {missingKinds ? (
+        <div className="text-muted-foreground">
+          {t('feedback.detail.identity_missing_kinds', { value: missingKinds })}
+        </div>
+      ) : null}
+      {risks.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {risks.map((risk) => (
+            <span key={risk} className="rounded bg-background px-2 py-0.5 text-muted-foreground">
+              {risk}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function FactPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border bg-background px-2.5 py-2">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 font-medium">{value}</div>
+    </div>
+  )
+}
+
+function IdentityCoverageChip({ active, label }: { active: boolean; label: string }) {
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium',
+        active
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          : 'border-border/60 bg-muted/10 text-muted-foreground',
+      )}
+    >
+      {active ? (
+        <CheckCircle className="size-3" />
+      ) : (
+        <span className="size-1.5 rounded-full bg-current opacity-40" />
+      )}
+      {label}
+    </span>
+  )
+}
+
+function IdentityEvidenceRow({ item }: { item: FeedbackIdentityKey }) {
+  const { t } = useTranslation()
+  const isEmail = item.kind === 'email'
+  return (
+    <div className="grid gap-2 rounded-lg border border-border/60 bg-muted/10 px-3 py-2 sm:grid-cols-[9rem_minmax(0,1fr)]">
+      <dt className="inline-flex min-w-0 items-center gap-2 text-xs font-medium text-muted-foreground">
+        {isEmail ? (
+          <Mail className="size-3.5 shrink-0" />
+        ) : (
+          <Fingerprint className="size-3.5 shrink-0" />
+        )}
+        <span className="truncate">{identityEvidenceKindLabel(item.kind, t)}</span>
+      </dt>
+      <dd className="min-w-0 space-y-1">
+        <div className="break-all font-mono text-xs text-foreground">{item.value}</div>
+        <div className="break-all text-[11px] text-muted-foreground">
+          {t('feedback.detail.identity_key_source', { source: item.source })}
+        </div>
+      </dd>
+    </div>
+  )
+}
+
+function identityStrengthTone(strength: FeedbackIdentityResolutionStrength) {
+  switch (strength) {
+    case FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_STRONG:
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    case FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_MEDIUM:
+      return 'border-amber-200 bg-amber-50 text-amber-700'
+    default:
+      return 'border-border/60 bg-muted/30 text-muted-foreground'
+  }
+}
+
+function identityStrengthLabel(strength: FeedbackIdentityResolutionStrength, t: TFunction) {
+  switch (strength) {
+    case FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_STRONG:
+      return t('feedback.detail.identity_strength_strong')
+    case FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_MEDIUM:
+      return t('feedback.detail.identity_strength_medium')
+    case FeedbackIdentityResolutionStrength.FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_WEAK:
+      return t('feedback.detail.identity_strength_weak')
+    default:
+      return t('feedback.detail.identity_strength_unknown')
+  }
+}
+
+function identityRecommendedActionLabel(action: FeedbackIdentityRecommendedAction, t: TFunction) {
+  switch (action) {
+    case FeedbackIdentityRecommendedAction.FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_MERGE:
+      return t('feedback.detail.identity_action_review_merge')
+    case FeedbackIdentityRecommendedAction.FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_WITH_CONTEXT:
+      return t('feedback.detail.identity_action_review_with_context')
+    case FeedbackIdentityRecommendedAction.FEEDBACK_IDENTITY_RECOMMENDED_ACTION_CAPTURE_MORE_KEYS:
+      return t('feedback.detail.identity_action_capture_more_keys')
+    default:
+      return t('feedback.detail.identity_action_capture_more_keys')
+  }
+}
+
+function identityRiskReasonLabel(reason: string, t: TFunction) {
+  switch (reason) {
+    case 'no_identity_keys':
+      return t('feedback.detail.identity_risk_no_identity_keys')
+    case 'only_source_user':
+      return t('feedback.detail.identity_risk_only_source_user')
+    case 'single_stable_key':
+      return t('feedback.detail.identity_risk_single_stable_key')
+    case 'missing_email':
+      return t('feedback.detail.identity_risk_missing_email')
+    case 'missing_system_context':
+      return t('feedback.detail.identity_risk_missing_system_context')
+    case 'single_source_path':
+      return t('feedback.detail.identity_risk_single_source_path')
+    default:
+      return t('feedback.detail.identity_risk_unknown')
+  }
+}
+
+function identityEvidenceKindLabel(kind: string, t: (key: string) => string) {
+  switch (kind) {
+    case 'source_user':
+      return t('feedback.detail.identity_kind_source_user')
+    case 'email':
+      return t('feedback.detail.identity_kind_email')
+    case 'external_id':
+      return t('feedback.detail.identity_kind_external_id')
+    case 'source_contact_id':
+      return t('feedback.detail.identity_kind_source_contact_id')
+    case 'crm_id':
+      return t('feedback.detail.identity_kind_crm_id')
+    case 'support_id':
+      return t('feedback.detail.identity_kind_support_id')
+    default:
+      return t('feedback.detail.identity_kind_unknown')
+  }
+}
+
 function ReplyDraftSection({
   id,
   draft,
@@ -788,16 +1536,21 @@ function ReplyDraftSection({
   const [isEditing, setIsEditing] = useState(false)
   const [preflightOpen, setPreflightOpen] = useState(false)
   const [editorText, setEditorText] = useState('')
+  const editorTextRef = useRef('')
   const [latestWorkflow, setLatestWorkflow] = useState<ReplyDraftWorkflow | undefined>()
   const copyTimer = useRef<number | undefined>(undefined)
-  const workflowSnapshotKey = `${id}:${workflow?.draftId ?? ''}:${workflow?.revision ?? ''}`
+  const workflowIdentityKey = `${id}:${workflow?.draftId ?? ''}:${workflow?.cycleNo ?? ''}`
   useEffect(() => () => window.clearTimeout(copyTimer.current), [])
   useEffect(() => {
-    if (workflowSnapshotKey) setLatestWorkflow(undefined)
-  }, [workflowSnapshotKey])
+    if (workflowIdentityKey) setLatestWorkflow(undefined)
+  }, [workflowIdentityKey])
 
-  const currentWorkflow = latestWorkflow ?? workflow
-  const current = currentWorkflow?.activeText ?? (regen.data ? regen.data.replyDraft : draft)
+  const currentWorkflow = freshestReplyDraftWorkflow(latestWorkflow, workflow)
+  const activeRevision = currentWorkflow ? displayReplyDraftRevision(currentWorkflow) : undefined
+  const current =
+    activeRevision?.content ??
+    currentWorkflow?.activeText ??
+    (regen.data ? regen.data.replyDraft : draft)
   const stamp = regen.data ? regen.data.replyDraftGeneratedAt : generatedAt
   const ago = relativeTime(stamp)
   const hasDraft = current !== ''
@@ -816,9 +1569,14 @@ function ReplyDraftSection({
     rejectDraft.isPending ||
     sendDraft.isPending
 
+  const setEditorDraftText = useCallback((value: string) => {
+    editorTextRef.current = value
+    setEditorText(value)
+  }, [])
+
   useEffect(() => {
-    if (!isEditing) setEditorText(current)
-  }, [current, isEditing])
+    if (!isEditing) setEditorDraftText(current)
+  }, [current, isEditing, setEditorDraftText])
 
   const onCopy = () => {
     navigator.clipboard
@@ -850,8 +1608,9 @@ function ReplyDraftSection({
   }
 
   const onSave = () => {
+    const content = editorTextRef.current
     updateDraft.mutate(
-      { content: editorText, expectedRevision: currentWorkflow?.revision ?? '0' },
+      { content, expectedRevision: currentWorkflow?.revision ?? '0' },
       {
         onSuccess: (next) => {
           if (isCompleteReplyDraftWorkflow(next.workflow)) setLatestWorkflow(next.workflow)
@@ -948,8 +1707,9 @@ function ReplyDraftSection({
               <DraftSkeleton />
             ) : isEditing ? (
               <textarea
+                aria-label={t('feedback.detail.reply_draft_editor_aria')}
                 value={editorText}
-                onChange={(event) => setEditorText(event.target.value)}
+                onChange={(event) => setEditorDraftText(event.target.value)}
                 className="min-h-44 w-full resize-y rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
               />
             ) : hasDraft ? (
@@ -983,6 +1743,7 @@ function ReplyDraftSection({
                 <Button
                   type="button"
                   size="sm"
+                  aria-label={t('feedback.detail.reply_draft_save_aria')}
                   onClick={onSave}
                   disabled={pending || editorText.trim() === ''}
                   className="motion-safe:active:scale-[0.98]"
@@ -995,7 +1756,7 @@ function ReplyDraftSection({
                   size="sm"
                   variant="ghost"
                   onClick={() => {
-                    setEditorText(current)
+                    setEditorDraftText(current)
                     setIsEditing(false)
                   }}
                   disabled={pending}
@@ -1024,7 +1785,7 @@ function ReplyDraftSection({
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  setEditorText(current)
+                  setEditorDraftText(current)
                   setIsEditing(true)
                 }}
                 disabled={pending}
@@ -1544,10 +2305,36 @@ function revisionByID(
   return (workflow.revisions ?? []).find((revision) => revision.id === id)
 }
 
+function displayReplyDraftRevision(workflow: ReplyDraftWorkflow): ReplyDraftRevision | undefined {
+  return (
+    revisionByID(workflow, workflow.sentRevisionId) ??
+    revisionByID(workflow, workflow.approvedRevisionId) ??
+    revisionByID(workflow, workflow.activeRevisionId)
+  )
+}
+
 function isCompleteReplyDraftWorkflow(
   workflow: ReplyDraftWorkflow | undefined,
 ): workflow is ReplyDraftWorkflow {
   return Boolean(workflow?.draftId && Array.isArray(workflow.revisions))
+}
+
+function freshestReplyDraftWorkflow(
+  local: ReplyDraftWorkflow | undefined,
+  remote: ReplyDraftWorkflow | undefined,
+) {
+  if (!local) return remote
+  if (!remote) return local
+  if (local.draftId !== remote.draftId || local.cycleNo !== remote.cycleNo) return remote
+  const localRevision = replyDraftRevisionNumber(local)
+  const remoteRevision = replyDraftRevisionNumber(remote)
+  if (remoteRevision > localRevision) return remote
+  return local
+}
+
+function replyDraftRevisionNumber(workflow: ReplyDraftWorkflow) {
+  const parsed = Number.parseInt(workflow.revision, 10)
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 // relativeTime renders a server timestamp as "x ago", or null when the value is
@@ -2168,6 +2955,7 @@ function SupportPromoteCard({
                 merge_target_id: undefined,
                 promote_feedback_ids: promoteIDs,
                 feedback_id: feedbackId,
+                account_key: undefined,
               }}
             >
               {promoteIDs.includes(',')
@@ -2251,6 +3039,7 @@ function PortalSubmissionSection({
                     merge_target_id: undefined,
                     promote_feedback_ids: feedbackId,
                     feedback_id: feedbackId,
+                    account_key: undefined,
                   }}
                 >
                   {t('feedback.detail.portal_submission_promote_action')}
@@ -2355,12 +3144,190 @@ function isPortalRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function normalizeSignalTraceStatus(status: string) {
+  const value = status.trim().toLowerCase()
+  if (['completed', 'done', 'ok', 'delivered', 'resolved', 'shipped'].includes(value)) {
+    return 'completed'
+  }
+  if (['pending', 'enriching', 'resolving', 'open', 'planned', 'in_progress'].includes(value)) {
+    return 'pending'
+  }
+  if (['failed', 'dead', 'error', 'rejected', 'bounced', 'suppressed', 'expired'].includes(value)) {
+    return 'failed'
+  }
+  if (value === 'missing' || value === '') return 'missing'
+  return 'observed'
+}
+
+function traceStatusPillClass(status: string) {
+  switch (normalizeSignalTraceStatus(status)) {
+    case 'completed':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    case 'pending':
+      return 'border-amber-200 bg-amber-50 text-amber-800'
+    case 'failed':
+      return 'border-destructive/25 bg-destructive/5 text-destructive'
+    case 'missing':
+      return 'border-border/60 bg-muted/10 text-muted-foreground'
+    default:
+      return 'border-sky-200 bg-sky-50 text-sky-800'
+  }
+}
+
+function traceStatusSurfaceClass(status: string) {
+  switch (normalizeSignalTraceStatus(status)) {
+    case 'completed':
+      return 'border-emerald-200 bg-emerald-50/60'
+    case 'pending':
+      return 'border-amber-200 bg-amber-50/70'
+    case 'failed':
+      return 'border-destructive/25 bg-destructive/5'
+    case 'missing':
+      return 'border-border/60 bg-muted/10'
+    default:
+      return 'border-sky-200 bg-sky-50/60'
+  }
+}
+
+function signalTraceStatusLabel(status: string, t: (key: string) => string) {
+  switch (normalizeSignalTraceStatus(status)) {
+    case 'completed':
+      return t('feedback.signal_trace.status.completed')
+    case 'pending':
+      return t('feedback.signal_trace.status.pending')
+    case 'failed':
+      return t('feedback.signal_trace.status.failed')
+    case 'missing':
+      return t('feedback.signal_trace.status.missing')
+    default:
+      return t('feedback.signal_trace.status.observed')
+  }
+}
+
+function signalTraceStageLabel(stage: string, t: (key: string) => string, fallback = '') {
+  switch (stage) {
+    case 'source_event':
+      return t('feedback.signal_trace.stages.source_event')
+    case 'enrichment':
+      return t('feedback.signal_trace.stages.enrichment')
+    case 'request':
+      return t('feedback.signal_trace.stages.request')
+    case 'notification':
+      return t('feedback.signal_trace.stages.notification')
+    case 'survey':
+      return t('feedback.signal_trace.stages.survey')
+    default:
+      return fallback || stage
+  }
+}
+
+function signalTraceEventKindLabel(kind: string, t: (key: string) => string) {
+  switch (kind) {
+    case 'source_captured':
+      return t('feedback.signal_trace.event_kinds.source_captured')
+    case 'enrichment_state':
+      return t('feedback.signal_trace.event_kinds.enrichment_state')
+    case 'semantic_extraction':
+      return t('feedback.signal_trace.event_kinds.semantic_extraction')
+    case 'llm_call':
+      return t('feedback.signal_trace.event_kinds.llm_call')
+    case 'classification_failure':
+      return t('feedback.signal_trace.event_kinds.classification_failure')
+    case 'feedback_outbox_delivery':
+      return t('feedback.signal_trace.event_kinds.feedback_outbox_delivery')
+    case 'request_linked':
+      return t('feedback.signal_trace.event_kinds.request_linked')
+    case 'request_notification_event':
+      return t('feedback.signal_trace.event_kinds.request_notification_event')
+    case 'request_notification_delivery':
+      return t('feedback.signal_trace.event_kinds.request_notification_delivery')
+    case 'survey_invitation':
+      return t('feedback.signal_trace.event_kinds.survey_invitation')
+    case 'survey_response':
+      return t('feedback.signal_trace.event_kinds.survey_response')
+    case 'survey_low_score_review':
+      return t('feedback.signal_trace.event_kinds.survey_low_score_review')
+    default:
+      return kind
+  }
+}
+
+function traceMetadataSummary(metadata: Record<string, unknown> | undefined) {
+  if (!metadata) return []
+  const preferred = [
+    'display_id',
+    'request_id',
+    'model_id',
+    'purpose',
+    'reason_class',
+    'channel',
+    'score',
+    'delivery_id',
+    'event_id',
+    'failure_kind',
+    'http_status',
+    'source',
+  ]
+  const out: [string, string][] = []
+  for (const key of preferred) {
+    const value = metadata[key]
+    if (value == null || value === '') continue
+    out.push([key, metadataValueText(value)])
+    if (out.length >= 4) break
+  }
+  return out
+}
+
+function metadataValueText(value: unknown): string {
+  if (Array.isArray(value)) return value.map(metadataValueText).join(', ')
+  if (typeof value === 'object' && value !== null) return JSON.stringify(value)
+  return String(value)
+}
+
+function traceMetadataLabel(key: string, t: TFunction) {
+  switch (key) {
+    case 'display_id':
+      return t('feedback.signal_trace.metadata.display_id')
+    case 'request_id':
+      return t('feedback.signal_trace.metadata.request_id')
+    case 'model_id':
+      return t('feedback.signal_trace.metadata.model_id')
+    case 'purpose':
+      return t('feedback.signal_trace.metadata.purpose')
+    case 'reason_class':
+      return t('feedback.signal_trace.metadata.reason_class')
+    case 'channel':
+      return t('feedback.signal_trace.metadata.channel')
+    case 'score':
+      return t('feedback.signal_trace.metadata.score')
+    case 'delivery_id':
+      return t('feedback.signal_trace.metadata.delivery_id')
+    case 'event_id':
+      return t('feedback.signal_trace.metadata.event_id')
+    case 'failure_kind':
+      return t('feedback.signal_trace.metadata.failure_kind')
+    case 'http_status':
+      return t('feedback.signal_trace.metadata.http_status')
+    case 'source':
+      return t('feedback.signal_trace.metadata.source')
+    default:
+      return key
+  }
+}
+
+function compactDateTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return format(date, 'MM-dd HH:mm')
+}
+
 export const feedbackDetailSheetTestables = {
   customerRequestPriorityLabel,
   customerRequestStatusLabel,
   detailSummaryState,
   detailWorkbenchCue,
   existingRequestFor,
+  identityEvidenceKindLabel,
   isCompleteReplyDraftWorkflow,
   isPortalRecord,
   isPositiveIntString,
@@ -2377,6 +3344,10 @@ export const feedbackDetailSheetTestables = {
   replyDraftTimelineItems,
   revisionByID,
   supportChannelCandidate,
+  signalTraceEventKindLabel,
+  signalTraceStageLabel,
+  signalTraceStatusLabel,
+  traceMetadataSummary,
   terminalFailureReasonClassLabel,
   terminalFailureSnapshotPresent,
   workbenchModeLabel,

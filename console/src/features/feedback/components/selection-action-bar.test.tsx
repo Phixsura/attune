@@ -50,6 +50,15 @@ describe('SelectionActionBar', () => {
     expect(onPromoteToCustomerRequest).toHaveBeenCalledTimes(1)
   })
 
+  it('shows the operator command center entry when handler is provided', async () => {
+    const onOpenCommandCenter = vi.fn()
+    const { user } = renderWithProviders(
+      <SelectionActionBar {...defaultProps} onOpenCommandCenter={onOpenCommandCenter} />,
+    )
+    await user.click(screen.getByRole('button', { name: '批量指挥面' }))
+    expect(onOpenCommandCenter).toHaveBeenCalledTimes(1)
+  })
+
   it('shows loading state with message', () => {
     renderWithProviders(
       <SelectionActionBar {...defaultProps} isLoading loadingMessage="处理中..." />,

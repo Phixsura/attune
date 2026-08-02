@@ -9,6 +9,9 @@ service CustomerRequestService {
   rpc ListCustomerRequests(ListCustomerRequestsRequest) returns (ListCustomerRequestsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/customer-requests"};
   }
+  rpc GetCustomerRequestAccountSummary(GetCustomerRequestAccountSummaryRequest) returns (CustomerRequestAccountSummary) {
+    option (google.api.http) = {get: "/fb/v1/console/customer-requests/account-summary"};
+  }
   rpc GetCustomerRequestScoringSettings(GetCustomerRequestScoringSettingsRequest) returns (CustomerRequestScoringSettings) {
     option (google.api.http) = {get: "/fb/v1/console/customer-requests/scoring-settings"};
   }
@@ -200,6 +203,68 @@ message CustomerRequestOwner {
   string role = 5;
 }
 
+enum CustomerRequestDecisionScoreFactorKind {
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY = 1;
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_FEEDBACK = 2;
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_CUSTOMERS = 3;
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_ACCOUNTS = 4;
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_VOTES = 5;
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_REVENUE = 6;
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH = 7;
+}
+
+message CustomerRequestDecisionScoreFactor {
+  CustomerRequestDecisionScoreFactorKind kind = 1;
+  int32 raw_count = 2;
+  int64 raw_value_cents = 3;
+  int32 weight = 4;
+  int32 cap = 5;
+  int64 unit_cents = 6;
+  int32 contribution = 7;
+  bool capped = 8;
+  bool contributes_to_score = 9;
+}
+
+enum CustomerRequestEvidenceConfidence {
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_LOW = 1;
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_MEDIUM = 2;
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_HIGH = 3;
+}
+
+enum CustomerRequestEvidenceQualityReason {
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_SUPPORTING_FEEDBACK = 1;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_LOW_FEEDBACK_VOLUME = 2;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_CUSTOMER = 3;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_ACCOUNT_CONTEXT = 4;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_STALE_EVIDENCE = 5;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_DELIVERY_LINK = 6;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_HIDDEN_FEEDBACK = 7;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SUPPORTING_FEEDBACK = 8;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_CUSTOMER = 9;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_ACCOUNT_CONTEXT = 10;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_FRESH_EVIDENCE = 11;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_DELIVERY_LINKED = 12;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_SOURCE = 13;
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_SOURCE = 14;
+}
+
+message CustomerRequestEvidenceQuality {
+  int32 score = 1;
+  CustomerRequestEvidenceConfidence confidence = 2;
+  int32 evidence_count = 3;
+  int32 source_count = 4;
+  int32 customer_count = 5;
+  int32 account_count = 6;
+  string latest_evidence_at = 7;
+  bool stale = 8;
+  bool low_confidence = 9;
+  repeated CustomerRequestEvidenceQualityReason gap_reasons = 10;
+  repeated CustomerRequestEvidenceQualityReason strengths = 11;
+}
+
 message CustomerRequestSummary {
   string id = 1;
   string display_id = 2;
@@ -231,6 +296,8 @@ message CustomerRequestSummary {
   int32 failed_issue_count = 28;
   int32 pending_issue_count = 29;
   int32 manual_issue_count = 30;
+  repeated CustomerRequestDecisionScoreFactor decision_score_factors = 31;
+  CustomerRequestEvidenceQuality evidence_quality = 32;
 }
 
 message CustomerRequestFeedbackEvidence {
@@ -364,6 +431,49 @@ message CustomerRequestAuditEntry {
   string created_at = 6;
 }
 
+enum CustomerRequestDecisionPublicSafeState {
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_PUBLIC_SAFE = 1;
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_NEEDS_REVIEW = 2;
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_INTERNAL_ONLY = 3;
+}
+
+message CustomerRequestDecisionRecord {
+  int64 audit_id = 1;
+  string action = 2;
+  string actor_type = 3;
+  string actor_id = 4;
+  string summary = 5;
+  string created_at = 6;
+  bool status_changed = 7;
+  CustomerRequestStatus old_status = 8;
+  CustomerRequestStatus new_status = 9;
+  bool priority_changed = 10;
+  CustomerRequestPriority old_priority = 11;
+  CustomerRequestPriority new_priority = 12;
+  bool owner_changed = 13;
+  string old_owner_member_id = 14;
+  string new_owner_member_id = 15;
+  bool title_changed = 16;
+  bool description_changed = 17;
+  bool has_decision_snapshot = 18;
+  int32 decision_score = 19;
+  repeated CustomerRequestDecisionScoreFactor decision_score_factors = 20;
+  CustomerRequestDeliveryHealth delivery_health = 21;
+  int32 supporting_feedback_count = 22;
+  int32 customer_count = 23;
+  int32 account_count = 24;
+  int32 vote_count = 25;
+  int64 revenue_impact_cents = 26;
+  string revenue_currency = 27;
+  string decision_rationale = 28;
+  string owner_member_id = 29;
+  string owner_display = 30;
+  string evidence_bundle_ref = 31;
+  CustomerRequestDecisionPublicSafeState public_safe_state = 32;
+  repeated string public_safe_reasons = 33;
+}
+
 message CustomerRequestDetail {
   CustomerRequestSummary request = 1;
   string description = 2;
@@ -376,6 +486,86 @@ message CustomerRequestDetail {
   repeated CustomerRequestAccountProfile account_profiles = 9;
   repeated CustomerRequestNote notes = 10;
   CustomerRequestDeliveryGraph delivery_graph = 11;
+  repeated CustomerRequestDecisionRecord decision_records = 12;
+}
+
+enum CustomerRequestAccountSignalKind {
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_DELIVERY_RISK = 1;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_HIGH_PRIORITY_DEMAND = 2;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_REVENUE_IMPACT = 3;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_BREADTH = 4;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_GAP = 5;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_SHIPPED_OUTCOME = 6;
+}
+
+enum CustomerRequestAccountSignalSeverity {
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_POSITIVE = 1;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_INFO = 2;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING = 3;
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL = 4;
+}
+
+message CustomerRequestAccountDecisionSignal {
+  CustomerRequestAccountSignalKind kind = 1;
+  CustomerRequestAccountSignalSeverity severity = 2;
+  int32 count = 3;
+  int64 value_cents = 4;
+  int32 score = 5;
+}
+
+enum CustomerRequestAccountEventKind {
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_UNSPECIFIED = 0;
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_REQUEST_CREATED = 1;
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_FEEDBACK_LINKED = 2;
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_CUSTOMER_LINKED = 3;
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_VOTE_ADDED = 4;
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_LINKED = 5;
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_SYNCED = 6;
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_NOTE_ADDED = 7;
+}
+
+message CustomerRequestAccountEvent {
+  CustomerRequestAccountEventKind kind = 1;
+  string request_id = 2;
+  string request_display_id = 3;
+  string request_title = 4;
+  string occurred_at = 5;
+  string actor_id = 6;
+  string subject_display = 7;
+  string source = 8;
+  string description = 9;
+  int64 feedback_id = 10;
+  string issue_provider = 11;
+  string issue_key = 12;
+  string issue_url = 13;
+  CustomerRequestIssueSyncState issue_sync_state = 14;
+}
+
+message CustomerRequestAccountSummary {
+  string account_key = 1;
+  CustomerRequestAccountProfile account_profile = 2;
+  int32 request_count = 3;
+  int32 feedback_count = 4;
+  int32 customer_count = 5;
+  int32 vote_count = 6;
+  int32 issue_count = 7;
+  int32 synced_issue_count = 8;
+  int32 stale_issue_count = 9;
+  int32 failed_issue_count = 10;
+  int32 pending_issue_count = 11;
+  int32 manual_issue_count = 12;
+  int64 revenue_impact_cents = 13;
+  string revenue_currency = 14;
+  int32 high_priority_request_count = 15;
+  int32 shipped_request_count = 16;
+  int32 stale_or_failed_issue_count = 17;
+  repeated CustomerRequestSummary timeline = 18;
+  int32 average_decision_score = 19;
+  int32 top_decision_score = 20;
+  repeated CustomerRequestAccountDecisionSignal decision_signals = 21;
+  repeated CustomerRequestAccountEvent events = 22;
 }
 
 message CustomerRequestScoringSettings {
@@ -428,6 +618,7 @@ message CustomerRequestSavedViewState {
   CustomerRequestSort sort = 6;
   SortDirection direction = 7;
   optional int64 feedback_id = 8;
+  optional string account_key = 9;
 }
 
 message CustomerRequestSavedView {
@@ -477,11 +668,26 @@ message ListCustomerRequestsRequest {
   optional string cursor = 9;
   optional int64 feedback_id = 10;
   optional string cohort_id = 11;
+  optional string account_key = 12;
 }
 
 message ListCustomerRequestsResponse {
   repeated CustomerRequestSummary requests = 1;
   optional string next_cursor = 2;
+}
+
+message GetCustomerRequestAccountSummaryRequest {
+  string account_key = 1 [(google.api.field_behavior) = REQUIRED];
+  string q = 2;
+  repeated CustomerRequestStatus status = 3;
+  repeated CustomerRequestPriority priority = 4;
+  optional string owner_member_id = 5;
+  CustomerRequestVisibility visibility = 6;
+  CustomerRequestSort sort = 7;
+  SortDirection direction = 8;
+  optional int64 feedback_id = 9;
+  optional int32 timeline_limit = 10;
+  optional int32 event_limit = 11;
 }
 
 message GetCustomerRequestRequest {

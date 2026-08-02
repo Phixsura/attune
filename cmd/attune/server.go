@@ -76,6 +76,7 @@ import (
 	"github.com/Phixsura/attune/internal/service/outbox"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
 	requestnotificationsvc "github.com/Phixsura/attune/internal/service/requestnotification"
+	surveysvc "github.com/Phixsura/attune/internal/service/survey"
 	"github.com/Phixsura/attune/internal/worker/batchjob"
 
 	digestrunrepo "github.com/Phixsura/attune/internal/repo/digestrun"
@@ -676,6 +677,7 @@ func startBackgroundWorkers(
 	startReplyDraftWorker(ctx, pool, enricher, llm, secrets)
 	startDigestWorker(ctx, pool, llm, consoleBaseURL)
 	startRequestNotificationWorker(ctx, pool, secrets, consoleBaseURL)
+	startSurveyWorker(ctx, pool, secrets, consoleBaseURL)
 	startGDPRExportWorker(ctx, pool, gdprExportTTL)
 	startAuditEvidenceWorker(ctx, pool, auditEvidenceExportTTL, auditEvidenceSigningKey)
 
@@ -691,6 +693,11 @@ func startBackgroundWorkers(
 func startRequestNotificationWorker(ctx context.Context, pool *pgxpool.Pool, secrets *secretstore.TinkStore, publicBaseURL string) {
 	worker := requestnotificationsvc.NewWorker(buildRequestNotificationService(pool, secrets, publicBaseURL))
 	safego(ctx, "request_notifications", func() { worker.Run(ctx) })
+}
+
+func startSurveyWorker(ctx context.Context, pool *pgxpool.Pool, secrets *secretstore.TinkStore, publicBaseURL string) {
+	worker := surveysvc.NewWorker(buildSurveyService(pool, publicBaseURL, secrets), notify.NewTransport(nil, notify.DefaultRetry()))
+	safego(ctx, "survey_invitations", func() { worker.Run(ctx) })
 }
 
 func startGDPRExportWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL time.Duration) {

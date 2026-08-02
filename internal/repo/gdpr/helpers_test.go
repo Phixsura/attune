@@ -138,7 +138,7 @@ func TestScanExportJob(t *testing.T) {
 
 	job, err := scanExportJob(fakeRow{values: []any{
 		"job-1", "tenant-1", "subject-1", "hash-1", "Subject One", ExportJobCompleted,
-		[]byte("zip"), "export.zip", 1, 2, 3, 4, "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt),
+		[]byte("zip"), "export.zip", 1, 2, 3, 4, 5, 6, 7, 8, 9, "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt),
 		ptrext.Of(expiresAt), ptrext.Of(downloadedAt), ptrext.Of(revokedAt), ptrext.Of(claimedAt), ptrext.Of(heartbeatAt),
 	}})
 	if err != nil {
@@ -155,6 +155,9 @@ func TestScanExportJob(t *testing.T) {
 	}
 	if job.CreatedByType != "admin" {
 		t.Fatalf("CreatedByType = %q, want admin", job.CreatedByType)
+	}
+	if job.Counts.SurveyRecoveryNotificationCount != 9 {
+		t.Fatalf("SurveyRecoveryNotificationCount = %d, want 9", job.Counts.SurveyRecoveryNotificationCount)
 	}
 }
 
@@ -179,7 +182,7 @@ func TestScanRequest(t *testing.T) {
 
 	req, err := scanRequest(fakeRow{values: []any{
 		"req-1", "tenant-1", RequestTypeDelete, RequestStatusScheduled, "subject-1", "hash-1", "Subject One",
-		1, 2, 3, 4, 5, "bundle.zip", "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt), ptrext.Of(expiresAt), ptrext.Of(downloadedAt),
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10, "bundle.zip", "", "admin", "admin-1", now, ptrext.Of(startedAt), ptrext.Of(completedAt), ptrext.Of(expiresAt), ptrext.Of(downloadedAt),
 		ptrext.Of(executeAfter), ptrext.Of(cancelledAt), ptrext.Of(revokedAt),
 	}})
 	if err != nil {
@@ -193,6 +196,9 @@ func TestScanRequest(t *testing.T) {
 	}
 	if req.Counts.OutboxCount != 5 {
 		t.Fatalf("OutboxCount = %d, want 5", req.Counts.OutboxCount)
+	}
+	if req.Counts.SurveyRecoveryNotificationCount != 10 {
+		t.Fatalf("SurveyRecoveryNotificationCount = %d, want 10", req.Counts.SurveyRecoveryNotificationCount)
 	}
 	if req.RevokedAt == nil || !req.RevokedAt.Equal(revokedAt) {
 		t.Fatalf("RevokedAt = %v, want %v", req.RevokedAt, revokedAt)
@@ -256,8 +262,8 @@ func TestSubjectMatchClauseIncludesLegacyFallbacks(t *testing.T) {
 func TestSubjectInfoTxReturnsFirstDisplayAndIDs(t *testing.T) {
 	t.Parallel()
 	rows := ptrext.Of(fakeRows{rows: [][]any{
-		{int64(10), "Alice"},
-		{int64(20), "Alice Updated"},
+		{int64(10), "Alice", "sha256:alice"},
+		{int64(20), "Alice Updated", "sha256:alice"},
 	}})
 	info, err := subjectInfoTx(context.Background(), fakeQueryer{rows: rows}, "tenant-1", "alice@example.com")
 	if err != nil {
@@ -268,6 +274,30 @@ func TestSubjectInfoTxReturnsFirstDisplayAndIDs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(info.feedbackIDs, []int64{10, 20}) {
 		t.Fatalf("feedbackIDs = %#v", info.feedbackIDs)
+	}
+	if !reflect.DeepEqual(info.feedbackIDTexts, []string{"10", "20"}) {
+		t.Fatalf("feedbackIDTexts = %#v", info.feedbackIDTexts)
+	}
+	if !reflect.DeepEqual(info.subjectHashes, []string{"sha256:alice"}) {
+		t.Fatalf("subjectHashes = %#v", info.subjectHashes)
+	}
+}
+
+func TestSubjectSurveyInvitationClauseMatchesAnchorsAndContacts(t *testing.T) {
+	t.Parallel()
+	clause := subjectSurveyInvitationClause(2, 3, 4)
+	wantFragments := []string{
+		"'manual_link'",
+		"'request_resolved'",
+		"si.source_id = ANY($2)",
+		"si.recipient_snapshot->>'feedback_id' = ANY($2)",
+		"c.subject_key = $3",
+		"c.subject_hash = ANY($4)",
+	}
+	for _, fragment := range wantFragments {
+		if !strings.Contains(clause, fragment) {
+			t.Fatalf("subjectSurveyInvitationClause() = %q, want fragment %q", clause, fragment)
+		}
 	}
 }
 

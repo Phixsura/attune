@@ -1,0 +1,4 @@
+External ID,Title,State,Source,Account Key,Revenue Impact Cents,Evidence URL,Tags
+fb-1001,CSV import stalls at 95 percent,open,zendesk,acct:acme,2400000,https://support.example.test/tickets/1001,"import;reliability"
+fb-1002,Need audit export for quarterly review,planned,salesforce,acct:globex,800000,https://crm.example.test/cases/1002,"governance;export"
+fb-1003,JSON bulk import should show dry-run errors,open,github,acct:initech,0,https://github.example.test/issues/1003,"import;dx"

@@ -5,6 +5,7 @@ package requestnotification
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	repo "github.com/Phixsura/attune/internal/repo/requestnotification"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
+
+var requestNotificationStatusOrder = []string{"open", "planned", "in_progress", "shipped", "cancelled"}
 
 type PreviewResult struct {
 	EligibleRecipients int
@@ -406,6 +409,41 @@ func (s *Service) RecordProviderSuppression(ctx context.Context, in ProviderSupp
 func (s *Service) ListDeliveries(ctx context.Context, filter repo.ListDeliveryFilter) ([]repo.Delivery, error) {
 	items, err := s.repo.ListDeliveries(ctx, filter)
 	return items, mapRepoError(err)
+}
+
+func (s *Service) ListStatusEvidence(ctx context.Context, tenantID string) ([]repo.StatusEvidence, error) {
+	rows, err := s.repo.ListStatusEvidence(ctx, strings.TrimSpace(tenantID))
+	if err != nil {
+		return nil, mapRepoError(err)
+	}
+	byStatus := make(map[string]repo.StatusEvidence, len(rows))
+	for _, row := range rows {
+		status := strings.TrimSpace(row.RequestStatus)
+		if status == "" {
+			status = "unknown"
+		}
+		row.RequestStatus = status
+		byStatus[status] = row
+	}
+	out := make([]repo.StatusEvidence, 0, len(requestNotificationStatusOrder)+len(rows))
+	seen := map[string]bool{}
+	for _, status := range requestNotificationStatusOrder {
+		item := byStatus[status]
+		item.RequestStatus = status
+		out = append(out, item)
+		seen[status] = true
+	}
+	extraStatuses := make([]string, 0, len(byStatus))
+	for status := range byStatus {
+		if !seen[status] {
+			extraStatuses = append(extraStatuses, status)
+		}
+	}
+	sort.Strings(extraStatuses)
+	for _, status := range extraStatuses {
+		out = append(out, byStatus[status])
+	}
+	return out, nil
 }
 
 func (s *Service) RetryDelivery(ctx context.Context, tenantID string, id int64, actorID string) (repo.Delivery, error) {

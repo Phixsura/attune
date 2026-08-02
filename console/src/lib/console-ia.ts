@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bell,
   Bot,
+  ClipboardCheck,
   ClipboardList,
   DatabaseZap,
   GitBranch,
@@ -228,6 +229,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
   {
     group: 'integrations',
+    icon: ClipboardCheck,
+    labelKey: 'nav.surveys',
+    path: '/integrations/surveys',
+    adminOnly: true,
+    settingsAliases: ['surveys', 'survey-campaigns', 'survey_campaigns'],
+  },
+  {
+    group: 'integrations',
     icon: Send,
     labelKey: 'nav.reply_send_hook',
     path: '/integrations/reply-send-hook',
@@ -319,6 +328,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
 ]
 
+const consoleGroupDefaultOverrides: Partial<
+  Record<ConsoleNavGroupId, Partial<Record<Role, string>>>
+> = {
+  administration: {
+    delegated_admin: '/administration/audit-log',
+  },
+}
+
 export function canAccessConsoleItem(role: Role, access?: ConsoleRouteAccess): boolean {
   /* v8 ignore next -- @preserve: callers omit access for universally visible chrome items. */
   if (!access) return true
@@ -332,6 +349,12 @@ export function getConsoleItemsForRole(role: Role): ConsoleNavItem[] {
 }
 
 export function getConsoleGroupDefaultPath(group: ConsoleNavGroupId, role: Role): string {
+  const override = consoleGroupDefaultOverrides[group]?.[role]
+  if (override) {
+    const item = consoleNavItems.find((candidate) => candidate.path === override)
+    /* v8 ignore next -- @preserve: default overrides are curated to point at accessible nav items. */
+    if (item && canAccessConsoleItem(role, item)) return override
+  }
   return getConsoleItemsForRole(role).find((item) => item.group === group)?.path ?? '/feedback'
 }
 

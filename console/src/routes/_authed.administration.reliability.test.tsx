@@ -103,6 +103,94 @@ describe('_authed.administration.reliability route', () => {
         seenPaths.add(deliveriesURL.pathname)
         return HttpResponse.json({ deliveries: [] })
       }),
+      http.get('/fb/v1/console/feedback/stats', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          periodStart: '2026-07-01T00:00:00Z',
+          periodEnd: '2026-07-31T23:59:59Z',
+          total: '2',
+          urgentCount: '1',
+          dims: [],
+        })
+      }),
+      http.get('/fb/v1/console/request-notifications/status-evidence', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          items: [
+            {
+              requestStatus: 'shipped',
+              expectedCustomers: 4,
+              notifiedCustomers: 2,
+              failedCustomers: 1,
+              suppressedCustomers: 1,
+              recoveryPendingCustomers: 1,
+              eventCount: 2,
+              lastEventAt: '2026-07-16T00:00:00Z',
+            },
+          ],
+        })
+      }),
+      http.get('/fb/v1/console/usage', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          periodStart: '2026-07-01T00:00:00Z',
+          periodEnd: '2026-07-31T23:59:59Z',
+          total: '72',
+          quota: '100',
+          series: [{ bucket: '2026-07-01T00:00:00Z', value: '72' }],
+        })
+      }),
+      http.get('/fb/v1/console/llm-usage', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          periodStart: '2026-07-01T00:00:00Z',
+          periodEnd: '2026-07-31T23:59:59Z',
+          granularity: 'week',
+          series: [],
+          promptTokens: '12000',
+          completionTokens: '4000',
+          costUsd: 2.34,
+          calls: '20',
+          errors: '1',
+        })
+      }),
+      http.get('/fb/v1/console/customer-requests', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ requests: [] })
+      }),
+      http.get('/fb/v1/console/surveys/analytics', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({
+          invitationCount: 0,
+          deliveredCount: 0,
+          suppressedCount: 0,
+          completedCount: 0,
+          lowScoreCount: 0,
+          averageScore: 0,
+          responseRate: 0,
+          scoreDistribution: [],
+          suppressionReasonDistribution: [],
+          averageResponseSeconds: 0,
+          positiveScoreCount: 0,
+          positiveScoreRate: 0,
+          openLowScoreReviewCount: 0,
+          overdueLowScoreReviewCount: 0,
+          notStartedCount: 0,
+          openedCount: 0,
+          expiredCount: 0,
+          unassignedLowScoreReviewCount: 0,
+          criticalLowScoreReviewCount: 0,
+          pendingCustomerContactReviewCount: 0,
+          overdueRecoveryQueueCount: 0,
+          unassignedRecoveryQueueCount: 0,
+          pendingContactRecoveryQueueCount: 0,
+          missingRootCauseRecoveryQueueCount: 0,
+          missingActionRecoveryQueueCount: 0,
+          pendingDeliveryCount: 0,
+          delayedDeliveryCount: 0,
+          rejectedDeliveryCount: 0,
+        })
+      }),
     )
 
     const queryClient = new QueryClient({
@@ -112,7 +200,7 @@ describe('_authed.administration.reliability route', () => {
       context: { queryClient: QueryClient }
     }) => Promise<unknown>
 
-    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(9)
+    await expect(loader({ context: { queryClient } })).resolves.toHaveLength(15)
     expect(ReliabilityRoute.options.component).toBeTypeOf('function')
     expect(seenPaths).toEqual(
       new Set([
@@ -125,6 +213,12 @@ describe('_authed.administration.reliability route', () => {
         '/fb/v1/console/mcp/clients',
         '/fb/v1/console/gdpr/operations',
         '/fb/v1/console/outbox/deliveries',
+        '/fb/v1/console/feedback/stats',
+        '/fb/v1/console/request-notifications/status-evidence',
+        '/fb/v1/console/usage',
+        '/fb/v1/console/llm-usage',
+        '/fb/v1/console/customer-requests',
+        '/fb/v1/console/surveys/analytics',
       ]),
     )
     expect(deliveriesURL?.searchParams.get('status')).toBe('dead')

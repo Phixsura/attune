@@ -1,0 +1,301 @@
+{
+  "schemaVersion": "attune.integration_catalog.v1",
+  "connectors": [
+    {
+      "id": "jira",
+      "displayName": "Jira",
+      "category": "issue_tracker",
+      "description": "Sync product feedback into Jira issues with status, labels, and project context.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/jira.md",
+        "authTypes": ["oauth2", "api_token"],
+        "setupChecks": ["credential_test", "project_key", "webhook_delivery"]
+      },
+      "permissions": {
+        "scopes": ["read:jira-work", "write:jira-work", "read:jira-user"],
+        "leastPrivilege": true,
+        "dataClasses": ["request", "status", "comment_reference"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["credential_test", "webhook_delivery", "backfill_cursor"],
+        "slo": "99.5% connector health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/jira-sample-replay.json",
+        "event": "issue_updated",
+        "normalizedType": "customer_request",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "stable-v1-to-managed-v2",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Integrations",
+      "supportTier": "standard"
+    },
+    {
+      "id": "github",
+      "displayName": "GitHub",
+      "category": "issue_tracker",
+      "description": "Sync customer requests to GitHub Issues with replayable webhook events.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/github.md",
+        "authTypes": ["github_app", "token"],
+        "setupChecks": ["credential_test", "repository_access", "webhook_secret"]
+      },
+      "permissions": {
+        "scopes": ["issues:read", "issues:write", "metadata:read", "webhooks:write"],
+        "leastPrivilege": true,
+        "dataClasses": ["request", "label", "issue_reference"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["credential_test", "signature_verification", "replay_fixture"],
+        "slo": "99.5% connector health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/github-sample-replay.json",
+        "event": "issues.edited",
+        "normalizedType": "customer_request",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "token-to-github-app",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Integrations",
+      "supportTier": "standard"
+    },
+    {
+      "id": "intercom",
+      "displayName": "Intercom",
+      "category": "support",
+      "description": "Import support conversations and customer context without taking over support ownership.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/intercom.md",
+        "authTypes": ["oauth2"],
+        "setupChecks": ["credential_test", "workspace_access", "conversation_scope"]
+      },
+      "permissions": {
+        "scopes": ["conversations:read", "contacts:read", "tickets:write"],
+        "leastPrivilege": true,
+        "dataClasses": ["conversation_reference", "contact", "support_ticket"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["credential_test", "conversation_cursor", "redaction_policy"],
+        "slo": "99.5% connector health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/intercom-sample-replay.json",
+        "event": "conversation.user.replied",
+        "normalizedType": "feedback",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "conversation-v1-to-ticket-context",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Integrations",
+      "supportTier": "standard"
+    },
+    {
+      "id": "zendesk",
+      "displayName": "Zendesk",
+      "category": "support",
+      "description": "Map Zendesk tickets and user context into request evidence and recovery workflows.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/zendesk.md",
+        "authTypes": ["oauth2", "api_token"],
+        "setupChecks": ["credential_test", "subdomain", "ticket_webhook"]
+      },
+      "permissions": {
+        "scopes": ["tickets:read", "tickets:write", "users:read"],
+        "leastPrivilege": true,
+        "dataClasses": ["support_ticket", "status", "contact"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["credential_test", "ticket_cursor", "webhook_delivery"],
+        "slo": "99.5% connector health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/zendesk-sample-replay.json",
+        "event": "ticket.updated",
+        "normalizedType": "feedback",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "ticket-v1-to-audit-events",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Integrations",
+      "supportTier": "standard"
+    },
+    {
+      "id": "salesforce",
+      "displayName": "Salesforce",
+      "category": "crm",
+      "description": "Bring account, contact, and opportunity context into prioritization evidence.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/salesforce.md",
+        "authTypes": ["oauth2"],
+        "setupChecks": ["credential_test", "object_access", "field_mapping"]
+      },
+      "permissions": {
+        "scopes": ["api", "refresh_token", "offline_access"],
+        "leastPrivilege": true,
+        "dataClasses": ["account", "contact", "commercial_context"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["credential_test", "object_schema", "sync_cursor"],
+        "slo": "99.5% connector health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/salesforce-sample-replay.json",
+        "event": "account.updated",
+        "normalizedType": "account_context",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "account-context-v1-to-subject-graph",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Integrations",
+      "supportTier": "enterprise"
+    },
+    {
+      "id": "hubspot",
+      "displayName": "HubSpot",
+      "category": "crm",
+      "description": "Attach contact, company, and ticket context to customer-request evidence.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/hubspot.md",
+        "authTypes": ["oauth2", "private_app_token"],
+        "setupChecks": ["credential_test", "object_access", "association_mapping"]
+      },
+      "permissions": {
+        "scopes": ["crm.objects.contacts.read", "crm.objects.companies.read", "tickets"],
+        "leastPrivilege": true,
+        "dataClasses": ["company", "contact", "support_ticket"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["credential_test", "association_cursor", "sync_cursor"],
+        "slo": "99.5% connector health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/hubspot-sample-replay.json",
+        "event": "ticket.propertyChange",
+        "normalizedType": "account_context",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "private-app-token-to-oauth",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Integrations",
+      "supportTier": "enterprise"
+    },
+    {
+      "id": "custom-webhook",
+      "displayName": "Custom webhook",
+      "category": "custom",
+      "description": "Receive signed source events from customer systems with replay and quarantine evidence.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/custom-webhook.md",
+        "authTypes": ["hmac", "bearer_token"],
+        "setupChecks": ["endpoint_secret", "signature_test", "sample_payload"]
+      },
+      "permissions": {
+        "scopes": ["webhook:receive", "webhook:replay"],
+        "leastPrivilege": true,
+        "dataClasses": ["raw_event_reference", "normalized_feedback"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["signature_verification", "payload_schema", "dead_letter_rate"],
+        "slo": "99.5% connector health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/custom-webhook-sample-replay.json",
+        "event": "attune.feedback.created",
+        "normalizedType": "feedback",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "unsigned-to-hmac",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Integrations",
+      "supportTier": "standard"
+    },
+    {
+      "id": "csv",
+      "displayName": "CSV",
+      "category": "file",
+      "description": "Import or export feedback and request records with schema preview and dry-run checks.",
+      "install": {
+        "status": "available",
+        "docs": "docs/integrations/csv.md",
+        "authTypes": ["file_upload"],
+        "setupChecks": ["schema_preview", "required_mapping", "dry_run"]
+      },
+      "permissions": {
+        "scopes": ["feedback:write", "audit:read"],
+        "leastPrivilege": true,
+        "dataClasses": ["feedback", "request", "audit_reference"]
+      },
+      "health": {
+        "badge": "ready",
+        "signals": ["template_version", "dry_run_result", "quarantine_count"],
+        "slo": "99.5% import/export health"
+      },
+      "sampleReplay": {
+        "path": "fixtures/csv-sample-replay.json",
+        "event": "csv.row.imported",
+        "normalizedType": "feedback",
+        "expectedAction": "upsert"
+      },
+      "upgrade": {
+        "currentVersion": "2026.07",
+        "path": "template-v1-to-workbench-v2",
+        "compatibility": "non_breaking",
+        "rollback": true
+      },
+      "auditEvents": ["integration.install", "integration.health_check", "integration.replay"],
+      "owner": "Developer Platform + Product Ops",
+      "supportTier": "standard"
+    }
+  ]
+}

@@ -25,7 +25,7 @@ import (
 )
 
 func TestBindListRequestParsesFilters(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/fb/v1/console/customer-requests?q=latency&status=open,CUSTOMER_REQUEST_STATUS_SHIPPED&priority=high,urgent&owner_member_id=11111111-1111-1111-1111-111111111111&visibility=all&sort=customer_count&direction=asc&limit=25&cursor=next&feedback_id=42", nil)
+	r := httptest.NewRequest(http.MethodGet, "/fb/v1/console/customer-requests?q=latency&status=open,CUSTOMER_REQUEST_STATUS_SHIPPED&priority=high,urgent&owner_member_id=11111111-1111-1111-1111-111111111111&visibility=all&sort=customer_count&direction=asc&limit=25&cursor=next&feedback_id=42&account_key=acct:acme", nil)
 	req := ptrext.Of(attunev1.ListCustomerRequestsRequest{})
 
 	if err := BindListRequest(r, req); err != nil {
@@ -43,9 +43,7 @@ func TestBindListRequestParsesFilters(t *testing.T) {
 		attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_HIGH,
 		attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_URGENT,
 	})
-	if req.OwnerMemberId == nil || ptrext.Indirect(req.OwnerMemberId) != "11111111-1111-1111-1111-111111111111" {
-		t.Fatalf("OwnerMemberId = %#v, want parsed owner", req.OwnerMemberId)
-	}
+	assertStringPointer(t, "OwnerMemberId", req.OwnerMemberId, "11111111-1111-1111-1111-111111111111")
 	if req.GetVisibility() != attunev1.CustomerRequestVisibility_CUSTOMER_REQUEST_VISIBILITY_ALL {
 		t.Fatalf("Visibility = %v, want all", req.GetVisibility())
 	}
@@ -55,14 +53,58 @@ func TestBindListRequestParsesFilters(t *testing.T) {
 	if req.GetDirection() != attunev1.SortDirection_SORT_DIRECTION_ASC {
 		t.Fatalf("Direction = %v, want asc", req.GetDirection())
 	}
-	if req.Limit == nil || ptrext.Indirect(req.Limit) != 25 {
-		t.Fatalf("Limit = %#v, want 25", req.Limit)
+	assertInt32Pointer(t, "Limit", req.Limit, 25)
+	assertStringPointer(t, "Cursor", req.Cursor, "next")
+	assertInt64Pointer(t, "FeedbackId", req.FeedbackId, 42)
+	assertStringPointer(t, "AccountKey", req.AccountKey, "acct:acme")
+}
+
+func TestBindAccountSummaryRequestParsesFilters(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/fb/v1/console/customer-requests/account-summary?q=latency&status=open&priority=urgent&owner_member_id=11111111-1111-1111-1111-111111111111&visibility=all&sort=decision_score&direction=asc&feedback_id=42&account_key=acct:acme&timeline_limit=7&event_limit=12", nil)
+	req := ptrext.Of(attunev1.GetCustomerRequestAccountSummaryRequest{})
+
+	if err := BindAccountSummaryRequest(r, req); err != nil {
+		t.Fatalf("BindAccountSummaryRequest() error = %v", err)
 	}
-	if req.Cursor == nil || ptrext.Indirect(req.Cursor) != "next" {
-		t.Fatalf("Cursor = %#v, want next", req.Cursor)
+
+	if req.GetAccountKey() != "acct:acme" || req.GetTimelineLimit() != 7 || req.GetEventLimit() != 12 {
+		t.Fatalf("BindAccountSummaryRequest() = %+v, want account key and limits", req)
 	}
-	if req.FeedbackId == nil || ptrext.Indirect(req.FeedbackId) != 42 {
-		t.Fatalf("FeedbackId = %#v, want 42", req.FeedbackId)
+	if req.GetQ() != "latency" || req.GetFeedbackId() != 42 {
+		t.Fatalf("BindAccountSummaryRequest() = %+v, want list filters", req)
+	}
+	if req.GetSort() != attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE || req.GetDirection() != attunev1.SortDirection_SORT_DIRECTION_ASC {
+		t.Fatalf("BindAccountSummaryRequest() sort/direction = %s/%s", req.GetSort(), req.GetDirection())
+	}
+
+	bad := httptest.NewRequest(http.MethodGet, "/fb/v1/console/customer-requests/account-summary?account_key=acct:acme&timeline_limit=0", nil)
+	if err := BindAccountSummaryRequest(bad, ptrext.Of(attunev1.GetCustomerRequestAccountSummaryRequest{})); err == nil {
+		t.Fatal("BindAccountSummaryRequest(invalid timeline_limit) error = nil")
+	}
+	badEventLimit := httptest.NewRequest(http.MethodGet, "/fb/v1/console/customer-requests/account-summary?account_key=acct:acme&event_limit=0", nil)
+	if err := BindAccountSummaryRequest(badEventLimit, ptrext.Of(attunev1.GetCustomerRequestAccountSummaryRequest{})); err == nil {
+		t.Fatal("BindAccountSummaryRequest(invalid event_limit) error = nil")
+	}
+}
+
+func assertStringPointer(t *testing.T, name string, got *string, want string) {
+	t.Helper()
+	if got == nil || ptrext.Indirect(got) != want {
+		t.Fatalf("%s = %#v, want %q", name, got, want)
+	}
+}
+
+func assertInt32Pointer(t *testing.T, name string, got *int32, want int32) {
+	t.Helper()
+	if got == nil || ptrext.Indirect(got) != want {
+		t.Fatalf("%s = %#v, want %d", name, got, want)
+	}
+}
+
+func assertInt64Pointer(t *testing.T, name string, got *int64, want int64) {
+	t.Helper()
+	if got == nil || ptrext.Indirect(got) != want {
+		t.Fatalf("%s = %#v, want %d", name, got, want)
 	}
 }
 
@@ -148,7 +190,39 @@ func newHandlerHarness() handlerHarness {
 	linkID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
 	detail := sampleServiceDetail(requestID, ownerID, linkID)
 	fake := &fakeCustomerRequestService{
-		list:   repo.ListResult{Items: []repo.Summary{detail.Request.Summary}, NextCursor: "50"},
+		list: repo.ListResult{Items: []repo.Summary{detail.Request.Summary}, NextCursor: "50"},
+		accountSummary: repo.AccountSummary{
+			AccountKey:               "acct:acme",
+			AccountProfile:           ptrext.Of(sampleAccountProfile(time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC))),
+			RequestCount:             2,
+			FeedbackCount:            5,
+			CustomerCount:            3,
+			VoteCount:                4,
+			IssueCount:               2,
+			SyncedIssueCount:         1,
+			StaleIssueCount:          1,
+			RevenueImpactCents:       4800000,
+			RevenueCurrency:          "USD",
+			HighPriorityRequestCount: 1,
+			StaleOrFailedIssueCount:  1,
+			AverageDecisionScore:     71,
+			TopDecisionScore:         114,
+			Timeline:                 []repo.Summary{detail.Request.Summary},
+			Events: []repo.AccountEvent{
+				{
+					Kind:             repo.AccountEventFeedbackLinked,
+					RequestID:        requestID,
+					RequestDisplayID: "CR-7",
+					RequestTitle:     "Exports",
+					OccurredAt:       time.Date(2026, 7, 7, 13, 0, 0, 0, time.UTC),
+					ActorID:          "operator",
+					SubjectDisplay:   "Ada",
+					Source:           "portal",
+					Description:      "Enterprise export evidence",
+					FeedbackID:       42,
+				},
+			},
+		},
 		detail: detail,
 	}
 	views := &fakeSavedViewService{}
@@ -179,6 +253,7 @@ func TestHandlerListAndGet(t *testing.T) {
 		Limit:         ptrext.Of(int32(25)),
 		Cursor:        ptrext.Of("25"),
 		FeedbackId:    ptrext.Of(int64(42)),
+		AccountKey:    ptrext.Of("acct:acme"),
 	})
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
@@ -190,12 +265,105 @@ func TestHandlerListAndGet(t *testing.T) {
 	if listInput.TenantID != "tenant-a" || listInput.Sort != repo.SortDecisionScore || listInput.Direction != repo.DirectionAsc {
 		t.Fatalf("ListInput = %+v, want tenant and converted filters", listInput)
 	}
+	if listInput.AccountKey != "acct:acme" {
+		t.Fatalf("ListInput.AccountKey = %q, want acct:acme", listInput.AccountKey)
+	}
 
 	gotDetail, err := h.handler.Get(h.ctx, &attunev1.GetCustomerRequestRequest{Id: h.requestID.String(), EvidenceLimit: ptrext.Of(int32(10))})
 	if err != nil {
 		t.Fatalf("Get() error = %v", err)
 	}
 	assertDetailProto(t, gotDetail.Body)
+}
+
+func TestHandlerGetsAccountSummary(t *testing.T) {
+	h := newHandlerHarness()
+
+	got, err := h.handler.GetAccountSummary(h.ctx, accountSummaryProtoRequest(h.ownerID))
+	if err != nil {
+		t.Fatalf("GetAccountSummary() error = %v", err)
+	}
+	assertAccountSummaryProto(t, got.Body)
+	assertAccountSummaryInput(t, h.fake.last.(svc.AccountSummaryInput))
+}
+
+func accountSummaryProtoRequest(ownerID uuid.UUID) *attunev1.GetCustomerRequestAccountSummaryRequest {
+	return ptrext.Of(attunev1.GetCustomerRequestAccountSummaryRequest{
+		AccountKey:    "acct:acme",
+		Q:             "renewal",
+		Status:        []attunev1.CustomerRequestStatus{attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_OPEN},
+		Priority:      []attunev1.CustomerRequestPriority{attunev1.CustomerRequestPriority_CUSTOMER_REQUEST_PRIORITY_HIGH},
+		OwnerMemberId: ptrext.Of(ownerID.String()),
+		Visibility:    attunev1.CustomerRequestVisibility_CUSTOMER_REQUEST_VISIBILITY_ALL,
+		Sort:          attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE,
+		Direction:     attunev1.SortDirection_SORT_DIRECTION_ASC,
+		FeedbackId:    ptrext.Of(int64(42)),
+		TimelineLimit: ptrext.Of(int32(7)),
+		EventLimit:    ptrext.Of(int32(12)),
+	})
+}
+
+func assertAccountSummaryProto(t *testing.T, got *attunev1.CustomerRequestAccountSummary) {
+	t.Helper()
+	if got.GetAccountKey() != "acct:acme" || got.GetRequestCount() != 2 || got.GetRevenueImpactCents() != 4800000 {
+		t.Fatalf("GetAccountSummary() = %+v, want account summary metrics", got)
+	}
+	if got.GetAverageDecisionScore() != 71 || got.GetTopDecisionScore() != 114 {
+		t.Fatalf("GetAccountSummary() scores = %d/%d, want average/top 71/114",
+			got.GetAverageDecisionScore(), got.GetTopDecisionScore())
+	}
+	assertAccountSummarySignals(t, got.GetDecisionSignals())
+	if got.GetAccountProfile().GetAccountDisplay() != "Acme" {
+		t.Fatalf("AccountProfile = %+v, want Acme profile", got.GetAccountProfile())
+	}
+	if len(got.GetTimeline()) != 1 || got.GetTimeline()[0].GetDisplayId() != "CR-7" {
+		t.Fatalf("Timeline = %+v, want CR-7", got.GetTimeline())
+	}
+	assertAccountSummaryEvents(t, got.GetEvents())
+}
+
+func assertAccountSummarySignals(t *testing.T, signals []*attunev1.CustomerRequestAccountDecisionSignal) {
+	t.Helper()
+	if len(signals) < 4 {
+		t.Fatalf("DecisionSignals = %+v, want risk, demand, revenue, and evidence signals", signals)
+	}
+	if signals[0].GetKind() != attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_DELIVERY_RISK ||
+		signals[0].GetSeverity() != attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING {
+		t.Fatalf("first DecisionSignal = %+v, want delivery risk warning", signals[0])
+	}
+	if signals[1].GetKind() != attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_HIGH_PRIORITY_DEMAND ||
+		signals[1].GetScore() != 114 {
+		t.Fatalf("second DecisionSignal = %+v, want high-priority top score", signals[1])
+	}
+	if signals[2].GetKind() != attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_REVENUE_IMPACT ||
+		signals[2].GetValueCents() != 4800000 {
+		t.Fatalf("third DecisionSignal = %+v, want revenue impact", signals[2])
+	}
+}
+
+func assertAccountSummaryEvents(t *testing.T, events []*attunev1.CustomerRequestAccountEvent) {
+	t.Helper()
+	if len(events) != 1 {
+		t.Fatalf("Events = %+v, want one account event", events)
+	}
+	got := events[0]
+	if got.GetKind() != attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_FEEDBACK_LINKED ||
+		got.GetRequestDisplayId() != "CR-7" || got.GetFeedbackId() != 42 {
+		t.Fatalf("Events[0] = %+v, want feedback event for CR-7", got)
+	}
+	if got.GetSubjectDisplay() != "Ada" || got.GetSource() != "portal" {
+		t.Fatalf("Events[0] = %+v, want subject and source evidence", got)
+	}
+}
+
+func assertAccountSummaryInput(t *testing.T, in svc.AccountSummaryInput) {
+	t.Helper()
+	if in.TenantID != "tenant-a" || in.AccountKey != "acct:acme" || in.Query != "renewal" || in.TimelineLimit != 7 || in.EventLimit != 12 {
+		t.Fatalf("AccountSummaryInput = %+v, want tenant, account, query, timeline limit", in)
+	}
+	if in.Sort != repo.SortDecisionScore || in.Direction != repo.DirectionAsc || in.FeedbackID != 42 {
+		t.Fatalf("AccountSummaryInput = %+v, want converted filters", in)
+	}
 }
 
 func TestHandlerScoringSettings(t *testing.T) {
@@ -248,6 +416,7 @@ func TestHandlerListsSavedViews(t *testing.T) {
 			Sort:          repo.SortDecisionScore,
 			Direction:     repo.DirectionAsc,
 			FeedbackID:    42,
+			AccountKey:    "acct:acme",
 		},
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -260,7 +429,8 @@ func TestHandlerListsSavedViews(t *testing.T) {
 	view := list.Body.GetViews()[0]
 	if view.GetName() != "Priority planning" ||
 		view.GetState().GetSort() != attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_DECISION_SCORE ||
-		view.GetState().GetFeedbackId() != 42 {
+		view.GetState().GetFeedbackId() != 42 ||
+		view.GetState().GetAccountKey() != "acct:acme" {
 		t.Fatalf("ListSavedViews() = %+v", view)
 	}
 }
@@ -278,6 +448,7 @@ func TestHandlerCreatesSavedView(t *testing.T) {
 			Sort:          attunev1.CustomerRequestSort_CUSTOMER_REQUEST_SORT_REVENUE_IMPACT,
 			Direction:     attunev1.SortDirection_SORT_DIRECTION_DESC,
 			FeedbackId:    ptrext.Of(int64(101)),
+			AccountKey:    ptrext.Of("acct:acme"),
 		},
 	})
 	if err != nil {
@@ -290,7 +461,8 @@ func TestHandlerCreatesSavedView(t *testing.T) {
 	if input.Name != "Scoreboard" || input.State.Query != "exports" ||
 		len(input.State.Statuses) != 1 || input.State.Statuses[0] != repo.StatusOpen ||
 		len(input.State.Priorities) != 1 || input.State.Priorities[0] != repo.PriorityUrgent ||
-		input.State.Sort != repo.SortRevenueImpact || input.State.FeedbackID != 101 {
+		input.State.Sort != repo.SortRevenueImpact || input.State.FeedbackID != 101 ||
+		input.State.AccountKey != "acct:acme" {
 		t.Fatalf("Saved view input = %+v", input)
 	}
 }
@@ -1608,6 +1780,7 @@ func TestQueryBindRejectsInvalidValues(t *testing.T) {
 
 type fakeCustomerRequestService struct {
 	list              repo.ListResult
+	accountSummary    repo.AccountSummary
 	detail            *svc.Detail
 	createIssueResult *svc.CreateGitHubIssueResult
 	scoring           repo.ScoringSettings
@@ -1679,6 +1852,14 @@ func (f *fakeCustomerRequestService) List(_ context.Context, in svc.ListInput) (
 		return repo.ListResult{}, f.err
 	}
 	return f.list, nil
+}
+
+func (f *fakeCustomerRequestService) GetAccountSummary(_ context.Context, in svc.AccountSummaryInput) (repo.AccountSummary, error) {
+	f.last = in
+	if f.err != nil {
+		return repo.AccountSummary{}, f.err
+	}
+	return f.accountSummary, nil
 }
 
 func (f *fakeCustomerRequestService) GetScoringSettings(_ context.Context, tenantID string) (repo.ScoringSettings, error) {
@@ -1878,6 +2059,36 @@ func sampleServiceDetail(requestID, ownerID, linkID uuid.UUID) *svc.Detail {
 			AccountProfiles: []repo.AccountProfile{profile},
 		},
 		AuditEntries: []svc.AuditEntry{{ID: 1, Action: "created", ActorType: "admin", ActorID: "tester", Summary: "Created", CreatedAt: now}},
+		DecisionRecords: []svc.DecisionRecord{{
+			AuditID:                 1,
+			Action:                  "customer_request.update",
+			ActorType:               "admin",
+			ActorID:                 "tester",
+			Summary:                 "Updated customer request",
+			CreatedAt:               now,
+			StatusChanged:           true,
+			OldStatus:               repo.StatusOpen,
+			NewStatus:               repo.StatusPlanned,
+			PriorityChanged:         true,
+			OldPriority:             repo.PriorityHigh,
+			NewPriority:             repo.PriorityUrgent,
+			HasDecisionSnapshot:     true,
+			DecisionScore:           100,
+			DecisionScoreFactors:    sampleSummary(requestID, ownerID, now).DecisionScoreFactors,
+			DeliveryHealth:          repo.DeliveryHealthFailed,
+			SupportingFeedbackCount: 2,
+			CustomerCount:           1,
+			AccountCount:            1,
+			VoteCount:               3,
+			RevenueImpactCents:      12345,
+			RevenueCurrency:         "USD",
+			DecisionRationale:       "priority=urgent feedback=2 customers=1",
+			OwnerMemberID:           ownerID.String(),
+			OwnerDisplay:            "owner@example.com",
+			EvidenceBundleRef:       "customer-request/11111111-1111-1111-1111-111111111111/evidence/CR-7",
+			PublicSafeState:         "needs_review",
+			PublicSafeReasons:       []string{"revenue_context"},
+		}},
 	})
 }
 
@@ -1958,10 +2169,32 @@ func sampleSummary(requestID, ownerID uuid.UUID, now time.Time) repo.Summary {
 		RevenueCurrency:          "USD",
 		DecisionScore:            100,
 		DecisionScoreExplanation: "priority=urgent",
-		DeliveryHealth:           repo.DeliveryHealthFailed,
-		FailedIssueCount:         1,
-		FirstFeedbackAt:          ptrext.Of(now),
-		LatestFeedbackAt:         ptrext.Of(now),
+		DecisionScoreFactors: []repo.DecisionScoreFactor{
+			{Kind: repo.DecisionScoreFactorPriority, RawCount: 1, Weight: 80, Contribution: 80, ContributesToScore: true},
+			{Kind: repo.DecisionScoreFactorFeedback, RawCount: 2, Weight: 2, Cap: 80, Contribution: 4, ContributesToScore: true},
+			{Kind: repo.DecisionScoreFactorRevenue, RawValueCents: 12345, UnitCents: 100000, Cap: 100, Contribution: 0, ContributesToScore: true},
+			{Kind: repo.DecisionScoreFactorDeliveryHealth, RawCount: 1, Contribution: 0, Capped: true, ContributesToScore: false},
+		},
+		EvidenceQuality: repo.EvidenceQuality{
+			Score:            75,
+			Confidence:       repo.EvidenceConfidenceHigh,
+			EvidenceCount:    3,
+			SourceCount:      2,
+			CustomerCount:    2,
+			AccountCount:     1,
+			LatestEvidenceAt: ptrext.Of(now),
+			Strengths: []repo.EvidenceQualityReason{
+				repo.EvidenceReasonSupportingFeedback,
+				repo.EvidenceReasonMultiSource,
+				repo.EvidenceReasonAccountContext,
+				repo.EvidenceReasonFreshEvidence,
+				repo.EvidenceReasonDeliveryLinked,
+			},
+		},
+		DeliveryHealth:   repo.DeliveryHealthFailed,
+		FailedIssueCount: 1,
+		FirstFeedbackAt:  ptrext.Of(now),
+		LatestFeedbackAt: ptrext.Of(now),
 	}
 }
 
@@ -2100,8 +2333,59 @@ func assertDetailSupportListsProto(t *testing.T, detail *attunev1.CustomerReques
 	if len(detail.GetVotes()) != 1 || detail.GetVotes()[0].GetWeight() != 3 {
 		t.Fatalf("Votes = %+v, want weight", detail.GetVotes())
 	}
+	assertDetailDecisionScoreFactors(t, detail.GetRequest().GetDecisionScoreFactors())
+	assertDetailEvidenceQuality(t, detail.GetRequest().GetEvidenceQuality())
+	assertDetailDecisionRecords(t, detail.GetDecisionRecords())
 	if len(detail.GetNotes()) != 1 || len(detail.GetDuplicates()) != 1 || len(detail.GetAuditEntries()) != 1 {
 		t.Fatalf("Detail lists = notes:%d duplicates:%d audit:%d", len(detail.GetNotes()), len(detail.GetDuplicates()), len(detail.GetAuditEntries()))
+	}
+}
+
+func assertDetailEvidenceQuality(t *testing.T, quality *attunev1.CustomerRequestEvidenceQuality) {
+	t.Helper()
+	if quality.GetScore() != 75 || quality.GetConfidence() != attunev1.CustomerRequestEvidenceConfidence_CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_HIGH {
+		t.Fatalf("EvidenceQuality = %+v, want high-confidence score 75", quality)
+	}
+	if quality.GetEvidenceCount() != 3 || quality.GetSourceCount() != 2 || quality.GetAccountCount() != 1 {
+		t.Fatalf("EvidenceQuality counts = %+v, want evidence/source/account counts", quality)
+	}
+	if len(quality.GetStrengths()) == 0 || quality.GetStrengths()[0] != attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SUPPORTING_FEEDBACK {
+		t.Fatalf("EvidenceQuality strengths = %+v, want supporting feedback strength", quality.GetStrengths())
+	}
+}
+
+func assertDetailDecisionScoreFactors(t *testing.T, factors []*attunev1.CustomerRequestDecisionScoreFactor) {
+	t.Helper()
+	if len(factors) != 4 {
+		t.Fatalf("DecisionScoreFactors = %+v, want mapped score factors", factors)
+	}
+	if factors[0].GetKind() != attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY || factors[0].GetContribution() != 80 {
+		t.Fatalf("priority factor = %+v, want 80-point priority contribution", factors[0])
+	}
+	if factors[3].GetKind() != attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH || factors[3].GetContributesToScore() {
+		t.Fatalf("delivery factor = %+v, want non-scoring delivery context", factors[3])
+	}
+}
+
+func assertDetailDecisionRecords(t *testing.T, records []*attunev1.CustomerRequestDecisionRecord) {
+	t.Helper()
+	if len(records) != 1 {
+		t.Fatalf("DecisionRecords = %+v, want one record", records)
+	}
+	record := records[0]
+	if !record.GetStatusChanged() || record.GetOldStatus() != attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_OPEN || record.GetNewStatus() != attunev1.CustomerRequestStatus_CUSTOMER_REQUEST_STATUS_PLANNED {
+		t.Fatalf("decision status transition = %+v, want open -> planned", record)
+	}
+	if !record.GetHasDecisionSnapshot() || record.GetDecisionScore() != 100 || len(record.GetDecisionScoreFactors()) == 0 {
+		t.Fatalf("decision snapshot = %+v, want score and factors", record)
+	}
+	if record.GetDecisionRationale() == "" || record.GetOwnerDisplay() != "owner@example.com" || record.GetEvidenceBundleRef() == "" {
+		t.Fatalf("decision context = %+v, want rationale, owner, evidence bundle", record)
+	}
+	if record.GetPublicSafeState() != attunev1.CustomerRequestDecisionPublicSafeState_CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_NEEDS_REVIEW ||
+		len(record.GetPublicSafeReasons()) != 1 ||
+		record.GetPublicSafeReasons()[0] != "revenue_context" {
+		t.Fatalf("public safe context = %+v reasons=%+v, want needs review revenue reason", record.GetPublicSafeState(), record.GetPublicSafeReasons())
 	}
 }
 

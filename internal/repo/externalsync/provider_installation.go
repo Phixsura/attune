@@ -62,7 +62,7 @@ func (r *Repo) GetProviderInstallation(ctx context.Context, tenantID string, id 
 func (r *Repo) CreateProviderInstallation(ctx context.Context, in ProviderInstallationWithResources) (*ProviderInstallation, []ProviderInstallationResource, error) {
 	var installation ProviderInstallation
 	var resources []ProviderInstallationResource
-	err := secretlock.WithTx(ctx, r.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+	err := secretlock.WithTx(ctx, r.secretPool, true, func(ctx context.Context, tx secretlock.Tx) error {
 		var scanErr error
 		installation, scanErr = scanProviderInstallation(tx.QueryRow(ctx, `
 			INSERT INTO external_provider_installations
@@ -134,7 +134,7 @@ func (r *Repo) UpdateProviderInstallationQualification(
 }
 
 func (r *Repo) DeleteProviderInstallation(ctx context.Context, tenantID string, id uuid.UUID, actor string) error {
-	err := secretlock.WithTx(ctx, r.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+	err := secretlock.WithTx(ctx, r.secretPool, true, func(ctx context.Context, tx secretlock.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE external_provider_installations
 			   SET status = 'deleted',
@@ -204,7 +204,7 @@ func (r *Repo) SelectProviderInstallationResources(
 ) ([]ProviderInstallationResource, error) {
 	resourceIDs = normalizedUUIDArray(resourceIDs)
 	var resources []ProviderInstallationResource
-	err := secretlock.WithTx(ctx, r.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+	err := secretlock.WithTx(ctx, r.secretPool, true, func(ctx context.Context, tx secretlock.Tx) error {
 		tag, err := tx.Exec(ctx, `
 			UPDATE external_provider_installations
 			   SET resource_selection = CASE WHEN cardinality($3::uuid[]) = 0 THEN 'none' ELSE 'selected' END,

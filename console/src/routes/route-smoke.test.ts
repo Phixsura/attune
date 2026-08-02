@@ -12,6 +12,7 @@ import { Route as LegacyGuardPoliciesRoute } from '@/routes/_authed.guard-polici
 import { Route as LegacyIndexRoute } from '@/routes/_authed.index'
 import { Route as DigestIntegrationRoute } from '@/routes/_authed.integrations.digests'
 import { Route as NotifyTargetsRoute } from '@/routes/_authed.integrations.notify-targets'
+import { Route as SurveysRoute } from '@/routes/_authed.integrations.surveys'
 import { Route as LegacyLLMConfigRoute } from '@/routes/_authed.llm-config'
 import { Route as MCPClientsRoute } from '@/routes/_authed.mcp-clients'
 import { Route as LegacyNotifyTargetsRoute } from '@/routes/_authed.notify-targets'
@@ -55,6 +56,7 @@ describe('route smoke coverage', () => {
     WorkflowConfigurationRoute,
     DigestIntegrationRoute,
     NotifyTargetsRoute,
+    SurveysRoute,
     MCPClientsRoute,
   ])('registers a component for route %s', (route) => {
     expect(route.options.component).toBeTypeOf('function')

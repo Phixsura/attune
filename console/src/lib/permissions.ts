@@ -179,6 +179,7 @@ const PERMISSION_MATRIX: Record<Role, Set<Permission>> = {
     'settings:workflow:edit',
     'settings:audit_log:view',
     'settings:gdpr:view',
+    'settings:members:view',
     // Usage
     'usage:view',
     // Navigation

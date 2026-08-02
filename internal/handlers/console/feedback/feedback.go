@@ -3,6 +3,7 @@ package feedback
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/types/known/structpb"
@@ -15,9 +16,12 @@ import (
 	"github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	"github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
+	signalgraphrepo "github.com/Phixsura/attune/internal/repo/signalgraph"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/workflowstate"
+	feedbackassignmentsvc "github.com/Phixsura/attune/internal/service/feedbackassignment"
 	replydraftsvc "github.com/Phixsura/attune/internal/service/replydraft"
+	signalgraphsvc "github.com/Phixsura/attune/internal/service/signalgraph"
 	"github.com/Phixsura/attune/internal/service/workflow"
 )
 
@@ -58,6 +62,8 @@ type FeedbackHandler struct {
 	tagAssignments tagAssignmentReader
 	workflow       workflowTransitioner
 	replyWorkflow  replyDraftWorkflow
+	identityGraph  identityGraphMerger
+	assignment     assignmentService
 	auditReader    auditReader
 	workflowStates workflowStateReader
 	audit          auditRecorder // optional writer for retry-enrichment audit trail
@@ -90,11 +96,37 @@ type replyDraftWorkflow interface {
 	Redeliver(ctx context.Context, tenantID string, attemptID string, actor replydraftrepo.Actor) (replydraftrepo.DeliveryAttempt, error)
 }
 
+type identityGraphMerger interface {
+	MergeIdentityReview(ctx context.Context, in signalgraphsvc.MergeIdentityReviewInput) (signalgraphsvc.MergeIdentityReviewResult, error)
+	SplitIdentityReview(ctx context.Context, in signalgraphsvc.SplitIdentityReviewInput) (signalgraphsvc.SplitIdentityReviewResult, error)
+	RecentIdentityMerges(ctx context.Context, tenantID string, limit int) ([]signalgraphrepo.RecentMerge, error)
+	SubjectRoster(ctx context.Context, tenantID string, limit int) (signalgraphrepo.SubjectRoster, error)
+	SubjectDetail(ctx context.Context, tenantID string, subjectID string, eventLimit int) (signalgraphrepo.SubjectDetail, error)
+}
+
+type assignmentService interface {
+	Assign(ctx context.Context, input feedbackassignmentsvc.Input) (feedback.Assignment, error)
+	AssignBatch(ctx context.Context, input feedbackassignmentsvc.BatchInput) (feedbackassignmentsvc.BatchResult, error)
+	RecommendBatch(ctx context.Context, input feedbackassignmentsvc.RecommendationInput) (feedbackassignmentsvc.RecommendationResult, error)
+	ApplyRecommendations(ctx context.Context, input feedbackassignmentsvc.ApplyRecommendationInput) (feedbackassignmentsvc.ApplyRecommendationResult, error)
+	GetPolicy(ctx context.Context, tenantID string) (feedbackassignmentsvc.Policy, error)
+	UpdatePolicy(ctx context.Context, input feedbackassignmentsvc.UpdatePolicyInput) (feedbackassignmentsvc.Policy, error)
+	ListPolicyRevisions(ctx context.Context, tenantID string) ([]feedbackassignmentsvc.PolicyRevision, error)
+	DryRunPolicy(ctx context.Context, input feedbackassignmentsvc.DryRunPolicyInput) (feedbackassignmentsvc.DryRunPolicyResult, error)
+	RestorePolicy(ctx context.Context, input feedbackassignmentsvc.RestorePolicyInput) (feedbackassignmentsvc.Policy, error)
+}
+
 // SetDrafter wires the reply-draft generator used by Regenerate.
 func (h *FeedbackHandler) SetDrafter(d Drafter) { h.drafter = d }
 
 // SetReplyDraftWorkflow wires the review/edit/approve/send workflow.
 func (h *FeedbackHandler) SetReplyDraftWorkflow(w replyDraftWorkflow) { h.replyWorkflow = w }
+
+// SetIdentityGraph wires durable identity graph merge operations.
+func (h *FeedbackHandler) SetIdentityGraph(g identityGraphMerger) { h.identityGraph = g }
+
+// SetAssignment wires durable feedback owner/SLA assignment.
+func (h *FeedbackHandler) SetAssignment(a assignmentService) { h.assignment = a }
 
 // SetRegenLimiter wires the per-tenant token-bucket that backstops the
 // synchronous Regenerate endpoint: the per-row cooldown caps one row, this caps
@@ -121,14 +153,20 @@ func (h *FeedbackHandler) SetAuditLogger(audit auditRecorder) { h.audit = audit 
 type feedbackRepo interface {
 	ListForConsole(ctx context.Context, tenantID string, opts feedback.ConsoleListOpts) ([]feedback.ConsoleListRow, error)
 	GetForConsole(ctx context.Context, tenantID string, id int64) (*feedback.ConsoleDetailRow, error)
+	IdentityReviewRows(ctx context.Context, tenantID string, limit int) ([]feedback.IdentityReviewRow, error)
 	UsageByDay(ctx context.Context, tenantID string, from, to time.Time) ([]feedback.UsageBucket, error)
 	UrgentCount(ctx context.Context, tenantID string, from, to time.Time) (int64, error)
 	TopValuesByDim(ctx context.Context, tenantID, dim string, multi bool, from, to time.Time, limit int) ([]feedback.ValueCount, error)
 	TerminalFailureWorkbench(ctx context.Context, tenantID string, from, to time.Time) (*feedback.TerminalFailureWorkbench, error)
+	FeedbackTriageCommandCenter(ctx context.Context, tenantID string, now time.Time) (feedback.FeedbackTriageCommandCenter, error)
+	FeedbackAssignmentEscalations(ctx context.Context, tenantID string, now time.Time, limit int) (feedback.AssignmentEscalationQueue, error)
 	RefreshClassificationQuality(ctx context.Context, opts feedback.ClassificationQualityRefreshOpts) error
 	ClassificationQualityAggregates(ctx context.Context, opts feedback.ClassificationQualityQueryOpts) (feedback.ClassificationQualitySignalAggregate, []feedback.ClassificationQualityValueAggregate, error)
 	ClassificationQualitySeries(ctx context.Context, opts feedback.ClassificationQualityQueryOpts) ([]feedback.ClassificationQualitySeriesBucket, error)
 	ClassificationQualitySamples(ctx context.Context, tenantID string, ids []int64) ([]feedback.ClassificationQualitySample, error)
+	ClassificationReviewLearning(ctx context.Context, opts feedback.ClassificationReviewLearningOpts) (feedback.ClassificationReviewLearning, error)
+	RecordClassificationReview(ctx context.Context, in feedback.ClassificationReviewRecord) (feedback.ClassificationReviewEvent, error)
+	FeedbackSignalTrace(ctx context.Context, tenantID string, feedbackID int64, limit int) (feedback.SignalTrace, error)
 	RetryEnrichment(ctx context.Context, tenantID string, id int64) (*feedback.RetryResult, error)
 }
 
@@ -192,11 +230,29 @@ func toProtoFeedback(row feedback.ConsoleListRow) *attunev1.Feedback {
 		EnrichmentFailureChannelName:       nullableString(row.TerminalFailureChannelName),
 		EnrichmentFailureConfigFingerprint: nullableString(row.TerminalFailureConfigFingerprint),
 		EnrichmentFailurePromptVersion:     nullableString(row.TerminalFailurePromptVersion),
+		Assignment:                         feedbackAssignmentToProto(row.Assignment),
+		AccountContext:                     feedbackAccountContextToProto(row.AccountContext),
 	})
 	if row.EnrichmentNextRetryAt != nil {
 		f.EnrichmentNextRetryAt = ptrext.Of(row.EnrichmentNextRetryAt.UTC().Format(time.RFC3339))
 	}
 	return f
+}
+
+func feedbackAccountContextToProto(ctx feedback.AccountContext) *attunev1.FeedbackAccountContext {
+	accountKey := strings.TrimSpace(ctx.AccountKey)
+	if accountKey == "" {
+		return nil
+	}
+	accountDisplay := strings.TrimSpace(ctx.AccountDisplay)
+	if accountDisplay == "" {
+		accountDisplay = accountKey
+	}
+	return ptrext.Of(attunev1.FeedbackAccountContext{
+		AccountKey:     accountKey,
+		AccountDisplay: accountDisplay,
+		Source:         strings.TrimSpace(ctx.Source),
+	})
 }
 
 // extractAttrFilters walks the query string for keys matching a

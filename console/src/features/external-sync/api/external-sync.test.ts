@@ -10,6 +10,7 @@ import {
   externalSyncConnectionSchemaQuery,
   externalSyncEventsQuery,
   externalSyncProvidersQuery,
+  externalSyncRecentEventsQuery,
   externalSyncRunsQuery,
   qualifyExternalProviderInstallation,
   retryExternalSyncFailure,
@@ -264,14 +265,20 @@ describe('external sync api helpers', () => {
       connectionId: 'conn-1',
       status: 'dead',
     })
+    const recentEventsQuery = externalSyncRecentEventsQuery(9, {
+      connectionId: 'conn-2',
+      status: 'failed',
+    })
     const unfilteredRunsQuery = externalSyncRunsQuery(5)
     const unfilteredEventsQuery = externalSyncEventsQuery(3)
     const runsQueryFn = runsQuery.queryFn
     const eventsQueryFn = eventsQuery.queryFn
+    const recentEventsQueryFn = recentEventsQuery.queryFn
     const unfilteredRunsQueryFn = unfilteredRunsQuery.queryFn
     const unfilteredEventsQueryFn = unfilteredEventsQuery.queryFn
     if (typeof runsQueryFn !== 'function') throw new Error('missing runs queryFn')
     if (typeof eventsQueryFn !== 'function') throw new Error('missing events queryFn')
+    if (typeof recentEventsQueryFn !== 'function') throw new Error('missing recent events queryFn')
     if (typeof unfilteredRunsQueryFn !== 'function') throw new Error('missing runs queryFn')
     if (typeof unfilteredEventsQueryFn !== 'function') throw new Error('missing events queryFn')
 
@@ -281,6 +288,9 @@ describe('external sync api helpers', () => {
     } as never)
     await eventsQueryFn({
       pageParam: 'event-before',
+      signal: undefined,
+    } as never)
+    await recentEventsQueryFn({
       signal: undefined,
     } as never)
     await unfilteredRunsQueryFn({
@@ -295,6 +305,7 @@ describe('external sync api helpers', () => {
     expect(seenQueries).toEqual([
       '?limit=11&connection_id=conn-1&mapping_id=mapping-1&status=failed&before_id=run-before',
       '?limit=7&connection_id=conn-1&status=dead&before_id=event-before',
+      '?limit=9&connection_id=conn-2&status=failed',
       '?limit=5',
       '?limit=3',
     ])

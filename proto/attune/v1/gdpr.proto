@@ -163,6 +163,11 @@ message GdprExportStatusResponse {
   optional string expires_at = 16;
   optional string downloaded_at = 17;
   optional string revoked_at = 18;
+  int32 survey_invitation_count = 19;
+  int32 survey_response_count = 20;
+  int32 survey_low_score_review_count = 21;
+  int32 survey_provider_event_count = 22;
+  int32 survey_recovery_notification_count = 23;
 }
 
 message DeleteGdprSubjectRequest {
@@ -179,6 +184,11 @@ message DeleteGdprSubjectResponse {
   int32 feedback_audit_count = 7;
   int32 llm_audit_count = 8;
   int32 outbox_count = 9;
+  int32 survey_invitation_count = 10;
+  int32 survey_response_count = 11;
+  int32 survey_low_score_review_count = 12;
+  int32 survey_provider_event_count = 13;
+  int32 survey_recovery_notification_count = 14;
 }
 
 message CancelGdprRequestRequest {
@@ -218,6 +228,11 @@ message GdprRequestSummary {
   optional string cancelled_at = 19;
   optional string revoked_at = 20;
   int32 outbox_count = 21;
+  int32 survey_invitation_count = 22;
+  int32 survey_response_count = 23;
+  int32 survey_low_score_review_count = 24;
+  int32 survey_provider_event_count = 25;
+  int32 survey_recovery_notification_count = 26;
 }
 
 message ListGdprRequestsResponse {

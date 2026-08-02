@@ -12,8 +12,8 @@ import {
   Users,
   Webhook,
 } from 'lucide-react'
-import type { FormEvent, ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent, ReactElement, ReactNode } from 'react'
+import { cloneElement, isValidElement, useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
@@ -42,6 +42,7 @@ import {
   requestNotificationDeliveriesQuery,
   requestNotificationSenderQuery,
   requestNotificationSettingsQuery,
+  requestNotificationStatusEvidenceQuery,
   requestNotificationWebhookTargetsQuery,
   useCreateRequestNotificationWebhookTarget,
   useDeleteRequestNotificationWebhookTarget,
@@ -61,6 +62,7 @@ import {
   RequestNotificationChannel,
   type RequestNotificationDelivery,
   type RequestNotificationSender,
+  type RequestNotificationStatusEvidenceItem,
   type RequestNotificationWebhookTarget,
   type RequestSubscriber,
 } from '@/proto/attune/v1/request_notification'
@@ -150,11 +152,13 @@ export function RequestNotificationsPage() {
   const senderQuery = useQuery(requestNotificationSenderQuery())
   const targetsQuery = useQuery(requestNotificationWebhookTargetsQuery())
   const deliveriesQuery = useQuery(requestNotificationDeliveriesQuery(25))
+  const statusEvidenceQuery = useQuery(requestNotificationStatusEvidenceQuery())
 
   const settings = settingsQuery.data
   const sender = senderQuery.data ?? null
   const targets = targetsQuery.data ?? []
   const deliveries = deliveriesQuery.data ?? []
+  const statusEvidence = statusEvidenceQuery.data ?? []
   const locale = i18n.resolvedLanguage || i18n.language || undefined
 
   const updateSettings = useUpdateRequestNotificationSettings()
@@ -237,6 +241,10 @@ export function RequestNotificationsPage() {
 
   const failedDeliveries = deliveries.filter((delivery) =>
     ['failed', 'dead'].includes(delivery.status),
+  )
+  const recoveryPendingCustomers = statusEvidence.reduce(
+    (total, item) => total + item.recoveryPendingCustomers,
+    0,
   )
   const activeTargets = targets.filter((target) => target.status === 'active')
   const selectedChannels = useMemo(
@@ -461,6 +469,7 @@ export function RequestNotificationsPage() {
               senderQuery.refetch()
               targetsQuery.refetch()
               deliveriesQuery.refetch()
+              statusEvidenceQuery.refetch()
             }}
           >
             <RefreshCcw className="size-4" />
@@ -493,6 +502,11 @@ export function RequestNotificationsPage() {
               label={t('request_notifications.summary.failures')}
               value={String(failedDeliveries.length)}
               tone={failedDeliveries.length > 0 ? 'urgent' : 'default'}
+            />
+            <PageHeroMetric
+              label={t('request_notifications.summary.recovery_pending')}
+              value={String(recoveryPendingCustomers)}
+              tone={recoveryPendingCustomers > 0 ? 'urgent' : 'default'}
             />
           </>
         }
@@ -549,7 +563,7 @@ export function RequestNotificationsPage() {
                 help={t('request_notifications.settings.consent_mode_help')}
               >
                 <Select value={consentMode} onValueChange={setConsentMode}>
-                  <SelectTrigger>
+                  <SelectTrigger aria-label={t('request_notifications.settings.consent_mode')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -811,7 +825,7 @@ export function RequestNotificationsPage() {
                   value={draft.kind}
                   onValueChange={(kind) => setDraft((current) => ({ ...current, kind }))}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger aria-label={t('request_notifications.publish.kind')}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -935,6 +949,24 @@ export function RequestNotificationsPage() {
         </Card>
       </div>
 
+      <Card
+        className="border-border/60 shadow-none"
+        data-testid="request-notification-status-evidence"
+      >
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CheckCircle2 className="size-4" />
+            {t('request_notifications.status_evidence.title')}
+          </CardTitle>
+          <CardDescription>
+            {t('request_notifications.status_evidence.description')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StatusEvidenceTable items={statusEvidence} locale={locale} />
+        </CardContent>
+      </Card>
+
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <Card className="border-border/60 shadow-none">
           <CardHeader>
@@ -1016,6 +1048,7 @@ function ToggleRow({
       )}
     >
       <Checkbox
+        aria-label={label}
         checked={checked}
         data-testid={testId}
         onCheckedChange={(value) => onCheckedChange(value === true)}
@@ -1074,13 +1107,49 @@ function FormField({
   help?: string
   label: string
 }) {
+  const controlId = useId()
+  const labelId = `${controlId}-label`
+  const helpId = help ? `${controlId}-help` : undefined
+  const control = isValidElement(children)
+    ? cloneFieldControl(
+        children as ReactElement<Record<string, unknown>>,
+        controlId,
+        labelId,
+        helpId,
+      )
+    : children
+
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
-      {children}
-      {help && <p className="text-xs text-muted-foreground">{help}</p>}
+      <Label id={labelId} htmlFor={controlId}>
+        {label}
+      </Label>
+      {control}
+      {help && (
+        <p id={helpId} className="text-xs text-muted-foreground">
+          {help}
+        </p>
+      )}
     </div>
   )
+}
+
+function cloneFieldControl(
+  child: ReactElement<Record<string, unknown>>,
+  controlId: string,
+  labelId: string,
+  helpId: string | undefined,
+) {
+  const existingDescription = child.props['aria-describedby']
+  const describedBy =
+    typeof existingDescription === 'string' && helpId
+      ? `${existingDescription} ${helpId}`
+      : (existingDescription ?? helpId)
+  return cloneElement(child, {
+    'aria-describedby': describedBy,
+    'aria-labelledby': child.props['aria-labelledby'] ?? labelId,
+    id: child.props.id ?? controlId,
+  })
 }
 
 function SenderSummary({
@@ -1205,6 +1274,63 @@ function TargetList({
                   )}
                 </Button>
               </div>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+function StatusEvidenceTable({
+  items,
+  locale,
+}: {
+  items: RequestNotificationStatusEvidenceItem[]
+  locale?: string
+}) {
+  const { t } = useTranslation()
+  if (items.length === 0) {
+    return (
+      <div
+        className="rounded-md border border-dashed border-border/80 p-4 text-sm text-muted-foreground"
+        data-testid="rn-status-evidence-empty"
+      >
+        {t('request_notifications.status_evidence.empty')}
+      </div>
+    )
+  }
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t('request_notifications.status_evidence.status')}</TableHead>
+          <TableHead>{t('request_notifications.status_evidence.expected')}</TableHead>
+          <TableHead>{t('request_notifications.status_evidence.notified')}</TableHead>
+          <TableHead>{t('request_notifications.status_evidence.failed')}</TableHead>
+          <TableHead>{t('request_notifications.status_evidence.suppressed')}</TableHead>
+          <TableHead>{t('request_notifications.status_evidence.recovery')}</TableHead>
+          <TableHead>{t('request_notifications.status_evidence.events')}</TableHead>
+          <TableHead>{t('request_notifications.status_evidence.last_event')}</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {items.map((item) => (
+          <TableRow
+            key={item.requestStatus || 'unknown'}
+            data-testid={`rn-status-evidence-${item.requestStatus || 'unknown'}`}
+          >
+            <TableCell className="font-medium">
+              {requestStatusLabel(t, item.requestStatus)}
+            </TableCell>
+            <TableCell className="tabular-nums">{item.expectedCustomers}</TableCell>
+            <TableCell className="tabular-nums">{item.notifiedCustomers}</TableCell>
+            <TableCell className="tabular-nums">{item.failedCustomers}</TableCell>
+            <TableCell className="tabular-nums">{item.suppressedCustomers}</TableCell>
+            <TableCell className="tabular-nums">{item.recoveryPendingCustomers}</TableCell>
+            <TableCell className="tabular-nums">{item.eventCount}</TableCell>
+            <TableCell className="whitespace-nowrap text-muted-foreground">
+              {formatTime(item.lastEventAt ?? '', locale)}
             </TableCell>
           </TableRow>
         ))}
@@ -1481,6 +1607,17 @@ export function statusLabel(t: (key: string) => string, status: string) {
     verified: t('request_notifications.status.verified'),
   }
   return labels[status] ?? status
+}
+
+export function requestStatusLabel(t: (key: string) => string, status: string) {
+  const labels: Record<string, string> = {
+    cancelled: t('request_notifications.request_statuses.cancelled'),
+    in_progress: t('request_notifications.request_statuses.in_progress'),
+    open: t('request_notifications.request_statuses.open'),
+    planned: t('request_notifications.request_statuses.planned'),
+    shipped: t('request_notifications.request_statuses.shipped'),
+  }
+  return labels[status] ?? (status || '-')
 }
 
 export function channelLabel(t: (key: string) => string, channel: RequestNotificationChannel) {

@@ -12,8 +12,12 @@ import {
   requestNotificationSenderQueryKey,
   requestNotificationSettingsQuery,
   requestNotificationSettingsQueryKey,
+  requestNotificationStatusEvidenceQuery,
+  requestNotificationStatusEvidenceQueryKey,
   requestNotificationWebhookTargetsQuery,
   requestNotificationWebhookTargetsQueryKey,
+  useBatchPreviewRequestNotifications,
+  useBatchPublishRequestUpdates,
   useCreateRequestNotificationWebhookTarget,
   useDeleteRequestNotificationWebhookTarget,
   useListRequestNotificationSubscribers,
@@ -103,6 +107,23 @@ describe('request notification API client', () => {
           ],
         })
       }),
+      http.get('/fb/v1/console/request-notifications/status-evidence', ({ request }) => {
+        const url = new URL(request.url)
+        seen.push({ path: url.pathname, query: url.search })
+        return HttpResponse.json({
+          items: [
+            {
+              requestStatus: 'shipped',
+              expectedCustomers: 4,
+              notifiedCustomers: 2,
+              failedCustomers: 1,
+              suppressedCustomers: 1,
+              recoveryPendingCustomers: 1,
+              eventCount: 2,
+            },
+          ],
+        })
+      }),
     )
 
     const qc = makeQueryClient()
@@ -111,10 +132,12 @@ describe('request notification API client', () => {
     })
     await expect(qc.fetchQuery(requestNotificationWebhookTargetsQuery())).resolves.toHaveLength(1)
     await expect(qc.fetchQuery(requestNotificationDeliveriesQuery(10))).resolves.toHaveLength(1)
+    await expect(qc.fetchQuery(requestNotificationStatusEvidenceQuery())).resolves.toHaveLength(1)
     expect(seen).toEqual([
       { path: '/fb/v1/console/request-notifications/settings', query: '' },
       { path: '/fb/v1/console/request-notifications/webhook-targets', query: '' },
       { path: '/fb/v1/console/request-notifications/deliveries', query: '?limit=10' },
+      { path: '/fb/v1/console/request-notifications/status-evidence', query: '' },
     ])
   })
 
@@ -122,11 +145,13 @@ describe('request notification API client', () => {
     server.use(
       http.get('/fb/v1/console/request-notifications/webhook-targets', () => HttpResponse.json({})),
       http.get('/fb/v1/console/request-notifications/deliveries', () => HttpResponse.json({})),
+      http.get('/fb/v1/console/request-notifications/status-evidence', () => HttpResponse.json({})),
     )
     const qc = makeQueryClient()
 
     await expect(qc.fetchQuery(requestNotificationWebhookTargetsQuery())).resolves.toEqual([])
     await expect(qc.fetchQuery(requestNotificationDeliveriesQuery())).resolves.toEqual([])
+    await expect(qc.fetchQuery(requestNotificationStatusEvidenceQuery())).resolves.toEqual([])
   })
 
   it('treats a missing sender as unconfigured while preserving other errors', async () => {
@@ -393,9 +418,29 @@ describe('request notification API client', () => {
         calls.push({ path: new URL(request.url).pathname, body: await request.json() })
         return HttpResponse.json({ eligibleRecipients: 1, excludedRecipients: 0 })
       }),
+      http.post('/fb/v1/console/request-notifications:batch-preview', async ({ request }) => {
+        calls.push({ path: new URL(request.url).pathname, body: await request.json() })
+        return HttpResponse.json({
+          totalMatched: 2,
+          eligibleRecipients: 1,
+          excludedRecipients: 0,
+          items: [{ requestId: 'request/slash', eligibleRecipients: 1, excludedRecipients: 0 }],
+          failed: [{ requestId: 'bad', code: 'validation', message: 'invalid request id' }],
+        })
+      }),
       http.post('/fb/v1/console/request-notifications/publish', async ({ request }) => {
         calls.push({ path: new URL(request.url).pathname, body: await request.json() })
         return HttpResponse.json({ id: 'event-1', status: 'pending' }, { status: 201 })
+      }),
+      http.post('/fb/v1/console/request-notifications:batch-publish', async ({ request }) => {
+        calls.push({ path: new URL(request.url).pathname, body: await request.json() })
+        return HttpResponse.json({
+          totalMatched: 2,
+          succeeded: 1,
+          skipped: 0,
+          events: [{ id: 'event-1', status: 'pending' }],
+          failed: [{ requestId: 'bad', code: 'validation', message: 'invalid request id' }],
+        })
       }),
       http.post(
         /\/fb\/v1\/console\/request-notifications\/deliveries\/[^/]+:retry$/,
@@ -409,6 +454,7 @@ describe('request notification API client', () => {
     const qc = makeQueryClient()
     qc.setQueryData(requestNotificationWebhookTargetsQueryKey, [{ id: 'target/slash' }])
     qc.setQueryData([...requestNotificationDeliveriesQueryKey, 25], [{ id: 'delivery/slash' }])
+    qc.setQueryData(requestNotificationStatusEvidenceQueryKey, [{ requestStatus: 'shipped' }])
 
     const createTarget = renderHook(() => useCreateRequestNotificationWebhookTarget(), {
       wrapper: wrapperFor(qc),
@@ -422,7 +468,13 @@ describe('request notification API client', () => {
     const preview = renderHook(() => usePreviewRequestNotification(), {
       wrapper: wrapperFor(qc),
     })
+    const batchPreview = renderHook(() => useBatchPreviewRequestNotifications(), {
+      wrapper: wrapperFor(qc),
+    })
     const publish = renderHook(() => usePublishRequestUpdate(), {
+      wrapper: wrapperFor(qc),
+    })
+    const batchPublish = renderHook(() => useBatchPublishRequestUpdates(), {
       wrapper: wrapperFor(qc),
     })
     const retry = renderHook(() => useRetryRequestNotificationDelivery(), {
@@ -454,6 +506,27 @@ describe('request notification API client', () => {
     })
     await waitFor(() => expect(preview.result.current.isSuccess).toBe(true))
 
+    batchPreview.result.current.mutate({
+      updates: [
+        {
+          requestId: 'request/slash',
+          title: 'Shipped',
+          body: 'Done',
+          kind: 'status_change',
+          notifySubscribers: true,
+        },
+        {
+          requestId: 'bad',
+          title: 'Shipped',
+          body: 'Done',
+          kind: 'status_change',
+          notifySubscribers: true,
+        },
+      ],
+      channels: [RequestNotificationChannel.REQUEST_NOTIFICATION_CHANNEL_EMAIL],
+    })
+    await waitFor(() => expect(batchPreview.result.current.isSuccess).toBe(true))
+
     publish.result.current.mutate({
       update: {
         requestId: 'request/slash',
@@ -466,6 +539,28 @@ describe('request notification API client', () => {
       confirmLargeAudience: true,
     })
     await waitFor(() => expect(publish.result.current.isSuccess).toBe(true))
+
+    batchPublish.result.current.mutate({
+      updates: [
+        {
+          requestId: 'request/slash',
+          title: 'Shipped',
+          body: 'Done',
+          kind: 'status_change',
+          notifySubscribers: true,
+        },
+        {
+          requestId: 'bad',
+          title: 'Shipped',
+          body: 'Done',
+          kind: 'status_change',
+          notifySubscribers: true,
+        },
+      ],
+      channels: [RequestNotificationChannel.REQUEST_NOTIFICATION_CHANNEL_EMAIL],
+      confirmLargeAudience: true,
+    })
+    await waitFor(() => expect(batchPublish.result.current.isSuccess).toBe(true))
 
     retry.result.current.mutate('delivery/slash')
     await waitFor(() => expect(retry.result.current.isSuccess).toBe(true))
@@ -498,6 +593,28 @@ describe('request notification API client', () => {
         },
       },
       {
+        path: '/fb/v1/console/request-notifications:batch-preview',
+        body: {
+          updates: [
+            {
+              requestId: 'request/slash',
+              title: 'Shipped',
+              body: 'Done',
+              kind: 'status_change',
+              notifySubscribers: true,
+            },
+            {
+              requestId: 'bad',
+              title: 'Shipped',
+              body: 'Done',
+              kind: 'status_change',
+              notifySubscribers: true,
+            },
+          ],
+          channels: ['REQUEST_NOTIFICATION_CHANNEL_EMAIL'],
+        },
+      },
+      {
         path: '/fb/v1/console/request-notifications/publish',
         body: {
           update: {
@@ -511,11 +628,35 @@ describe('request notification API client', () => {
           confirmLargeAudience: true,
         },
       },
+      {
+        path: '/fb/v1/console/request-notifications:batch-publish',
+        body: {
+          updates: [
+            {
+              requestId: 'request/slash',
+              title: 'Shipped',
+              body: 'Done',
+              kind: 'status_change',
+              notifySubscribers: true,
+            },
+            {
+              requestId: 'bad',
+              title: 'Shipped',
+              body: 'Done',
+              kind: 'status_change',
+              notifySubscribers: true,
+            },
+          ],
+          channels: ['REQUEST_NOTIFICATION_CHANNEL_EMAIL'],
+          confirmLargeAudience: true,
+        },
+      },
       { path: '/fb/v1/console/request-notifications/deliveries/delivery%2Fslash:retry' },
     ])
     expect(qc.getQueryState(requestNotificationWebhookTargetsQueryKey)?.isInvalidated).toBe(true)
     expect(qc.getQueryState([...requestNotificationDeliveriesQueryKey, 25])?.isInvalidated).toBe(
       true,
     )
+    expect(qc.getQueryState(requestNotificationStatusEvidenceQueryKey)?.isInvalidated).toBe(true)
   })
 })

@@ -544,6 +544,114 @@ func TestHandlerPublishDeliveryAndSubscriberEndpoints(t *testing.T) {
 	}
 }
 
+func TestHandlerBatchPublishEndpoints(t *testing.T) {
+	requestID := uuid.New()
+	eventID := uuid.New()
+	now := time.Now().UTC()
+	fake := &fakeNotificationService{
+		batchPrev: svc.BatchPreviewResult{
+			TotalMatched:       2,
+			EligibleRecipients: 2,
+			ExcludedRecipients: 1,
+			Items: []svc.BatchPreviewItem{{
+				RequestID: requestID.String(),
+				Preview:   svc.PreviewResult{EligibleRecipients: 2, ExcludedRecipients: 1},
+			}},
+			Failed: []svc.BatchNotificationFailure{{
+				RequestID: "bad-request",
+				Code:      "validation",
+				Message:   "invalid request id",
+			}},
+		},
+		batchPub: svc.BatchPublishResult{
+			TotalMatched: 2,
+			Succeeded:    1,
+			Events: []repo.Event{{
+				ID:               eventID,
+				TenantID:         "tenant-1",
+				PrimaryRequestID: ptrext.Of(requestID),
+				EventType:        repo.EventTypeStatusChanged,
+				Status:           repo.EventStatusPending,
+				CreatedAt:        now,
+			}},
+			Failed: []svc.BatchNotificationFailure{{
+				RequestID: "bad-request",
+				Code:      "validation",
+				Message:   "invalid request id",
+			}},
+		},
+	}
+	h := NewHandler(fake)
+	audit := &fakeAudit{}
+	h.SetAuditLogger(audit)
+	ctx := requestNotificationContext()
+	draft := &attunev1.RequestNotificationUpdateDraft{
+		RequestId: requestID.String(),
+		Title:     "Update",
+		Body:      "Body",
+		Kind:      "status_change",
+	}
+
+	batchPreview, err := h.BatchPreview(ctx, &attunev1.BatchPreviewRequestNotificationsRequest{
+		Updates: []*attunev1.RequestNotificationUpdateDraft{draft},
+		Channels: []attunev1.RequestNotificationChannel{
+			attunev1.RequestNotificationChannel_REQUEST_NOTIFICATION_CHANNEL_EMAIL,
+		},
+	})
+	if err != nil || batchPreview.Body.GetTotalMatched() != 2 || len(batchPreview.Body.GetFailed()) != 1 {
+		t.Fatalf("BatchPreview() = %+v err=%v", batchPreview.Body, err)
+	}
+	if fake.last.(svc.BatchPublishInput).Channels[0] != repo.ChannelEmail {
+		t.Fatalf("batch preview input = %+v", fake.last)
+	}
+
+	batchPublished, err := h.BatchPublish(ctx, &attunev1.BatchPublishRequestUpdatesRequest{
+		Updates:              []*attunev1.RequestNotificationUpdateDraft{draft},
+		ConfirmLargeAudience: true,
+	})
+	if err != nil || batchPublished.Status != http.StatusCreated ||
+		batchPublished.Body.GetSucceeded() != 1 || batchPublished.Body.GetFailed()[0].GetCode() != "validation" {
+		t.Fatalf("BatchPublish() = %+v err=%v", batchPublished.Body, err)
+	}
+	if !fake.last.(svc.BatchPublishInput).ConfirmLargeAudience || len(audit.events) != 1 {
+		t.Fatalf("batch publish input = %+v audit=%+v", fake.last, audit.events)
+	}
+}
+
+func TestHandlerGetStatusEvidence(t *testing.T) {
+	fake := &fakeNotificationService{
+		evidence: []repo.StatusEvidence{
+			{
+				RequestStatus:            "shipped",
+				ExpectedCustomers:        4,
+				NotifiedCustomers:        2,
+				FailedCustomers:          1,
+				SuppressedCustomers:      1,
+				RecoveryPendingCustomers: 1,
+				EventCount:               2,
+				LastEventAt:              ptrext.Of(time.Now().UTC()),
+			},
+		},
+	}
+	h := NewHandler(fake)
+
+	evidence, err := h.GetStatusEvidence(requestNotificationContext(), &attunev1.GetRequestNotificationStatusEvidenceRequest{})
+	if err != nil || len(evidence.Body.GetItems()) != 1 {
+		t.Fatalf("GetStatusEvidence() = %+v err=%v", evidence.Body, err)
+	}
+	shipped := evidence.Body.GetItems()[0]
+	if shipped.GetRequestStatus() != "shipped" ||
+		shipped.GetExpectedCustomers() != 4 ||
+		shipped.GetNotifiedCustomers() != 2 ||
+		shipped.GetFailedCustomers() != 1 ||
+		shipped.GetSuppressedCustomers() != 1 ||
+		shipped.GetRecoveryPendingCustomers() != 1 ||
+		shipped.GetEventCount() != 2 ||
+		shipped.GetLastEventAt() == "" {
+		t.Fatalf("status evidence = %+v, want shipped notification counts", shipped)
+	}
+}
+
 func TestHandlerSubscriberEndpoints(t *testing.T) {
 	requestID := uuid.New()
 	contactID := uuid.New()
@@ -695,9 +803,23 @@ func TestHandlerServiceErrors(t *testing.T) {
 			},
 		},
 		{
+			name: "batch preview",
+			call: func(h *Handler) error {
+				_, err := h.BatchPreview(ctx, &attunev1.BatchPreviewRequestNotificationsRequest{Updates: []*attunev1.RequestNotificationUpdateDraft{draft}})
+				return err
+			},
+		},
+		{
 			name: "publish",
 			call: func(h *Handler) error {
 				_, err := h.Publish(ctx, &attunev1.PublishRequestUpdateRequest{Update: draft})
+				return err
+			},
+		},
+		{
+			name: "batch publish",
+			call: func(h *Handler) error {
+				_, err := h.BatchPublish(ctx, &attunev1.BatchPublishRequestUpdatesRequest{Updates: []*attunev1.RequestNotificationUpdateDraft{draft}})
 				return err
 			},
 		},
@@ -837,8 +959,11 @@ type fakeNotificationService struct {
 	sender     repo.Sender
 	target     repo.WebhookTarget
 	preview    svc.PreviewResult
+	batchPrev  svc.BatchPreviewResult
 	event      repo.Event
+	batchPub   svc.BatchPublishResult
 	delivery   repo.Delivery
+	evidence   []repo.StatusEvidence
 	subscriber repo.Subscriber
 	err        error
 }
@@ -936,6 +1061,14 @@ func (f *fakeNotificationService) Preview(_ context.Context, in svc.PublishInput
 	return f.preview, nil
 }
 
+func (f *fakeNotificationService) BatchPreview(_ context.Context, in svc.BatchPublishInput) (svc.BatchPreviewResult, error) {
+	f.last = in
+	if f.err != nil {
+		return svc.BatchPreviewResult{}, f.err
+	}
+	return f.batchPrev, nil
+}
+
 func (f *fakeNotificationService) Publish(_ context.Context, in svc.PublishInput) (repo.Event, error) {
 	f.last = in
 	if f.err != nil {
@@ -944,12 +1077,27 @@ func (f *fakeNotificationService) Publish(_ context.Context, in svc.PublishInput
 	return f.event, nil
 }
 
+func (f *fakeNotificationService) BatchPublish(_ context.Context, in svc.BatchPublishInput) (svc.BatchPublishResult, error) {
+	f.last = in
+	if f.err != nil {
+		return svc.BatchPublishResult{}, f.err
+	}
+	return f.batchPub, nil
+}
+
 func (f *fakeNotificationService) ListDeliveries(_ context.Context, filter repo.ListDeliveryFilter) ([]repo.Delivery, error) {
 	f.last = filter
 	if f.err != nil {
 		return nil, f.err
 	}
 	return []repo.Delivery{f.delivery}, nil
+}
+
+func (f *fakeNotificationService) ListStatusEvidence(context.Context, string) ([]repo.StatusEvidence, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.evidence, nil
 }
 
 func (f *fakeNotificationService) RetryDelivery(_ context.Context, tenantID string, id int64, actorID string) (repo.Delivery, error) {
