@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Added
 
+- Runtime smoke base-image overrides so local release sweeps can use verified
+  mirror or locally tagged Docker bases while CI keeps the official pinned
+  Dockerfile defaults.
+
 - Amplitude and Mixpanel cohort sync (#233):
   - **Backend**: 15 proto RPCs, Tink-encrypted dual credentials (webhook +
     pull), per-provider webhook receivers with auth-before-body-read, SHA-256
