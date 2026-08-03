@@ -30,6 +30,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console/notifytarget"
 	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
 	consolerequestnotification "github.com/Phixsura/attune/internal/handlers/console/requestnotification"
+	consolesurvey "github.com/Phixsura/attune/internal/handlers/console/survey"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
 	"github.com/Phixsura/attune/internal/handlers/console/usage"
@@ -59,6 +60,7 @@ func TestMutatingRoutesHaveAuditCoverageDecision(t *testing.T) {
 		feedbackJob:          &feedbackjob.Handler{},
 		publicVisibility:     &consolepublicvisibility.Handler{},
 		requestNotifications: &consolerequestnotification.Handler{},
+		surveys:              &consolesurvey.Handler{},
 		usage:                &usage.UsageHandler{},
 		enrichConfig:         &enrichconfig.Handler{},
 		enrichmentRuntime:    &consoleenrichmentruntime.Handler{},
@@ -150,6 +152,11 @@ var auditEmittedActions = []string{
 	"request_notification.bounce",
 	"request_notification.complaint",
 	"request_notification.public_update_publish",
+	"survey.provider_event_record",
+	"survey.invitation_delivery_retry",
+	"signal_subject.merge",
+	"signal_subject.split",
+	"classification_review.record",
 }
 
 // TestAuditedRouteActionsAreRegistered asserts every emitted audit action is
@@ -174,6 +181,7 @@ func expectedMutatingRouteCoverage() map[string]string {
 	mergeMutatingRouteCoverage(coverage, replyDraftMutatingRouteCoverage())
 	mergeMutatingRouteCoverage(coverage, publicVisibilityMutatingRouteCoverage())
 	mergeMutatingRouteCoverage(coverage, requestNotificationMutatingRouteCoverage())
+	mergeMutatingRouteCoverage(coverage, surveyMutatingRouteCoverage())
 	return coverage
 }
 
@@ -241,9 +249,17 @@ func workflowMutatingRouteCoverage() map[string]string {
 		"POST /feedback/batch":                               "audited: feedback.batch_delete for delete payloads; route is payload-multiplexed and non-delete variants are operational",
 		"POST /feedback/search":                              "exempt: read-only semantic search",
 		"POST /feedback/search/events":                       "exempt: search interaction telemetry, not a control-plane mutation",
+		"POST /classification-quality/reviews":               "audited: classification_review.record",
 		"POST /feedback/{id}/tags":                           "exempt: per-feedback tagging flow, not unified control-plane audit",
 		"DELETE /feedback/{id}/tags/{tag_id}":                "exempt: per-feedback tagging flow, not unified control-plane audit",
 		"POST /feedback/{id}/transition":                     "exempt: per-feedback workflow audit path, not unified control-plane audit",
+		"PATCH /feedback/{id}/assignment":                    "audited: feedback_assignment changed-field audit entries",
+		"PUT /feedback/assignment/policy":                    "audited: feedback_assignment.policy_update",
+		"POST /feedback/assignment/policy:dry-run":           "exempt: preview-only, does not persist assignment policy",
+		"POST /feedback/assignment/policy:restore":           "audited: feedback_assignment.policy_restore",
+		"POST /feedback/assignment:batch":                    "audited: feedback_assignment changed-field audit entries per affected row",
+		"POST /feedback/assignment:recommend":                "exempt: preview-only, does not persist assignment state",
+		"POST /feedback/assignment:apply-recommendations":    "audited: feedback_assignment policy-application audit entries per affected row",
 		"POST /feedback/{id}/retry-enrichment":               "audited: retry_enrichment",
 		"PUT /enrich-config/":                                "audited: enrich_config.update",
 		"POST /enrich-config/versions/{version_id}:activate": "audited: enrich_config.activate_version",
@@ -300,6 +316,8 @@ func workflowMutatingRouteCoverage() map[string]string {
 
 func replyDraftMutatingRouteCoverage() map[string]string {
 	return map[string]string{
+		"POST /feedback/identity-review/merge":            "audited: signal_subject.merge",
+		"POST /feedback/identity-review/split":            "audited: signal_subject.split",
 		"POST /feedback/{id}/reply-draft/regenerate":      "audited: reply_draft.generate when workflow persistence is configured",
 		"POST /feedback/{id}/reply-draft/edit":            "audited: reply_draft.edit",
 		"POST /feedback/{id}/reply-draft/approve":         "audited: reply_draft.approve",
@@ -337,9 +355,28 @@ func requestNotificationMutatingRouteCoverage() map[string]string {
 		"DELETE /request-notifications/webhook-targets/{id}":            "audited: request_notification.webhook_target_delete",
 		"POST /request-notifications/webhook-targets/{id}:test":         "audited: request_notification.webhook_target_test",
 		"POST /request-notifications/preview":                           "exempt: preview-only, does not persist notification state",
+		"POST /request-notifications:batch-preview":                     "exempt: preview-only, does not persist notification state",
 		"POST /request-notifications/publish":                           "audited: request_notification.public_update_publish",
+		"POST /request-notifications:batch-publish":                     "audited: request_notification.public_update_publish per successful event",
 		"POST /request-notifications/deliveries/{id}:retry":             "audited: request_notification.delivery_retry",
 		"POST /request-notifications/subscribers/{contact_id}:suppress": "audited: request_notification.suppress_contact",
 		"POST /request-notifications/provider-events:suppress":          "audited: request_notification.bounce, request_notification.complaint, or request_notification.suppress_contact",
+	}
+}
+
+func surveyMutatingRouteCoverage() map[string]string {
+	return map[string]string{
+		"POST /surveys/campaigns":                                  "audited: survey.campaign_create",
+		"PATCH /surveys/campaigns/{id}":                            "audited: survey.campaign_update",
+		"POST /surveys/campaigns/{id}:archive":                     "audited: survey.campaign_archive",
+		"POST /surveys/campaigns/{campaign_id}/hosted-links":       "audited: survey.hosted_link_create",
+		"POST /surveys/campaigns/{campaign_id}/recipients:preview": "exempt: preview-only, does not persist survey state",
+		"POST /surveys/campaigns/{campaign_id}:sendTestEmail":      "audited: survey.test_email_send",
+		"POST /surveys/provider-events:record":                     "audited: survey.provider_event_record",
+		"POST /surveys/invitations/{id}:retry":                     "audited: survey.invitation_delivery_retry",
+		"PATCH /surveys/responses/{response_id}/low-score-review":  "audited: survey.low_score_review_update",
+		"POST /surveys/responses/low-score-reviews:batchUpdate":    "audited: survey.low_score_review_batch_update",
+		"POST /surveys/responses/low-score-reviews:assign":         "audited: survey.low_score_review_assign",
+		"POST /surveys/responses/low-score-reviews:escalate":       "audited: survey.low_score_review_escalate",
 	}
 }

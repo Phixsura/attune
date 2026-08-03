@@ -1,0 +1,17 @@
+{
+  "provider": "zendesk",
+  "eventType": "ticket.updated",
+  "rawPayload": {
+    "ticketId": "zd-991",
+    "subject": "Public roadmap privacy approval",
+    "requesterId": "user-1201"
+  },
+  "normalized": {
+    "type": "feedback",
+    "action": "upsert",
+    "externalId": "zendesk:zd-991",
+    "title": "Public roadmap privacy approval",
+    "status": "open",
+    "source": "zendesk"
+  }
+}

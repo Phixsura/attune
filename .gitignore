@@ -30,6 +30,9 @@
 /console/playwright-report/
 /console/test-results/
 
+# Node workspaces
+node_modules/
+
 # Logs
 *.log
 

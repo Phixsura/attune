@@ -124,6 +124,7 @@
     "external_sync": "外部同步",
     "public_visibility": "公开可见性",
     "request_notifications": "需求通知",
+    "surveys": "满意度调查",
     "reply_send_hook": "回复发送 Hook",
     "inbound_sources": "入站源",
     "guard_policies": "防护策略",
@@ -143,6 +144,542 @@
     "security": "安全设置",
     "cohort_sync": "人群同步"
   },
+  "surveys": {
+    "title": "满意度调查",
+    "subtitle": "管理解决后的 CSAT/CES 活动、邀请漏斗、托管链接和低分跟进。",
+    "days": "{{count}} 天",
+    "load_error_title": "调查数据加载失败",
+    "metrics": {
+      "campaigns": "活动",
+      "campaigns_hint": "当前租户下的调查活动数量。",
+      "response_rate": "回复率",
+      "response_rate_hint": "已完成回复占全部邀请的比例。",
+      "positive_rate": "正向率",
+      "positive_rate_hint": "正向评分占已完成回复的比例。",
+      "average_score": "均分",
+      "average_score_hint": "当前范围内已完成回复的平均分。",
+      "low_scores": "低分",
+      "low_scores_hint": "需要运营跟进的低分回复数量。"
+    },
+    "health": {
+      "title": "活动健康诊断",
+      "description": "用配置、投递漏斗、回复漏斗和低分恢复队列判断当前活动是否可信。",
+      "loading": "检查中",
+      "empty": "选择活动后显示健康诊断。",
+      "score": "就绪分",
+      "delivery_rate": "送达率",
+      "response_rate": "回复率",
+      "suppression_rate": "抑制率",
+      "pending_delivery": "待投递",
+      "overdue_recovery": "逾期恢复",
+      "checks": "健康检查",
+      "status": {
+        "healthy": "健康",
+        "needs_attention": "需关注",
+        "blocked": "受阻"
+      },
+      "check_items": {
+        "campaign-status": {
+          "title": "活动状态可运行",
+          "summary": "当前活动状态决定是否能接收触发并生成邀请。",
+          "action": "保持活动负责人、内容和触发规则最新。"
+        },
+        "delivery-readiness": {
+          "title": "投递路径已配置",
+          "summary": "当前发送方式所需的发件人和加密边界需要同时就绪。",
+          "action": "先修复投递 blocker，再判断活动表现。"
+        },
+        "delivery-funnel": {
+          "title": "投递漏斗",
+          "summary": "检查邀请是否卡在待发送、延迟或拒收状态。",
+          "action": "检查调查 worker、发件人配置和 provider 事件流。"
+        },
+        "response-funnel": {
+          "title": "回复漏斗",
+          "summary": "检查邀请是否能转化为足够可信的客户回复。",
+          "action": "调整发送时机、文案或入口位置，再观察更大的样本。"
+        },
+        "suppression-rate": {
+          "title": "抑制率",
+          "summary": "检查冷却、频率、活跃窗口和同意状态是否挡住过多机会。",
+          "action": "查看抑制原因分布，再调整冷却、每日上限或最近活跃规则。"
+        },
+        "expiry-rate": {
+          "title": "过期率",
+          "summary": "检查客户是否在有效期内完成调查。",
+          "action": "调整提醒时机、有效期或调查出现的节点。"
+        },
+        "recovery-queue": {
+          "title": "低分恢复队列",
+          "summary": "检查低分回复是否有人负责、是否逾期、是否完成客户恢复。",
+          "action": "先处理逾期和未分配低分，再扩大活动发送量。"
+        }
+      }
+    },
+    "type": {
+      "csat": "CSAT",
+      "ces": "CES"
+    },
+    "status": {
+      "active": "启用",
+      "draft": "草稿",
+      "archived": "已归档"
+    },
+    "trigger": {
+      "workflow_transition": "工作流关闭",
+      "reply_sent": "回复已发送",
+      "manual_link": "手动链接",
+      "request_resolved": "需求已解决"
+    },
+    "distribution": {
+      "contact_email": "联系人邮件",
+      "source_link": "来源链接"
+    },
+    "dedupe": {
+      "one_per_resolution": "每次解决一次",
+      "one_per_source": "每个来源一次",
+      "one_per_trigger": "每个触发一次"
+    },
+    "delivery_status": {
+      "pending": "待发送",
+      "accepted": "已受理",
+      "delivered": "已送达",
+      "rejected": "已拒收",
+      "bounced": "已退信",
+      "complained": "已投诉",
+      "delayed": "延迟重试",
+      "not_applicable": "无需投递",
+      "unknown": "未知投递状态"
+    },
+    "response_status": {
+      "not_started": "未开始",
+      "opened": "已打开",
+      "started": "填写中",
+      "completed": "已提交",
+      "expired": "已过期",
+      "unknown": "未知回复状态"
+    },
+    "reasons": {
+      "auto_resolved": "自动解决已跳过",
+      "campaign_daily_limit": "活动每日上限",
+      "contact_cooldown": "联系人冷却中",
+      "contact_missing": "联系人缺失",
+      "contact_suppressed": "联系人已退订或被抑制",
+      "dedupe_conflict": "重复来源已跳过",
+      "delivery_secret_store_not_configured": "投递加密未配置",
+      "email_sender_not_configured": "发件人未配置",
+      "expired": "邀请已过期",
+      "expired_before_send": "发送前已过期",
+      "manual": "手动抑制",
+      "missing_contact": "缺少可投递联系人",
+      "no_eligible_recipient": "没有合格收件人",
+      "no_recent_customer_activity": "最近无客户活动",
+      "sampled_out": "抽样跳过",
+      "tenant_hourly_limit": "租户小时上限",
+      "unknown": "未知原因"
+    },
+    "fields": {
+      "name": "活动名称",
+      "type": "调查类型",
+      "status": "状态",
+      "trigger": "触发方式",
+      "distribution": "发送方式",
+      "dedupe": "去重策略",
+      "locale": "语言",
+      "sampling": "抽样比例",
+      "cooldown": "联系人冷却",
+      "expiry": "邀请有效期",
+      "daily_limit": "每日上限",
+      "low_score": "低分阈值",
+      "recent_days": "最近活跃窗口",
+      "require_recent": "仅发送给最近活跃联系人",
+      "suppress_auto": "跳过自动解决的来源"
+    },
+    "create": {
+      "title": "新建活动",
+      "description": "为关闭工作流、回复发送或需求解决创建一条可追踪的 CSAT/CES 活动。",
+      "submit": "创建活动"
+    },
+    "campaigns": {
+      "title": "活动",
+      "description": "选择活动后，右侧指标和队列会切换到对应范围。",
+      "empty": "还没有调查活动。",
+      "name": "名称",
+      "trigger": "触发",
+      "delivery": "发送",
+      "status": "状态",
+      "actions": "操作",
+      "archive": "归档活动"
+    },
+    "scope": {
+      "title": "当前范围",
+      "description": "按活动查看邀请、回复、低分和漏斗指标。",
+      "filter_label": "筛选活动",
+      "placeholder": "选择活动",
+      "empty": "创建活动后即可查看范围。"
+    },
+    "settings": {
+      "title": "活动设置",
+      "description": "调整选中活动的触发、发送、去重和发送保护。",
+      "empty": "选择活动后即可调整设置。",
+      "save": "保存设置"
+    },
+    "recipient_preview": {
+      "title": "收件人预检",
+      "description": "在发送前用真实资格规则演练一个来源样本，确认覆盖人数和跳过原因。",
+      "empty": "创建未归档活动后即可预检收件人。",
+      "campaign": "活动",
+      "source_type": "来源类型",
+      "source_id": "来源 ID",
+      "feedback_id": "反馈 ID",
+      "request_source_id": "需求 ID",
+      "request_id": "关联需求 ID",
+      "submit": "预检收件人",
+      "matched": "候选",
+      "eligible": "可发送",
+      "suppressed": "已跳过",
+      "delivery": "投递",
+      "ready_badge": "就绪",
+      "blocked_badge": "阻断",
+      "eligible_badge": "可发送",
+      "recipients": "预检收件人",
+      "reason_distribution": "跳过原因",
+      "filter_mismatch": "当前样本不匹配活动触发筛选条件。",
+      "sampled_out": "当前样本被抽样规则跳过。",
+      "delivery_blocked": "当前发送通道尚未就绪。",
+      "delivery_blocked_reason": "当前发送通道尚未就绪：{{reason}}。",
+      "no_recipients": "当前样本没有可展示的收件人。",
+      "anonymous": "未命名收件人"
+    },
+    "test_email": {
+      "title": "测试邮件",
+      "description": "使用当前发件人和邮件服务发送一封标记为测试的调查样张。",
+      "empty": "创建未归档活动后即可发送测试邮件。",
+      "campaign": "活动",
+      "to_email": "收件邮箱",
+      "submit": "发送测试邮件",
+      "provider_unknown": "未知通道"
+    },
+    "analytics": {
+      "title": "漏斗",
+      "description": "邀请、送达、提交和抑制数量用于定位闭环断点。",
+      "invitations": "邀请",
+      "delivered": "送达",
+      "not_started": "未开始",
+      "opened": "已打开",
+      "completed": "提交",
+      "expired": "已过期",
+      "suppressed": "抑制",
+      "positive": "正向",
+      "open_reviews": "待跟进",
+      "overdue_reviews": "逾期跟进",
+      "average_response_time": "平均响应耗时",
+      "distribution": "分数分布",
+      "suppression_reasons": "抑制原因",
+      "empty": "暂无分数分布。"
+    },
+    "analytics_insights": {
+      "title": "运营洞察",
+      "description": "按优先级列出需要处理的调查风险和建议动作。",
+      "empty": "暂无运营洞察。",
+      "metric": "当前值",
+      "threshold": "阈值",
+      "segment": "关联分群：{{value}}",
+      "action": "建议：{{value}}",
+      "cta": {
+        "analytics": "查看健康指标",
+        "low_scores": "打开低分队列",
+        "segments": "查看问题分群",
+        "settings": "调整活动设置"
+      },
+      "severity": {
+        "info": "正常",
+        "warning": "注意",
+        "critical": "紧急"
+      },
+      "items": {
+        "overdue": {
+          "title": "低分跟进已逾期",
+          "summary": "客户恢复动作被逾期的低分跟进阻塞。",
+          "action": "先分配负责人并处理逾期低分，再继续扩大调查量。"
+        },
+        "critical_reviews": {
+          "title": "紧急低分仍未关闭",
+          "summary": "高严重度客户恢复工作仍处于处理中。",
+          "action": "把紧急低分升级给负责人，并在当天形成恢复计划。"
+        },
+        "unassigned_reviews": {
+          "title": "低分跟进缺少负责人",
+          "summary": "部分活跃恢复工作还没有分配到成员。",
+          "action": "先完成负责人分配，再评估活动表现或继续发送邀请。"
+        },
+        "pending_contact": {
+          "title": "客户仍未被恢复联系",
+          "summary": "活跃低分跟进尚未记录客户联系动作。",
+          "action": "联系受影响客户，并在每条跟进里记录恢复动作。"
+        },
+        "missing_root_cause": {
+          "title": "低分跟进缺少根因",
+          "summary": "客户恢复工作还没有沉淀可复盘的原因。",
+          "action": "先补齐活跃跟进的根因，再判断问题是否集中在某个流程或分群。"
+        },
+        "missing_action": {
+          "title": "低分跟进缺少行动记录",
+          "summary": "已经识别原因的恢复项还没有记录实际动作。",
+          "action": "补齐每条低分恢复项的行动记录，再关闭客户闭环。"
+        },
+        "low_score_rate": {
+          "title": "低分率升高",
+          "summary": "已提交回复中有较高比例需要恢复动作。",
+          "action": "复盘低分评论并归类根因，再调整活动设置。"
+        },
+        "response_rate": {
+          "title": "回复率低于目标",
+          "summary": "调查邀请没有转化成足够的客户信号。",
+          "action": "检查入口位置、发送时机，以及客户是否已经感知到问题解决。"
+        },
+        "suppression_rate": {
+          "title": "抑制率偏高",
+          "summary": "发送资格规则正在过滤较多调查机会。",
+          "action": "查看抑制原因并调整冷却期、每日上限或最近活跃要求。"
+        },
+        "expired_rate": {
+          "title": "邀请过期偏多",
+          "summary": "客户没有在有效期内打开或提交调查。",
+          "action": "检查有效期、提醒时机和调查入口可见性。"
+        },
+        "segment": {
+          "title": "分群风险集中",
+          "summary": "某个分群集中出现低分、过期或抑制。",
+          "action": "先下钻这个分群，再修改全局调查设置。"
+        },
+        "stable": {
+          "title": "调查闭环稳定",
+          "summary": "当前窗口没有触发风险阈值。",
+          "action": "继续监控回复质量和低分跟进队列。"
+        }
+      }
+    },
+    "low_score_command": {
+      "title": "低分恢复指挥台",
+      "description": "用 SLA、负责人和客户联系状态判断今天的恢复队列是否健康。",
+      "readiness": "恢复健康度",
+      "open": "活跃跟进",
+      "overdue": "已逾期",
+      "critical": "紧急",
+      "unassigned": "未分配",
+      "pending_contact": "未联系客户",
+      "missing_root_cause": "缺根因",
+      "missing_action": "缺行动",
+      "oldest_due": "最早到期",
+      "no_due": "暂无到期项",
+      "next_steps": "处理顺序",
+      "owner_load": {
+        "title": "负责人负载",
+        "count": "{{count}} 人",
+        "empty": "暂无已分配的活跃恢复项。",
+        "suggested": "建议下一位负责人：{{owner}}",
+        "open": "活跃 {{count}}",
+        "overdue": "逾期 {{count}}",
+        "critical": "紧急 {{count}}",
+        "score": "压力分"
+      },
+      "summary": {
+        "stable": "当前没有活跃低分恢复项，继续监控新回复即可。",
+        "overdue": "先处理逾期恢复项，否则客户恢复 SLA 会继续恶化。",
+        "unassigned": "队列里有未分配恢复项，风险还没有真正进入负责人闭环。",
+        "critical": "存在紧急低分恢复项，需要优先升级并形成当天动作。",
+        "contact": "队列里仍有客户未被联系，需要先补上恢复触达。",
+        "root_cause": "队列里仍有恢复项缺少根因，团队还不能从低分中学习。",
+        "action": "队列里仍有恢复项缺少行动记录，客户闭环还没有证据。",
+        "healthy": "活跃恢复项已经进入负责人和 SLA 管控，继续推进根因归档。"
+      },
+      "steps": {
+        "resolve_overdue": "处理逾期项并更新状态",
+        "assign_owners": "给未分配项指定负责人",
+        "escalate_critical": "升级紧急项并确认当天动作",
+        "contact_customers": "联系客户并记录触达结果",
+        "record_root_cause": "补齐根因，沉淀可复用恢复模式",
+        "record_actions": "记录恢复行动，形成闭环证据",
+        "monitor": "继续监控新低分回复",
+        "keep_thresholds": "保持当前低分阈值和 SLA 设置",
+        "review_segments": "定期复查分群风险是否集中"
+      }
+    },
+    "analytics_trend": {
+      "title": "30 天趋势",
+      "description": "按日查看回复率、提交量和低分变化，判断闭环质量是否正在改善。",
+      "empty": "暂无趋势数据。",
+      "latest_response_rate": "最近回复率",
+      "latest_completed": "最近提交",
+      "latest_low_scores": "最近低分",
+      "latest_expired": "最近过期",
+      "response_rate": "回复率趋势",
+      "completed": "提交趋势",
+      "low_scores": "低分趋势",
+      "recent_days": "最近日期",
+      "completed_short": "提交 {{count}}",
+      "rate_short": "回复率 {{value}}",
+      "low_short": "低分 {{count}}"
+    },
+    "analytics_segments": {
+      "title": "问题分群",
+      "description": "按来源类型定位高低分、低回复和抑制集中的分群。",
+      "empty": "暂无分群数据。",
+      "sample": "{{completed}} / {{invitations}} 已提交",
+      "attention": "关注分",
+      "response_rate": "回复率",
+      "low_score_rate": "低分率",
+      "suppression_rate": "抑制率",
+      "expired": "过期 {{count}}",
+      "average_score": "均分 {{value}}",
+      "response_time": "耗时 {{value}}"
+    },
+    "hosted_link": {
+      "title": "托管链接",
+      "description": "为已知反馈或需求生成可复制的调查入口。",
+      "campaign": "活动",
+      "source_type": "来源类型",
+      "source_id": "来源 ID",
+      "request_id": "需求 ID",
+      "submit": "生成链接"
+    },
+    "invitations": {
+      "title": "邀请",
+      "description": "最近的邀请、发送状态和公开入口。",
+      "empty": "暂无邀请。",
+      "source": "来源",
+      "delivery": "发送状态",
+      "response": "回复状态",
+      "public_link": "公开链接",
+      "retry": "立即重试发送"
+    },
+    "low_scores": {
+      "title": "低分跟进",
+      "description": "低分回复需要明确状态，避免客户闭环丢失。",
+      "empty": "暂无低分回复。",
+      "focus_label": "焦点队列",
+      "focus": {
+        "all": "全部",
+        "critical": "紧急",
+        "overdue": "逾期",
+        "unassigned": "未分配",
+        "pending_contact": "待联系",
+        "root_cause": "待根因",
+        "action_missing": "待动作"
+      },
+      "score": "评分 {{score}}",
+      "no_comment": "未留下评论",
+      "status": "状态 {{value}}",
+      "severity": "严重度 {{value}}",
+      "due": "截止 {{value}}",
+      "no_due": "未设置截止时间",
+      "status_label": "跟进状态",
+      "severity_label": "严重度",
+      "owner": "负责人",
+      "owner_filter": "负责人",
+      "all_owners": "全部负责人",
+      "owner_unassigned": "未分配",
+      "account_filter": "账户标识",
+      "account_filter_placeholder": "按 account key 筛选",
+      "account_context": "账户 {{account}}",
+      "due_label": "截止时间",
+      "root_cause": "根因",
+      "action_taken": "行动记录",
+      "customer_contacted": "已联系客户",
+      "in_review": "跟进中",
+      "resolve": "已解决",
+      "save": "保存跟进",
+      "batch": {
+        "selected": "已选 {{count}} 条",
+        "select_visible": "选择当前 {{count}} 条",
+        "select_response": "选择低分回复 {{source}}",
+        "clear": "清除选择",
+        "no_change": "保持不变",
+        "customer_contacted": "批量标记已联系客户",
+        "apply": "应用批量更新"
+      },
+      "assignment": {
+        "apply": "智能分配"
+      },
+      "escalation": {
+        "apply": "升级处理"
+      },
+      "playbook": {
+        "risk_score": "风险分",
+        "automated_escalation": "自动升级",
+        "next_action": "下一步：{{value}}"
+      },
+      "notification_status": {
+        "pending": "通知待发",
+        "delivered": "通知已发送",
+        "failed": "通知重试中",
+        "dead": "通知失败",
+        "suppressed": "通知已跳过"
+      },
+      "notification_reason": {
+        "critical_recovery": "紧急恢复",
+        "high_risk_recovery": "高风险恢复",
+        "owner_unavailable": "负责人不可用",
+        "owner_email_missing": "负责人邮箱缺失",
+        "email_sender_not_configured": "发件人未配置",
+        "transport": "投递异常"
+      },
+      "sla": {
+        "on_track": "SLA 正常",
+        "due_soon": "即将到期",
+        "overdue": "SLA 逾期",
+        "closed": "已关闭",
+        "unknown": "SLA 未知"
+      },
+      "blocker": {
+        "overdue_sla": "阻塞：已逾期",
+        "owner_missing": "阻塞：缺少负责人",
+        "due_missing": "阻塞：缺少截止时间",
+        "customer_contact_missing": "阻塞：未联系客户",
+        "root_cause_missing": "阻塞：缺少根因",
+        "action_missing": "阻塞：缺少行动记录",
+        "none": "无阻塞",
+        "unknown": "阻塞未知"
+      },
+      "action": {
+        "resolve_overdue": "处理逾期项并更新状态",
+        "assign_owner": "分配负责人",
+        "set_due_date": "设置截止时间",
+        "contact_customer": "联系客户并记录结果",
+        "capture_root_cause": "补充根因",
+        "record_action": "记录恢复行动",
+        "start_review": "开始跟进",
+        "complete_review": "关闭恢复项",
+        "monitor_recovery": "继续监控恢复结果",
+        "unknown": "确认下一步动作"
+      }
+    },
+    "severity": {
+      "low": "低",
+      "medium": "中",
+      "high": "高",
+      "critical": "紧急"
+    },
+    "review_status": {
+      "open": "待处理",
+      "in_review": "跟进中",
+      "resolved": "已解决",
+      "dismissed": "已忽略"
+    },
+    "toasts": {
+      "campaign_created": "调查活动已创建",
+      "campaign_updated": "调查活动已更新",
+      "campaign_archived": "调查活动已归档",
+      "test_email_sent": "测试邮件已通过 {{provider}} 发送",
+      "hosted_link_created": "托管链接已生成",
+      "invitation_retry_requested": "调查邀请已重新入队",
+      "low_score_updated": "低分跟进已更新",
+      "low_score_batch_updated": "已批量更新 {{count}} 条低分跟进",
+      "low_score_assigned": "已智能分配 {{count}} 条低分跟进，其中 {{escalated}} 条升级处理",
+      "low_score_escalated": "已升级 {{count}} 条低分跟进，其中 {{dueChanged}} 条收紧截止时间"
+    }
+  },
   "public_visibility": {
     "subtitle": "统一管理公开入口、审核队列和公开字段边界。",
     "refresh": "刷新",
@@ -150,6 +687,25 @@
     "policy_help": "控制哪些公开表面可访问、是否索引，以及新内容默认如何进入审核。",
     "queue_title": "审核队列",
     "queue_help": "审核即将进入公开入口的需求、评论、路线图项和更新内容。",
+    "privacy_preflight": {
+      "title": "公开隐私预检",
+      "description": "公开访问、审核默认值、身份暴露、门户字段和审核恢复路径会在内容进入公开面前保持可见。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "隐私指纹",
+      "summary": "预检判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      }
+    },
     "loading_policy": "正在加载公开策略…",
     "loading_queue": "正在加载审核队列…",
     "policy_saved": "公开策略已保存",
@@ -427,6 +983,179 @@
     "links": {
       "release_context": "发布与归属"
     },
+    "replay_drill": {
+      "title": "Replay / Backfill 演练",
+      "description": "每条可靠性 SLO 都绑定重放入口、证据产物、负责人和升级路径。",
+      "ready": "就绪",
+      "attention": "需处理",
+      "blocked": "阻塞",
+      "lens": "Replay lens",
+      "action": "Action",
+      "evidence": "Evidence",
+      "status": {
+        "ready": "就绪",
+        "attention": "需处理",
+        "blocked": "阻塞"
+      }
+    },
+    "error_budget_ledger": {
+      "title": "Error budget / burn-rate ledger",
+      "description": "每条服务 SLO 都把目标、burn 查询、剩余预算证据、例外策略和事故证明放进同一个可审计账本。",
+      "monitored": "监控中",
+      "attention": "需处理",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "objective": "Objective",
+      "thresholds": "Thresholds",
+      "exception_policy": "Exception policy",
+      "incident_evidence": "Incident evidence",
+      "burn_rate_query": "Burn-rate query",
+      "remaining_budget_query": "Remaining-budget query",
+      "open_dashboard": "打开 dashboard",
+      "open_runbook": "打开 runbook",
+      "status": {
+        "monitored": "监控中",
+        "attention": "需处理",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      }
+    },
+    "release_health_ledger": {
+      "title": "Release health correlation ledger",
+      "description": "运行版本、生命周期、恢复演练、反馈压力和通知失败绑定到同一个发布健康决策。",
+      "ready": "就绪",
+      "attention": "需处理",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Release fingerprint",
+      "summary": "Release decision",
+      "signal": "Signal",
+      "evidence": "Evidence",
+      "status": {
+        "ready": "就绪",
+        "attention": "需处理",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      }
+    },
+    "incident_timeline": {
+      "title": "Incident timeline reconstruction",
+      "description": "事故开始、检测、影响、缓解、恢复和客户通知证据绑定到同一条事故复盘链。",
+      "verified": "已验证",
+      "attention": "需处理",
+      "blocked": "阻塞",
+      "recovered": "已恢复",
+      "needs_data": "缺数据",
+      "fingerprint": "Incident fingerprint",
+      "summary": "Incident decision",
+      "signal": "Signal",
+      "evidence": "Evidence",
+      "phase": {
+        "start": "Start",
+        "detection": "Detection",
+        "impact": "Impact",
+        "mitigation": "Mitigation",
+        "recovery": "Recovery",
+        "customer_notification": "Customer notification"
+      },
+      "status": {
+        "verified": "已验证",
+        "attention": "需处理",
+        "blocked": "阻塞",
+        "recovered": "已恢复",
+        "needs_data": "缺数据"
+      }
+    },
+    "tenant_quota": {
+      "title": "Tenant quota / saturation dashboard",
+      "description": "Ingest、enrichment、MCP、GDPR 和 outbox 容量信号绑定到同一个租户边界。",
+      "healthy": "健康",
+      "watch": "需观察",
+      "saturated": "已饱和",
+      "needs_data": "缺数据",
+      "fingerprint": "Quota fingerprint",
+      "summary": "Quota decision",
+      "window": "Window",
+      "saturation": "Saturation",
+      "signal": "Signal",
+      "capacity": "Capacity",
+      "consumption": "Consumption",
+      "evidence": "Evidence",
+      "guardrail": "Guardrail",
+      "ingest_usage": "Ingest usage",
+      "llm_usage": "LLM usage",
+      "status": {
+        "healthy": "健康",
+        "watch": "需观察",
+        "saturated": "已饱和",
+        "needs_data": "缺数据"
+      }
+    },
+    "backup_restore": {
+      "title": "Backup / restore drill evidence",
+      "description": "备份新鲜度、恢复执行、迁移准备、责任归属和修复路径绑定到同一个恢复证明。",
+      "verified": "已验证",
+      "watch": "需观察",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Recovery fingerprint",
+      "summary": "Recovery decision",
+      "signal": "Signal",
+      "evidence": "Evidence",
+      "guardrail": "Guardrail",
+      "status": {
+        "verified": "已验证",
+        "watch": "需观察",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      }
+    },
+    "consistency": {
+      "title": "Data consistency checks",
+      "description": "Ingest、feedback、request、notification、survey 和 recovery 投影绑定到同一条可审计数据链。",
+      "verified": "已验证",
+      "watch": "需观察",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Consistency fingerprint",
+      "summary": "Consistency decision",
+      "signal": "Signal",
+      "evidence": "Evidence",
+      "guardrail": "Guardrail",
+      "customer_requests": "Customer requests",
+      "survey_analytics": "Survey analytics",
+      "status": {
+        "verified": "已验证",
+        "watch": "需观察",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      }
+    },
+    "pipeline_slo": {
+      "title": "Pipeline SLO ledger",
+      "description": "Ingest、enrich、outbox 和 sync 的目标、burn signal、owner、runbook 和发布门禁证据绑定到同一个流水线账本。",
+      "ready": "就绪",
+      "watch": "需观察",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Pipeline fingerprint",
+      "summary": "Pipeline decision",
+      "objective": "Objective",
+      "burn_signal": "Burn signal",
+      "release_gate": "Release gate",
+      "evidence": "Evidence",
+      "open_runbook": "Open runbook",
+      "status": {
+        "ready": "就绪",
+        "watch": "需观察",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      }
+    },
+    "release_health": {
+      "feedback_pressure": "Feedback pressure",
+      "notification_failures": "Notification failures"
+    },
     "sections": {
       "release": "发布与归属",
       "release_description": "把当前运行版本、部署环境、责任团队、恢复结果和 runbook 放在同一处。",
@@ -490,6 +1219,232 @@
       "delayed_retry": "延迟重试",
       "degraded_connections": "持续失败",
       "quarantined_connections": "已隔离"
+    },
+    "connector_conformance": {
+      "title": "Connector conformance gate",
+      "description": "把 connector 安装元数据、fixture replay、webhook signature、字段映射和错误恢复放进同一个可验证证据面。",
+      "verified": "已验证",
+      "watch": "关注",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Conformance fingerprint",
+      "summary": "Conformance decision",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "门禁",
+      "status": {
+        "verified": "已验证",
+        "watch": "关注",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      },
+      "lanes": {
+        "connector_manifest": {
+          "title": "Connector manifest 与 SDK contract",
+          "owner": "Developer Platform + Integrations",
+          "action": "查看 connector manifest"
+        },
+        "fixture_replay": {
+          "title": "Fixture replay 标准化",
+          "owner": "Developer Platform + QA",
+          "action": "查看 replay fixtures"
+        },
+        "webhook_signature": {
+          "title": "Webhook signature 证据",
+          "owner": "Security + Integrations",
+          "action": "运行 signature gate"
+        },
+        "field_mapping": {
+          "title": "字段映射契约",
+          "owner": "Integrations + Console",
+          "action": "查看 mapping contract"
+        },
+        "error_recovery": {
+          "title": "错误恢复 conformance",
+          "owner": "Reliability + Integrations",
+          "action": "查看 recovery matrix"
+        }
+      }
+    },
+    "integration_catalog": {
+      "title": "集成目录",
+      "description": "把 connector 目录卡、安装状态、权限边界、健康 badge、replay 样本和升级路径放进同一个上线前证据面。",
+      "verified": "已验证",
+      "watch": "关注",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Catalog fingerprint",
+      "summary": "Catalog decision",
+      "signal": "信号",
+      "evidence": "证据",
+      "detail": "细节",
+      "connector_matrix": "Connector matrix",
+      "permissions": "权限",
+      "sample_replay": "Sample replay",
+      "upgrade": "升级路径",
+      "live_connection": "当前连接",
+      "installed_runtime": "租户已安装",
+      "not_installed": "未安装",
+      "status": {
+        "verified": "已验证",
+        "watch": "关注",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      },
+      "install_status": {
+        "installed": "已安装",
+        "available": "可安装",
+        "beta": "Beta",
+        "requires_setup": "需配置"
+      },
+      "health_badge": {
+        "healthy": "健康",
+        "ready": "就绪",
+        "watch": "关注",
+        "degraded": "异常"
+      },
+      "lanes": {
+        "catalog_cards": {
+          "title": "Marketplace catalog 覆盖",
+          "owner": "Developer Platform + Integrations",
+          "action": "查看 catalog manifest"
+        },
+        "install_status": {
+          "title": "安装状态与配置检查",
+          "owner": "Developer Platform + Console",
+          "action": "复核安装状态"
+        },
+        "permission_scope": {
+          "title": "权限 scope 清晰度",
+          "owner": "Security + Developer Platform",
+          "action": "审计 connector 权限"
+        },
+        "health_badge": {
+          "title": "Health badge 与租户风险",
+          "owner": "Integrations + Reliability",
+          "action": "检查 health badge"
+        },
+        "sample_replay": {
+          "title": "Sample replay 证据",
+          "owner": "Developer Platform + QA",
+          "action": "打开 replay fixtures"
+        },
+        "upgrade_path": {
+          "title": "升级路径与回滚",
+          "owner": "Developer Platform + Release",
+          "action": "复核升级路径"
+        }
+      }
+    },
+    "upgrade_diagnostics": {
+      "title": "升级诊断",
+      "description": "把安装、权限、schema drift、webhook、replay 和版本兼容证据汇总成一个可执行升级诊断。",
+      "verified": "已验证",
+      "watch": "关注",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Diagnostics fingerprint",
+      "summary": "Diagnostics decision",
+      "signal": "信号",
+      "evidence": "证据",
+      "detail": "细节",
+      "next_action": "下一步",
+      "diagnostic_matrix": "诊断矩阵",
+      "status": {
+        "verified": "已验证",
+        "watch": "关注",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      },
+      "lanes": {
+        "install_health": {
+          "title": "安装与 connector health",
+          "owner": "Developer Platform + Integrations",
+          "action": "恢复隔离连接或重跑凭证测试"
+        },
+        "permission_boundary": {
+          "title": "权限边界诊断",
+          "owner": "Security + Developer Platform",
+          "action": "升级前复核 scopes"
+        },
+        "schema_drift": {
+          "title": "Schema drift 与 mapping 安全",
+          "owner": "Integrations + Product Ops",
+          "action": "回填前预检 mapping"
+        },
+        "webhook_readiness": {
+          "title": "Webhook readiness 诊断",
+          "owner": "Security + Integrations",
+          "action": "固定 webhook signature fixture"
+        },
+        "fixture_replay": {
+          "title": "Fixture replay 诊断",
+          "owner": "Developer Platform + QA",
+          "action": "把 replay fixtures 纳入升级门禁"
+        },
+        "version_compatibility": {
+          "title": "版本兼容与回滚",
+          "owner": "Developer Platform + Release",
+          "action": "运行兼容性迁移计划"
+        }
+      }
+    },
+    "field_mapping_workbench": {
+      "title": "字段映射工作台",
+      "description": "把当前连接的 schema drift、必填字段、状态映射、预检/回填安全和回滚恢复证据放进同一个操作面。",
+      "verified": "已验证",
+      "watch": "关注",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Mapping fingerprint",
+      "summary": "Mapping decision",
+      "signal": "信号",
+      "evidence": "证据",
+      "detail": "细节",
+      "matrix": "映射矩阵",
+      "local_field": "Attune 字段",
+      "provider_field": "Provider 字段",
+      "required": "必填",
+      "suggestion": "建议 {{value}}",
+      "status": {
+        "verified": "已验证",
+        "watch": "关注",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      },
+      "row_status": {
+        "mapped": "已映射",
+        "suggested": "建议",
+        "missing": "缺失",
+        "drift": "漂移"
+      },
+      "lanes": {
+        "schema_diff": {
+          "title": "Provider schema diff",
+          "owner": "Integrations",
+          "action": "复核 schema diff"
+        },
+        "required_mapping": {
+          "title": "必填字段覆盖",
+          "owner": "Console + Product Ops",
+          "action": "补齐必填映射"
+        },
+        "status_mapping": {
+          "title": "状态与生命周期映射",
+          "owner": "Product Ops + Integrations",
+          "action": "复核状态映射"
+        },
+        "preview_backfill": {
+          "title": "预检和回填安全",
+          "owner": "Console + Reliability",
+          "action": "回填前运行预检"
+        },
+        "rollback_recovery": {
+          "title": "回滚与恢复路径",
+          "owner": "Reliability + Integrations",
+          "action": "复核回滚路径"
+        }
+      }
     },
     "toast": {
       "created": "外部连接已创建",
@@ -682,6 +1637,53 @@
     "status": "状态",
     "priority": "优先级",
     "owner_filter": "负责人",
+    "account_filter": "账户标识",
+    "account_filter_placeholder": "按 account key 筛选",
+    "account_view_requests": "查看此账户需求",
+    "account_view_requests_for": "查看 {{value}} 的客户需求",
+    "account_overview_title": "账户信号概览",
+    "account_overview_scope": "{{value}} 需求组合",
+    "account_overview_request_metric": "{{count}} 个需求",
+    "account_overview_feedback_metric": "{{count}} 条反馈",
+    "account_overview_customer_metric": "{{count}} 位客户",
+    "account_overview_vote_metric": "{{count}} 票",
+    "account_overview_revenue_metric": "收入影响 {{value}}",
+    "account_overview_delivery_metric": "{{synced}} 已同步 · {{stale}} 过期 · {{failed}} 失败 · {{pending}} 待同步 · {{manual}} 手动",
+    "account_overview_average_score_metric": "平均决策分 {{count}}",
+    "account_overview_top_score_metric": "最高决策分 {{count}}",
+    "account_overview_high_priority_metric": "{{count}} 高优先级",
+    "account_overview_shipped_metric": "{{count}} 已发布",
+    "account_overview_delivery_risk_metric": "{{count}} 个交付风险",
+    "account_overview_profile_meta": "{{value}}",
+    "account_overview_decision_signals": "决策信号",
+    "account_signal_delivery_risk": "{{count}} 个交付风险需要恢复",
+    "account_signal_high_priority": "{{count}} 个高优先级需求，最高分 {{score}}",
+    "account_signal_revenue": "收入影响 {{value}}，平均分 {{score}}",
+    "account_signal_evidence_breadth": "{{count}} 条客户证据，平均分 {{score}}",
+    "account_signal_evidence_gap": "{{count}} 个需求缺少客户证据",
+    "account_signal_shipped": "{{count}} 个需求已发布",
+    "account_signal_unknown": "未知决策信号",
+    "account_signal_severity_critical": "严重",
+    "account_signal_severity_warning": "预警",
+    "account_signal_severity_info": "信息",
+    "account_signal_severity_positive": "正向",
+    "account_overview_events": "账户证据时间线",
+    "account_events_empty": "该账户暂无证据事件",
+    "account_event_request_created": "需求创建",
+    "account_event_feedback_linked": "反馈关联",
+    "account_event_customer_linked": "客户关联",
+    "account_event_vote_added": "投票新增",
+    "account_event_issue_linked": "交付关联",
+    "account_event_issue_synced": "交付同步",
+    "account_event_note_added": "内部备注",
+    "account_event_unknown": "未知事件",
+    "account_event_subject": "对象 {{value}}",
+    "account_event_source": "来源 {{value}}",
+    "account_event_actor": "操作人 {{value}}",
+    "account_event_feedback": "反馈 #{{value}}",
+    "account_event_issue": "交付 {{value}}",
+    "account_overview_timeline": "请求时间线",
+    "account_overview_empty": "该账户暂无命中的客户需求",
     "visibility": "可见范围",
     "sort": "排序",
     "create": "新建需求",
@@ -723,6 +1725,88 @@
     "hidden_feedback_count": "{{count}} 条隐藏反馈",
     "revenue_impact": "收入影响 {{value}}",
     "decision_score": "决策分 {{count}}",
+    "evidence_quality_score": "证据质量 {{score}} · {{confidence}}",
+    "evidence_quality_title": "证据质量",
+    "evidence_quality_summary": "{{score}} 分 · {{confidence}}信心 · 最新证据 {{latest}}",
+    "evidence_quality_low_confidence": "低信心",
+    "evidence_quality_stale": "证据过期",
+    "evidence_quality_no_latest": "暂无",
+    "evidence_quality_evidence_count": "{{count}} 条证据",
+    "evidence_quality_source_count": "{{count}} 个来源",
+    "evidence_quality_customer_count": "{{count}} 位客户",
+    "evidence_quality_account_count": "{{count}} 个账户",
+    "evidence_quality_strengths": "强项",
+    "evidence_quality_gaps": "缺口",
+    "evidence_quality_no_strengths": "暂无强项",
+    "evidence_quality_no_gaps": "暂无缺口",
+    "evidence_confidence": {
+      "high": "高",
+      "medium": "中",
+      "low": "低",
+      "unknown": "未知"
+    },
+    "evidence_reasons": {
+      "no_supporting_feedback": "没有反馈证据",
+      "low_feedback_volume": "反馈量不足",
+      "single_customer": "客户覆盖不足",
+      "no_account_context": "缺少账户上下文",
+      "stale_evidence": "最新证据已过期",
+      "no_delivery_link": "没有交付引用",
+      "hidden_feedback": "存在隐藏反馈",
+      "supporting_feedback": "反馈证据充分",
+      "multi_customer": "多客户覆盖",
+      "account_context": "账户上下文明确",
+      "fresh_evidence": "证据新鲜",
+      "delivery_linked": "已连接交付引用",
+      "single_source": "来源单一",
+      "multi_source": "多来源证据",
+      "unknown": "未知原因"
+    },
+    "decision_breakdown": "决策分解释",
+    "decision_breakdown_total": "计分贡献 {{count}}",
+    "decision_factor_priority": "优先级",
+    "decision_factor_feedback": "反馈证据",
+    "decision_factor_customers": "客户覆盖",
+    "decision_factor_accounts": "账户覆盖",
+    "decision_factor_votes": "投票权重",
+    "decision_factor_revenue": "收入影响",
+    "decision_factor_delivery": "交付健康",
+    "decision_factor_unknown": "未知因子",
+    "decision_factor_priority_formula": "权重 {{weight}}",
+    "decision_factor_count_formula": "{{count}} × 权重 {{weight}} · 上限 {{cap}}",
+    "decision_factor_revenue_formula": "{{value}} · 每 {{unit}} 计 1 分 · 上限 {{cap}}",
+    "decision_factor_delivery_formula": "{{count}} 个交付引用 · 不计入分数",
+    "decision_factor_contribution": "+{{count}}",
+    "decision_factor_context": "上下文",
+    "decision_factor_capped": "已达上限",
+    "decision_records": "决策记录",
+    "no_decision_records": "暂无决策记录",
+    "decision_record_meta": "{{actor}} · {{value}}",
+    "decision_record_owner": "负责人 {{value}}",
+    "decision_record_rationale": "原因 {{value}}",
+    "decision_record_evidence_bundle": "证据包 {{value}}",
+    "decision_record_public_safe": "公开安全 {{value}}",
+    "decision_public_safe_states": {
+      "public_safe": "可公开",
+      "needs_review": "需复核",
+      "internal_only": "仅内部",
+      "unknown": "未知"
+    },
+    "decision_public_safe_reasons": {
+      "hidden_feedback": "包含隐藏反馈",
+      "revenue_context": "收入上下文",
+      "missing_evidence": "缺少证据",
+      "failed_delivery_link": "交付同步失败",
+      "unknown": "未知原因 {{value}}"
+    },
+    "decision_record_status_changed": "状态 {{old}} → {{next}}",
+    "decision_record_priority_changed": "优先级 {{old}} → {{next}}",
+    "decision_record_owner_changed": "负责人变更",
+    "decision_record_title_changed": "标题变更",
+    "decision_record_description_changed": "描述变更",
+    "decision_record_no_snapshot": "该记录没有决策分快照",
+    "decision_record_action": "动作 {{value}}",
+    "actor_unknown": "未知操作者",
     "delivery_health": "交付健康 {{value}}",
     "issue_sync_counts": "{{synced}} 已同步 · {{stale}} 过期 · {{failed}} 失败 · {{pending}} 待同步",
     "latest_feedback": "最新反馈 {{value}}",
@@ -877,18 +1961,616 @@
   },
   "control_tower": {
     "title": "控制塔",
-    "subtitle": "把分类质量、搜索可用性和索引覆盖放在同一个运营视图里。",
+    "subtitle": "把分类质量、搜索可用性、索引覆盖和闭环恢复放在同一个运营视图里。",
     "hero": {
       "readiness": "状态",
       "active_risks": "风险",
       "classification_events": "分类事件",
-      "search_coverage": "搜索覆盖"
+      "search_coverage": "搜索覆盖",
+      "closed_loop": "闭环恢复"
     },
     "severity": {
       "alert": "告警",
       "watch": "关注",
       "normal": "正常",
       "insufficient_data": "数据不足"
+    },
+    "first_value": {
+      "title": "首次价值激活",
+      "description": "验证一个租户是否已经从接入到洞察、发现和闭环测试跑通第一条客户信号路径。",
+      "progress": "{{passed}} / {{total}} 已达标",
+      "evidence": "证据",
+      "next": "下一步",
+      "items": {
+        "source_connected": {
+          "title": "接入源已连接",
+          "evidence": "{{active}} 个启用源 · {{total}} 个总源 · {{errors}} 个错误",
+          "restricted_evidence": "当前角色无法读取入站源配置。",
+          "next": {
+            "pass": "继续观察最近事件时间和源级错误。",
+            "watch": "先修复有错误的入站源，避免第一批信号不完整。",
+            "blocked": "至少连接一个 webhook、email 或 Slack 源。",
+            "insufficient_data": "由有权限的操作员确认源配置和最近事件。"
+          }
+        },
+        "signal_captured": {
+          "title": "客户信号已进入",
+          "evidence": "{{total}} 条反馈 · {{urgent}} 条紧急",
+          "next": {
+            "pass": "继续把新信号保持在可搜索、可分类状态。",
+            "watch": "补充真实样本，避免只依赖演示数据。",
+            "blocked": "先导入或提交至少一条真实客户反馈。",
+            "insufficient_data": "等待反馈统计窗口生成。"
+          }
+        },
+        "insight_generated": {
+          "title": "洞察已生成",
+          "evidence": "{{events}} 个分类事件 · {{risks}} 个活跃风险",
+          "next": {
+            "pass": "把洞察转入需求、聚类或公开沟通路径。",
+            "watch": "先处理活跃风险，再把洞察用于决策。",
+            "blocked": "分类事件或高严重度风险仍阻塞可信洞察。",
+            "insufficient_data": "等待分类质量信号生成。"
+          }
+        },
+        "discovery_ready": {
+          "title": "语义发现可用",
+          "evidence": "覆盖 {{coverage}} · {{queries}} 个搜索 query",
+          "next": {
+            "pass": "继续复盘零结果和 fallback query。",
+            "watch": "运行第一批语义搜索并补齐索引覆盖。",
+            "blocked": "搜索覆盖不足，先补 embedding 和索引。",
+            "insufficient_data": "等待搜索质量信号生成。"
+          }
+        },
+        "closed_loop_tested": {
+          "title": "闭环已测试",
+          "evidence": "{{invitations}} 个调查邀请 · 恢复健康度 {{readiness}}/100",
+          "restricted_evidence": "需要调查分析权限或闭环样本。",
+          "next": {
+            "pass": "继续把闭环结果回填到需求和客户记录。",
+            "watch": "发送第一条闭环测试或补齐低分恢复证据。",
+            "blocked": "低分恢复已阻塞，需要先处理逾期或低健康度队列。",
+            "insufficient_data": "由管理员验证调查和闭环测试路径。"
+          }
+        }
+      }
+    },
+    "source_health": {
+      "title": "信号入口健康",
+      "description": "把入站源拆成启用状态、事件新鲜度、错误和从未收到事件的风险，确认客户信号入口是否可信。",
+      "next_action": "优先动作",
+      "metrics": {
+        "active": "启用",
+        "active_value": "{{active}} / {{total}} 个源启用",
+        "freshness": "新鲜度",
+        "freshness_value": "{{fresh}} 个新鲜 · {{stale}} 个过期",
+        "failures": "失败",
+        "failures_value": "{{errors}} 个错误 · {{never}} 个从未收到",
+        "disabled": "停用",
+        "disabled_value": "{{disabled}} 个停用"
+      },
+      "problems": {
+        "title": "入口问题",
+        "empty": "当前没有入口健康问题。",
+        "no_sources": "尚未创建入站源",
+        "no_active": "没有启用源",
+        "errors": "源级错误",
+        "never_seen": "从未收到事件",
+        "stale": "事件已过期",
+        "disabled": "停用源需复核"
+      },
+      "sources": {
+        "title": "源状态",
+        "empty": "暂无入站源。",
+        "restricted": "当前角色无法读取入站源配置。",
+        "detail": "通道 {{channel}}",
+        "last_event": "最近事件 {{value}}",
+        "no_event": "从未收到事件",
+        "error": "错误：{{value}}"
+      },
+      "next": {
+        "insufficient_data": "由有权限的操作员确认入站源配置和最近事件。",
+        "connect_source": "先连接一个 webhook、email 或 Slack 源。",
+        "resume_source": "至少恢复 {{total}} 个已停用源中的一个。",
+        "fix_errors": "先修复 {{errors}} 个源级错误，避免信号入口丢失。",
+        "send_test_event": "向 {{neverSeen}} 个从未收到事件的启用源发送测试事件。",
+        "refresh_stale": "检查 {{stale}} 个过期源的外部凭证、轮询和 webhook 投递。",
+        "review_disabled": "复核 {{disabled}} 个停用源是否仍应停用。",
+        "monitor": "入口健康，继续监控最近事件和源级错误。"
+      }
+    },
+    "recovery_command": {
+      "title": "闭环恢复指挥",
+      "description": "把低分恢复队列拆成 SLA、负责人、客户联系和证据债务，优先处理真正阻塞客户恢复的工作。",
+      "next_action": "优先动作",
+      "metrics": {
+        "sla": "SLA",
+        "sla_value": "{{overdue}} 个逾期 · {{dueSoon}} 个即将到期",
+        "ownership": "负责人",
+        "ownership_value": "{{unassigned}} 个未分配 · {{owners}} 个负责人",
+        "customer_contact": "客户联系",
+        "customer_contact_value": "{{pending}} 个待联系",
+        "evidence_debt": "证据债务",
+        "evidence_debt_value": "{{debt}} 个缺口"
+      },
+      "blockers": {
+        "title": "阻塞项",
+        "empty": "当前没有恢复阻塞项。",
+        "overdue": "逾期恢复",
+        "unassigned": "未分配恢复",
+        "pending_contact": "待联系客户",
+        "missing_root_cause": "缺少根因",
+        "missing_action": "缺少行动记录"
+      },
+      "owner_load": {
+        "title": "负责人负载",
+        "empty": "暂无负责人负载数据。",
+        "workload": "负载 {{score}}",
+        "detail": "{{open}} 个开放 · {{overdue}} 个逾期 · {{dueSoon}} 个即将到期 · {{critical}} 个严重 · {{pending}} 个待联系",
+        "oldest_due": "最早到期 {{value}}",
+        "no_due": "暂无到期项"
+      },
+      "next": {
+        "insufficient_data": "由管理员确认调查分析权限和恢复队列数据。",
+        "resolve_overdue": "先处理 {{overdue}} 个逾期恢复并更新状态。",
+        "assign_owners": "给 {{unassigned}} 个未分配恢复指定负责人。",
+        "contact_customers": "联系 {{pending}} 个待联系客户并记录触达结果。",
+        "document_evidence": "补齐 {{debt}} 个根因或行动记录缺口。",
+        "progress_reviews": "推进 {{open}} 个开放低分恢复，直到有明确状态。",
+        "run_test": "发送第一条闭环测试，确认调查、低分跟进和恢复记录可用。",
+        "monitor": "保持恢复队列为空，并把结果回填到需求和客户记录。"
+      }
+    },
+    "readiness_matrix": {
+      "title": "世界级可用性矩阵",
+      "description": "把当前运营信号映射到可验收标准，明确哪些能力达标、需要关注或仍然阻塞。",
+      "evidence": "证据",
+      "gap": "缺口",
+      "status": {
+        "pass": "达标",
+        "watch": "关注",
+        "blocked": "阻塞",
+        "insufficient_data": "数据不足"
+      },
+      "items": {
+        "signal_quality": {
+          "title": "信号理解可信",
+          "standard": "分类样本充足，低置信度、越界值和告警保持在目标范围内。",
+          "evidence": "健康度 {{health}} · {{events}} 个分类事件 · {{warnings}} 个告警",
+          "gap": {
+            "pass": "继续抽样复核高影响分类，防止 taxonomy 漂移。",
+            "watch": "低置信度或越界值接近阈值，需要复核样本和提示词边界。",
+            "blocked": "分类质量已经影响下游搜索、聚类和决策可信度。",
+            "insufficient_data": "还没有足够分类事件证明信号理解质量。"
+          }
+        },
+        "semantic_discovery": {
+          "title": "语义发现可靠",
+          "standard": "搜索覆盖、零结果、fallback 和延迟支持日常操作员检索。",
+          "evidence": "覆盖 {{coverage}} · 零结果 {{zero}} · fallback {{fallback}} · p95 {{latency}}",
+          "gap": {
+            "pass": "继续保留零结果复盘和排序版本证据。",
+            "watch": "语义检索仍有可见摩擦，需要补齐索引、同义词或排序证据。",
+            "blocked": "搜索结果缺失、fallback 或延迟已经阻塞可靠发现。",
+            "insufficient_data": "还没有足够搜索 query 证明发现体验。"
+          }
+        },
+        "closed_loop": {
+          "title": "闭环运营可执行",
+          "standard": "低分恢复有 SLA、负责人、客户联系和响应率证据。",
+          "evidence": "恢复健康度 {{readiness}}/100 · {{overdue}} 个逾期 · 响应率 {{responseRate}}",
+          "restricted_evidence": "需要管理员权限或调查分析数据。",
+          "gap": {
+            "pass": "继续把低分恢复结果回填到需求和客户沟通记录。",
+            "watch": "低分恢复健康度或响应率偏弱，需要补齐负责人和联系证据。",
+            "blocked": "逾期或低健康度低分恢复正在削弱客户闭环可信度。",
+            "insufficient_data": "当前用户无法读取闭环恢复证据，或还没有调查样本。"
+          }
+        },
+        "action_accountability": {
+          "title": "行动问责明确",
+          "standard": "每个风险都有处理状态、负责人意图和验证路径。",
+          "evidence": "{{active}} 个活跃风险 · {{open}} 个待处理 · {{started}} 个处理中 · {{verified}} 个已验证",
+          "gap": {
+            "pass": "继续保持风险动作和证据页同步。",
+            "watch": "风险已有处理动作，但仍需要验证结果和关闭证据。",
+            "blocked": "仍有活跃风险未接手，无法证明运营闭环可控。",
+            "insufficient_data": "缺少行动队列数据。"
+          }
+        },
+        "release_verification": {
+          "title": "发布验证可追溯",
+          "standard": "关键体验由生产构建、bundle budget、Chromium、Firefox 和 WebKit 门禁保护。",
+          "evidence": "release-smoke 已接入 Control Tower、全量 Chromium 和 Firefox/WebKit 浏览器 smoke。",
+          "gap": {
+            "pass": "每次发布继续记录 ci-check 和浏览器 smoke 输出。"
+          }
+        }
+      }
+    },
+    "release_verification": {
+      "title": "发布验证证据",
+      "description": "把运行态阻断和发布证据合同放在一起，确认版本不是只靠主观判断放行。",
+      "next_action": "发布动作",
+      "metrics": {
+        "runtime": "运行态",
+        "runtime_value": "{{blocked}} 个阻断 · {{watch}} 个关注",
+        "risks": "风险动作",
+        "risks_value": "{{risks}} 个未验证",
+        "evidence": "证据合同",
+        "evidence_value": "{{passed}} / {{total}} 项已纳入"
+      },
+      "evidence": {
+        "title": "发布证据",
+        "proposal": {
+          "title": "Proposal",
+          "body": "Customer Signal OS proposal 定义验收条、风险和验证范围。"
+        },
+        "product_contract": {
+          "title": "产品合同门禁",
+          "body": "lint-product-readiness-contract 防止证据中心、浏览器 smoke 和发布门禁被移除。"
+        },
+        "unit": {
+          "title": "单元覆盖",
+          "body": "Control Tower helper 和渲染测试覆盖发布判断、入口健康、恢复指挥和 readiness。"
+        },
+        "browser": {
+          "title": "浏览器证据",
+          "body": "Chromium、Firefox 和 WebKit 覆盖控制塔可见性、可访问性和关键交互。"
+        },
+        "bundle": {
+          "title": "Bundle budget",
+          "body": "生产构建执行 JS/CSS 体积预算，超限直接失败。"
+        },
+        "release_smoke": {
+          "title": "Release smoke",
+          "body": "release-smoke 串起 public、Control Tower、全量 Console 和补充浏览器 smoke。"
+        }
+      },
+      "next": {
+        "clear_blockers": "先清理 {{blocked}} 个运行态阻断或数据不足项，再把版本视为可发布。",
+        "close_watch": "处理 {{watch}} 个关注项，并确认 {{risks}} 个风险动作已验证或有发布说明。",
+        "attach_ci": "发布证据已就绪；把 ci-check、release-smoke 和浏览器 smoke 输出贴到 PR。"
+      }
+    },
+    "world_class_maturity": {
+      "title": "100项世界级成熟度差距",
+      "description": "把对标顶级产品后的差距登记成可见清单，避免把局部功能误判成世界级完成。",
+      "summary": "{{total}} 项总差距",
+      "category_summary": "{{total}} 项 · {{gap}} 差距 · {{partial}} 基础 · {{covered}} 验证",
+      "next_action": "优先动作",
+      "metrics": {
+        "gap": "重大差距",
+        "gap_value": "{{count}} 项仍阻塞世界级体验",
+        "partial": "基础已建",
+        "partial_value": "{{count}} 项有基础但缺完整闭环",
+        "covered": "已验证",
+        "covered_value": "{{count}} 项已有可见证据"
+      },
+      "status": {
+        "covered": "已验证",
+        "partial": "基础已建",
+        "gap": "重大差距"
+      },
+      "execution": {
+        "title": "世界级执行队列",
+        "description": "把最高优先级重大差距转成 owner、验收证据和验证范围，避免清单停留在静态自评。",
+        "count": "{{count}} 个优先切片",
+        "priority": "P{{priority}}",
+        "owner": "Owner",
+        "acceptance": "验收证据",
+        "verification": "验证",
+        "items": {
+          "identity-graph-foundation": {
+            "owner": "Product Ops + Backend",
+            "acceptance": "用户身份图能合并 email、external_id、source contact id，并在反馈详情显示来源。",
+            "verification": "Repo/service tests、console render tests、postgres identity integration。"
+          },
+          "account-model-foundation": {
+            "owner": "Product Ops + Console",
+            "acceptance": "Account/Company 成为请求、反馈和闭环恢复的过滤维度。",
+            "verification": "Proto drift、handler tests、Console browser filter smoke。"
+          },
+          "evidence-quality-score": {
+            "owner": "AI Quality",
+            "acceptance": "每个 insight/request 显示证据数量、新鲜度、低置信度和缺口原因。",
+            "verification": "Quality model tests、fixture snapshots、Control Tower readiness contract。"
+          },
+          "decision-record": {
+            "owner": "Product",
+            "acceptance": "请求状态变化写入决策记录，包含 why、owner、evidence bundle 和公开安全状态。",
+            "verification": "Audit tests、request workflow tests、browser decision timeline smoke。"
+          },
+          "notified-customer-evidence": {
+            "owner": "Customer Success",
+            "acceptance": "每个发布状态显示应通知、已通知、失败、抑制和待恢复客户数。",
+            "verification": "Notification worker tests、delivery integration、public safety assertions。"
+          },
+          "operator-batch-actions": {
+            "owner": "Console",
+            "acceptance": "操作员能批量 link、assign、dismiss、notify，并看到失败项恢复路径。",
+            "verification": "Console unit tests、keyboard/a11y browser smoke、mutation retry tests。"
+          },
+          "ai-review-feedback-loop": {
+            "owner": "AI Governance",
+            "acceptance": "AI 建议有 accept、edit、dismiss 反馈，并进入可审计学习事件。",
+            "verification": "LLM suggestion tests、audit log tests、no public mutation guard。"
+          },
+          "end-to-end-signal-trace": {
+            "owner": "Reliability",
+            "acceptance": "从 source event 到 enrichment、request、notification、survey 都可追踪同一个 trace id。",
+            "verification": "OTel assertions、integration trace tests、operations dashboard smoke。"
+          },
+          "error-budget-burn-ledger": {
+            "owner": "Reliability",
+            "acceptance": "SLO、burn-rate、剩余预算、例外策略和事故证据进入同一个可审计 ledger。",
+            "verification": "Prometheus rule tests、Control Tower render tests、browser reliability drill smoke。"
+          },
+          "release-health-correlation": {
+            "owner": "Reliability",
+            "acceptance": "发布版本、生命周期、恢复结果、反馈压力和通知失败进入同一个 release health ledger。",
+            "verification": "Release context tests、Control Tower render tests、browser reliability smoke。"
+          },
+          "incident-timeline-reconstruction": {
+            "owner": "Reliability",
+            "acceptance": "事故开始、检测、影响客户、缓解动作、恢复证据和客户通知进入同一条 incident timeline。",
+            "verification": "Incident model tests、Reliability render tests、browser incident timeline smoke。"
+          },
+          "tenant-quota-saturation-dashboard": {
+            "owner": "Reliability",
+            "acceptance": "租户级 ingest、enrichment、MCP、GDPR、outbox 配额、饱和度和限流证据进入同一个 quota dashboard。",
+            "verification": "Quota model tests、Reliability render tests、browser quota smoke。"
+          },
+          "backup-restore-drill-evidence": {
+            "owner": "Reliability",
+            "acceptance": "备份、恢复和迁移演练结果进入可审计证据中心，能证明最近一次恢复、数据新鲜度和失败修复路径。",
+            "verification": "Recovery model tests、Reliability render tests、browser restore-drill smoke。"
+          },
+          "consistency-checks-audit": {
+            "owner": "Reliability",
+            "acceptance": "数据一致性检查任务能覆盖 ingest、feedback、request、notification 和 survey 之间的引用漂移。",
+            "verification": "Consistency model tests、repository checks、Reliability browser consistency smoke。"
+          },
+          "pipeline-slo-ledger": {
+            "owner": "Reliability",
+            "acceptance": "Ingest、enrich、outbox 和 sync 都有 pipeline SLO、burn signal、owner、runbook 和发布门禁证据。",
+            "verification": "Pipeline SLO model tests、Prometheus rule checks、Reliability browser SLO smoke。"
+          },
+          "governance-rbac-readiness": {
+            "owner": "Security + Console",
+            "acceptance": "SSO、SCIM、角色权限、last-admin guard、访问复核和审计导出进入同一个治理就绪证据中心。",
+            "verification": "Permission model tests、member-management render tests、governance browser smoke。"
+          },
+          "field-level-permissions-ledger": {
+            "owner": "Security + Product",
+            "acceptance": "客户证据、公开面板、反馈详情和导出路径都有字段级权限、脱敏、角色矩阵和审计证据。",
+            "verification": "Field policy model tests、public privacy projection tests、Security browser permission smoke。"
+          },
+          "public-privacy-preflight": {
+            "owner": "Security + Portal",
+            "acceptance": "公开面、门户投稿、路线图、评论和通知链接在发布前都有隐私预检、敏感字段阻断和可恢复审核证据。",
+            "verification": "Public projection tests、portal privacy fixtures、browser privacy preflight smoke。"
+          },
+          "retention-legal-hold-workflow": {
+            "owner": "Security + Compliance",
+            "acceptance": "租户级保留策略、legal hold、删除宽限期、导出残留和备份保留窗口进入同一个可审计工作流。",
+            "verification": "GDPR operations tests、retention model tests、browser retention evidence smoke。"
+          },
+          "compliance-package-evidence": {
+            "owner": "Security + Legal",
+            "acceptance": "DPA、SOC2-ready 控制说明、数据流、子处理方、审计证据和客户可下载合规包进入同一个可验证资料室。",
+            "verification": "Compliance package model tests、Security render tests、browser compliance evidence smoke。"
+          },
+          "key-rotation-readiness": {
+            "owner": "Security + Platform",
+            "acceptance": "Tink keysets、API key、webhook secret、LLM provider secrets 和 rotation evidence 进入同一个可验证轮换控制面。",
+            "verification": "Key rotation model tests、Security render tests、browser key-rotation evidence smoke。"
+          },
+          "webhook-signature-tooling": {
+            "owner": "Security + Integrations",
+            "acceptance": "Inbound webhook、reply hook、request notification webhook、external sync webhook 的签名测试、fixture 和失败诊断进入同一个可验证工具面。",
+            "verification": "Webhook signature model tests、Security render tests、browser signature tooling smoke。"
+          },
+          "security-incident-runbook": {
+            "owner": "Security + Reliability",
+            "acceptance": "安全事件响应 runbook 把密钥泄露、webhook 签名失败、SSO/SCIM 异常、公开面隐私事件和客户通知证据串进同一个演练与复盘路径。",
+            "verification": "Security runbook model tests、Security render tests、browser incident-runbook smoke。"
+          },
+          "developer-api-adoption-kit": {
+            "owner": "Developer Platform",
+            "acceptance": "OpenAPI、Node SDK、Go SDK、示例应用、sandbox tenant 和 webhook replay playground 进入同一个可验证开发者采用包。",
+            "verification": "SDK parity tests、OpenAPI drift checks、example-app smoke、developer adoption browser smoke。"
+          },
+          "developer-sdk-parity-gate": {
+            "owner": "Developer Platform",
+            "acceptance": "Node SDK 和 Go SDK 的 public management surface、错误契约、重试策略、idempotency、browser-safe 使用边界保持逐端可验证 parity。",
+            "verification": "Node/Go SDK live e2e、packed artifact install smoke、contract parity tests、SDK browser smoke。"
+          },
+          "developer-connector-sdk-conformance": {
+            "owner": "Developer Platform + Integrations",
+            "acceptance": "Connector SDK、fixture replay、webhook signature、field mapping 和错误恢复 conformance 能覆盖第三方集成从安装到恢复的完整生命周期。",
+            "verification": "Connector conformance tests、fixture replay suite、integration catalog browser smoke、webhook recovery e2e。"
+          },
+          "developer-field-mapping-workbench": {
+            "owner": "Integrations + Console",
+            "acceptance": "外部字段、Attune 对象、schema drift、预检样本、冲突策略和回填影响在同一个 mapping workbench 中可视化、可验证、可回滚。",
+            "verification": "Mapping workbench model tests、external-sync render tests、schema-drift fixtures、browser mapping smoke。"
+          },
+          "developer-api-consistency-contract": {
+            "owner": "Developer Platform + API",
+            "acceptance": "Console API、OpenAPI、Node SDK、Go SDK 的 pagination、filter、sort、错误 envelope 和 idempotency 语义进入同一个一致性契约并能被回归验证。",
+            "verification": "OpenAPI contract tests、SDK parity verifier、API fixture matrix、browser developer evidence smoke。"
+          },
+          "developer-import-export-workbench": {
+            "owner": "Developer Platform + Product Ops",
+            "acceptance": "CSV、JSON 和 bulk import/export 工作流有 schema preview、字段映射、dry-run 差异、错误恢复、权限边界和审计证据。",
+            "verification": "Import/export model tests、Console render tests、contract fixtures、browser import/export smoke。"
+          },
+          "developer-integration-catalog": {
+            "owner": "Developer Platform + Integrations",
+            "acceptance": "Jira、GitHub、Intercom、Zendesk、Salesforce、HubSpot、自定义 webhook 和 CSV connectors 有目录卡、安装状态、权限说明、health badge、示例 replay 和升级路径。",
+            "verification": "Integration catalog model tests、connector fixture coverage、External Sync render tests、browser catalog smoke。"
+          },
+          "developer-upgrade-diagnostics": {
+            "owner": "Developer Platform + Release",
+            "acceptance": "升级、安装、权限、schema drift、webhook、fixture replay 和版本兼容问题能汇总为可执行诊断，直接指向恢复步骤和验证证据。",
+            "verification": "Upgrade diagnostics model tests、External Sync diagnostics render tests、catalog fixture regression、browser diagnostics smoke。"
+          },
+          "developer-north-star-metrics": {
+            "owner": "Developer Platform + Product Ops",
+            "acceptance": "First value time、signal loss rate、decision coverage、closed-loop rate、connector freshness 和 developer activation 能进入同一个北极星指标面板。",
+            "verification": "North-star metrics model tests、Control Tower metrics render tests、browser metrics smoke、product-readiness regression。"
+          }
+        }
+      },
+      "next": {
+        "close_gaps": "先把 {{gap}} 个重大差距转成 owner、issue、验收证据和浏览器/集成验证，再继续扩大功能面。"
+      },
+      "categories": {
+        "capture": {
+          "title": "信号捕获与入口健康",
+          "description": "确认客户信号能从真实渠道稳定进入、可追踪、可恢复。"
+        },
+        "identity": {
+          "title": "身份与账户上下文",
+          "description": "把原始反馈连接到用户、账户、商业价值、权限和时间线。"
+        },
+        "evidence": {
+          "title": "证据与研究资产",
+          "description": "让每个洞察、优先级和 AI 结论都能回到可引用证据。"
+        },
+        "requests": {
+          "title": "请求与路线图决策",
+          "description": "把反馈变成可比较、可解释、可沟通的产品决策。"
+        },
+        "closed_loop": {
+          "title": "闭环沟通与结果测量",
+          "description": "确认支持者被通知，低分被恢复，交付结果能被客户验证。"
+        },
+        "operator": {
+          "title": "操作员工作流",
+          "description": "让产品、CS、支持、工程可以高效协作处理真实队列。"
+        },
+        "ai": {
+          "title": "AI 可信治理",
+          "description": "让模型建议有引用、有边界、有审计、有人工反馈。"
+        },
+        "reliability": {
+          "title": "可靠性与可观测性",
+          "description": "把质量门禁、SLO、追踪、恢复和事故证据产品化。"
+        },
+        "governance": {
+          "title": "安全、治理与合规",
+          "description": "保护客户数据、公开表面、密钥、权限和审计证据。"
+        },
+        "developer": {
+          "title": "开发者与集成平台",
+          "description": "让 API、SDK、连接器、部署和演示工作区可被外部团队采用。"
+        }
+      },
+      "items": {
+        "capture_source_health": "源级启用状态、错误、新鲜度和下一步修复动作",
+        "capture_multi_channel_setup": "Webhook、email、Slack、Discord、GitHub、支持系统等多源接入",
+        "capture_import_preview": "接入前样本预览、字段映射和隐私风险检查",
+        "capture_source_slo": "每个 source 的延迟、失败率、重复率和丢弃率 SLO",
+        "capture_source_weighting": "按渠道、客户层级和可信度调整信号权重",
+        "capture_event_replay": "失败事件回放、审计和恢复工具",
+        "capture_noise_filtering": "模板垃圾、机器人内容和低价值重复的自动去噪",
+        "capture_identity_join": "跨源同一用户识别和合并",
+        "capture_schema_versions": "外部 source schema 版本治理和兼容检查",
+        "capture_first_value_wizard": "首次接入 5 分钟内看到真实价值的引导流程",
+        "identity_user_graph": "Email、external_id、support id、CRM id 的用户身份图",
+        "identity_account_model": "Account/Company 一等公民模型",
+        "identity_commercial_context": "ARR、plan、segment、lifecycle、health score 等商业上下文",
+        "identity_contact_roles": "Buyer、admin、end user、champion 等联系人角色",
+        "identity_account_hierarchy": "母公司、子公司、workspace、team 层级",
+        "identity_consent_retention": "同意、隐私和保留策略绑定到用户和证据",
+        "identity_customer_timeline": "客户反馈、请求、回复、订阅、调查的完整时间线",
+        "identity_impacted_accounts": "按请求聚合谁受影响和影响强度",
+        "identity_high_value_escalation": "高价值客户重复痛点自动提升",
+        "identity_context_freshness": "客户和账户上下文同步新鲜度",
+        "evidence_citations": "洞察、排序和建议的来源引用",
+        "evidence_quote_workbench": "Quote/highlight 工作台",
+        "evidence_quality_score": "证据质量评分、过期提示和低置信度标记",
+        "evidence_contrary_signal": "相反证据和冲突信号展示",
+        "evidence_bundle_export": "PM review、周会、PRD 和 roadmap 的证据包导出",
+        "evidence_research_assets": "访谈笔记、转录、剪辑和研究报告资产",
+        "evidence_redaction_preview": "证据级脱敏和公开前预览",
+        "evidence_insight_lifecycle": "Insight 的 new、reviewed、linked、dismissed、stale 生命周期",
+        "evidence_ai_review_state": "AI 生成内容的人审状态和接受/驳回记录",
+        "evidence_explainability": "为什么这个洞察重要的可解释摘要",
+        "request_problem_solution_split": "Problem、solution、customer need、acceptance signal 分离",
+        "request_merge_split": "重复请求合并、拆分和回滚",
+        "request_scoring_model": "Impact、reach、confidence、effort、revenue、strategy 评分",
+        "request_configurable_formula": "可配置优先级公式",
+        "request_scenario_planning": "不同权重下的 roadmap scenario planning",
+        "request_stakeholder_views": "PM、CS、Sales、Engineering、Leadership 视图",
+        "request_saved_views": "Saved views、shared filters 和 review snapshots",
+        "request_decision_record": "为什么做、为什么不做、谁批准的决策记录",
+        "request_private_public_roadmap": "私有 roadmap 与公开 roadmap 双层投影",
+        "request_release_linkage": "请求、issue、release、changelog 的强关联",
+        "closed_loop_supporter_detection": "支持者、订阅者、受影响账户自动识别",
+        "closed_loop_status_templates": "状态变更通知模板和预览",
+        "closed_loop_changelog_comms": "Changelog 风格的发布沟通",
+        "closed_loop_preferences": "Notification preference center",
+        "closed_loop_failed_notification_queue": "失败通知修复队列",
+        "closed_loop_survey_surface": "Post-resolution CSAT/CES 调查产品页",
+        "closed_loop_low_score_cases": "低分调查恢复 case、owner、SLA 和证据",
+        "closed_loop_reopen_demand": "客户回复后 reopen demand 机制",
+        "closed_loop_notified_evidence": "已通知多少受影响客户的完成证据",
+        "closed_loop_public_trust_trail": "客户可见的 heard、decided、shipped、verified 信任轨迹",
+        "operator_triage_queue": "真正的 triage queue",
+        "operator_owner_deadline_sla": "Owner、deadline、SLA、escalation",
+        "operator_batch_actions": "Link、merge、dismiss、assign、notify 批量处理",
+        "operator_command_palette": "Keyboard-first command palette",
+        "operator_collaboration": "评论、mention 和内部协作",
+        "operator_activity_timeline": "对象级 activity timeline",
+        "operator_weekly_artifact": "每周 review artifact 自动生成",
+        "operator_exception_queues": "无 owner、无证据、超 SLA、通知失败、source 失效异常队列",
+        "operator_dashboard_drilldown": "运营 dashboard drill-down",
+        "operator_empty_state_path": "空状态到真实价值的路径设计",
+        "ai_eval_harness_productized": "AI eval harness 产品化",
+        "ai_prompt_version_audit": "Prompt、version、model route 审计",
+        "ai_cited_confidence": "每次 AI 判断的引用和置信度",
+        "ai_no_evidence_guardrail": "无证据不允许决策性结论的 guardrail",
+        "ai_accept_dismiss_learning": "AI 建议 accept、edit、dismiss 学习闭环",
+        "ai_cost_latency_dashboard": "Cost、latency、token、failure rate dashboard",
+        "ai_model_drift_detection": "模型漂移检测",
+        "ai_tenant_policy": "Tenant 级 AI policy",
+        "ai_sensitive_redaction_policy": "敏感字段进入模型前的策略化脱敏",
+        "ai_action_approval": "自动化外部动作的权限边界和审批",
+        "reliability_pipeline_slo": "Ingest、enrich、outbox、sync 的 pipeline SLO",
+        "reliability_error_budget": "Error budget 和 burn-rate 告警",
+        "reliability_end_to_end_trace": "Source event 到 customer notification 的端到端 trace",
+        "reliability_backfill_replay": "Backfill、replay 和恢复 runbook",
+        "reliability_backup_restore_drill": "备份、恢复、迁移演练证据",
+        "reliability_tenant_quota_dashboard": "多租户配额、速率和隔离 dashboard",
+        "reliability_incident_timeline": "生产事故 timeline 和 postmortem",
+        "reliability_release_health": "发布后错误、反馈、调查趋势联动",
+        "reliability_consistency_checks": "数据一致性检查任务",
+        "reliability_quality_gate_history": "质量门禁、浏览器 smoke 和 bundle 证据可见",
+        "governance_sso_scim_rbac": "SSO、SCIM 和细粒度 RBAC",
+        "governance_field_level_permissions": "字段级权限",
+        "governance_public_privacy_preflight": "Public roadmap 隐私预检",
+        "governance_audit_export": "Audit log 查询和导出",
+        "governance_retention_legal_hold": "Retention 和 legal hold",
+        "governance_compliance_package": "DPA、SOC2-ready 控制说明",
+        "governance_key_rotation_ui": "密钥轮换 UI 和状态证明",
+        "governance_webhook_signature_tooling": "Webhook signature 验证体验和测试工具",
+        "governance_data_request_workflow": "数据导出、删除和 GDPR 请求工作流",
+        "governance_security_runbook": "安全事件响应 runbook",
+        "developer_openapi_sdk_examples": "OpenAPI、SDK、示例和 sandbox 一体化",
+        "developer_sdk_parity": "Node 和 Go SDK 功能 parity",
+        "developer_connector_sdk": "Connector SDK 和 conformance tests",
+        "developer_field_mapping_ui": "外部字段到 Attune 对象的 mapping UI",
+        "developer_api_consistency": "API pagination、filter、sort 一致性契约",
+        "developer_import_export_ui": "Import/export UI",
+        "developer_integration_catalog": "Marketplace 式集成目录",
+        "developer_upgrade_diagnostics": "部署升级健康检查和诊断页",
+        "developer_demo_workspace": "高质量 demo workspace、playbooks 和 templates",
+        "developer_north_star_metrics": "First value time、signal loss rate、decision coverage、closed-loop rate 等北极星指标"
+      }
     },
     "lanes": {
       "classification": {
@@ -902,6 +2584,10 @@
       "index": {
         "title": "索引覆盖",
         "body": "可参与语义检索的有效反馈占比。"
+      },
+      "closed_loop": {
+        "title": "闭环恢复",
+        "body": "低分恢复 SLA、客户联系和响应率的综合健康度。"
       }
     },
     "risks": {
@@ -940,7 +2626,10 @@
       "zero_result": "复盘最高零结果 query，把缺失语料、同义词或标题证据补进检索路径。",
       "fallback": "确认 embedding 覆盖、模型配置和向量检索可用性，再回放高频 query。",
       "index_coverage": "运行 embedding backfill，优先补齐最新和高影响反馈，再检查索引覆盖率。",
-      "search_latency": "检查搜索计划、索引覆盖和 fallback 路径，必要时缩小窗口或调整排序参数。"
+      "search_latency": "检查搜索计划、索引覆盖和 fallback 路径，必要时缩小窗口或调整排序参数。",
+      "closed_loop_overdue": "打开满意度调查队列，优先处理逾期低分恢复，并补齐客户联系和行动记录。",
+      "closed_loop_recovery": "用低分恢复视图分配负责人、升级严重度并补齐根因和下一步动作。",
+      "closed_loop_response_rate": "检查调查投递、抑制原因和触达文案，先恢复样本量再判断满意度趋势。"
     },
     "error": {
       "title": "质量信号暂不可用",
@@ -974,6 +2663,18 @@
       "search_latency": {
         "title": "搜索延迟偏高",
         "body": "高延迟会降低操作员在反馈队列里使用语义搜索的意愿。"
+      },
+      "closed_loop_overdue": {
+        "title": "低分恢复已逾期",
+        "body": "逾期低分恢复说明客户闭环没有被及时处理，满意度数据会停留在报表而不是行动。"
+      },
+      "closed_loop_recovery": {
+        "title": "闭环恢复健康度偏低",
+        "body": "未分配、严重、待联系或缺少根因/动作的低分恢复会削弱闭环可信度。"
+      },
+      "closed_loop_response_rate": {
+        "title": "调查响应率偏低",
+        "body": "响应率过低时，满意度趋势缺少足够样本，优先检查投递和抑制路径。"
       }
     },
     "proof": {
@@ -985,7 +2686,10 @@
       "no_zero_query": "暂无零结果 query",
       "search_engagement": "结果打开率",
       "ranking": "排序版本",
-      "no_ranking": "暂无排序版本"
+      "no_ranking": "暂无排序版本",
+      "closed_loop": "闭环恢复",
+      "closed_loop_value": "{{open}} 个开放低分 · {{overdue}} 个逾期 · 响应率 {{rate}}",
+      "restricted": "需要管理员权限"
     }
   },
   "members": {
@@ -1867,6 +3571,213 @@
       "revoke_title": "泄露怀疑时直接撤销重铸",
       "revoke_body": "明文 key 不可再次查看，发现泄露风险时应先撤销旧 key，再更新接入方配置。"
     },
+    "developer_adoption": {
+      "title": "开发者 API 采用包",
+      "description": "OpenAPI、SDK、示例应用、sandbox bootstrap 和 webhook replay 证据进入同一个外部接入控制面。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "采用指纹",
+      "summary": "采用判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "lanes": {
+        "openapi_contract": {
+          "title": "OpenAPI 契约清单",
+          "owner": "Developer Platform",
+          "action": "打开 API 契约"
+        },
+        "node_sdk": {
+          "title": "Node SDK 采用路径",
+          "owner": "Developer Platform",
+          "action": "复核 Node SDK"
+        },
+        "go_sdk": {
+          "title": "Go SDK 采用路径",
+          "owner": "Developer Platform",
+          "action": "复核 Go SDK"
+        },
+        "example_sandbox": {
+          "title": "示例应用和 sandbox 路径",
+          "owner": "Developer Experience",
+          "action": "打开 sandbox 指南"
+        },
+        "webhook_replay": {
+          "title": "Webhook replay playground",
+          "owner": "Developer Platform + Integrations",
+          "action": "复核 replay 资产"
+        }
+      }
+    },
+    "sdk_parity": {
+      "title": "开发者 SDK parity gate",
+      "description": "Node 和 Go SDK 的 public surface、错误契约、重试、idempotency、browser boundary 和发布资产保持可验证 parity。",
+      "verified": "已验证",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "Parity 指纹",
+      "summary": "Parity 判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "verified": "已验证",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "lanes": {
+        "management_surface": {
+          "title": "Public management surface parity",
+          "owner": "Developer Platform",
+          "action": "运行 parity verifier"
+        },
+        "error_contract": {
+          "title": "错误契约 parity",
+          "owner": "Developer Platform + Support",
+          "action": "复核错误契约"
+        },
+        "retry_idempotency": {
+          "title": "重试和 idempotency parity",
+          "owner": "Developer Platform + Reliability",
+          "action": "复核重试测试"
+        },
+        "browser_boundary": {
+          "title": "Browser-safe 使用边界",
+          "owner": "Developer Platform + Security",
+          "action": "复核 browser 示例"
+        },
+        "release_artifacts": {
+          "title": "发布资产 parity",
+          "owner": "Developer Platform + Release",
+          "action": "复核 SDK 发布资产"
+        }
+      }
+    },
+    "api_consistency": {
+      "title": "开发者 API consistency contract",
+      "description": "Pagination、filter、sort enum、错误 envelope、idempotency 和 SDK wire name 保持可回归验证。",
+      "verified": "已验证",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "一致性指纹",
+      "summary": "一致性判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "verified": "已验证",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "lanes": {
+        "pagination_contract": {
+          "title": "Pagination 契约",
+          "owner": "Developer Platform + API",
+          "action": "运行 consistency verifier"
+        },
+        "filter_contract": {
+          "title": "Filter 语义",
+          "owner": "Developer Platform + Integrations",
+          "action": "复核 filter 契约"
+        },
+        "sort_contract": {
+          "title": "Sort enum 契约",
+          "owner": "Developer Platform + Console",
+          "action": "复核 sort enum"
+        },
+        "error_envelope": {
+          "title": "错误 envelope",
+          "owner": "Developer Platform + Support",
+          "action": "复核错误 envelope"
+        },
+        "idempotency_contract": {
+          "title": "Idempotency 语义",
+          "owner": "Developer Platform + Reliability",
+          "action": "复核 idempotency 测试"
+        },
+        "sdk_wire_semantics": {
+          "title": "SDK wire 语义",
+          "owner": "Developer Platform",
+          "action": "复核 SDK 查询 fixture"
+        }
+      }
+    },
+    "import_export": {
+      "title": "开发者 import/export 工作台",
+      "description": "CSV 和 JSON template、schema preview、字段映射、dry-run diff、恢复路径、权限边界和审计证据进入同一个操作面。",
+      "verified": "已验证",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "工作台指纹",
+      "summary": "工作台判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "templates": "Template catalog",
+      "dry_run_rows": "Dry-run 样例",
+      "mapping_matrix": "字段映射矩阵",
+      "local_field": "本地字段",
+      "provider_field": "Template 字段",
+      "required": "必填",
+      "recovery_action": "恢复动作 {{value}}",
+      "status": {
+        "verified": "已验证",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "row_status": {
+        "mapped": "已映射",
+        "suggested": "建议",
+        "missing": "缺失",
+        "drift": "漂移"
+      },
+      "lanes": {
+        "template_catalog": {
+          "title": "Template catalog",
+          "owner": "Developer Platform + Product Ops",
+          "action": "复核 template"
+        },
+        "schema_preview": {
+          "title": "Schema preview",
+          "owner": "Console + Integrations",
+          "action": "预览 schema"
+        },
+        "field_mapping": {
+          "title": "字段映射",
+          "owner": "Product Ops",
+          "action": "处理映射"
+        },
+        "dry_run_diff": {
+          "title": "Dry-run diff",
+          "owner": "Console + Reliability",
+          "action": "打开 dry-run diff"
+        },
+        "error_recovery": {
+          "title": "错误恢复",
+          "owner": "Reliability + Support",
+          "action": "复核恢复路径"
+        },
+        "governance_audit": {
+          "title": "治理与审计",
+          "owner": "Security + Developer Platform",
+          "action": "复核审计证据"
+        }
+      }
+    },
     "table": {
       "prefix": "前缀",
       "label": "用途",
@@ -2448,7 +4359,7 @@
     "subject_hint": "使用精确值匹配。不要用模糊搜索词或部分邮箱。",
     "subject_required": "请输入 subject key",
     "export_title": "导出数据",
-    "export_help": "生成 ZIP 归档，包含该主体关联的反馈、标签分配、工作流审计和 LLM 审计。",
+    "export_help": "生成 ZIP 归档，包含该主体关联的反馈、标签分配、工作流审计、LLM 审计和满意度调查记录。",
     "export_body": "导出是只读操作，不会删除任何数据。归档会继承当前输入的 subject key，并在有效期内允许下载或由运营显式撤销。",
     "export_button": "导出 ZIP",
     "export_download_button": "重新下载 ZIP",
@@ -2459,7 +4370,7 @@
     "export_queued": "导出请求已创建，正在后台生成归档",
     "export_status_label": "导出状态",
     "export_job_id": "任务 ID",
-    "export_counts": "反馈 / 标签 / 审计 / LLM",
+    "export_counts": "反馈 / 标签 / 审计 / LLM / Survey",
     "export_filename": "归档文件",
     "exporting": "导出中…",
     "export_expired": "导出归档已过期，请重新发起导出",
@@ -2483,6 +4394,25 @@
     "ops_next_expiry": "下一份导出归档过期时间：{{value}}",
     "ops_next_expiry_empty": "当前没有等待过期的导出归档。",
     "ops_days": "{{count}} 天",
+    "retention_workflow": {
+      "title": "Retention / legal hold 工作流",
+      "description": "保留策略、legal hold、删除宽限期、导出残留和备份残留在不可逆操作执行前进入同一个可审计工作流。",
+      "ready": "就绪",
+      "watch": "需观察",
+      "blocked": "阻塞",
+      "needs_data": "缺数据",
+      "fingerprint": "Retention fingerprint",
+      "summary": "Retention decision",
+      "signal": "Signal",
+      "evidence": "Evidence",
+      "guardrail": "Guardrail",
+      "status": {
+        "ready": "就绪",
+        "watch": "需观察",
+        "blocked": "阻塞",
+        "needs_data": "缺数据"
+      }
+    },
     "guardrail_title": "敏感操作保护",
     "guardrail_help": "导出和永久删除都要求近期二次验证，降低操作者会话被滥用时的影响面。",
     "guardrail_warning_title": "删除不可恢复",
@@ -2510,12 +4440,12 @@
     "status_revoked": "已撤销",
     "status_unknown": "未知",
     "delete_title": "永久删除",
-    "delete_help": "从反馈主表及其派生 AI 数据中执行不可恢复的硬删除。",
-    "delete_body": "删除会永久移除该主体关联的反馈、reply draft、embedding 元数据和 linked LLM 审计。控制台只保留哈希化审计痕迹。",
+    "delete_help": "从反馈主表、派生 AI 数据和满意度调查记录中执行不可恢复的硬删除。",
+    "delete_body": "删除会永久移除该主体关联的反馈、reply draft、embedding 元数据、linked LLM 审计和调查评论。控制台只保留哈希化审计痕迹。",
     "delete_button": "永久删除",
     "delete_failed": "删除失败",
     "delete_success": "已删除 {{feedback}} 条反馈、{{llmAudit}} 条 LLM 审计记录，并清理 {{outbox}} 条 Outbox 记录",
-    "delete_scheduled": "删除请求已排队，将在 {{executeAfter}} 执行，涉及 {{feedback}} 条反馈与 {{llmAudit}} 条 LLM 审计记录，并清理 {{outbox}} 条 Outbox 记录",
+    "delete_scheduled": "删除请求已排队，将在 {{executeAfter}} 执行，涉及 {{feedback}} 条反馈、{{llmAudit}} 条 LLM 审计、{{survey}} 条 Survey 记录，并清理 {{outbox}} 条 Outbox 记录",
     "confirm_label": "输入相同的 subject key 以确认删除",
     "confirm_placeholder": "再次输入 subject key",
     "confirm_mismatch": "确认输入与 subject key 不一致",
@@ -2526,7 +4456,7 @@
     "request_col_type": "类型",
     "request_col_subject": "主体",
     "request_col_status": "状态",
-    "request_col_counts": "反馈 / 标签 / 审计 / LLM / Outbox",
+    "request_col_counts": "反馈 / 标签 / 审计 / LLM / Outbox / Survey",
     "request_col_timing": "时间",
     "request_col_action": "操作",
     "request_status_queued": "已创建",
@@ -2788,7 +4718,8 @@
       "email": "邮件",
       "webhook": "Webhook",
       "targets": "活动目标",
-      "failures": "异常投递"
+      "failures": "异常投递",
+      "recovery_pending": "待恢复客户"
     },
     "enabled": {
       "enabled": "启用",
@@ -2910,6 +4841,19 @@
       "attempts": "尝试",
       "time": "时间",
       "error": "错误"
+    },
+    "status_evidence": {
+      "title": "状态通知证据",
+      "description": "按需求状态汇总应通知、已通知、失败、抑制和待恢复客户数。",
+      "empty": "暂无状态通知证据。",
+      "status": "状态",
+      "expected": "应通知",
+      "notified": "已通知",
+      "failed": "失败",
+      "suppressed": "抑制",
+      "recovery": "待恢复",
+      "events": "事件",
+      "last_event": "最近事件"
     },
     "subscribers": {
       "title": "订阅者治理",
@@ -3254,6 +5198,8 @@
       "enrichment_status": "AI 富化状态",
       "source": "来源",
       "type": "类型",
+      "account_key": "账户标识",
+      "account_key_placeholder": "按 account key 筛选",
       "search_placeholder": "搜索内容或标题...",
       "quick": {
         "all": "全部反馈",
@@ -3263,6 +5209,117 @@
     },
     "filter_title": "筛选视角",
     "filter_description": "按维度、标签、工作流状态和关键词快速收拢当前反馈面。",
+    "identity_review": {
+      "eyebrow": "身份合并复核",
+      "title": "身份合并复核队列",
+      "merge_candidates": "合并候选",
+      "needs_evidence": "需补证据",
+      "scanned": "已扫描反馈",
+      "recent_merges": "最近合并",
+      "active_subjects": "已解析主体",
+      "best_candidate": "最高优先级候选",
+      "needs_evidence_item": "证据不足样本",
+      "recent_merge_item": "最近已合并",
+      "subject_roster_item": "已解析主体",
+      "no_candidates": "当前没有可复核的身份合并候选。",
+      "no_weak_evidence": "当前没有证据不足的身份样本。",
+      "no_recent_merges": "当前没有可撤销的身份合并。",
+      "no_subjects": "当前还没有已解析的身份主体。",
+      "subject_roster_summary": "{{identities}} 个身份，{{evidence}} 条证据",
+      "subject_count": "{{count}} 个主体",
+      "identity_count": "{{count}} 个身份",
+      "evidence_count": "{{count}} 条证据",
+      "subject_selected": "正在查看",
+      "subject_detail_title": "主体详情",
+      "subject_detail_loading": "正在加载主体详情",
+      "close_subject_detail": "关闭主体详情",
+      "subject_detail_retry": "重试",
+      "subject_identities": "身份",
+      "subject_timeline": "时间线",
+      "subject_identity_active": "有效",
+      "subject_identity_revoked": "已撤销",
+      "subject_event_merge": "审核合并",
+      "subject_event_split": "拆分撤销",
+      "subject_event_unknown": "身份事件",
+      "no_subject_identities": "当前主体没有身份记录。",
+      "no_subject_events": "当前主体没有身份事件。",
+      "feedback_count": "{{count}} 条反馈",
+      "source_count": "{{count}} 个来源",
+      "stable_keys": "{{count}} 个稳定键",
+      "missing_kinds": "缺少 {{value}}",
+      "open_evidence": "查看 #{{id}}",
+      "approve_merge": "批准合并",
+      "merge_pending": "合并中",
+      "merge_success": "已合并到 {{name}}",
+      "merge_need_two": "至少需要两条证据才能合并",
+      "undo_merge": "撤销合并",
+      "split_pending": "撤销中",
+      "split_success": "已撤销 {{name}}",
+      "split_missing_subject": "缺少可撤销的主体",
+      "strength_strong": "强",
+      "strength_medium": "需复核",
+      "strength_weak": "弱"
+    },
+    "assignment_escalations": {
+      "eyebrow": "SLA 升级队列",
+      "title": "需要立即处理的责任缺口",
+      "description": "把逾期、即将到期、缺少负责人和缺少 SLA 的开放反馈集中到一处，方便每天先处理最可能伤害客户承诺的工作。",
+      "overdue_count": "已逾期",
+      "due_soon_count": "12 小时内到期",
+      "missing_owner_count": "缺少负责人",
+      "missing_sla_count": "缺少 SLA",
+      "generated_at": "生成于 {{value}}",
+      "owner_label": "负责人",
+      "account_label": "账户 {{value}}",
+      "due_label": "SLA",
+      "no_owner": "未分派",
+      "opened_at": "进入 {{value}}",
+      "open_feedback": "打开",
+      "open_feedback_with_id": "打开反馈 #{{id}}",
+      "empty_title": "当前没有 SLA 升级项",
+      "empty_body": "开放反馈都有负责人和明确截止时间，且 12 小时内没有即将到期的 SLA。",
+      "error_title": "SLA 升级队列暂时无法加载",
+      "error_body": "稍后重试，或先使用反馈列表筛选逾期和未分派项。",
+      "hours_overdue": "逾期 {{count}} 小时",
+      "hours_left": "剩余 {{count}} 小时",
+      "reason": {
+        "overdue": "已逾期",
+        "due_soon": "即将到期",
+        "missing_owner": "缺少负责人",
+        "missing_sla": "缺少 SLA"
+      },
+      "priority": {
+        "critical": "最高优先级",
+        "high": "高优先级",
+        "medium": "中优先级",
+        "low": "低优先级"
+      }
+    },
+    "assignment_policy": {
+      "title": "分派策略中心",
+      "description": "配置推荐分派使用的 owner lane、SLA 和默认负责人。",
+      "loading": "正在读取分派策略…",
+      "save": "保存策略",
+      "saved": "分派策略已保存",
+      "save_failed": "保存分派策略失败",
+      "preview": "预演影响",
+      "preview_done": "策略预演完成：{{changed}}/{{total}} 条反馈会变化",
+      "preview_failed_toast": "预演分派策略失败",
+      "preview_summary": "{{changed}}/{{total}} 条反馈会变化",
+      "preview_failed": "{{count}} 条未命中",
+      "history": "最近版本",
+      "version": "v{{version}}",
+      "restore": "恢复",
+      "restored": "分派策略已恢复",
+      "restore_failed": "恢复分派策略失败",
+      "enabled_label": "启用 {{name}}",
+      "owner_lane": "{{name}} owner lane",
+      "sla_hours": "{{name}} SLA 小时",
+      "default_owner": "{{name}} 默认负责人",
+      "no_default_owner": "不设置默认负责人",
+      "note": "变更备注",
+      "note_placeholder": "记录策略调整原因或适用范围。"
+    },
     "quality_filters": {
       "ids": "质量样本",
       "ids_value": "{{count}} 条反馈",
@@ -3324,6 +5381,93 @@
       "add_tag": "添加标签",
       "remove_tag": "移除标签",
       "transition": "流转状态",
+      "assign": "批量分派",
+      "recommend": "推荐分派",
+      "operator": {
+        "open": "批量指挥面",
+        "title": "批量操作指挥面",
+        "description": "处理 {{count}} 条反馈的 link、assign、dismiss、notify，并保留失败项恢复路径。",
+        "actions_label": "批量操作",
+        "link_title": "Link 到客户需求",
+        "link_body": "把已选反馈提升为 Customer Request 证据，或继续选择已有需求承接这些证据。",
+        "link_action": "Link 需求",
+        "assign_title": "Assign owner 与 SLA",
+        "assign_body": "批量设置负责人、截止时间和交接备注，让这批信号进入明确责任闭环。",
+        "dismiss_title": "Dismiss 低价值或已处理反馈",
+        "dismiss_body": "把已选反馈批量流转到 {{state}}，保留 workflow audit 和恢复结果。",
+        "dismiss_blocked": "当前租户还没有可用于 dismiss 的终态 workflow state。",
+        "dismiss_blocked_toast": "当前租户还没有可用于关闭的终态 workflow state。",
+        "dismiss_action": "批量关闭",
+        "dismiss_success": "已关闭 {{count}} 条反馈",
+        "notify_title": "Notify 订阅者",
+        "notify_body": "对已关联的 Customer Request 批量预览 audience、发布更新，并保留逐项失败恢复路径。",
+        "notify_action": "批量预览通知",
+        "recovery_label": "失败恢复路径",
+        "scope_title": "当前批处理范围",
+        "scope_body": "已选 {{count}} 条反馈；执行前请确认筛选与选择范围。",
+        "more_ids": "+{{count}} 条",
+        "recovery_title": "失败项恢复",
+        "latest_result": "{{succeeded}} 条成功 · {{skipped}} 条跳过 · {{failed}} 条失败",
+        "focus_failed": "聚焦失败项",
+        "focus_failed_toast": "已聚焦 {{count}} 条失败反馈",
+        "clear_result": "清除结果",
+        "no_result": "还没有批处理结果；执行操作后这里会保留成功、跳过和失败数量。",
+        "terminal_failures_title": "{{count}} 条终态富化失败",
+        "terminal_failures_body": "如果失败来自 AI 富化，先聚焦这些项并在修复配置后批量重试。"
+      },
+      "notify": {
+        "title": "批量通知 Customer Request 订阅者",
+        "description": "基于当前 {{count}} 条已选反馈，向已关联需求的订阅者批量发布同一条更新。",
+        "request_ids": "Customer Request ID",
+        "request_ids_placeholder": "每行一个已关联 Customer Request ID，也可以用逗号分隔",
+        "preview": "预览 audience",
+        "publish": "发布并通知",
+        "no_preview_title": "先预览 audience",
+        "no_preview_body": "预览会逐项检查需求 ID、状态策略、通知通道和限额；失败项不会阻塞其它需求。",
+        "preview_result": "批量预览结果",
+        "publish_result": "批量发布结果",
+        "preview_counts": "{{total}} 个需求 · {{eligible}} 位可发送 · {{excluded}} 位已排除 · {{failed}} 个失败",
+        "publish_counts": "{{total}} 个需求 · {{succeeded}} 个已发布 · {{failed}} 个失败",
+        "preview_failed": "批量通知预览失败",
+        "publish_failed": "批量通知发布失败",
+        "publish_success": "已发布 {{count}} 个需求通知",
+        "publish_partial": "{{count}} 个需求通知发布失败"
+      },
+      "assign_title": "批量分派反馈",
+      "assign_description": "将对 {{count}} 条反馈更新负责人、SLA 或交接备注。",
+      "assign_owner": "负责人",
+      "assign_owner_keep": "保持负责人不变",
+      "assign_owner_clear": "清空负责人",
+      "assign_no_members": "暂无可分派成员",
+      "assign_sla": "SLA",
+      "assign_sla_keep": "保持 SLA 不变",
+      "assign_sla_clear": "清空 SLA",
+      "assign_sla_set": "设置 SLA",
+      "assign_due_at": "截止时间",
+      "assign_note": "交接备注",
+      "assign_note_placeholder": "记录这次批量分派的背景、风险或下一步。",
+      "assign_apply": "应用分派",
+      "assign_success": "已分派 {{count}} 条反馈",
+      "assign_partial": "{{succeeded}} 条已分派，{{failed}} 条失败",
+      "assign_failed": "批量分派失败",
+      "recommend_title": "推荐分派策略",
+      "recommend_description": "根据 {{count}} 条反馈的 urgent、状态、身份债和失败信号生成可审计的 owner lane 与 SLA 建议。",
+      "recommend_loading": "正在生成分派建议…",
+      "recommend_matched": "已检查",
+      "recommend_ready": "可应用",
+      "recommend_failed": "未命中",
+      "recommend_rule_summary": "{{count}} 条命中 {{lane}}，建议 {{hours}}h SLA",
+      "recommend_next_due": "最早截止 {{value}}",
+      "recommend_empty": "这些反馈暂时没有命中可应用的分派策略。",
+      "recommend_failure_hint": "{{count}} 条反馈没有建议或已经不存在；应用时会跳过这些条目。",
+      "recommend_owner": "实际负责人",
+      "recommend_owner_keep": "使用策略默认负责人",
+      "recommend_note": "应用备注",
+      "recommend_note_placeholder": "记录这次策略应用的背景或例外处理。",
+      "recommend_apply": "应用建议",
+      "recommend_success": "已应用 {{succeeded}} 条建议，跳过 {{skipped}} 条",
+      "recommend_partial": "已应用 {{succeeded}} 条，跳过 {{skipped}} 条，{{failed}} 条失败",
+      "recommend_apply_failed": "应用分派建议失败",
       "delete": "删除",
       "success": "已更新 {{count}} 条反馈",
       "transition_success": "已流转 {{count}} 条反馈",
@@ -3408,6 +5552,110 @@
       "error_title": "终态失败工位暂时无法加载",
       "error_body": "稍后重试，或者先切回普通反馈列表查看终态失败子队列。"
     },
+    "triage_command_center": {
+      "eyebrow": "反馈指挥中心",
+      "title": "反馈运营指挥中心",
+      "description": "把开放反馈、活跃处理、终态失败、身份债和 urgent 反馈压成可追责队列，明确 owner lane、SLA、逾期风险和样本反馈。",
+      "open_count": "开放反馈",
+      "active_count": "处理中",
+      "closed_count": "已关闭",
+      "urgent_open_count": "Urgent 开放",
+      "terminal_failure_count": "终态失败",
+      "identity_debt_count": "身份债",
+      "overdue_count": "逾期",
+      "due_soon_count": "{{count}} 条即将到期",
+      "next_action": "下一步动作",
+      "default_recommended_action": "先打开样本反馈确认上下文，再更新队列状态或分派 owner lane。",
+      "sla_hours": "SLA {{count}}h",
+      "next_deadline": "下个截止 {{value}}",
+      "focus_lane": "聚焦队列",
+      "lanes_title": "运营队列",
+      "generated_at": "生成于 {{value}}",
+      "no_lanes": "暂无需要展示的运营队列。",
+      "count": "{{count}} 条",
+      "oldest": "最早进入",
+      "deadline": "截止时间",
+      "empty_lane": "空队列",
+      "overdue_badge": "{{count}} 条逾期",
+      "due_soon_badge": "{{count}} 条即将到期",
+      "on_track": "按时",
+      "open_sample_with_id": "打开样本反馈 #{{id}}",
+      "error_title": "反馈指挥中心暂时无法加载",
+      "error_body": "稍后重试，或先使用下方反馈列表继续处理。"
+    },
+    "assignment": {
+      "title": "责任与 SLA",
+      "owner": "负责人",
+      "unassigned": "未分派",
+      "sla_due_at": "SLA 截止",
+      "no_due_date": "未设置",
+      "sla_status": "SLA 状态",
+      "note": "处理备注",
+      "note_placeholder": "记录分派理由、客户影响面或下一步动作。",
+      "save": "保存分派",
+      "saved": "分派已保存",
+      "save_failed": "保存分派失败",
+      "audit_hint": "保存后会写入反馈操作日志，便于后续追责和复盘。",
+      "readonly_hint": "当前角色只能查看责任与 SLA。",
+      "members_unavailable": "当前角色无法读取成员目录，只能查看已有负责人。",
+      "status": {
+        "missing_due_date": "缺少截止时间",
+        "overdue": "已逾期",
+        "due_soon": "即将到期",
+        "on_track": "按时"
+      }
+    },
+    "signal_trace": {
+      "title": "端到端证据链",
+      "timeline": "事件时间线",
+      "empty": "暂无端到端证据链。",
+      "no_events": "暂无 trace 事件。",
+      "load_failed": "端到端证据链加载失败。",
+      "missing_stages": "缺少阶段：{{stages}}",
+      "event_count": "{{count}} 个事件",
+      "status": {
+        "completed": "完成",
+        "pending": "进行中",
+        "failed": "失败",
+        "missing": "缺失",
+        "observed": "已记录"
+      },
+      "stages": {
+        "source_event": "来源事件",
+        "enrichment": "AI 富化",
+        "request": "客户需求",
+        "notification": "客户通知",
+        "survey": "调查复盘"
+      },
+      "event_kinds": {
+        "source_captured": "来源捕获",
+        "enrichment_state": "富化状态",
+        "semantic_extraction": "语义抽取",
+        "llm_call": "模型调用",
+        "classification_failure": "分类失败",
+        "feedback_outbox_delivery": "反馈通知",
+        "request_linked": "需求关联",
+        "request_notification_event": "通知事件",
+        "request_notification_delivery": "通知投递",
+        "survey_invitation": "调查邀请",
+        "survey_response": "调查响应",
+        "survey_low_score_review": "低分复盘"
+      },
+      "metadata": {
+        "display_id": "需求",
+        "request_id": "需求 ID",
+        "model_id": "模型",
+        "purpose": "用途",
+        "reason_class": "原因",
+        "channel": "通道",
+        "score": "评分",
+        "delivery_id": "投递",
+        "event_id": "事件",
+        "failure_kind": "失败类型",
+        "http_status": "HTTP",
+        "source": "来源"
+      }
+    },
     "job": {
       "status_queued": "排队中",
       "status_running": "处理中",
@@ -3475,6 +5723,40 @@
       "sheet_summary": "反馈详情，含 AI 分类与回复草稿建议",
       "source": "来源",
       "sourceMeta": "元数据",
+      "account_context": "账户上下文",
+      "account_key": "账户标识",
+      "account_display": "账户名称",
+      "account_source": "账户来源",
+      "identity_evidence": "身份图证据",
+      "identity_candidate_count": "{{count}} 个合并候选",
+      "identity_resolution_title": "解析质量",
+      "identity_resolution_coverage": "证据覆盖",
+      "identity_resolution_counts": "{{stable}} 个稳定键 · {{sources}} 个来源路径",
+      "identity_recommended_action": "建议动作",
+      "identity_strength_strong": "强",
+      "identity_strength_medium": "需复核",
+      "identity_strength_weak": "弱",
+      "identity_strength_unknown": "未知",
+      "identity_action_review_merge": "进入合并复核",
+      "identity_action_review_with_context": "带上下文复核",
+      "identity_action_capture_more_keys": "补充身份字段",
+      "identity_missing_kinds": "缺少 {{value}}",
+      "identity_risk_no_identity_keys": "没有稳定身份键",
+      "identity_risk_only_source_user": "仅有 source user",
+      "identity_risk_single_stable_key": "只有一个稳定键",
+      "identity_risk_missing_email": "缺少 Email",
+      "identity_risk_missing_system_context": "缺少 CRM/Support 上下文",
+      "identity_risk_single_source_path": "来源路径单一",
+      "identity_risk_unknown": "需人工确认",
+      "identity_empty": "这条反馈还没有可识别的身份候选。",
+      "identity_key_source": "来自 {{source}}",
+      "identity_kind_source_user": "Source user",
+      "identity_kind_email": "Email",
+      "identity_kind_external_id": "External ID",
+      "identity_kind_source_contact_id": "Source contact",
+      "identity_kind_crm_id": "CRM ID",
+      "identity_kind_support_id": "Support ID",
+      "identity_kind_unknown": "Identity",
       "portal_submission": "门户投稿",
       "portal_submission_kind": "投稿类型",
       "portal_submission_title": "标题",
@@ -3534,7 +5816,9 @@
       "reply_draft_status_sent": "已发送",
       "reply_draft_status_stale": "需复核",
       "reply_draft_edit": "编辑",
+      "reply_draft_editor_aria": "回复草稿编辑器",
       "reply_draft_save": "保存",
+      "reply_draft_save_aria": "保存回复草稿",
       "reply_draft_cancel": "取消",
       "reply_draft_saved": "草稿已保存",
       "reply_draft_save_failed": "保存失败",
@@ -3824,6 +6108,7 @@
       "classification_enriching": "正在富化",
       "classification_pending": "等待富化",
       "portal_submission": "门户投稿",
+      "account_context": "账户 {{value}}",
       "urgent": "需优先处理",
       "decision_snapshot": "快速判读",
       "terminal_attempts_hint": "已尝试 {{count}} 次，达到上限，不会自动重试",
@@ -4004,6 +6289,7 @@
     "subtitle": "按当前窗口和基线窗口对比分类分布、低置信度、越界值与失败率。",
     "period": "{{start}} — {{end}}",
     "open_feedback": "查看反馈",
+    "open_feedback_with_id": "查看反馈 {{id}}",
     "range": {
       "7d": "7 天",
       "30d": "30 天",
@@ -4021,6 +6307,9 @@
       "insufficient_data": "数据不足"
     },
     "filters": {
+      "range": "时间窗口",
+      "bucket": "趋势粒度",
+      "severity": "严重级别",
       "dimension": "维度",
       "source": "来源",
       "logical_model": "逻辑模型",
@@ -4036,7 +6325,8 @@
       "warnings": "告警"
     },
     "trend": {
-      "title": "质量率趋势"
+      "title": "质量率趋势",
+      "chart": "分类质量率趋势图"
     },
     "legend": {
       "low_confidence": "低置信度",
@@ -4081,6 +6371,34 @@
       "status": "状态",
       "empty_title": "暂无样本",
       "empty_body": "当前告警和漂移没有返回样本反馈。"
+    },
+    "learning": {
+      "title": "AI 审核学习",
+      "description": "把人工接受、修正和驳回转成可追溯的分类学习样本。",
+      "loading": "加载中",
+      "training_candidates": "{{count}} 个训练候选",
+      "total_reviews": "审核记录",
+      "coverage": "覆盖率",
+      "coverage_hint": "{{reviewed}} / {{classified}} 已审核",
+      "accepted": "接受",
+      "edited": "修正",
+      "dismissed": "驳回",
+      "accepted_short": "接受 {{count}}",
+      "edited_short": "修正 {{count}}",
+      "dismissed_short": "驳回 {{count}}",
+      "unknown_reason": "未知原因",
+      "empty": "还没有人工审核样本。",
+      "accept": "接受分类",
+      "correct": "修正分类",
+      "dismiss": "驳回分类",
+      "accept_with_id": "接受反馈 {{id}} 的分类",
+      "correct_with_id": "修正反馈 {{id}} 的分类",
+      "dismiss_with_id": "驳回反馈 {{id}} 的分类",
+      "correction_json": "修正 JSON",
+      "note": "审核备注",
+      "save_correction": "保存修正",
+      "review_saved": "AI 审核反馈已记录",
+      "review_failed": "AI 审核反馈记录失败"
     },
     "empty": {
       "title": "暂无趋势数据",
@@ -4253,6 +6571,7 @@
       "empty": "暂无标签"
     },
     "combobox": {
+      "label": "标签选择器",
       "search_placeholder": "搜索标签…",
       "no_results": "无匹配标签",
       "exact_match_assigned": "标签「{{name}}」已添加到当前反馈",
@@ -4722,6 +7041,228 @@
       "warning_desc": "仅在 SSO 不可用时执行此操作",
       "confirm": "启用密码",
       "success": "已切换至混合模式"
+    },
+    "governance": {
+      "title": "治理 / RBAC 就绪度",
+      "description": "SSO、SCIM 或 IdP 角色来源、RBAC 覆盖、last-admin 连续性和访问复核审计证据集中在同一个控制面。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "治理指纹",
+      "summary": "治理判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      }
+    },
+    "field_permissions": {
+      "title": "字段级权限台账",
+      "description": "角色矩阵、公开投影、写入身份策略、审核脱敏和可导出审计证据会在客户字段离开可信工作区前保持可见。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "字段权限指纹",
+      "summary": "字段权限判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      }
+    },
+    "compliance_package": {
+      "title": "合规包证据",
+      "description": "DPA、SOC2-ready 控制说明、数据流、审计导出、保留删除和子处理方边界进入同一个客户可验证资料包。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "合规指纹",
+      "summary": "合规判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "lanes": {
+        "control_mapping": {
+          "title": "DPA / SOC2 控制映射",
+          "owner": "Security + Legal",
+          "action": "复核访问控制"
+        },
+        "data_flow_inventory": {
+          "title": "数据流清单",
+          "owner": "Security + Product",
+          "action": "复核数据流清单"
+        },
+        "audit_evidence_package": {
+          "title": "审计证据包",
+          "owner": "Security + Compliance",
+          "action": "打开审计证据"
+        },
+        "retention_dsr": {
+          "title": "保留和 DSR 控制",
+          "owner": "Security + Compliance",
+          "action": "复核 DSR 控制"
+        },
+        "subprocessor_boundary": {
+          "title": "子处理方边界",
+          "owner": "Security + Customer Success",
+          "action": "复核 outbound targets"
+        }
+      }
+    },
+    "key_rotation": {
+      "title": "密钥轮换就绪度",
+      "description": "Tink keyset、API key、webhook secret、outbound hook secret 和 LLM provider credential 进入同一个轮换证据面。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "轮换指纹",
+      "summary": "轮换判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "lanes": {
+        "tink_keyset_runtime": {
+          "title": "Tink keyset 运行态证明",
+          "owner": "Security + Platform",
+          "action": "打开系统预检"
+        },
+        "api_key_rotation": {
+          "title": "API key 轮换清单",
+          "owner": "Security + Developer Platform",
+          "action": "复核 API keys"
+        },
+        "inbound_webhook_rotation": {
+          "title": "Inbound webhook secret 轮换",
+          "owner": "Security + Integrations",
+          "action": "复核入站源"
+        },
+        "outbound_secret_boundary": {
+          "title": "Outbound secret 边界",
+          "owner": "Security + Customer Success",
+          "action": "复核 outbound secrets"
+        },
+        "llm_provider_secret_rotation": {
+          "title": "LLM provider secret 轮换",
+          "owner": "Security + AI Platform",
+          "action": "复核 LLM providers"
+        }
+      }
+    },
+    "webhook_signature": {
+      "title": "Webhook signature 验证工具",
+      "description": "Inbound webhook、reply hook、request notification webhook 和 external sync webhook 的签名、指纹、测试与失败诊断进入同一个控制面。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "签名指纹",
+      "summary": "签名判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "lanes": {
+        "inbound_webhook_signature": {
+          "title": "Inbound webhook 签名 fixture",
+          "owner": "Security + Integrations",
+          "action": "打开入站源"
+        },
+        "reply_hook_fingerprint": {
+          "title": "Reply hook 指纹探针",
+          "owner": "Security + Support Ops",
+          "action": "打开 reply hook"
+        },
+        "request_notification_webhook": {
+          "title": "Request notification webhook 测试",
+          "owner": "Security + Customer Success",
+          "action": "打开需求通知"
+        },
+        "external_sync_signature": {
+          "title": "External sync 签名诊断",
+          "owner": "Security + Integrations",
+          "action": "打开 external sync"
+        },
+        "failure_diagnostics": {
+          "title": "跨表面失败诊断",
+          "owner": "Security + Reliability",
+          "action": "复核签名诊断"
+        }
+      }
+    },
+    "incident_runbook": {
+      "title": "安全事件响应 runbook",
+      "description": "密钥泄露、webhook 签名失败、访问异常、公开隐私事件和客户通知恢复进入同一个演练控制面。",
+      "ready": "就绪",
+      "watch": "观察",
+      "blocked": "阻塞",
+      "needs_data": "缺少数据",
+      "fingerprint": "Runbook 指纹",
+      "summary": "Runbook 判断",
+      "signal": "信号",
+      "evidence": "证据",
+      "guardrail": "护栏",
+      "status": {
+        "ready": "就绪",
+        "watch": "观察",
+        "blocked": "阻塞",
+        "needs_data": "缺少数据"
+      },
+      "lanes": {
+        "credential_compromise": {
+          "title": "密钥泄露响应",
+          "owner": "Security + Platform",
+          "action": "复核密钥 runbook"
+        },
+        "webhook_signature_incident": {
+          "title": "Webhook 签名事故",
+          "owner": "Security + Integrations",
+          "action": "复核 webhook 事故路径"
+        },
+        "access_identity_incident": {
+          "title": "访问与身份事故",
+          "owner": "Security + IT",
+          "action": "复核访问事故路径"
+        },
+        "public_privacy_incident": {
+          "title": "公开隐私事故",
+          "owner": "Security + Product",
+          "action": "复核隐私事故路径"
+        },
+        "customer_notification_recovery": {
+          "title": "客户通知恢复",
+          "owner": "Security + Customer Success",
+          "action": "复核客户恢复"
+        }
+      }
     },
     "pagination": {
       "prev": "上一页",

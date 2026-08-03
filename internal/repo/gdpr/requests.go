@@ -86,6 +86,8 @@ type OperationsSummary struct {
 
 const requestCols = `id, tenant_id, request_type, status, subject_key, subject_hash, subject_display,
 	feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count, outbox_count,
+	survey_invitation_count, survey_response_count, survey_low_score_review_count,
+	survey_provider_event_count, survey_recovery_notification_count,
 	archive_filename, COALESCE(error, ''), created_by_type, created_by, created_at, started_at, completed_at, expires_at, downloaded_at, execute_after, cancelled_at, revoked_at`
 
 func scanRequest(row pgx.Row) (*Request, error) {
@@ -103,6 +105,11 @@ func scanRequest(row pgx.Row) (*Request, error) {
 		&req.Counts.FeedbackAuditCount,
 		&req.Counts.LLMAuditCount,
 		&req.Counts.OutboxCount,
+		&req.Counts.SurveyInvitationCount,
+		&req.Counts.SurveyResponseCount,
+		&req.Counts.SurveyLowScoreReviewCount,
+		&req.Counts.SurveyProviderEventCount,
+		&req.Counts.SurveyRecoveryNotificationCount,
 		&req.ArchiveFilename,
 		&req.Error,
 		&req.CreatedByType,
@@ -220,32 +227,10 @@ func (r *Repo) CreateDeleteRequest(
 		return nil, err
 	}
 
-	var counts Counts
-	if err := tx.QueryRow(
-		ctx, `
-		SELECT
-			(SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_drafts WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_draft_revisions WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_draft_events WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_delivery_attempts WHERE feedback_id = ANY($1))`,
-		info.feedbackIDs,
-	).Scan(
-		&counts.TagAssignmentCount,
-		&counts.FeedbackAuditCount,
-		&counts.LLMAuditCount,
-		&counts.OutboxCount,
-		&counts.ReplyDraftCount,
-		&counts.ReplyDraftRevisionCount,
-		&counts.ReplyDraftEventCount,
-		&counts.ReplyDeliveryAttemptCount,
-	); err != nil {
-		return nil, fmt.Errorf("count subject-linked rows: %w", err)
+	counts, err := countLockedSubject(ctx, tx, tenantID, info)
+	if err != nil {
+		return nil, err
 	}
-	counts.FeedbackCount = len(info.feedbackIDs)
 
 	requestID := newRequestID()
 	if _, err := tx.Exec(
@@ -253,10 +238,17 @@ func (r *Repo) CreateDeleteRequest(
 		INSERT INTO gdpr_requests (
 			id, tenant_id, request_type, status, subject_key, subject_hash, subject_display,
 			feedback_count, tag_assignment_count, feedback_audit_count, llm_audit_count, outbox_count,
+			survey_invitation_count, survey_response_count, survey_low_score_review_count,
+			survey_provider_event_count, survey_recovery_notification_count,
 			created_by_type, created_by, execute_after
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+			$13, $14, $15, $16, $17, $18, $19, $20
+		)`,
 		requestID, tenantID, RequestTypeDelete, RequestStatusScheduled, subjectKey, subjectHash, info.subjectDisplay,
 		counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount, counts.OutboxCount,
+		counts.SurveyInvitationCount, counts.SurveyResponseCount, counts.SurveyLowScoreReviewCount,
+		counts.SurveyProviderEventCount, counts.SurveyRecoveryNotificationCount,
 		createdByType, createdBy, executeAfter.UTC(),
 	); err != nil {
 		return nil, fmt.Errorf("insert gdpr delete request: %w", err)
@@ -352,10 +344,17 @@ func (r *Repo) CompleteDeleteRequest(ctx context.Context, requestID string, coun
 		    feedback_audit_count = $4,
 		    llm_audit_count = $5,
 		    outbox_count = $6,
+		    survey_invitation_count = $7,
+		    survey_response_count = $8,
+		    survey_low_score_review_count = $9,
+		    survey_provider_event_count = $10,
+		    survey_recovery_notification_count = $11,
 		    completed_at = NOW(),
 		    error = ''
 		WHERE id = $1 AND request_type = 'delete'`,
-		requestID, counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount, counts.OutboxCount,
+		requestID, counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
+		counts.OutboxCount, counts.SurveyInvitationCount, counts.SurveyResponseCount,
+		counts.SurveyLowScoreReviewCount, counts.SurveyProviderEventCount, counts.SurveyRecoveryNotificationCount,
 	)
 	if err != nil {
 		return fmt.Errorf("complete gdpr delete request: %w", err)

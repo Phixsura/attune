@@ -64,6 +64,9 @@ func (h *FeedbackHandler) Get(ctx *dispatcher.RequestContext[*session.AuthCtx], 
 		EnrichmentFailureChannelName:       f.EnrichmentFailureChannelName,
 		EnrichmentFailureConfigFingerprint: f.EnrichmentFailureConfigFingerprint,
 		EnrichmentFailurePromptVersion:     f.EnrichmentFailurePromptVersion,
+		Assignment:                         f.Assignment,
+		AccountContext:                     f.AccountContext,
+		IdentityEvidence:                   buildFeedbackIdentityEvidence(row.UserID, row.SourceMeta),
 	})
 	if len(row.SourceMeta) > 0 {
 		var m map[string]any

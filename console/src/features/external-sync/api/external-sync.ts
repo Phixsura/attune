@@ -261,6 +261,25 @@ export const externalSyncEventsQuery = (limit = 25, filter: ExternalSyncEventsFi
     staleTime: 10_000,
   })
 
+export const externalSyncRecentEventsQuery = (limit = 25, filter: ExternalSyncEventsFilter = {}) =>
+  queryOptions({
+    queryKey: [...externalSyncQueryKeys.events(limit, filter), 'recent'] as const,
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams()
+      params.set('limit', String(limit))
+      if (filter.connectionId) params.set('connection_id', filter.connectionId)
+      if (filter.status) params.set('status', filter.status)
+      const resp = await api<ListExternalSyncEventsResponse>(
+        `${base}/events?${params.toString()}`,
+        {
+          signal,
+        },
+      )
+      return resp.events
+    },
+    staleTime: 10_000,
+  })
+
 export function createExternalConnection(body: CreateExternalConnectionRequest) {
   return api<ExternalConnection>(`${base}/connections`, { method: 'POST', body })
 }

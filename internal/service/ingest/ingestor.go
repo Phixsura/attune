@@ -92,6 +92,11 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 	}
 
 	in = scrubUntrustedSourceMeta(keyID, in)
+	signalTraceID := feedbackrepo.SignalTraceIDFromSourceMeta(in.SourceMeta, trace.FromContext(ctx))
+	if signalTraceID == "" {
+		signalTraceID = trace.New()
+	}
+	in.SignalTraceID = signalTraceID
 	userID := composeUserID(keyID, in.SourceUser)
 	subjectKey, subjectDisplay := subjectkey.Normalize(in.SourceUser, userID)
 	subjectHash := ""
@@ -119,13 +124,13 @@ func (i *Ingestor) IngestRow(ctx context.Context, tenantID string, keyID uuid.UU
 		metrics.IdempotencyKeyUsage.WithLabelValues(tenantID, outcome).Inc()
 	}
 
-	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,deduped:%t", where, tenantID, id, deduped)
+	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,deduped:%t,signal_trace_id:%s", where, tenantID, id, deduped, signalTraceID)
 	// A replay that already enqueued enrichment on its first insert should not
 	// submit twice.
 	if !deduped && i.submitter != nil {
-		if err := i.submitter.Submit(ctx, enrich.Job{ID: id, TraceID: trace.FromContext(ctx)}); err != nil {
+		if err := i.submitter.Submit(ctx, enrich.Job{ID: id, TraceID: signalTraceID}); err != nil {
 			logext.Warnf(ctx, "[%s] enrich submit failed,feedback_id:%d,inbound_trace_id:%s,err:%+v",
-				where, id, trace.FromContext(ctx), err.Error())
+				where, id, signalTraceID, err.Error())
 		}
 	}
 	return id, nil

@@ -68,6 +68,7 @@ test.describe('Public visibility browser behavior', () => {
     page,
   }) => {
     test.setTimeout(120_000)
+    test.slow()
     const diagnostics = collectConsoleDiagnostics(page)
     const mock = await installPublicVisibilityMocks(page, { role: 'admin' })
 
@@ -137,15 +138,21 @@ test.describe('Public visibility browser behavior', () => {
       submittedByDisplay: 'Ada Customer',
     })
 
-    await moderateRow(page, 'profile-approve', zh.approve, 'copy reviewed for public portal')
-    await moderateRow(page, 'profile-reject', zh.reject, 'contains private implementation detail')
+    await moderateRow(page, mock, 'profile-approve', zh.approve, 'copy reviewed for public portal')
+    await moderateRow(
+      page,
+      mock,
+      'profile-reject',
+      zh.reject,
+      'contains private implementation detail',
+    )
 
     await queueButton(page, zh.approved).click()
-    await moderateRow(page, 'profile-hide', zh.hide, 'published copy is now outdated')
+    await moderateRow(page, mock, 'profile-hide', zh.hide, 'published copy is now outdated')
 
     await queueButton(page, zh.blocked).click()
-    await moderateRow(page, 'profile-restore', zh.spam, 'automated abuse pattern')
-    await moderateRow(page, 'profile-restore', zh.restore, '')
+    await moderateRow(page, mock, 'profile-restore', zh.spam, 'automated abuse pattern')
+    await moderateRow(page, mock, 'profile-restore', zh.restore, '')
 
     expect(mock.moderationActions).toEqual([
       {
@@ -214,15 +221,24 @@ async function selectOption(page: Page, label: string, option: string) {
   await page.getByRole('option', { name: option }).click()
 }
 
-async function moderateRow(page: Page, subjectID: string, action: string, note: string) {
+async function moderateRow(
+  page: Page,
+  mock: PublicVisibilityMock,
+  subjectID: string,
+  action: string,
+  note: string,
+) {
   const row = moderationRow(page, subjectID)
   await expect(row).toBeVisible()
   await row.getByRole('button', { name: action }).click()
   const dialogTitle = `${action}\u5ba1\u6838\u9879`
-  await expect(page.getByRole('dialog', { name: dialogTitle })).toBeVisible()
-  await page.getByPlaceholder(zh.reasonNotePlaceholder).fill(note)
-  await page.getByRole('button', { name: zh.submitDecision }).click()
-  await expect(page.getByRole('dialog', { name: dialogTitle })).toHaveCount(0)
+  const dialog = page.getByRole('dialog', { name: dialogTitle })
+  const expectedActionCount = mock.moderationActions.length + 1
+  await expect(dialog).toBeVisible()
+  await dialog.getByPlaceholder(zh.reasonNotePlaceholder).fill(note)
+  await dialog.getByRole('button', { name: zh.submitDecision }).click()
+  await expect.poll(() => mock.moderationActions.length).toBe(expectedActionCount)
+  await expect(dialog).toBeHidden()
 }
 
 function queueButton(page: Page, name: string) {

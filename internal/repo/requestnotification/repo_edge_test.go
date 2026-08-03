@@ -258,6 +258,33 @@ func TestRepoFakePoolDeliveryBranches(t *testing.T) {
 	}
 }
 
+func TestRepoFakePoolStatusEvidenceBranches(t *testing.T) {
+	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
+	ctx := context.Background()
+	evidenceRow := scanRow{"shipped", 2, 4, 2, 1, 1, 1, ptrext.Of(now)}
+
+	evidence, err := edgeRepo(repoFakePool{rowsQueue: []pgx.Rows{ptrext.Of(scanRows{rows: []scanRow{evidenceRow}})}}).ListStatusEvidence(ctx, "tenant-1")
+	if err != nil || len(evidence) != 1 {
+		t.Fatalf("ListStatusEvidence() = %+v, %v", evidence, err)
+	}
+	if evidence[0].RequestStatus != "shipped" ||
+		evidence[0].EventCount != 2 ||
+		evidence[0].ExpectedCustomers != 4 ||
+		evidence[0].NotifiedCustomers != 2 ||
+		evidence[0].FailedCustomers != 1 ||
+		evidence[0].SuppressedCustomers != 1 ||
+		evidence[0].RecoveryPendingCustomers != 1 ||
+		evidence[0].LastEventAt == nil {
+		t.Fatalf("ListStatusEvidence() scanned unexpected item: %+v", evidence[0])
+	}
+	if _, err := edgeRepo(repoFakePool{rowsQueue: []pgx.Rows{ptrext.Of(scanRows{rows: []scanRow{{}}})}}).ListStatusEvidence(ctx, "tenant-1"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("ListStatusEvidence(scan err) = %v, want invalid input", err)
+	}
+	if _, err := edgeRepo(repoFakePool{queryErr: errors.New("boom")}).ListStatusEvidence(ctx, "tenant-1"); err == nil {
+		t.Fatalf("ListStatusEvidence(query err) error = nil")
+	}
+}
+
 func TestRepoFakePoolEventAndMarkBranches(t *testing.T) {
 	now := time.Date(2026, 7, 16, 0, 0, 0, 0, time.UTC)
 	id := uuid.New()

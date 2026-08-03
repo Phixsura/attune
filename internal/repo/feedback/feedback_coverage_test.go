@@ -321,6 +321,7 @@ func richConsoleOpts(now time.Time) ConsoleListOpts {
 		Limit:              500,
 		Source:             ptrext.Of("api"),
 		Type:               ptrext.Of("bug"),
+		AccountKey:         ptrext.Of("acct:acme"),
 		TagID:              ptrext.Of("aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb"),
 		WorkflowStateID:    ptrext.Of("cccccccc-1111-2222-3333-dddddddddddd"),
 		WorkflowCategory:   ptrext.Of("active"),

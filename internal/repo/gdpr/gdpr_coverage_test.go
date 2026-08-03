@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -83,6 +85,26 @@ func TestRepoExportHelpersReturnPoolErrors(t *testing.T) {
 			_, err := r.exportReplyDeliveryAttemptRows(ctx, "tenant-1", "subject-1")
 			return err
 		}},
+		{name: "exportSurveyInvitationRows", call: func() error {
+			_, err := r.exportSurveyInvitationRows(ctx, "tenant-1", surveySubjectMetadata())
+			return err
+		}},
+		{name: "exportSurveyResponseRows", call: func() error {
+			_, err := r.exportSurveyResponseRows(ctx, "tenant-1", surveySubjectMetadata())
+			return err
+		}},
+		{name: "exportSurveyLowScoreReviewRows", call: func() error {
+			_, err := r.exportSurveyLowScoreReviewRows(ctx, "tenant-1", surveySubjectMetadata())
+			return err
+		}},
+		{name: "exportSurveyProviderEventRows", call: func() error {
+			_, err := r.exportSurveyProviderEventRows(ctx, "tenant-1", surveySubjectMetadata())
+			return err
+		}},
+		{name: "exportSurveyRecoveryNotificationRows", call: func() error {
+			_, err := r.exportSurveyRecoveryNotificationRows(ctx, "tenant-1", surveySubjectMetadata())
+			return err
+		}},
 	} {
 		expectGDPRErr(t, tc.name, tc.call)
 	}
@@ -92,14 +114,19 @@ func TestSubjectExportRowsCounts(t *testing.T) {
 	t.Parallel()
 
 	rows := subjectExportRows{
-		feedback:              make([]json.RawMessage, 2),
-		tags:                  make([]json.RawMessage, 3),
-		feedbackAudit:         make([]json.RawMessage, 4),
-		llmAudit:              make([]json.RawMessage, 5),
-		replyDrafts:           make([]json.RawMessage, 6),
-		replyDraftRevisions:   make([]json.RawMessage, 7),
-		replyDraftEvents:      make([]json.RawMessage, 8),
-		replyDeliveryAttempts: make([]json.RawMessage, 9),
+		feedback:                    make([]json.RawMessage, 2),
+		tags:                        make([]json.RawMessage, 3),
+		feedbackAudit:               make([]json.RawMessage, 4),
+		llmAudit:                    make([]json.RawMessage, 5),
+		replyDrafts:                 make([]json.RawMessage, 6),
+		replyDraftRevisions:         make([]json.RawMessage, 7),
+		replyDraftEvents:            make([]json.RawMessage, 8),
+		replyDeliveryAttempts:       make([]json.RawMessage, 9),
+		surveyInvitations:           make([]json.RawMessage, 10),
+		surveyResponses:             make([]json.RawMessage, 11),
+		surveyLowScoreReviews:       make([]json.RawMessage, 12),
+		surveyProviderEvents:        make([]json.RawMessage, 13),
+		surveyRecoveryNotifications: make([]json.RawMessage, 14),
 	}
 	counts := rows.counts()
 	if counts.FeedbackCount != 2 ||
@@ -109,9 +136,23 @@ func TestSubjectExportRowsCounts(t *testing.T) {
 		counts.ReplyDraftCount != 6 ||
 		counts.ReplyDraftRevisionCount != 7 ||
 		counts.ReplyDraftEventCount != 8 ||
-		counts.ReplyDeliveryAttemptCount != 9 {
+		counts.ReplyDeliveryAttemptCount != 9 ||
+		counts.SurveyInvitationCount != 10 ||
+		counts.SurveyResponseCount != 11 ||
+		counts.SurveyLowScoreReviewCount != 12 ||
+		counts.SurveyProviderEventCount != 13 ||
+		counts.SurveyRecoveryNotificationCount != 14 {
 		t.Fatalf("counts = %+v; want lengths for every export bucket", counts)
 	}
+}
+
+func surveySubjectMetadata() *subjectMetadata {
+	return ptrext.Of(subjectMetadata{
+		feedbackIDs:     []int64{1},
+		feedbackIDTexts: []string{"1"},
+		subjectKey:      "subject-1",
+		subjectHashes:   []string{"sha256:subject-1"},
+	})
 }
 
 func TestRepoRequestMethodsReturnPoolErrors(t *testing.T) {

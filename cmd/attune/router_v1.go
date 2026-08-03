@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/console"
 	"github.com/Phixsura/attune/internal/handlers/externalsyncwebhook"
 	"github.com/Phixsura/attune/internal/handlers/portal"
+	"github.com/Phixsura/attune/internal/handlers/surveywebhook"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
@@ -42,13 +43,14 @@ func mountV1Routes(
 	rateLimiter *ratelimit.Limiter,
 	perKeyRateLimiter *ratelimit.PerKeyLimiter,
 	portalHandler *portal.Handler,
-	portalLimiter middlewareProvider,
-	portalWriteLimiter middlewareProvider,
+	surveyProviderWebhooks *surveywebhook.Handler,
+	portalLimiters portalLimiterSet,
 	adminRepo *admin.Repo,
 ) {
 	r.Route("/v1", func(r chi.Router) {
 		mountV1AdapterRoutes(r, pool, inboundMux, inboundSecrets, cohortSyncSvc)
-		mountV1PortalRoutes(r, portalHandler, versionMW, portalLimiter, portalWriteLimiter)
+		mountV1SurveyProviderWebhookRoutes(r, surveyProviderWebhooks, portalLimiters.write, portalLimiters.surveyProviderEvents)
+		mountV1PortalRoutes(r, portalHandler, versionMW, portalLimiters.read, portalLimiters.write, portalLimiters.surveyRead, portalLimiters.surveyWrite)
 		mountV1ApiKeyRoutes(r, cfg, pool, ingestHandler, apiKeys, versionMW, rateLimiter, perKeyRateLimiter, adminRepo)
 	})
 }
@@ -67,28 +69,46 @@ func mountV1AdapterRoutes(r chi.Router, pool *pgxpool.Pool, inboundMux chi.Route
 	}
 }
 
+func mountV1SurveyProviderWebhookRoutes(
+	r chi.Router,
+	handler *surveywebhook.Handler,
+	portalWriteLimiter middlewareProvider,
+	portalProviderEventLimiter middlewareProvider,
+) {
+	if handler == nil {
+		return
+	}
+	r.Group(func(r chi.Router) {
+		r.Use(portal.NoStore)
+		r.Use(portalWriteLimiter.Middleware)
+		r.With(portalProviderEventLimiter.Middleware).Post("/surveys/provider-events/{tenant_id}/{sender_id}", handler.Record)
+	})
+}
+
 func mountV1PortalRoutes(
 	r chi.Router,
 	portalHandler *portal.Handler,
 	versionMW func(http.Handler) http.Handler,
 	portalLimiter middlewareProvider,
 	portalWriteLimiter middlewareProvider,
+	portalSurveyLimiter middlewareProvider,
+	portalSurveyWriteLimiter middlewareProvider,
 ) {
 	r.Group(func(r chi.Router) {
 		r.Use(versionMW)
 		r.Use(portal.NoStore)
 		r.Use(portalLimiter.Middleware)
-		mountPortalReadRoutes(r, portalHandler)
+		mountPortalReadRoutes(r, portalHandler, portalSurveyLimiter)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(versionMW)
 		r.Use(portal.NoStore)
 		r.Use(portalWriteLimiter.Middleware)
-		mountPortalWriteRoutes(r, portalHandler)
+		mountPortalWriteRoutes(r, portalHandler, portalSurveyWriteLimiter)
 	})
 }
 
-func mountPortalReadRoutes(r chi.Router, portalHandler *portal.Handler) {
+func mountPortalReadRoutes(r chi.Router, portalHandler *portal.Handler, portalSurveyLimiter middlewareProvider) {
 	r.Get("/portal/{tenant_slug}/submission-config", dispatcher.Bind(
 		"portal.Handler.GetPublicSubmissionConfig",
 		dispatcher.Path(
@@ -146,11 +166,23 @@ func mountPortalReadRoutes(r chi.Router, portalHandler *portal.Handler) {
 		portalHandler.ListPublicRoadmap,
 		dispatcher.WithAuth(okAuth[attunev1.ListPublicRoadmapRequest]),
 	))
+	r.With(portalSurveyLimiter.Middleware).Get("/surveys/{token}", dispatcher.Bind(
+		"portal.Handler.GetPublicSurvey",
+		dispatcher.Path(
+			func() *attunev1.GetPublicSurveyRequest {
+				return ptrext.Of(attunev1.GetPublicSurveyRequest{})
+			},
+			portal.BindGetPublicSurvey,
+		),
+		portalHandler.GetPublicSurvey,
+		dispatcher.WithAuth(okAuth[attunev1.GetPublicSurveyRequest]),
+	))
 }
 
 func mountPortalWriteRoutes(
 	r chi.Router,
 	portalHandler *portal.Handler,
+	portalSurveyWriteLimiter middlewareProvider,
 ) {
 	r.Post("/portal/{tenant_slug}/requests/{public_slug}/votes", dispatcher.Bind(
 		"portal.Handler.VotePublicCustomerRequest",
@@ -217,6 +249,17 @@ func mountPortalWriteRoutes(
 		),
 		portalHandler.CreatePublicSubmission,
 		dispatcher.WithAuth(okAuth[attunev1.CreatePublicSubmissionRequest]),
+	))
+	r.With(portalSurveyWriteLimiter.Middleware).Post("/surveys/{token}/responses", dispatcher.Bind(
+		"portal.Handler.SubmitPublicSurveyResponse",
+		dispatcher.Custom(
+			func() *attunev1.SubmitPublicSurveyResponseRequest {
+				return ptrext.Of(attunev1.SubmitPublicSurveyResponseRequest{})
+			},
+			portal.BindSubmitPublicSurveyResponse,
+		),
+		portalHandler.SubmitPublicSurveyResponse,
+		dispatcher.WithAuth(okAuth[attunev1.SubmitPublicSurveyResponseRequest]),
 	))
 	r.Post("/portal/{tenant_slug}/unsubscribe", dispatcher.Bind(
 		"portal.Handler.UnsubscribePublicCustomerRequest",

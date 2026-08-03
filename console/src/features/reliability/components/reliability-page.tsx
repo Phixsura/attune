@@ -18,6 +18,23 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { cn } from '@/lib/utils'
+import type { BackupRestoreDrill } from '../backup-restore-drill'
+import type { ConsistencyChecks } from '../consistency-checks'
+import type { ErrorBudgetLedger } from '../error-budget-ledger'
+import type { IncidentTimeline } from '../incident-timeline'
+import type { PipelineSloLedger } from '../pipeline-slo-ledger'
+import type { ReleaseHealthLedger } from '../release-health-ledger'
+import type { ReplayDrill } from '../replay-drill'
+import type { TenantQuotaSaturation } from '../tenant-quota-saturation'
+import { BackupRestoreDrillCard } from './backup-restore-drill-card'
+import { ConsistencyChecksCard } from './consistency-checks-card'
+import { ErrorBudgetLedgerCard } from './error-budget-ledger-card'
+import { IncidentTimelineCard } from './incident-timeline-card'
+import { PipelineSloLedgerCard } from './pipeline-slo-ledger-card'
+import { ReleaseHealthLedgerCard } from './release-health-ledger-card'
+import { ReplayDrillCard } from './replay-drill-card'
+import { ReplayWorksheetCard } from './replay-worksheet-card'
+import { TenantQuotaSaturationCard } from './tenant-quota-saturation-card'
 
 export type Tone = 'default' | 'active' | 'urgent'
 
@@ -46,6 +63,14 @@ export interface ReliabilityPageProps {
   mcpClients: ReliabilityMetric
   gdpr: ReliabilityMetric
   deadDeliveries: ReliabilityMetric
+  backupRestoreDrill: BackupRestoreDrill
+  consistencyChecks: ConsistencyChecks
+  errorBudgetLedger: ErrorBudgetLedger
+  incidentTimeline: IncidentTimeline
+  pipelineSloLedger: PipelineSloLedger
+  releaseHealthLedger: ReleaseHealthLedger
+  replayDrill: ReplayDrill
+  tenantQuotaSaturation: TenantQuotaSaturation
   releaseContext: {
     version: ReliabilityMetric
     environment: ReliabilityMetric
@@ -175,6 +200,14 @@ export function ReliabilityPage({
   mcpClients,
   gdpr,
   deadDeliveries,
+  backupRestoreDrill,
+  consistencyChecks,
+  errorBudgetLedger,
+  incidentTimeline,
+  pipelineSloLedger,
+  releaseHealthLedger,
+  replayDrill,
+  tenantQuotaSaturation,
   releaseContext,
 }: ReliabilityPageProps) {
   const { t } = useTranslation()
@@ -194,7 +227,12 @@ export function ReliabilityPage({
               <RefreshCw className={cn('mr-1.5 h-3.5 w-3.5', isRefreshing && 'animate-spin')} />
               {t('reliability.refresh', '刷新')}
             </Button>
-            <Button asChild size="sm" variant="default">
+            <Button
+              asChild
+              size="sm"
+              variant="default"
+              className="h-auto min-h-8 max-w-full whitespace-normal py-1.5 text-left leading-5"
+            >
               <a href={dashboardHref} target="_blank" rel="noreferrer">
                 <Radar className="mr-1.5 h-3.5 w-3.5" />
                 {t('reliability.open_dashboard', '打开 tenant impact dashboard')}
@@ -272,6 +310,24 @@ export function ReliabilityPage({
           </CardContent>
         </Card>
       )}
+
+      <ReleaseHealthLedgerCard ledger={releaseHealthLedger} />
+
+      <IncidentTimelineCard timeline={incidentTimeline} />
+
+      <TenantQuotaSaturationCard quota={tenantQuotaSaturation} />
+
+      <BackupRestoreDrillCard drill={backupRestoreDrill} />
+
+      <ConsistencyChecksCard checks={consistencyChecks} />
+
+      <PipelineSloLedgerCard ledger={pipelineSloLedger} />
+
+      <ReplayDrillCard drill={replayDrill} />
+
+      <ErrorBudgetLedgerCard ledger={errorBudgetLedger} />
+
+      <ReplayWorksheetCard tenantName={tenantName} dashboardHref={dashboardHref} />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(22rem,0.8fr)]">
         <Card className="border-border/60 shadow-none">

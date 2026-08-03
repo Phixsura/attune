@@ -136,6 +136,7 @@ func savedViewStateFromProto(state *attunev1.CustomerRequestSavedViewState) (vie
 		Visibility:    visibilityFromProto(state.GetVisibility()),
 		Sort:          sortFromProto(state.GetSort()),
 		Direction:     directionFromProto(state.GetDirection()),
+		AccountKey:    state.GetAccountKey(),
 	}
 	if state.FeedbackId != nil {
 		out.FeedbackID = state.GetFeedbackId()
@@ -170,6 +171,9 @@ func savedViewStateToProto(state viewsvc.State) *attunev1.CustomerRequestSavedVi
 	}
 	if state.FeedbackID > 0 {
 		out.FeedbackId = ptrext.Of(state.FeedbackID)
+	}
+	if state.AccountKey != "" {
+		out.AccountKey = ptrext.Of(state.AccountKey)
 	}
 	return out
 }

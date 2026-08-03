@@ -600,6 +600,26 @@ var DigestClusterCount = prometheus.NewHistogramVec(
 	[]string{"tenant"},
 )
 
+// SurveyRecoveryAutomationTotal counts low-score recovery automation outcomes.
+// result ∈ {escalated, skipped, error}; reason is a bounded recovery reason.
+var SurveyRecoveryAutomationTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_survey_recovery_automation_total",
+		Help: "Low-score survey recovery automation outcomes by tenant and reason.",
+	},
+	[]string{"tenant", "result", "reason"},
+)
+
+// SurveyRecoveryNotificationTotal counts low-score recovery owner notification outcomes.
+// result ∈ {enqueued, sent, suppressed, failed, dead, skipped, error}; reason is bounded.
+var SurveyRecoveryNotificationTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_survey_recovery_notification_total",
+		Help: "Low-score survey recovery owner notification outcomes by tenant and reason.",
+	},
+	[]string{"tenant", "result", "reason"},
+)
+
 // WorkflowTransitionsTotal counts workflow state transitions by outcome.
 // result ∈ {success, invalid, error}.
 var WorkflowTransitionsTotal = prometheus.NewCounterVec(
@@ -1190,6 +1210,8 @@ var allMetrics = []prometheus.Collector{
 	DigestDuration,
 	DigestClusteringFallbackTotal,
 	DigestClusterCount,
+	SurveyRecoveryAutomationTotal,
+	SurveyRecoveryNotificationTotal,
 	WorkflowTransitionsTotal,
 	WorkflowBatchSize,
 	BatchJobsClaimed,
@@ -1310,6 +1332,8 @@ func registeredMetricNamesCore() []string {
 		"attune_digest_duration_seconds",
 		"attune_digest_clustering_fallback_total",
 		"attune_digest_cluster_count",
+		"attune_survey_recovery_automation_total",
+		"attune_survey_recovery_notification_total",
 	}
 }
 

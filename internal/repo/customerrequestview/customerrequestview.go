@@ -36,6 +36,7 @@ type State struct {
 	Sort          crrepo.Sort       `json:"sort,omitempty"`
 	Direction     crrepo.Direction  `json:"direction,omitempty"`
 	FeedbackID    int64             `json:"feedbackId,omitempty"`
+	AccountKey    string            `json:"accountKey,omitempty"`
 }
 
 type View struct {

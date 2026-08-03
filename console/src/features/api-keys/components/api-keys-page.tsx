@@ -25,16 +25,27 @@ import {
   useCreateApiKey,
 } from '@/features/api-keys/api/create-api-key'
 import { type ApiKey, apiKeysQuery } from '@/features/api-keys/api/list-api-keys'
+import { presetsQuery, scopesQuery } from '@/features/api-keys/api/list-scopes'
+import { serviceAccountsQuery } from '@/features/api-keys/api/list-service-accounts'
 import { useRevokeApiKey } from '@/features/api-keys/api/revoke-api-key'
+import { DeveloperApiAdoptionKitCard } from '@/features/api-keys/components/developer-api-adoption-kit-card'
+import { DeveloperApiConsistencyContractCard } from '@/features/api-keys/components/developer-api-consistency-contract-card'
+import { DeveloperImportExportWorkbenchCard } from '@/features/api-keys/components/developer-import-export-workbench-card'
+import { DeveloperSdkParityGateCard } from '@/features/api-keys/components/developer-sdk-parity-gate-card'
 import {
   CreateKeyDialog,
   RevokeKeyDialog,
   SecretKeyDialog,
 } from '@/features/api-keys/components/dialogs'
 import { ServiceAccountsCard } from '@/features/api-keys/components/service-accounts-card'
+import { buildDeveloperApiAdoptionKit } from '@/features/api-keys/developer-api-adoption-kit'
+import { buildDeveloperApiConsistencyContract } from '@/features/api-keys/developer-api-consistency-contract'
+import { buildDeveloperImportExportWorkbench } from '@/features/api-keys/developer-import-export-workbench'
+import { buildDeveloperSdkParityGate } from '@/features/api-keys/developer-sdk-parity-gate'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { restoreFocusWhenReady } from '@/lib/focus'
+import { cn } from '@/lib/utils'
 
 export function ApiKeysPage() {
   const { t } = useTranslation()
@@ -42,6 +53,9 @@ export function ApiKeysPage() {
   const { can } = usePermissions()
   const canEdit = can('settings:api_keys:edit')
   const list = useQuery(apiKeysQuery())
+  const serviceAccounts = useQuery({ ...serviceAccountsQuery(), enabled: canEdit })
+  const scopes = useQuery(scopesQuery())
+  const presets = useQuery(presetsQuery())
   const create = useCreateApiKey()
   const revoke = useRevokeApiKey()
 
@@ -54,6 +68,17 @@ export function ApiKeysPage() {
   const activeCount = keys.filter((key) => key.isActive).length
   const revokedCount = keys.length - activeCount
   const recentlyUsedCount = keys.filter((key) => Boolean(key.lastUsedAt)).length
+  const developerAdoptionKit = buildDeveloperApiAdoptionKit({
+    apiKeys: list.data,
+    scopePresets: presets.data?.presets,
+    scopes: scopes.data?.scopes,
+    serviceAccounts: canEdit ? serviceAccounts.data : undefined,
+  })
+  const developerSdkParityGate = buildDeveloperSdkParityGate({
+    apiKeys: list.data,
+  })
+  const developerApiConsistencyContract = buildDeveloperApiConsistencyContract()
+  const developerImportExportWorkbench = buildDeveloperImportExportWorkbench()
   const setCreateButtonRef = useCallback((node: HTMLButtonElement | null) => {
     createFocusRef.current = node
   }, [])
@@ -97,7 +122,7 @@ export function ApiKeysPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <PageHero
         eyebrow={t('shell.groups.integrations')}
         title={t('nav.api_keys')}
@@ -139,15 +164,15 @@ export function ApiKeysPage() {
         }
       />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
-        <Card className="border-border/60 shadow-none">
+      <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(20rem,0.8fr)]">
+        <Card className="min-w-0 overflow-hidden border-border/60 shadow-none">
           <CardHeader>
             <CardTitle className="text-base">{t('api_keys.registry_title')}</CardTitle>
             <CardDescription>
               {t('api_keys.registry_description', { count: keys.length })}
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-6">
+          <CardContent className="min-w-0 overflow-hidden pt-6">
             {list.isPending ? (
               <Loading />
             ) : keys.length > 0 ? (
@@ -181,7 +206,11 @@ export function ApiKeysPage() {
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
+          <DeveloperApiAdoptionKitCard kit={developerAdoptionKit} />
+          <DeveloperSdkParityGateCard gate={developerSdkParityGate} />
+          <DeveloperApiConsistencyContractCard contract={developerApiConsistencyContract} />
+          <DeveloperImportExportWorkbenchCard workbench={developerImportExportWorkbench} />
           <ServiceAccountsCard canEdit={canEdit} />
 
           <Card className="border-border/60 shadow-none">
@@ -250,64 +279,119 @@ function KeyTable({
   revokingId: string | undefined
 }) {
   const { t } = useTranslation()
+  const renderRevokeButton = (k: ApiKey) =>
+    k.isActive && onRevoke ? (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="relative z-10"
+        aria-label={t('api_keys.revoke_key_aria', {
+          label: k.label || k.keyPrefix,
+        })}
+        title={t('api_keys.revoke_button')}
+        onClick={(event) => onRevoke(k, event.currentTarget)}
+        disabled={revokingId === k.id}
+      >
+        {revokingId === k.id ? (
+          <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Trash2 className="h-3.5 w-3.5" />
+        )}
+      </Button>
+    ) : null
+
   return (
-    <Table aria-label={t('api_keys.table.aria_label')}>
-      <TableCaption className="sr-only">{t('api_keys.table.aria_label')}</TableCaption>
-      <TableHeader>
-        <TableRow>
-          <TableHead>{t('api_keys.table.prefix')}</TableHead>
-          <TableHead>{t('api_keys.table.label')}</TableHead>
-          <TableHead>{t('api_keys.table.created')}</TableHead>
-          <TableHead>{t('api_keys.table.last_used')}</TableHead>
-          <TableHead>{t('api_keys.table.status')}</TableHead>
-          <TableHead className="text-right">{t('api_keys.table.actions')}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
+    <div className="min-w-0 space-y-3">
+      <ul className="grid gap-3 sm:hidden" aria-label={t('api_keys.table.aria_label')}>
         {keys.map((k) => (
-          <TableRow key={k.id} className={k.isActive ? '' : 'opacity-50'}>
-            <TableCell className="font-mono text-xs">{k.keyPrefix}…</TableCell>
-            <TableCell>{k.label || '—'}</TableCell>
-            <TableCell className="text-muted-foreground">
-              {formatDistanceToNow(new Date(k.createdAt), { addSuffix: true, locale: zhCN })}
-            </TableCell>
-            <TableCell className="text-muted-foreground">
-              {k.lastUsedAt
-                ? formatDistanceToNow(new Date(k.lastUsedAt), { addSuffix: true, locale: zhCN })
-                : t('common.never')}
-            </TableCell>
-            <TableCell>
-              {k.isActive ? (
-                <span className="text-emerald-700 dark:text-emerald-300">
-                  {t('api_keys.status.active')}
-                </span>
-              ) : (
-                <span className="text-muted-foreground">{t('api_keys.status.revoked')}</span>
-              )}
-            </TableCell>
-            <TableCell className="text-right">
-              {k.isActive && onRevoke ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  aria-label={t('api_keys.revoke_key_aria', {
-                    label: k.label || k.keyPrefix,
-                  })}
-                  title={t('api_keys.revoke_button')}
-                  onClick={(event) => onRevoke(k, event.currentTarget)}
-                  disabled={revokingId === k.id}
-                >
-                  {revokingId === k.id ? (
-                    <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+          <li
+            key={k.id}
+            className={cn(
+              'min-w-0 rounded-md border border-border/70 bg-background p-3',
+              !k.isActive && 'opacity-60',
+            )}
+          >
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="break-all font-mono text-xs text-muted-foreground">
+                  {k.keyPrefix}…
+                </div>
+                <div className="mt-1 break-words text-sm font-medium">{k.label || '—'}</div>
+              </div>
+              <div className="shrink-0">{renderRevokeButton(k)}</div>
+            </div>
+            <dl className="mt-3 grid gap-2 text-xs text-muted-foreground">
+              <div className="flex min-w-0 justify-between gap-3">
+                <dt>{t('api_keys.table.created')}</dt>
+                <dd className="text-right">
+                  {formatDistanceToNow(new Date(k.createdAt), { addSuffix: true, locale: zhCN })}
+                </dd>
+              </div>
+              <div className="flex min-w-0 justify-between gap-3">
+                <dt>{t('api_keys.table.last_used')}</dt>
+                <dd className="text-right">
+                  {k.lastUsedAt
+                    ? formatDistanceToNow(new Date(k.lastUsedAt), { addSuffix: true, locale: zhCN })
+                    : t('common.never')}
+                </dd>
+              </div>
+              <div className="flex min-w-0 justify-between gap-3">
+                <dt>{t('api_keys.table.status')}</dt>
+                <dd>
+                  {k.isActive ? (
+                    <span className="text-emerald-700 dark:text-emerald-300">
+                      {t('api_keys.status.active')}
+                    </span>
                   ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>{t('api_keys.status.revoked')}</span>
                   )}
-                </Button>
-              ) : null}
-            </TableCell>
-          </TableRow>
+                </dd>
+              </div>
+            </dl>
+          </li>
         ))}
-      </TableBody>
-    </Table>
+      </ul>
+      <div className="hidden min-w-0 sm:block">
+        <Table aria-label={t('api_keys.table.aria_label')} className="min-w-[42rem]">
+          <TableCaption className="sr-only">{t('api_keys.table.aria_label')}</TableCaption>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('api_keys.table.prefix')}</TableHead>
+              <TableHead>{t('api_keys.table.label')}</TableHead>
+              <TableHead>{t('api_keys.table.created')}</TableHead>
+              <TableHead>{t('api_keys.table.last_used')}</TableHead>
+              <TableHead>{t('api_keys.table.status')}</TableHead>
+              <TableHead className="text-right">{t('api_keys.table.actions')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {keys.map((k) => (
+              <TableRow key={k.id} className={k.isActive ? '' : 'opacity-50'}>
+                <TableCell className="font-mono text-xs">{k.keyPrefix}…</TableCell>
+                <TableCell>{k.label || '—'}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatDistanceToNow(new Date(k.createdAt), { addSuffix: true, locale: zhCN })}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {k.lastUsedAt
+                    ? formatDistanceToNow(new Date(k.lastUsedAt), { addSuffix: true, locale: zhCN })
+                    : t('common.never')}
+                </TableCell>
+                <TableCell>
+                  {k.isActive ? (
+                    <span className="text-emerald-700 dark:text-emerald-300">
+                      {t('api_keys.status.active')}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">{t('api_keys.status.revoked')}</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-right">{renderRevokeButton(k)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
   )
 }

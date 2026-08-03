@@ -1,0 +1,17 @@
+{
+  "connector": "github",
+  "input": {
+    "installStatus": "installed",
+    "health": "quarantined",
+    "schemaDrift": false,
+    "webhookSignature": "verified",
+    "replayFixture": "available",
+    "compatibility": "non_breaking",
+    "rollback": true
+  },
+  "expected": {
+    "status": "watch",
+    "primaryAction": "resume_or_reauthorize_connection",
+    "evidence": "quarantined connector blocks unattended upgrade"
+  }
+}

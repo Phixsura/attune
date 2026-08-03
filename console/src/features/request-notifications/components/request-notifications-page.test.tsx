@@ -6,6 +6,7 @@ import {
   requestNotificationDeliveriesQueryKey,
   requestNotificationSenderQueryKey,
   requestNotificationSettingsQueryKey,
+  requestNotificationStatusEvidenceQueryKey,
   requestNotificationWebhookTargetsQueryKey,
 } from '@/features/request-notifications/api/request-notifications'
 import {
@@ -20,6 +21,7 @@ import {
   optionalValue,
   policyEnabled,
   RequestNotificationsPage,
+  requestStatusLabel,
   statusLabel,
   statusTone,
 } from '@/features/request-notifications/components/request-notifications-page'
@@ -28,6 +30,7 @@ import type {
   RequestNotificationDelivery,
   RequestNotificationSender,
   RequestNotificationSettings,
+  RequestNotificationStatusEvidenceItem,
   RequestNotificationWebhookTarget,
   RequestSubscriber,
 } from '@/proto/attune/v1/request_notification'
@@ -128,6 +131,17 @@ const deliveryQuietFixture: RequestNotificationDelivery = {
   deadReason: '',
 }
 
+const statusEvidenceFixture: RequestNotificationStatusEvidenceItem = {
+  requestStatus: 'shipped',
+  expectedCustomers: 4,
+  notifiedCustomers: 2,
+  failedCustomers: 1,
+  suppressedCustomers: 1,
+  recoveryPendingCustomers: 1,
+  eventCount: 2,
+  lastEventAt: '2026-07-16T00:00:00Z',
+}
+
 const subscriberFixture: RequestSubscriber = {
   contactId: '33333333-3333-3333-3333-333333333333',
   displayName: 'Jane Customer',
@@ -172,6 +186,10 @@ function seededClient() {
     [...requestNotificationDeliveriesQueryKey, 25],
     [deliveryFixture, deliveryDeadFixture, deliveryQuietFixture],
   )
+  qc.setQueryData(requestNotificationStatusEvidenceQueryKey, [
+    { ...statusEvidenceFixture, requestStatus: 'open', expectedCustomers: 0 },
+    statusEvidenceFixture,
+  ])
   return qc
 }
 
@@ -185,6 +203,7 @@ function emptyStateClient() {
   qc.setQueryData(requestNotificationSenderQueryKey, null)
   qc.setQueryData(requestNotificationWebhookTargetsQueryKey, [])
   qc.setQueryData([...requestNotificationDeliveriesQueryKey, 25], [])
+  qc.setQueryData(requestNotificationStatusEvidenceQueryKey, [])
   return qc
 }
 
@@ -222,6 +241,9 @@ function installRequestHandlers(captures: Record<string, unknown>) {
     }),
     http.get('/fb/v1/console/request-notifications/deliveries', () =>
       HttpResponse.json({ deliveries: [deliveryFixture, deliveryDeadFixture] }),
+    ),
+    http.get('/fb/v1/console/request-notifications/status-evidence', () =>
+      HttpResponse.json({ items: [statusEvidenceFixture] }),
     ),
     http.post('/fb/v1/console/request-notifications/preview', async ({ request }) => {
       captures.preview = await request.json()
@@ -362,6 +384,10 @@ describe('request notification page helpers', () => {
     expect(statusTone('pending')).toContain('muted')
     expect(statusLabel(translate, 'verified')).toBe('request_notifications.status.verified')
     expect(statusLabel(translate, 'mystery')).toBe('mystery')
+    expect(requestStatusLabel(translate, 'shipped')).toBe(
+      'request_notifications.request_statuses.shipped',
+    )
+    expect(requestStatusLabel(translate, '')).toBe('-')
     expect(
       channelLabel(translate, RequestNotificationChannel.REQUEST_NOTIFICATION_CHANNEL_EMAIL),
     ).toBe('request_notifications.channels.email')
@@ -383,6 +409,7 @@ describe('RequestNotificationsPage', () => {
     expect(await screen.findByTestId('rn-sender-empty')).toBeInTheDocument()
     expect(screen.getByTestId('rn-targets-empty')).toBeInTheDocument()
     expect(screen.getByTestId('rn-deliveries-empty')).toBeInTheDocument()
+    expect(screen.getByTestId('rn-status-evidence-empty')).toBeInTheDocument()
     expect(screen.getByTestId('rn-subscribers-empty')).toBeInTheDocument()
     expect(screen.getByTestId('rn-preview')).toBeDisabled()
     expect(screen.getByTestId('rn-publish')).toBeDisabled()
@@ -429,6 +456,9 @@ describe('RequestNotificationsPage', () => {
       ),
       http.get('/fb/v1/console/request-notifications/deliveries', () =>
         HttpResponse.json({ deliveries: [deliveryDeadFixture] }),
+      ),
+      http.get('/fb/v1/console/request-notifications/status-evidence', () =>
+        HttpResponse.json({ items: [statusEvidenceFixture] }),
       ),
       http.get('/fb/v1/console/request-notifications/requests/bad-request/subscribers', () =>
         HttpResponse.json({ message: 'cannot load subscribers' }, { status: 500 }),
@@ -478,6 +508,13 @@ describe('RequestNotificationsPage', () => {
     expect(await screen.findByText('CRM')).toBeInTheDocument()
     expect(screen.getByText('temporary provider outage')).toBeInTheDocument()
     expect(screen.getByText('n***@example.test')).toBeInTheDocument()
+    expect(screen.getByText('状态通知证据')).toBeInTheDocument()
+    expect(screen.getByText('待恢复客户')).toBeInTheDocument()
+    const statusEvidenceRow = screen.getByTestId('rn-status-evidence-shipped')
+    expect(statusEvidenceRow).toHaveTextContent('已发货')
+    expect(statusEvidenceRow).toHaveTextContent('4')
+    expect(statusEvidenceRow).toHaveTextContent('2')
+    expect(statusEvidenceRow).toHaveTextContent('1')
 
     await user.click(screen.getByTestId('rn-email-enabled'))
     await user.click(screen.getByTestId('rn-event-shipped'))
@@ -980,6 +1017,9 @@ describe('RequestNotificationsPage', () => {
       ),
       http.get('/fb/v1/console/request-notifications/deliveries', () =>
         HttpResponse.json({ deliveries: [undefinedDelivery] }),
+      ),
+      http.get('/fb/v1/console/request-notifications/status-evidence', () =>
+        HttpResponse.json({ items: [statusEvidenceFixture] }),
       ),
       http.put('/fb/v1/console/request-notifications/settings', async () => {
         await delay(350)

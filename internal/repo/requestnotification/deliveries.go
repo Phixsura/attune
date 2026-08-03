@@ -257,6 +257,66 @@ func (r *Repo) ListDeliveries(ctx context.Context, filter ListDeliveryFilter) ([
 	return scanDeliveries(rows)
 }
 
+func (r *Repo) ListStatusEvidence(ctx context.Context, tenantID string) ([]StatusEvidence, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT COALESCE(NULLIF(e.new_status, ''), 'unknown') AS request_status,
+		 COUNT(DISTINCT e.id)::int AS event_count,
+		 COUNT(DISTINCT d.contact_id) FILTER (
+		   WHERE d.channel = 'email' AND d.contact_id IS NOT NULL
+		 )::int AS expected_customers,
+		 COUNT(DISTINCT d.contact_id) FILTER (
+		   WHERE d.channel = 'email'
+		     AND d.contact_id IS NOT NULL
+		     AND d.status = 'delivered'
+		 )::int AS notified_customers,
+		 COUNT(DISTINCT d.contact_id) FILTER (
+		   WHERE d.channel = 'email'
+		     AND d.contact_id IS NOT NULL
+		     AND d.status IN ('failed', 'dead')
+		 )::int AS failed_customers,
+		 COUNT(DISTINCT d.contact_id) FILTER (
+		   WHERE d.channel = 'email'
+		     AND d.contact_id IS NOT NULL
+		     AND d.status = 'suppressed'
+		 )::int AS suppressed_customers,
+		 COUNT(DISTINCT d.contact_id) FILTER (
+		   WHERE d.channel = 'email'
+		     AND d.contact_id IS NOT NULL
+		     AND d.status IN ('failed', 'dead')
+		 )::int AS recovery_pending_customers,
+		 MAX(e.created_at) AS last_event_at
+		FROM customer_request_notification_events e
+		LEFT JOIN customer_request_notification_deliveries d
+		  ON d.tenant_id = e.tenant_id
+		 AND d.event_id = e.id
+		WHERE e.tenant_id = $1
+		  AND e.primary_request_id IS NOT NULL
+		  AND e.event_type IN ('request.status_changed', 'request.shipped')
+		GROUP BY COALESCE(NULLIF(e.new_status, ''), 'unknown')`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list request notification status evidence: %w", err)
+	}
+	defer rows.Close()
+	out := []StatusEvidence{}
+	for rows.Next() {
+		var item StatusEvidence
+		if err := rows.Scan(
+			&item.RequestStatus,
+			&item.EventCount,
+			&item.ExpectedCustomers,
+			&item.NotifiedCustomers,
+			&item.FailedCustomers,
+			&item.SuppressedCustomers,
+			&item.RecoveryPendingCustomers,
+			&item.LastEventAt,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 func scanDeliveries(rows pgx.Rows) ([]Delivery, error) {
 	var out []Delivery
 	for rows.Next() {

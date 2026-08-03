@@ -1,0 +1,17 @@
+{
+  "provider": "github",
+  "rawBody": "{\"action\":\"closed\",\"issue\":{\"number\":983,\"title\":\"Backfill retry should preserve cursor\",\"body\":\"Retrying a provider outage must not advance the cursor.\",\"state\":\"closed\",\"html_url\":\"https://github.com/acme/product/issues/983\",\"labels\":[{\"name\":\"sync\"}],\"updated_at\":\"2026-07-08T02:16:00Z\"},\"repository\":{\"full_name\":\"acme/product\"},\"sender\":{\"login\":\"octocat\"}}",
+  "headers": {
+    "x-github-event": "issues",
+    "x-github-delivery": "github-delivery-1003",
+    "x-hub-signature-256": "sha256=c3122737e25d1cb6f046beaa0a2cc5398fb8fa6bf52e4734dcf2367684ef5f97"
+  },
+  "expected": {
+    "dedupeKey": "github:issues:github-delivery-1003",
+    "eventType": "issues.closed",
+    "externalKey": "github:acme/product#983",
+    "title": "Backfill retry should preserve cursor",
+    "status": "closed",
+    "labels": ["sync"]
+  }
+}

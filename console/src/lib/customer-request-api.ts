@@ -13,6 +13,7 @@ import type {
   CreateCustomerRequestGitHubIssueResponse,
   CreateCustomerRequestRequest,
   CreateCustomerRequestSavedViewRequest,
+  CustomerRequestAccountSummary,
   CustomerRequestDetail,
   CustomerRequestPriority,
   CustomerRequestSavedViewResponse,
@@ -56,12 +57,15 @@ export interface CustomerRequestFilters {
   direction?: SortDirection
   feedbackId?: string
   cohortId?: string
+  accountKey?: string
 }
 
 export const customerRequestKeys = {
   all: ['console', 'customer-requests'] as const,
   list: (filters: CustomerRequestFilters) =>
     ['console', 'customer-requests', 'list', filters] as const,
+  accountSummary: (filters: CustomerRequestFilters) =>
+    ['console', 'customer-requests', 'account-summary', filters] as const,
   detail: (id: string) => ['console', 'customer-requests', 'detail', id] as const,
   githubIssueConnectionOptions: () =>
     ['console', 'customer-requests', 'github-issue-connection-options'] as const,
@@ -84,6 +88,21 @@ export const customerRequestsInfiniteQuery = (filters: CustomerRequestFilters = 
     },
     initialPageParam: '' as string,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    staleTime: 20_000,
+  })
+
+export const customerRequestsQuery = (filters: CustomerRequestFilters = {}, limit = 50) =>
+  queryOptions({
+    queryKey: [...customerRequestKeys.list(filters), 'snapshot', limit] as const,
+    queryFn: async ({ signal }) => {
+      const params = buildListParams(filters)
+      params.set('limit', String(limit))
+      const qs = params.toString()
+      const res = await api<ListCustomerRequestsResponse>(`${BASE}?${qs}`, {
+        signal,
+      })
+      return res.requests ?? []
+    },
     staleTime: 20_000,
   })
 
@@ -163,6 +182,20 @@ function isPushCapableGitHubIssueMapping(mapping: ExternalObjectMapping) {
       mapping.direction === ExternalSyncDirection.EXTERNAL_SYNC_DIRECTION_BIDIRECTIONAL)
   )
 }
+
+export const customerRequestAccountSummaryQuery = (filters: CustomerRequestFilters = {}) =>
+  queryOptions({
+    queryKey: customerRequestKeys.accountSummary(filters),
+    enabled: Boolean(filters.accountKey?.trim()),
+    queryFn: ({ signal }) => {
+      const params = buildListParams(filters)
+      params.set('timeline_limit', '5')
+      params.set('event_limit', '12')
+      const qs = params.toString()
+      return api<CustomerRequestAccountSummary>(`${BASE}/account-summary?${qs}`, { signal })
+    },
+    staleTime: 20_000,
+  })
 
 export const customerRequestScoringSettingsQuery = () =>
   queryOptions({
@@ -505,5 +538,6 @@ function buildListParams(filters: CustomerRequestFilters) {
   if (filters.direction) params.set('direction', filters.direction)
   if (filters.feedbackId) params.set('feedback_id', filters.feedbackId)
   if (filters.cohortId) params.set('cohort_id', filters.cohortId)
+  if (filters.accountKey?.trim()) params.set('account_key', filters.accountKey.trim())
   return params
 }

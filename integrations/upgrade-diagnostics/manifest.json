@@ -1,0 +1,160 @@
+{
+  "schemaVersion": "attune.upgrade_diagnostics.v1",
+  "diagnosticChecks": [
+    {
+      "id": "install_health",
+      "title": "Install and connector health",
+      "category": "install",
+      "evidenceSource": "external-sync-health",
+      "failureSignals": ["quarantined_connection", "degraded_connection", "failed_credential_test"],
+      "recoveryAction": "resume_or_reauthorize_connection",
+      "owner": "Developer Platform + Integrations"
+    },
+    {
+      "id": "permission_boundary",
+      "title": "Permission boundary",
+      "category": "permissions",
+      "evidenceSource": "integration-catalog",
+      "failureSignals": ["missing_scope", "blank_data_class", "least_privilege_missing"],
+      "recoveryAction": "review_scopes_before_upgrade",
+      "owner": "Security + Developer Platform"
+    },
+    {
+      "id": "schema_drift",
+      "title": "Schema drift and mapping safety",
+      "category": "schema",
+      "evidenceSource": "field-mapping-workbench",
+      "failureSignals": ["required_field_missing", "provider_field_removed", "invalid_mapping_json"],
+      "recoveryAction": "preview_mapping_before_backfill",
+      "owner": "Integrations + Product Ops"
+    },
+    {
+      "id": "webhook_readiness",
+      "title": "Webhook readiness",
+      "category": "webhook",
+      "evidenceSource": "connector-conformance",
+      "failureSignals": ["signature_failed", "secret_missing", "unreplayable_event"],
+      "recoveryAction": "rotate_secret_and_replay_fixture",
+      "owner": "Security + Integrations"
+    },
+    {
+      "id": "fixture_replay",
+      "title": "Fixture replay coverage",
+      "category": "replay",
+      "evidenceSource": "connector-conformance",
+      "failureSignals": ["fixture_missing", "normalization_mismatch", "dedupe_unstable"],
+      "recoveryAction": "refresh_replay_fixture",
+      "owner": "Developer Platform + QA"
+    },
+    {
+      "id": "version_compatibility",
+      "title": "Version compatibility and rollback",
+      "category": "upgrade",
+      "evidenceSource": "integration-catalog",
+      "failureSignals": ["breaking_change", "rollback_missing", "migration_unverified"],
+      "recoveryAction": "run_compatibility_migration_plan",
+      "owner": "Developer Platform + Release"
+    }
+  ],
+  "compatibilityMatrix": [
+    {
+      "connector": "jira",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    },
+    {
+      "connector": "github",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    },
+    {
+      "connector": "intercom",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    },
+    {
+      "connector": "zendesk",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    },
+    {
+      "connector": "salesforce",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    },
+    {
+      "connector": "hubspot",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    },
+    {
+      "connector": "custom-webhook",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    },
+    {
+      "connector": "csv",
+      "currentVersion": "2026.07",
+      "targetVersion": "2026.08",
+      "compatibility": "non_breaking",
+      "rollback": true
+    }
+  ],
+  "recoveryPlaybooks": [
+    {
+      "action": "resume_or_reauthorize_connection",
+      "steps": ["rerun credential test", "resume quarantined connector", "verify newest successful run"]
+    },
+    {
+      "action": "review_scopes_before_upgrade",
+      "steps": ["compare live scopes", "confirm least privilege", "write audit note"]
+    },
+    {
+      "action": "preview_mapping_before_backfill",
+      "steps": ["run schema discovery", "preview mapping", "request backfill after approval"]
+    },
+    {
+      "action": "rotate_secret_and_replay_fixture",
+      "steps": ["rotate webhook secret", "verify signature", "replay sample event"]
+    },
+    {
+      "action": "refresh_replay_fixture",
+      "steps": ["record provider payload", "normalize fixture", "run conformance verifier"]
+    },
+    {
+      "action": "run_compatibility_migration_plan",
+      "steps": ["validate target version", "run fixture migration", "confirm rollback path"]
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "github upgrade diagnostics",
+      "path": "fixtures/github-upgrade-diagnostics.json",
+      "expectedStatus": "watch"
+    },
+    {
+      "name": "csv template diagnostics",
+      "path": "fixtures/csv-template-diagnostics.json",
+      "expectedStatus": "verified"
+    },
+    {
+      "name": "salesforce compatibility diagnostics",
+      "path": "fixtures/salesforce-compatibility-diagnostics.json",
+      "expectedStatus": "verified"
+    }
+  ]
+}

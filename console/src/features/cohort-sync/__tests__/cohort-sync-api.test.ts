@@ -29,9 +29,25 @@ describe('cohort-sync API client', () => {
     const opts = listCohortSourcesQuery()
     expect(opts.queryKey).toEqual(cohortSyncKeys.sources())
     expect(opts.staleTime).toBe(20_000)
-    const result = await opts.queryFn!({ signal: new AbortController().signal } as never)
+    const result = await runQuery<Array<{ name: string }>>(opts.queryFn)
     expect(result).toHaveLength(1)
     expect(result[0].name).toBe('Test')
+  })
+
+  it('list queries return empty arrays when collections are omitted', async () => {
+    server.use(
+      http.get('/fb/v1/console/cohort-sync/sources', () => HttpResponse.json({})),
+      http.get('/fb/v1/console/cohort-sync/cohorts', () => HttpResponse.json({})),
+      http.get('/fb/v1/console/cohort-sync/cohorts/c1/members', () => HttpResponse.json({})),
+      http.get('/fb/v1/console/cohort-sync/sources/s1/events', () => HttpResponse.json({})),
+      http.get('/fb/v1/console/cohort-sync/cohorts/c1/runs', () => HttpResponse.json({})),
+    )
+
+    await expect(runQuery<unknown[]>(listCohortSourcesQuery().queryFn)).resolves.toEqual([])
+    await expect(runQuery<unknown[]>(listCohortsQuery().queryFn)).resolves.toEqual([])
+    await expect(runQuery<unknown[]>(listCohortMembersQuery('c1').queryFn)).resolves.toEqual([])
+    await expect(runQuery<unknown[]>(listCohortSyncEventsQuery('s1').queryFn)).resolves.toEqual([])
+    await expect(runQuery<unknown[]>(listCohortSyncRunsQuery('c1').queryFn)).resolves.toEqual([])
   })
 
   it('getCohortSource returns a source', async () => {
@@ -91,13 +107,33 @@ describe('cohort-sync API client', () => {
   })
 
   it('listCohortsQuery returns cohorts', async () => {
+    let sourceId = ''
+    server.use(
+      http.get('/fb/v1/console/cohort-sync/cohorts', ({ request }) => {
+        sourceId = new URL(request.url).searchParams.get('source_id') ?? ''
+        return HttpResponse.json({ cohorts: [{ id: 'c1', name: 'Cohort' }] })
+      }),
+    )
+    const opts = listCohortsQuery('s1')
+    const result = await runQuery<unknown[]>(opts.queryFn)
+    expect(result).toHaveLength(1)
+    expect(sourceId).toBe('s1')
+  })
+
+  it('marks entity-scoped queries disabled without an id', () => {
+    expect(listCohortMembersQuery('').enabled).toBe(false)
+    expect(listCohortSyncEventsQuery('').enabled).toBe(false)
+    expect(listCohortSyncRunsQuery('').enabled).toBe(false)
+  })
+
+  it('listCohortsQuery returns cohorts without a source filter', async () => {
     server.use(
       http.get('/fb/v1/console/cohort-sync/cohorts', () =>
         HttpResponse.json({ cohorts: [{ id: 'c1', name: 'Cohort' }] }),
       ),
     )
     const opts = listCohortsQuery()
-    const result = await opts.queryFn!({ signal: new AbortController().signal } as never)
+    const result = await runQuery<unknown[]>(opts.queryFn)
     expect(result).toHaveLength(1)
   })
 
@@ -138,7 +174,7 @@ describe('cohort-sync API client', () => {
       ),
     )
     const opts = listCohortMembersQuery('c1')
-    const result = await opts.queryFn!({ signal: new AbortController().signal } as never)
+    const result = await runQuery<unknown[]>(opts.queryFn)
     expect(result).toHaveLength(1)
   })
 
@@ -149,7 +185,7 @@ describe('cohort-sync API client', () => {
       ),
     )
     const opts = listCohortSyncEventsQuery('s1')
-    const result = await opts.queryFn!({ signal: new AbortController().signal } as never)
+    const result = await runQuery<unknown[]>(opts.queryFn)
     expect(result).toHaveLength(1)
   })
 
@@ -160,7 +196,7 @@ describe('cohort-sync API client', () => {
       ),
     )
     const opts = listCohortSyncRunsQuery('c1')
-    const result = await opts.queryFn!({ signal: new AbortController().signal } as never)
+    const result = await runQuery<unknown[]>(opts.queryFn)
     expect(result).toHaveLength(1)
   })
 
@@ -171,7 +207,7 @@ describe('cohort-sync API client', () => {
       ),
     )
     const opts = cohortSyncHealthQuery()
-    const result = await opts.queryFn!({ signal: new AbortController().signal } as never)
+    const result = await runQuery<{ sourceCount: number }>(opts.queryFn)
     expect(result.sourceCount).toBe(2)
   })
 
@@ -185,3 +221,10 @@ describe('cohort-sync API client', () => {
     expect(cohortSyncKeys.health()).toEqual(['cohort-sync', 'health'])
   })
 })
+
+async function runQuery<T>(queryFn: unknown): Promise<T> {
+  if (typeof queryFn !== 'function') {
+    throw new Error('queryFn missing')
+  }
+  return queryFn({ signal: new AbortController().signal } as never) as Promise<T>
+}

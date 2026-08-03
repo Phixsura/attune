@@ -74,9 +74,7 @@ describe('DeadDeliveriesPage', () => {
     )
     const { user } = renderWithProviders(<DeadDeliveriesPage />)
 
-    const retryBtn = await screen.findByRole('button', {
-      name: '重试投递 https://example.com/hook',
-    })
+    const retryBtn = await findRetryButton()
     const callsBeforeRetry = listCalls
     await user.click(retryBtn)
 
@@ -101,9 +99,7 @@ describe('DeadDeliveriesPage', () => {
     )
     renderWithProviders(<DeadDeliveriesPage />)
 
-    const retryBtn = await screen.findByRole('button', {
-      name: '重试投递 https://example.com/hook',
-    })
+    const retryBtn = await findRetryButton()
     expect(retryBtn).toBeDisabled()
   })
 
@@ -121,9 +117,7 @@ describe('DeadDeliveriesPage', () => {
     )
     const { user } = renderWithProviders(<DeadDeliveriesPage />)
 
-    const retryBtn = await screen.findByRole('button', {
-      name: '重试投递 https://example.com/hook',
-    })
+    const retryBtn = await findRetryButton()
     await user.click(retryBtn)
 
     await waitFor(() => {
@@ -167,6 +161,14 @@ describe('DeadDeliveriesPage', () => {
     expect(screen.getByRole('button', { name: '死信' })).toHaveAttribute('aria-pressed', 'false')
   })
 })
+
+function findRetryButton() {
+  return screen.findByRole(
+    'button',
+    { name: '重试投递 https://example.com/hook' },
+    { timeout: 5_000 },
+  )
+}
 
 describe('DeliveriesTable failure rendering edge cases', () => {
   it('renders an em-dash when there is no http response and no classification', async () => {

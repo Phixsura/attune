@@ -4,8 +4,18 @@ import type {
   ListTokensResponse,
   RevokeAllResponse,
 } from '@/features/security/api/breakglass'
-import type { ApiKey, CreateApiKeyResponse, ListApiKeysResponse } from '@/proto/attune/v1/api_key'
-import type { GetClassificationQualityResponse } from '@/proto/attune/v1/classification_quality'
+import type {
+  ApiKey,
+  CreateApiKeyResponse,
+  ListApiKeysResponse,
+  ListScopePresetsResponse,
+  ListScopesResponse,
+  ListServiceAccountsResponse,
+} from '@/proto/attune/v1/api_key'
+import type {
+  GetClassificationQualityResponse,
+  GetClassificationReviewLearningResponse,
+} from '@/proto/attune/v1/classification_quality'
 import type { DigestSubscription } from '@/proto/attune/v1/digest_subscription'
 import type {
   EnrichConfig,
@@ -19,14 +29,24 @@ import type {
   ListExternalSyncProvidersResponse,
   SelectExternalProviderInstallationResourcesResponse,
 } from '@/proto/attune/v1/external_sync'
+import type { InboundSource } from '@/proto/attune/v1/inbound_source'
 import type {
+  FeedbackAssignment,
+  FeedbackAssignmentEscalationQueue,
+  FeedbackAssignmentPolicy,
   FeedbackDetail,
+  FeedbackIdentitySubjectDetail,
+  FeedbackSignalTrace,
+  FeedbackTriageCommandCenter,
+  GetFeedbackIdentityReviewResponse,
   GetFeedbackStatsResponse,
   ListFeedbackResponse,
   ListReplySendHookDeliveriesResponse,
+  MergeFeedbackIdentityReviewResponse,
   ReplySendHook,
   ReplySendHookDelivery,
   ReplySendHookHealth,
+  SplitFeedbackIdentityReviewResponse,
 } from '@/proto/attune/v1/ingest'
 import type {
   ListLLMChannelAbilitiesResponse,
@@ -50,9 +70,38 @@ import {
   OutboxFailureKind,
   type RetryDeliveryResponse,
 } from '@/proto/attune/v1/outbox'
+import type { RequestNotificationStatusEvidenceResponse } from '@/proto/attune/v1/request_notification'
 import type { GetSearchQualityResponse, SemanticSearchResponse } from '@/proto/attune/v1/search'
 import type { GetMeResponse } from '@/proto/attune/v1/session'
-import type { GetLLMUsageResponse } from '@/proto/attune/v1/usage'
+import {
+  type PreviewSurveyRecipientsResponse,
+  type SurveyAnalytics,
+  type SurveyAnalyticsInsight,
+  SurveyAnalyticsInsightSeverity,
+  type SurveyAnalyticsSegment,
+  SurveyAnalyticsSegmentDimension,
+  type SurveyAnalyticsTrendBucket,
+  type SurveyCampaign,
+  type SurveyCampaignHealth,
+  SurveyCampaignHealthCheckStatus,
+  SurveyCampaignHealthStatus,
+  SurveyCampaignStatus,
+  SurveyDedupePolicy,
+  SurveyDeliveryStatus,
+  SurveyDistributionMode,
+  type SurveyInvitation,
+  type SurveyLowScoreReview,
+  SurveyLowScoreReviewStatus,
+  SurveyLowScoreSeverity,
+  SurveyRecoveryNotificationStatus,
+  SurveyRecoverySlaStatus,
+  type SurveyResponse,
+  SurveyResponseStatus,
+  SurveySuppressionStatus,
+  SurveyTriggerEvent,
+  SurveyType,
+} from '@/proto/attune/v1/survey'
+import type { GetLLMUsageResponse, GetUsageResponse } from '@/proto/attune/v1/usage'
 import type { ListAuditResponse, ListStatesResponse } from '@/proto/attune/v1/workflow'
 
 // Forward-friendly default handlers for every /fb/v1/console/* endpoint.
@@ -90,6 +139,9 @@ export const defaultMembersList: ListMembersResponse = { members: [] }
 
 // API keys -----------------------------------------------------------------
 export const defaultApiKeysList: ListApiKeysResponse = { items: [] }
+export const defaultServiceAccountsList: ListServiceAccountsResponse = { items: [] }
+export const defaultApiKeyScopes: ListScopesResponse = { scopes: [] }
+export const defaultApiKeyPresets: ListScopePresetsResponse = { presets: [] }
 const defaultIssuedKey: ApiKey = {
   id: 'k-new',
   label: 'fresh',
@@ -388,6 +440,83 @@ export const defaultFeedbackDetail: FeedbackDetail = {
   enrichmentError: '',
   tags: [],
   allowedNextStates: [],
+  accountContext: {
+    accountKey: 'acct:sample',
+    accountDisplay: 'Sample Account',
+    source: 'source_meta',
+  },
+  assignment: {
+    feedbackId: 'f-1',
+    assignedBy: '',
+    slaStatus: 'missing_due_date',
+    note: '',
+  },
+}
+export const defaultFeedbackSignalTrace: FeedbackSignalTrace = {
+  feedbackId: 'f-1',
+  signalTraceId: 'trace-f-1',
+  source: 'web',
+  terminalStatus: 'completed',
+  complete: true,
+  missingStages: [],
+  generatedAt: '2026-06-07T00:05:00Z',
+  stages: [
+    {
+      key: 'source_event',
+      label: 'Source event',
+      status: 'completed',
+      eventCount: 1,
+      lastEventAt: '2026-06-07T00:00:00Z',
+    },
+    {
+      key: 'enrichment',
+      label: 'AI enrichment',
+      status: 'completed',
+      eventCount: 2,
+      lastEventAt: '2026-06-07T00:01:00Z',
+    },
+    {
+      key: 'request',
+      label: 'Customer request',
+      status: 'completed',
+      eventCount: 1,
+      lastEventAt: '2026-06-07T00:02:00Z',
+    },
+    {
+      key: 'notification',
+      label: 'Customer notification',
+      status: 'completed',
+      eventCount: 1,
+      lastEventAt: '2026-06-07T00:03:00Z',
+    },
+    {
+      key: 'survey',
+      label: 'Survey follow-up',
+      status: 'completed',
+      eventCount: 1,
+      lastEventAt: '2026-06-07T00:04:00Z',
+    },
+  ],
+  events: [
+    {
+      stage: 'source_event',
+      kind: 'source_captured',
+      status: 'completed',
+      traceId: 'trace-f-1',
+      summary: 'Feedback source event captured',
+      occurredAt: '2026-06-07T00:00:00Z',
+      metadata: { source: 'web' },
+    },
+    {
+      stage: 'enrichment',
+      kind: 'llm_call',
+      status: 'completed',
+      traceId: 'trace-f-1',
+      summary: 'LLM call recorded for enrichment',
+      occurredAt: '2026-06-07T00:01:00Z',
+      metadata: { model_id: 'gpt-4o-mini', purpose: 'enrichment' },
+    },
+  ],
 }
 export const defaultFeedbackStats: GetFeedbackStatsResponse = {
   periodStart: '',
@@ -396,6 +525,219 @@ export const defaultFeedbackStats: GetFeedbackStatsResponse = {
   dims: [],
   urgentCount: '0',
 }
+export const defaultRequestNotificationStatusEvidence: RequestNotificationStatusEvidenceResponse = {
+  items: [],
+}
+export const defaultFeedbackTriageCommandCenter: FeedbackTriageCommandCenter = {
+  generatedAt: '2026-08-01T00:00:00Z',
+  openCount: '0',
+  activeCount: '0',
+  closedCount: '0',
+  urgentOpenCount: '0',
+  terminalFailureCount: '0',
+  identityDebtCount: '0',
+  overdueCount: '0',
+  dueSoonCount: '0',
+  lanes: [],
+}
+export const defaultFeedbackAssignmentEscalations: FeedbackAssignmentEscalationQueue = {
+  generatedAt: '2026-08-01T00:00:00Z',
+  overdueCount: '1',
+  dueSoonCount: '1',
+  missingOwnerCount: '1',
+  missingSlaCount: '1',
+  items: [
+    {
+      feedbackId: 'f-1',
+      title: 'Sample assignment risk',
+      source: 'web',
+      type: 'bug',
+      isUrgent: true,
+      createdAt: '2026-07-31T09:00:00Z',
+      assignment: {
+        feedbackId: 'f-1',
+        assignedBy: '',
+        slaDueAt: '2026-07-31T21:00:00Z',
+        slaStatus: 'overdue',
+        note: 'Mocked escalation queue sample.',
+      },
+      escalationReasons: ['overdue', 'missing_owner'],
+      hoursUntilDue: -3,
+      priority: 'critical',
+      accountContext: {
+        accountKey: 'acct:sample',
+        accountDisplay: 'Sample Account',
+        source: 'source_meta',
+      },
+    },
+  ],
+}
+export const defaultFeedbackAssignmentPolicy: FeedbackAssignmentPolicy = {
+  version: 1,
+  updatedBy: 'system',
+  note: 'Default assignment policy',
+  rules: [
+    {
+      ruleKey: 'urgent_open',
+      ruleName: 'Urgent open feedback',
+      ownerLane: 'support_triage',
+      severity: 'critical',
+      slaHours: 24,
+      enabled: true,
+      rationale:
+        'Urgent open feedback should be confirmed and assigned before the next business cycle.',
+    },
+    {
+      ruleKey: 'terminal_failures',
+      ruleName: 'Terminal AI failures',
+      ownerLane: 'ai_ops',
+      severity: 'high',
+      slaHours: 48,
+      enabled: true,
+      rationale:
+        'Terminal enrichment failures need operator review before retrying or changing model configuration.',
+    },
+    {
+      ruleKey: 'stalled_active',
+      ruleName: 'Active work at risk',
+      ownerLane: 'product_owner',
+      severity: 'high',
+      slaHours: 168,
+      enabled: true,
+      rationale:
+        'Active feedback should keep an explicit deadline so committed work does not disappear.',
+    },
+    {
+      ruleKey: 'identity_debt',
+      ruleName: 'Identity evidence debt',
+      ownerLane: 'data_quality',
+      severity: 'medium',
+      slaHours: 96,
+      enabled: true,
+      rationale:
+        'Feedback without stable identity evidence should be repaired before merging demand or notifying customers.',
+    },
+    {
+      ruleKey: 'untriaged',
+      ruleName: 'Untriaged intake',
+      ownerLane: 'triage_dri',
+      severity: 'high',
+      slaHours: 72,
+      enabled: true,
+      rationale:
+        'Open intake should get an owner lane and deadline before promotion or closure decisions.',
+    },
+  ],
+}
+let feedbackAssignmentPolicyState: FeedbackAssignmentPolicy = structuredClone(
+  defaultFeedbackAssignmentPolicy,
+)
+export const defaultFeedbackIdentityReview: GetFeedbackIdentityReviewResponse = {
+  summary: {
+    scannedFeedbackCount: 0,
+    mergeCandidateCount: 0,
+    needsEvidenceCount: 0,
+    strongCandidateCount: 0,
+    weakFeedbackCount: 0,
+  },
+  mergeCandidates: [],
+  needsEvidence: [],
+  recentMerges: [],
+  subjectRoster: {
+    activeSubjectCount: 0,
+    activeIdentityCount: 0,
+    evidenceCount: 0,
+    subjects: [],
+  },
+}
+export const defaultFeedbackIdentityMerge: MergeFeedbackIdentityReviewResponse = {
+  subject: {
+    id: 'subject-default',
+    displayName: 'ada@example.com',
+    primaryIdentityKind: 'email',
+    primaryIdentityValue: 'ada@example.com',
+    status: 'active',
+    identityCount: 1,
+    evidenceCount: 2,
+    createdAt: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-08-01T00:00:00Z',
+  },
+  evidenceCount: 2,
+  createdSubject: true,
+  action: 'signal_subject.merge',
+}
+export const defaultFeedbackIdentitySplit: SplitFeedbackIdentityReviewResponse = {
+  subject: {
+    id: 'subject-default',
+    displayName: 'ada@example.com',
+    primaryIdentityKind: '',
+    primaryIdentityValue: '',
+    status: 'active',
+    identityCount: 0,
+    evidenceCount: 0,
+    createdAt: '2026-08-01T00:00:00Z',
+    updatedAt: '2026-08-01T00:00:00Z',
+  },
+  evidenceCount: 2,
+  action: 'signal_subject.split',
+}
+export const defaultFeedbackIdentitySubjectDetail: FeedbackIdentitySubjectDetail = {
+  subject: defaultFeedbackIdentityMerge.subject,
+  identities: [
+    {
+      id: 'identity-default-email',
+      kind: 'email',
+      value: 'ada@example.com',
+      source: 'review',
+      confidence: 'reviewed',
+      evidenceCount: 2,
+      firstFeedbackId: '201',
+      latestFeedbackId: '202',
+      revoked: false,
+      revokedAt: '',
+      createdAt: '2026-08-01T00:00:00Z',
+      updatedAt: '2026-08-01T00:00:00Z',
+    },
+  ],
+  events: [
+    {
+      id: 'event-default-merge',
+      action: 'review_merge',
+      identityKind: 'email',
+      identityValue: 'ada@example.com',
+      evidenceCount: 2,
+      feedbackIds: ['201', '202'],
+      evidence: [
+        {
+          feedbackId: '201',
+          source: 'web',
+          sourceUser: 'web-1',
+          createdAt: '2026-08-01T00:00:00Z',
+          excerpt: 'Ada reported the same checkout failure from the web portal.',
+          keys: [{ kind: 'email', value: 'ada@example.com', source: 'source_meta.email' }],
+        },
+      ],
+      note: 'reviewed',
+      createdBy: 'user-1',
+      createdAt: '2026-08-01T00:00:00Z',
+    },
+  ],
+}
+export const defaultInboundSources: InboundSource[] = [
+  {
+    id: 'source-default-webhook',
+    tenantId: 't-1',
+    channel: 'webhook',
+    name: 'Default webhook',
+    slug: 'default-webhook',
+    enabled: true,
+    lastEventAt: '2026-07-10T12:00:00Z',
+    lastUid: '0',
+    lastError: '',
+    createdAt: '2026-07-10T12:00:00Z',
+    updatedAt: '2026-07-10T12:00:00Z',
+  },
+]
 export const defaultSemanticSearchResponse: SemanticSearchResponse = {
   hits: [],
   embeddingModel: '',
@@ -415,6 +757,13 @@ export const defaultLLMUsage: GetLLMUsageResponse = {
   costUsd: 0,
   calls: '0',
   errors: '0',
+}
+export const defaultUsage: GetUsageResponse = {
+  periodStart: '2026-07-01T00:00:00Z',
+  periodEnd: '2026-07-31T23:59:59Z',
+  total: '72',
+  quota: '100',
+  series: [{ bucket: '2026-07-01T00:00:00Z', value: '72' }],
 }
 export const defaultClassificationQuality: GetClassificationQualityResponse = {
   generatedAt: '2026-07-02T00:00:00Z',
@@ -440,6 +789,21 @@ export const defaultClassificationQuality: GetClassificationQualityResponse = {
   dimensions: [],
   warnings: [],
   samples: [],
+}
+export const defaultClassificationReviewLearning: GetClassificationReviewLearningResponse = {
+  generatedAt: '2026-07-02T00:00:00Z',
+  currentFrom: '2026-06-25T00:00:00Z',
+  currentTo: '2026-07-02T00:00:00Z',
+  totalReviews: '0',
+  accepted: '0',
+  edited: '0',
+  dismissed: '0',
+  trainingCandidateCount: '0',
+  reviewedFeedbackCount: '0',
+  classifiedFeedbackCount: '0',
+  reviewCoverageRate: 0,
+  reasonBuckets: [],
+  recentEvents: [],
 }
 export const defaultSearchQuality: GetSearchQualityResponse = {
   generatedAt: '2026-07-02T00:00:00Z',
@@ -496,6 +860,306 @@ const sampleDigestSubscription: DigestSubscription = {
   clusteringEnabled: false,
 }
 
+export const sampleSurveyCampaign: SurveyCampaign = {
+  id: 'survey-campaign-1',
+  name: 'Resolution CSAT',
+  surveyType: SurveyType.SURVEY_TYPE_CSAT,
+  status: SurveyCampaignStatus.SURVEY_CAMPAIGN_STATUS_ACTIVE,
+  triggerEvent: SurveyTriggerEvent.SURVEY_TRIGGER_EVENT_WORKFLOW_TRANSITION,
+  distributionMode: SurveyDistributionMode.SURVEY_DISTRIBUTION_MODE_CONTACT_EMAIL,
+  dedupePolicy: SurveyDedupePolicy.SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION,
+  triggerFilter: { workflow_category: 'closed' },
+  content: {
+    title: 'Satisfaction check',
+    question: 'How satisfied are you with this resolution?',
+  },
+  locale: 'zh-CN',
+  contentVersion: 1,
+  samplingPercent: 100,
+  minDaysBetweenContact: 14,
+  expiresAfterDays: 14,
+  maxDailyInvitations: 500,
+  lowScoreThreshold: 3,
+  requireRecentCustomerActivity: false,
+  recentActivityDays: 30,
+  suppressAutoResolved: true,
+  createdBy: 'u-1',
+  updatedBy: 'u-1',
+  createdAt: '2026-07-30T00:00:00Z',
+  updatedAt: '2026-07-30T00:00:00Z',
+}
+
+export const sampleSurveyInvitation: SurveyInvitation = {
+  id: 'survey-invitation-1',
+  campaignId: sampleSurveyCampaign.id,
+  sourceType: 'feedback',
+  sourceId: '101',
+  distributionMode: SurveyDistributionMode.SURVEY_DISTRIBUTION_MODE_CONTACT_EMAIL,
+  deliveryStatus: SurveyDeliveryStatus.SURVEY_DELIVERY_STATUS_ACCEPTED,
+  responseStatus: SurveyResponseStatus.SURVEY_RESPONSE_STATUS_NOT_STARTED,
+  suppressionStatus: SurveySuppressionStatus.SURVEY_SUPPRESSION_STATUS_NOT_SUPPRESSED,
+  suppressionReason: '',
+  campaignSnapshot: {},
+  recipientSnapshot: { account: { key: 'acct:acme', name: 'Acme Corp' } },
+  deliveryRetryable: false,
+  publicUrl: '/surveys/token-1',
+  expiresAt: '2026-08-13T00:00:00Z',
+  createdAt: '2026-07-30T00:00:00Z',
+  updatedAt: '2026-07-30T00:00:00Z',
+}
+
+export const sampleSurveyRecipientPreview: PreviewSurveyRecipientsResponse = {
+  campaignId: sampleSurveyCampaign.id,
+  triggerMatched: true,
+  sampleIncluded: true,
+  matchedCount: 2,
+  eligibleCount: 1,
+  suppressedCount: 1,
+  deliveryReady: true,
+  deliveryBlocker: '',
+  recipients: [
+    {
+      sourceType: 'workflow_transition',
+      sourceId: '101',
+      contactId: '33333333-3333-3333-3333-333333333333',
+      channel: 'email',
+      displayName: 'Ada Lovelace',
+      subjectDisplay: 'Ada',
+      eligible: true,
+      suppressionReason: '',
+      recipientSnapshot: {},
+      lastActivityAt: '2026-07-30T00:00:00Z',
+    },
+    {
+      sourceType: 'workflow_transition',
+      sourceId: '102',
+      contactId: '44444444-4444-4444-4444-444444444444',
+      channel: 'email',
+      displayName: 'Grace Hopper',
+      subjectDisplay: 'Grace',
+      eligible: false,
+      suppressionReason: 'contact_cooldown',
+      recipientSnapshot: {},
+      lastActivityAt: '2026-07-29T00:00:00Z',
+    },
+  ],
+  suppressionReasonDistribution: [{ reason: 'contact_cooldown', count: 1 }],
+}
+
+export const sampleSurveyLowScoreReview: SurveyLowScoreReview = {
+  responseId: 'survey-response-1',
+  status: SurveyLowScoreReviewStatus.SURVEY_LOW_SCORE_REVIEW_STATUS_OPEN,
+  severity: SurveyLowScoreSeverity.SURVEY_LOW_SCORE_SEVERITY_HIGH,
+  ownerMemberId: '',
+  rootCause: '',
+  actionTaken: '',
+  customerContacted: false,
+  dueAt: '2026-07-29T00:10:00Z',
+  updatedBy: '',
+  createdAt: '2026-07-30T00:10:00Z',
+  updatedAt: '2026-07-30T00:10:00Z',
+  slaStatus: SurveyRecoverySlaStatus.SURVEY_RECOVERY_SLA_STATUS_OVERDUE,
+  blockerReason: 'overdue_sla',
+  nextBestAction: 'resolve_overdue',
+  riskScore: 95,
+  recoveryNotificationStatus:
+    SurveyRecoveryNotificationStatus.SURVEY_RECOVERY_NOTIFICATION_STATUS_UNSPECIFIED,
+  recoveryNotificationReason: '',
+  recoveryNotificationLastError: '',
+}
+
+export const sampleSurveyResponse: SurveyResponse = {
+  id: sampleSurveyLowScoreReview.responseId,
+  campaignId: sampleSurveyCampaign.id,
+  invitationId: sampleSurveyInvitation.id,
+  sourceType: 'feedback',
+  sourceId: '101',
+  score: 2,
+  comment: 'The fix helped, but it took too many messages.',
+  locale: 'zh-CN',
+  lowScore: true,
+  submittedAt: '2026-07-30T00:10:00Z',
+  accountContext: {
+    accountKey: 'acct:acme',
+    accountDisplay: 'Acme Corp',
+    source: 'recipient_snapshot',
+  },
+  lowScoreReview: sampleSurveyLowScoreReview,
+}
+
+export const defaultSurveyAnalytics: SurveyAnalytics = {
+  invitationCount: 3,
+  deliveredCount: 2,
+  suppressedCount: 1,
+  notStartedCount: 1,
+  openedCount: 0,
+  expiredCount: 0,
+  pendingDeliveryCount: 1,
+  delayedDeliveryCount: 0,
+  rejectedDeliveryCount: 0,
+  completedCount: 1,
+  lowScoreCount: 1,
+  positiveScoreCount: 1,
+  openLowScoreReviewCount: 1,
+  overdueLowScoreReviewCount: 1,
+  unassignedLowScoreReviewCount: 1,
+  criticalLowScoreReviewCount: 0,
+  pendingCustomerContactReviewCount: 1,
+  oldestOpenLowScoreReviewDueAt: '2026-07-30T01:00:00Z',
+  overdueRecoveryQueueCount: 1,
+  unassignedRecoveryQueueCount: 0,
+  pendingContactRecoveryQueueCount: 0,
+  missingRootCauseRecoveryQueueCount: 0,
+  missingActionRecoveryQueueCount: 0,
+  averageScore: 2,
+  responseRate: 1 / 3,
+  positiveScoreRate: 1,
+  averageResponseSeconds: 7200,
+  scoreDistribution: [{ score: 2, count: 1 }],
+  suppressionReasonDistribution: [{ reason: 'contact_cooldown', count: 1 }],
+  ownerRecoveryLoads: [
+    {
+      ownerMemberId: '22222222-2222-2222-2222-222222222222',
+      openCount: 3,
+      overdueCount: 1,
+      dueSoonCount: 1,
+      criticalCount: 1,
+      pendingContactCount: 2,
+      oldestOpenDueAt: '2026-07-30T01:00:00Z',
+      workloadScore: 91,
+    },
+  ],
+}
+
+export const defaultSurveyAnalyticsTrend: SurveyAnalyticsTrendBucket[] = [
+  {
+    date: '2026-07-28',
+    invitationCount: 2,
+    deliveredCount: 2,
+    suppressedCount: 0,
+    completedCount: 1,
+    lowScoreCount: 1,
+    positiveScoreCount: 0,
+    averageScore: 2,
+    responseRate: 0.5,
+    notStartedCount: 1,
+    openedCount: 0,
+    expiredCount: 0,
+  },
+  {
+    date: '2026-07-29',
+    invitationCount: 3,
+    deliveredCount: 2,
+    suppressedCount: 1,
+    completedCount: 1,
+    lowScoreCount: 0,
+    positiveScoreCount: 1,
+    averageScore: 5,
+    responseRate: 1 / 3,
+    notStartedCount: 1,
+    openedCount: 1,
+    expiredCount: 0,
+  },
+  {
+    date: '2026-07-30',
+    invitationCount: 3,
+    deliveredCount: 2,
+    suppressedCount: 1,
+    completedCount: 1,
+    lowScoreCount: 1,
+    positiveScoreCount: 1,
+    averageScore: 2,
+    responseRate: 1 / 3,
+    notStartedCount: 1,
+    openedCount: 0,
+    expiredCount: 0,
+  },
+]
+
+export const defaultSurveyAnalyticsSegments: SurveyAnalyticsSegment[] = [
+  {
+    dimension: SurveyAnalyticsSegmentDimension.SURVEY_ANALYTICS_SEGMENT_DIMENSION_SOURCE_TYPE,
+    key: 'feedback',
+    label: 'feedback',
+    invitationCount: 3,
+    deliveredCount: 2,
+    suppressedCount: 1,
+    completedCount: 1,
+    lowScoreCount: 1,
+    positiveScoreCount: 0,
+    expiredCount: 1,
+    averageScore: 2,
+    responseRate: 1 / 3,
+    lowScoreRate: 1,
+    positiveScoreRate: 0,
+    suppressionRate: 1 / 3,
+    averageResponseSeconds: 7200,
+    attentionScore: 6,
+  },
+]
+
+export const defaultSurveyAnalyticsInsights: SurveyAnalyticsInsight[] = [
+  {
+    id: 'survey-overdue-low-score-reviews',
+    severity: SurveyAnalyticsInsightSeverity.SURVEY_ANALYTICS_INSIGHT_SEVERITY_CRITICAL,
+    title: 'Low-score reviews are overdue',
+    summary: 'Customer recovery is blocked by overdue low-score follow-up work.',
+    metric: 'overdue_low_score_review_count',
+    value: 1,
+    threshold: 1,
+    segmentDimension:
+      SurveyAnalyticsSegmentDimension.SURVEY_ANALYTICS_SEGMENT_DIMENSION_UNSPECIFIED,
+    recommendedAction: 'Assign owners and resolve overdue low-score reviews.',
+    rank: 1,
+  },
+]
+
+export const defaultSurveyCampaignHealth: SurveyCampaignHealth = {
+  campaignId: sampleSurveyCampaign.id,
+  status: SurveyCampaignHealthStatus.SURVEY_CAMPAIGN_HEALTH_STATUS_BLOCKED,
+  readinessScore: 65,
+  generatedAt: '2026-07-30T13:00:00Z',
+  funnel: {
+    invitationCount: 3,
+    pendingCount: 1,
+    delayedCount: 0,
+    deliveredCount: 2,
+    openedCount: 0,
+    completedCount: 1,
+    suppressedCount: 1,
+    expiredCount: 0,
+    rejectedCount: 0,
+    lowScoreCount: 1,
+    openLowScoreReviewCount: 1,
+    overdueLowScoreReviewCount: 1,
+    deliveryRate: 2 / 3,
+    openRate: 0,
+    responseRate: 1 / 3,
+    suppressionRate: 1 / 3,
+    expiredRate: 0,
+    recoveryOverdueRate: 1,
+  },
+  checks: [
+    {
+      id: 'campaign-status',
+      status: SurveyCampaignHealthCheckStatus.SURVEY_CAMPAIGN_HEALTH_CHECK_STATUS_PASS,
+      title: 'Campaign is active',
+      summary: 'The campaign can receive trigger events and create invitations.',
+      recommendedAction: 'Keep campaign ownership and content current.',
+      evidence: 'status=active',
+    },
+    {
+      id: 'recovery-queue',
+      status: SurveyCampaignHealthCheckStatus.SURVEY_CAMPAIGN_HEALTH_CHECK_STATUS_FAIL,
+      title: 'Customer recovery is overdue',
+      summary: 'Low-score responses have active follow-up work past its due date.',
+      recommendedAction: 'Assign owners and resolve overdue low-score reviews.',
+      evidence: 'overdue_reviews=1 open_reviews=1',
+    },
+  ],
+  suppressionReasonDistribution: [{ reason: 'contact_cooldown', count: 1 }],
+}
+
 // Auth providers (login page SSO detection)
 export const defaultAuthProviders = { providers: [{ type: 'local' }], oidc_only: false }
 export const defaultAuthMode = { mode: 'hybrid' as const }
@@ -550,6 +1214,9 @@ export const handlers = [
   }),
 
   http.get(`${BASE}/api-keys`, () => HttpResponse.json(defaultApiKeysList)),
+  http.get(`${BASE}/service-accounts`, () => HttpResponse.json(defaultServiceAccountsList)),
+  http.get(`${BASE}/api-keys/scopes`, () => HttpResponse.json(defaultApiKeyScopes)),
+  http.get(`${BASE}/api-keys/presets`, () => HttpResponse.json(defaultApiKeyPresets)),
   http.post(`${BASE}/api-keys`, () => HttpResponse.json(defaultCreateApiKey)),
   http.delete(`${BASE}/api-keys/:id`, () => new HttpResponse(null, { status: 204 })),
 
@@ -562,6 +1229,136 @@ export const handlers = [
   http.delete(`${BASE}/digest-subscription`, () => new HttpResponse(null, { status: 204 })),
   http.post(`${BASE}/notify-targets/:id/test`, () =>
     HttpResponse.json(defaultTestNotifyTargetResponse),
+  ),
+
+  http.get(`${BASE}/surveys/campaigns`, () =>
+    HttpResponse.json({ campaigns: [sampleSurveyCampaign] }),
+  ),
+  http.post(`${BASE}/surveys/campaigns`, async ({ request }) => {
+    const body = (await request.json()) as Partial<SurveyCampaign>
+    return HttpResponse.json(
+      {
+        ...sampleSurveyCampaign,
+        ...body,
+        id: 'survey-campaign-new',
+        contentVersion: 1,
+        createdAt: '2026-07-30T01:00:00Z',
+        updatedAt: '2026-07-30T01:00:00Z',
+      },
+      { status: 201 },
+    )
+  }),
+  http.patch(`${BASE}/surveys/campaigns/:id`, async ({ params, request }) => {
+    const body = (await request.json()) as Partial<SurveyCampaign>
+    return HttpResponse.json({
+      ...sampleSurveyCampaign,
+      ...body,
+      id: String(params.id),
+      updatedAt: '2026-07-30T01:10:00Z',
+    })
+  }),
+  http.post(`${BASE}/surveys/campaigns/:id\\:archive`, ({ params }) =>
+    HttpResponse.json({
+      ...sampleSurveyCampaign,
+      id: String(params.id),
+      status: SurveyCampaignStatus.SURVEY_CAMPAIGN_STATUS_ARCHIVED,
+      archivedAt: '2026-07-30T01:15:00Z',
+    }),
+  ),
+  http.post(`${BASE}/surveys/campaigns/:id/hosted-links`, ({ params }) =>
+    HttpResponse.json(
+      {
+        ...sampleSurveyInvitation,
+        id: 'survey-invitation-new',
+        campaignId: String(params.id),
+        publicUrl: '/surveys/token-new',
+      },
+      { status: 201 },
+    ),
+  ),
+  http.post(`${BASE}/surveys/campaigns/:id/recipients:preview`, ({ params }) =>
+    HttpResponse.json({
+      ...sampleSurveyRecipientPreview,
+      campaignId: String(params.id),
+    }),
+  ),
+  http.post(`${BASE}/surveys/campaigns/:id\\:sendTestEmail`, () =>
+    HttpResponse.json({
+      ok: true,
+      provider: 'postmark',
+      sentAt: '2026-07-30T01:20:00Z',
+    }),
+  ),
+  http.get(`${BASE}/surveys/campaigns/:id/health`, ({ params }) =>
+    HttpResponse.json({
+      ...defaultSurveyCampaignHealth,
+      campaignId: String(params.id),
+    }),
+  ),
+  http.get(`${BASE}/surveys/invitations`, () =>
+    HttpResponse.json({ invitations: [sampleSurveyInvitation] }),
+  ),
+  http.get(`${BASE}/surveys/responses`, () =>
+    HttpResponse.json({ responses: [sampleSurveyResponse] }),
+  ),
+  http.get(`${BASE}/surveys/analytics`, () => HttpResponse.json(defaultSurveyAnalytics)),
+  http.get(`${BASE}/surveys/analytics/trend`, () =>
+    HttpResponse.json({ buckets: defaultSurveyAnalyticsTrend }),
+  ),
+  http.get(`${BASE}/surveys/analytics/segments`, () =>
+    HttpResponse.json({ segments: defaultSurveyAnalyticsSegments }),
+  ),
+  http.get(`${BASE}/surveys/analytics/insights`, () =>
+    HttpResponse.json({ insights: defaultSurveyAnalyticsInsights }),
+  ),
+  http.patch(`${BASE}/surveys/responses/:id/low-score-review`, ({ params }) =>
+    HttpResponse.json({
+      ...sampleSurveyLowScoreReview,
+      responseId: String(params.id),
+      status: SurveyLowScoreReviewStatus.SURVEY_LOW_SCORE_REVIEW_STATUS_RESOLVED,
+      updatedAt: '2026-07-30T01:20:00Z',
+    }),
+  ),
+  http.post(`${BASE}/surveys/responses/low-score-reviews:assign`, () =>
+    HttpResponse.json({
+      reviews: [sampleSurveyLowScoreReview],
+      decisions: [
+        {
+          responseId: sampleSurveyLowScoreReview.responseId,
+          ownerMemberId: '22222222-2222-2222-2222-222222222222',
+          dueAt: '2026-07-31T09:00:00Z',
+          severity: SurveyLowScoreSeverity.SURVEY_LOW_SCORE_SEVERITY_HIGH,
+          escalated: false,
+          reason: 'load_rebalance',
+          workloadScoreBefore: 20,
+          workloadScoreAfter: 43,
+        },
+      ],
+    }),
+  ),
+  http.post(`${BASE}/surveys/responses/low-score-reviews:escalate`, () =>
+    HttpResponse.json({
+      reviews: [
+        {
+          ...sampleSurveyLowScoreReview,
+          status: SurveyLowScoreReviewStatus.SURVEY_LOW_SCORE_REVIEW_STATUS_IN_REVIEW,
+          severity: SurveyLowScoreSeverity.SURVEY_LOW_SCORE_SEVERITY_CRITICAL,
+        },
+      ],
+      decisions: [
+        {
+          responseId: sampleSurveyLowScoreReview.responseId,
+          previousSeverity: SurveyLowScoreSeverity.SURVEY_LOW_SCORE_SEVERITY_HIGH,
+          severity: SurveyLowScoreSeverity.SURVEY_LOW_SCORE_SEVERITY_CRITICAL,
+          previousDueAt: '2026-07-30T01:00:00Z',
+          dueAt: '2026-07-30T01:00:00Z',
+          ownerMissing: false,
+          dueAtChanged: false,
+          reason: 'overdue_sla',
+          actionTaken: 'Escalated recovery: reason=overdue_sla; severity=critical.',
+        },
+      ],
+    }),
   ),
 
   http.get(`${BASE}/outbox/deliveries`, () => HttpResponse.json(defaultDeliveriesList)),
@@ -751,11 +1548,191 @@ export const handlers = [
   http.get(`${BASE}/feedback/search/quality`, () => HttpResponse.json(defaultSearchQuality)),
   http.post(`${BASE}/feedback/search/events`, () => HttpResponse.json({})),
   http.get(`${BASE}/feedback/stats`, () => HttpResponse.json(defaultFeedbackStats)),
+  http.get(`${BASE}/request-notifications/status-evidence`, () =>
+    HttpResponse.json(defaultRequestNotificationStatusEvidence),
+  ),
+  http.get(`${BASE}/feedback/triage-command-center`, () =>
+    HttpResponse.json(defaultFeedbackTriageCommandCenter),
+  ),
+  http.get(`${BASE}/feedback/assignment/escalations`, () =>
+    HttpResponse.json(defaultFeedbackAssignmentEscalations),
+  ),
+  http.get(`${BASE}/feedback/assignment/policy`, () =>
+    HttpResponse.json(feedbackAssignmentPolicyState),
+  ),
+  http.put(`${BASE}/feedback/assignment/policy`, async ({ request }) => {
+    const body = (await request.json()) as { rules?: FeedbackAssignmentPolicy['rules'] }
+    feedbackAssignmentPolicyState = {
+      version: feedbackAssignmentPolicyState.version + 1,
+      updatedBy: 'admin-1',
+      note: 'Policy updated from mock',
+      rules: body.rules ?? [],
+    }
+    return HttpResponse.json(feedbackAssignmentPolicyState)
+  }),
+  http.get(`${BASE}/feedback/assignment/policy/revisions`, () =>
+    HttpResponse.json({ revisions: [feedbackAssignmentPolicyState] }),
+  ),
+  http.post(`${BASE}/feedback/assignment/policy:dry-run`, async ({ request }) => {
+    const body = (await request.json()) as {
+      rules?: FeedbackAssignmentPolicy['rules']
+      feedbackIds?: string[]
+    }
+    const draftRule = body.rules?.[0]
+    const currentRule = feedbackAssignmentPolicyState.rules[0]
+    return HttpResponse.json({
+      totalMatched: body.feedbackIds?.length ?? 0,
+      changed: draftRule && currentRule?.slaHours !== draftRule.slaHours ? 1 : 0,
+      recommendations: [],
+      failed: [],
+      impacts: (body.feedbackIds ?? []).slice(0, 1).map((feedbackId) => ({
+        feedbackId,
+        currentRuleKey: currentRule?.ruleKey ?? '',
+        currentRuleName: currentRule?.ruleName ?? '',
+        currentOwnerLane: currentRule?.ownerLane ?? '',
+        currentSlaHours: currentRule?.slaHours ?? 0,
+        draftRuleKey: draftRule?.ruleKey ?? '',
+        draftRuleName: draftRule?.ruleName ?? '',
+        draftOwnerLane: draftRule?.ownerLane ?? '',
+        draftSlaHours: draftRule?.slaHours ?? 0,
+        changed: Boolean(draftRule && currentRule?.slaHours !== draftRule.slaHours),
+      })),
+    })
+  }),
+  http.post(`${BASE}/feedback/assignment/policy:restore`, async ({ request }) => {
+    const body = (await request.json()) as { version?: number }
+    feedbackAssignmentPolicyState = {
+      ...defaultFeedbackAssignmentPolicy,
+      version: feedbackAssignmentPolicyState.version + 1,
+      updatedBy: 'admin-1',
+      note: `Restored version ${body.version ?? 1}`,
+    }
+    return HttpResponse.json(feedbackAssignmentPolicyState)
+  }),
+  http.get(`${BASE}/feedback/identity-review`, () =>
+    HttpResponse.json(defaultFeedbackIdentityReview),
+  ),
+  http.get(`${BASE}/feedback/identity-review/subjects/:subjectId`, () =>
+    HttpResponse.json(defaultFeedbackIdentitySubjectDetail),
+  ),
+  http.post(`${BASE}/feedback/identity-review/merge`, () =>
+    HttpResponse.json(defaultFeedbackIdentityMerge),
+  ),
+  http.post(`${BASE}/feedback/identity-review/split`, () =>
+    HttpResponse.json(defaultFeedbackIdentitySplit),
+  ),
+  http.post(`${BASE}/feedback/assignment\\:batch`, async ({ request }) => {
+    const body = (await request.json()) as { feedbackIds?: string[] }
+    const count = body.feedbackIds?.length ?? 0
+    return HttpResponse.json({ totalMatched: count, succeeded: count, failed: [] })
+  }),
+  http.post(`${BASE}/feedback/transition/batch`, async ({ request }) => {
+    const body = (await request.json()) as { feedbackIds?: string[] }
+    const count = body.feedbackIds?.length ?? 0
+    return HttpResponse.json({ succeeded: count, failed: [] })
+  }),
+  http.post(`${BASE}/feedback/assignment\\:recommend`, async ({ request }) => {
+    const body = (await request.json()) as { feedbackIds?: string[] }
+    const ids = body.feedbackIds ?? []
+    return HttpResponse.json({
+      totalMatched: ids.length,
+      recommendations: ids.map((feedbackId) => ({
+        feedbackId,
+        ruleKey: 'urgent_open',
+        ruleName: 'Urgent open feedback',
+        ownerLane: 'support_triage',
+        severity: 'critical',
+        slaHours: 24,
+        recommendedSlaDueAt: '2026-08-02T09:30:00Z',
+        rationale:
+          'Urgent open feedback should be confirmed and assigned before the next business cycle.',
+        alreadySatisfied: false,
+      })),
+      failed: [],
+    })
+  }),
+  http.post(`${BASE}/feedback/assignment\\:apply-recommendations`, async ({ request }) => {
+    const body = (await request.json()) as { feedbackIds?: string[] }
+    const count = body.feedbackIds?.length ?? 0
+    return HttpResponse.json({
+      totalMatched: count,
+      succeeded: count,
+      skipped: 0,
+      failed: [],
+      applied: [],
+    })
+  }),
+  http.get(`${BASE}/inbound/sources`, () => HttpResponse.json({ items: defaultInboundSources })),
+  http.get(`${BASE}/feedback/:id/signal-trace`, ({ params }) =>
+    HttpResponse.json({
+      ...defaultFeedbackSignalTrace,
+      feedbackId: String(params.id),
+      signalTraceId: `trace-${String(params.id)}`,
+    }),
+  ),
   http.get(`${BASE}/feedback/:id`, ({ params }) =>
     HttpResponse.json({ ...defaultFeedbackDetail, id: params.id }),
   ),
+  http.patch(`${BASE}/feedback/:id/assignment`, async ({ params, request }) => {
+    const body = (await request.json()) as {
+      ownerMemberId?: string
+      slaDueAt?: string
+      note?: string
+    }
+    const owner = defaultMembersList.members.find((member) => member.id === body.ownerMemberId)
+    const assignment: FeedbackAssignment = {
+      feedbackId: String(params.id),
+      owner: owner
+        ? {
+            memberId: owner.id,
+            memberType: owner.memberType,
+            userId: owner.userId,
+            email: owner.email,
+            role: owner.role,
+          }
+        : undefined,
+      assignedAt: body.ownerMemberId ? '2026-08-01T09:00:00Z' : undefined,
+      assignedBy: 'u-1',
+      slaDueAt: body.slaDueAt || undefined,
+      slaStatus: body.slaDueAt ? 'on_track' : 'missing_due_date',
+      note: body.note ?? '',
+    }
+    return HttpResponse.json(assignment)
+  }),
   http.get(`${BASE}/workflow/states`, () => HttpResponse.json(defaultWorkflowStates)),
   http.get(`${BASE}/feedback/:id/audit`, () => HttpResponse.json(defaultWorkflowAudit)),
+  http.get(`${BASE}/usage`, () => HttpResponse.json(defaultUsage)),
   http.get(`${BASE}/llm-usage`, () => HttpResponse.json(defaultLLMUsage)),
   http.get(`${BASE}/classification-quality`, () => HttpResponse.json(defaultClassificationQuality)),
+  http.get(`${BASE}/classification-quality/review-learning`, () =>
+    HttpResponse.json(defaultClassificationReviewLearning),
+  ),
+  http.post(`${BASE}/classification-quality/reviews`, async ({ request }) => {
+    const body = (await request.json()) as {
+      feedbackId?: string
+      outcome?: string
+      signalReason?: string
+      correctionJson?: string
+      note?: string
+    }
+    return HttpResponse.json({
+      event: {
+        eventId: 'classification-review-default',
+        feedbackId: body.feedbackId ?? '0',
+        outcome: body.outcome ?? 'accepted',
+        signalReason: body.signalReason ?? '',
+        correctionJson: body.correctionJson ?? '{}',
+        note: body.note ?? '',
+        reviewedAt: '2026-07-02T09:00:00Z',
+      },
+      learning: {
+        ...defaultClassificationReviewLearning,
+        totalReviews: '1',
+        accepted: body.outcome === 'accepted' ? '1' : '0',
+        edited: body.outcome === 'edited' ? '1' : '0',
+        dismissed: body.outcome === 'dismissed' ? '1' : '0',
+        trainingCandidateCount: body.outcome === 'accepted' ? '0' : '1',
+      },
+    })
+  }),
 ]

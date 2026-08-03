@@ -2,6 +2,7 @@ import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FeedbackAssignmentPolicy } from '@/proto/attune/v1/ingest'
 import { Route as FeedbackShellRoute } from '@/routes/_authed.feedback'
 import { Route as FeedbackClustersRoute } from '@/routes/_authed.feedback.clusters'
 import { Route as FeedbackIndexRoute } from '@/routes/_authed.feedback.index'
@@ -77,6 +78,11 @@ const itemFixture = {
   type: 'bug',
   enrichmentStatus: 'done',
   tags: [],
+  accountContext: {
+    accountKey: 'acct:acme',
+    accountDisplay: 'Acme Corp',
+    source: 'source_meta',
+  },
 }
 
 const terminalItemFixture = {
@@ -112,6 +118,11 @@ const detailFixture = {
   attachments: [],
   enrichmentError: '',
   enrichedAt: '2026-06-07T08:31:00Z',
+  accountContext: {
+    accountKey: 'acct:acme',
+    accountDisplay: 'Acme Corp',
+    source: 'source_meta',
+  },
 }
 
 const terminalDetailFixture = {
@@ -215,6 +226,7 @@ describe('_authed.feedback route — user flow smoke', () => {
     expect(screen.getByText('推荐视角')).toBeInTheDocument()
     expect(screen.getByText('队列体征')).toBeInTheDocument()
     expect(screen.getByText('操作上下文')).toBeInTheDocument()
+    expect(screen.getByText('需要立即处理的责任缺口')).toBeInTheDocument()
     // Dim column header rendered from enrich-config dims. Two
     // matches expected: one in the stats card title, one in the
     // table column header.
@@ -339,6 +351,47 @@ describe('_authed.feedback route — user flow smoke', () => {
         ),
       ).toBe(true)
     })
+  })
+
+  it('sends account_key when the account filter changes', async () => {
+    const seen: URL[] = []
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', ({ request }) => {
+        seen.push(new URL(request.url))
+        return HttpResponse.json({ items: [itemFixture], nextCursor: undefined })
+      }),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [],
+          urgentCount: '0',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await user.type(screen.getByLabelText('账户标识'), 'acct:acme')
+
+    await waitFor(() => {
+      expect(seen.some((url) => url.searchParams.get('account_key') === 'acct:acme')).toBe(true)
+    })
+    expect(screen.getByText('账户 Acme Corp')).toBeInTheDocument()
   })
 
   it('queue rail primary action opens the current highest-priority feedback', async () => {
@@ -2406,6 +2459,9 @@ describe('_authed.feedback route — user flow smoke', () => {
     }
     const batchBodies: unknown[] = []
     let transitionBody: unknown
+    let assignmentBody: unknown
+    let recommendationPreviewBody: unknown
+    let recommendationApplyBody: unknown
 
     server.use(
       http.get('/fb/v1/console/enrich-config', () =>
@@ -2440,6 +2496,43 @@ describe('_authed.feedback route — user flow smoke', () => {
         transitionBody = await request.json()
         return HttpResponse.json({ succeeded: 1, failed: [] })
       }),
+      http.post('/fb/v1/console/feedback/assignment\\:batch', async ({ request }) => {
+        assignmentBody = await request.json()
+        return HttpResponse.json({ totalMatched: 1, succeeded: 1, failed: [] })
+      }),
+      http.post('/fb/v1/console/feedback/assignment\\:recommend', async ({ request }) => {
+        recommendationPreviewBody = await request.json()
+        return HttpResponse.json({
+          totalMatched: 1,
+          recommendations: [
+            {
+              feedbackId: '101',
+              ruleKey: 'urgent_open',
+              ruleName: 'Urgent open feedback',
+              ownerLane: 'support_triage',
+              severity: 'critical',
+              slaHours: 24,
+              recommendedSlaDueAt: '2026-08-02T09:30:00Z',
+              rationale: 'urgent',
+              alreadySatisfied: false,
+            },
+          ],
+          failed: [],
+        })
+      }),
+      http.post(
+        '/fb/v1/console/feedback/assignment\\:apply-recommendations',
+        async ({ request }) => {
+          recommendationApplyBody = await request.json()
+          return HttpResponse.json({
+            totalMatched: 1,
+            succeeded: 1,
+            skipped: 0,
+            failed: [],
+            applied: [],
+          })
+        },
+      ),
       http.get('/fb/v1/console/clusters', () =>
         HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
       ),
@@ -2469,6 +2562,28 @@ describe('_authed.feedback route — user flow smoke', () => {
     await waitFor(() => expect(transitionBody).toBeTruthy())
 
     await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    await user.click(screen.getByRole('button', { name: '批量分派' }))
+    const assignmentDialog = await screen.findByRole('dialog')
+    await user.click(within(assignmentDialog).getByLabelText('负责人'))
+    await user.click(screen.getByRole('option', { name: '清空负责人' }))
+    await user.click(within(assignmentDialog).getByLabelText('SLA'))
+    await user.click(screen.getByRole('option', { name: '设置 SLA' }))
+    await user.type(within(assignmentDialog).getByLabelText('截止时间'), '2026-08-02T09:30')
+    await user.type(within(assignmentDialog).getByLabelText('交接备注'), 'Batch handoff')
+    await user.click(within(assignmentDialog).getByRole('button', { name: '应用分派' }))
+    await waitFor(() => expect(assignmentBody).toBeTruthy())
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    await user.click(screen.getByRole('button', { name: '推荐分派' }))
+    const recommendationDialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(recommendationPreviewBody).toBeTruthy())
+    expect(within(recommendationDialog).getByText('Urgent open feedback')).toBeInTheDocument()
+    await user.type(within(recommendationDialog).getByLabelText('应用备注'), 'Policy sweep')
+    await user.click(within(recommendationDialog).getByRole('button', { name: '应用建议' }))
+    await waitFor(() => expect(recommendationApplyBody).toBeTruthy())
+
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
     await user.click(screen.getByRole('button', { name: '从反馈提升' }))
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/feedback/customer-requests',
@@ -2477,6 +2592,7 @@ describe('_authed.feedback route — user flow smoke', () => {
         merge_target_id: undefined,
         promote_feedback_ids: '101',
         feedback_id: undefined,
+        account_key: undefined,
       },
     })
 
@@ -2497,6 +2613,163 @@ describe('_authed.feedback route — user flow smoke', () => {
       toStateId: 'ws-2',
       comment: '',
     })
+    expect(assignmentBody).toEqual({
+      feedbackIds: ['101'],
+      ownerMemberIdSet: true,
+      ownerMemberId: '',
+      slaDueAtSet: true,
+      slaDueAt: expect.stringMatching(/^2026-08-02T.*Z$/),
+      note: 'Batch handoff',
+    })
+    expect(recommendationPreviewBody).toEqual({ feedbackIds: ['101'] })
+    expect(recommendationApplyBody).toEqual({
+      feedbackIds: ['101'],
+      note: 'Policy sweep',
+    })
+  })
+
+  it('saves assignment policy rules and uses them in recommendation preview', async () => {
+    let policy: FeedbackAssignmentPolicy = {
+      version: 1,
+      updatedBy: 'system',
+      note: 'Default assignment policy',
+      rules: [
+        {
+          ruleKey: 'urgent_open',
+          ruleName: 'Urgent open feedback',
+          ownerLane: 'support_triage',
+          severity: 'critical',
+          slaHours: 24,
+          enabled: true,
+          rationale: 'urgent customer-visible feedback needs a fast owner',
+        },
+      ],
+    }
+    let savedPolicyBody: unknown
+    let recommendationPreviewBody: unknown
+
+    server.use(
+      http.get('/fb/v1/console/enrich-config', () =>
+        HttpResponse.json({
+          config: { promptTemplate: '', defaultPromptTemplate: '', dimensions: dimsFixture },
+        }),
+      ),
+      http.get('/fb/v1/console/feedback', () =>
+        HttpResponse.json({
+          items: [itemFixture],
+          nextCursor: undefined,
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/stats', () =>
+        HttpResponse.json({
+          periodStart: '',
+          periodEnd: '',
+          total: '1',
+          dims: [{ dim: 'severity', top: [{ value: 'P0', count: '1' }] }],
+          urgentCount: '1',
+        }),
+      ),
+      http.get('/fb/v1/console/workflow/states', () => HttpResponse.json({ states: [] })),
+      http.get('/fb/v1/console/tags', () => HttpResponse.json({ tags: [] })),
+      http.get('/fb/v1/console/members', () =>
+        HttpResponse.json({
+          members: [
+            {
+              id: 'member-1',
+              memberType: 'tenant_user',
+              userId: 'owner-1',
+              email: 'owner@example.com',
+              role: 'member',
+              roleSource: 'manual',
+              invitedAt: '0',
+              acceptedAt: '1',
+            },
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/feedback/assignment/policy', () => HttpResponse.json(policy)),
+      http.get('/fb/v1/console/feedback/assignment/policy/revisions', () =>
+        HttpResponse.json({ revisions: [policy] }),
+      ),
+      http.put('/fb/v1/console/feedback/assignment/policy', async ({ request }) => {
+        savedPolicyBody = await request.json()
+        policy = {
+          version: policy.version + 1,
+          updatedBy: 'admin-1',
+          note: (savedPolicyBody as FeedbackAssignmentPolicy & { note?: string }).note ?? '',
+          rules: (savedPolicyBody as FeedbackAssignmentPolicy & { note?: string }).rules,
+        }
+        return HttpResponse.json(policy)
+      }),
+      http.post('/fb/v1/console/feedback/assignment\\:recommend', async ({ request }) => {
+        recommendationPreviewBody = await request.json()
+        const rule = policy.rules[0]
+        return HttpResponse.json({
+          totalMatched: 1,
+          recommendations: [
+            {
+              feedbackId: '101',
+              ruleKey: rule.ruleKey,
+              ruleName: rule.ruleName,
+              ownerLane: rule.ownerLane,
+              severity: rule.severity,
+              slaHours: rule.slaHours,
+              recommendedSlaDueAt: '2026-08-01T17:30:00Z',
+              rationale: rule.rationale,
+              alreadySatisfied: false,
+              recommendedOwnerMemberId: rule.defaultOwnerMemberId,
+            },
+          ],
+          failed: [],
+        })
+      }),
+      http.get('/fb/v1/console/clusters', () =>
+        HttpResponse.json({ items: [], clusteringEnabled: false, totalCount: 0 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<FeedbackRoutePage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Unicode 密码登录失败')).toBeInTheDocument()
+    })
+    await waitFor(() => expect(screen.getByText('分派策略中心')).toBeInTheDocument())
+
+    await user.clear(screen.getByLabelText('Urgent open feedback owner lane'))
+    await user.type(screen.getByLabelText('Urgent open feedback owner lane'), 'enterprise_triage')
+    await user.clear(screen.getByLabelText('Urgent open feedback SLA 小时'))
+    await user.type(screen.getByLabelText('Urgent open feedback SLA 小时'), '8')
+    await user.click(screen.getByLabelText('Urgent open feedback 默认负责人'))
+    await user.click(screen.getByRole('option', { name: 'owner@example.com' }))
+    await user.type(screen.getByLabelText('变更备注'), 'Enterprise policy')
+    await user.click(screen.getByRole('button', { name: '保存策略' }))
+
+    await waitFor(() => expect(savedPolicyBody).toBeTruthy())
+    expect(savedPolicyBody).toEqual({
+      rules: [
+        {
+          ruleKey: 'urgent_open',
+          ruleName: 'Urgent open feedback',
+          ownerLane: 'enterprise_triage',
+          severity: 'critical',
+          slaHours: 8,
+          enabled: true,
+          rationale: 'urgent customer-visible feedback needs a fast owner',
+          defaultOwnerMemberId: 'member-1',
+        },
+      ],
+      note: 'Enterprise policy',
+    })
+    expect(toast.success).toHaveBeenCalledWith('分派策略已保存')
+
+    await user.click(screen.getByLabelText('选择 Unicode 密码登录失败'))
+    await user.click(screen.getByRole('button', { name: '推荐分派' }))
+    const recommendationDialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(recommendationPreviewBody).toBeTruthy())
+    expect(recommendationPreviewBody).toEqual({ feedbackIds: ['101'] })
+    expect(
+      within(recommendationDialog).getByText('1 条命中 enterprise_triage，建议 8h SLA'),
+    ).toBeInTheDocument()
   })
 
   it('surfaces batch mutation errors without clearing the current selection', async () => {

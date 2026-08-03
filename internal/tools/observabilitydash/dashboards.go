@@ -268,6 +268,8 @@ func operationsDashboard() dashboard {
 			targetExpr("N", `sum by (name, result) (rate(attune_circuit_breaker_results_total[$__rate_interval]))`, "circuit / {{name}} / {{result}}"),
 			targetExpr("O", `sum by (name) (rate(attune_circuit_breaker_rejected_total[$__rate_interval]))`, "circuit rejected / {{name}}"),
 			targetExpr("P", `sum by (name, from, to) (increase(attune_circuit_breaker_transitions_total[$__range]))`, "circuit state / {{name}} / {{from}}->{{to}}"),
+			targetExpr("Q", `sum by (result, reason) (rate(attune_survey_recovery_automation_total{tenant=~"$tenant"}[$__rate_interval]))`, "survey recovery / {{result}} / {{reason}}"),
+			targetExpr("R", `sum by (result, reason) (rate(attune_survey_recovery_notification_total{tenant=~"$tenant"}[$__rate_interval]))`, "survey recovery notify / {{result}} / {{reason}}"),
 		}, "short", gp(0, 43, 24, 8)),
 		rowPanel(22, "External sync", 51),
 		externalSyncHealthPanel(),

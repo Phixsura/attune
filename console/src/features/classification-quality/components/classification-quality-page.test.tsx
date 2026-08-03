@@ -108,19 +108,117 @@ test('renders classification quality drift, warnings, trend, and samples', async
         ],
       }),
     ),
+    http.get('/fb/v1/console/classification-quality/review-learning', () =>
+      HttpResponse.json({
+        totalReviews: '7',
+        accepted: '3',
+        edited: '2',
+        dismissed: '2',
+        trainingCandidateCount: '4',
+        reviewedFeedbackCount: '7',
+        classifiedFeedbackCount: '100',
+        reviewCoverageRate: 0.07,
+        reasonBuckets: [
+          {
+            signalReason: 'low_confidence_rate_spike',
+            totalReviews: '4',
+            accepted: '1',
+            edited: '2',
+            dismissed: '1',
+            trainingCandidateCount: '3',
+            lastReviewedAt: '2026-07-02T09:00:00Z',
+          },
+        ],
+        recentEvents: [],
+      }),
+    ),
   )
 
   renderWithProviders(<ClassificationQualityPage />)
 
   expect(await screen.findByText('质量率趋势')).toBeInTheDocument()
-  expect(screen.getByText('低置信度升高')).toBeInTheDocument()
+  expect(screen.getAllByText('低置信度升高').length).toBeGreaterThanOrEqual(1)
   expect(screen.getByText('unknown_reason')).toBeInTheDocument()
   expect(screen.getByText('priority')).toBeInTheDocument()
   expect(screen.getByText('Urgent')).toBeInTheDocument()
   expect(screen.getByText('越界')).toBeInTheDocument()
   expect(screen.getByText('Billing import misclassified')).toBeInTheDocument()
   expect(screen.getByText('fb-2')).toBeInTheDocument()
-  expect(screen.getAllByText('查看反馈').length).toBeGreaterThanOrEqual(3)
+  expect(screen.getByText('AI 审核学习')).toBeInTheDocument()
+  expect(screen.getByText('4 个训练候选')).toBeInTheDocument()
+  expect(screen.getAllByText('查看反馈').length).toBeGreaterThanOrEqual(2)
+  expect(screen.getByRole('link', { name: '查看反馈 fb-1' })).toBeInTheDocument()
+})
+
+test('records AI review feedback from classification samples', async () => {
+  const posted: unknown[] = []
+  server.use(
+    http.get('/fb/v1/console/classification-quality', () =>
+      HttpResponse.json({
+        ...defaultClassificationQuality,
+        samples: [
+          {
+            id: '101',
+            title: 'Low confidence sample',
+            createdAt: '2026-07-01T08:30:00Z',
+            source: 'api',
+            classificationConfidence: 0.42,
+            enrichmentStatus: 'done',
+            signalReason: 'low_confidence_rate_spike',
+          },
+        ],
+      }),
+    ),
+    http.get('/fb/v1/console/classification-quality/review-learning', () =>
+      HttpResponse.json({
+        totalReviews: '0',
+        accepted: '0',
+        edited: '0',
+        dismissed: '0',
+        trainingCandidateCount: '0',
+        reviewedFeedbackCount: '0',
+        classifiedFeedbackCount: '1',
+        reviewCoverageRate: 0,
+        reasonBuckets: [],
+        recentEvents: [],
+      }),
+    ),
+    http.post('/fb/v1/console/classification-quality/reviews', async ({ request }) => {
+      posted.push(await request.json())
+      return HttpResponse.json({
+        event: { eventId: String(posted.length), feedbackId: '101', outcome: 'accepted' },
+        learning: {
+          totalReviews: String(posted.length),
+          accepted: '1',
+          edited: posted.length > 1 ? '1' : '0',
+          dismissed: '0',
+          trainingCandidateCount: posted.length > 1 ? '1' : '0',
+          reasonBuckets: [],
+          recentEvents: [],
+        },
+      })
+    }),
+  )
+
+  const { user } = renderWithProviders(<ClassificationQualityPage />)
+
+  expect(await screen.findByText('Low confidence sample')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: '接受反馈 101 的分类' }))
+  await waitFor(() => expect(posted).toHaveLength(1))
+  await user.click(screen.getByRole('button', { name: '修正反馈 101 的分类' }))
+  await user.click(screen.getByRole('button', { name: '保存修正' }))
+  await waitFor(() => expect(posted).toHaveLength(2))
+
+  expect(posted[0]).toMatchObject({
+    feedbackId: '101',
+    outcome: 'accepted',
+    signalReason: 'low_confidence_rate_spike',
+  })
+  expect(posted[1]).toMatchObject({
+    feedbackId: '101',
+    outcome: 'edited',
+    correctionJson: '{\n  \n}',
+  })
 })
 
 test('sends advanced filters and clears them without changing the base range', async () => {

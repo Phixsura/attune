@@ -72,6 +72,22 @@ describe('PublicVisibilityPage', () => {
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
     await waitFor(() => expect(screen.getByText('公开策略')).toBeInTheDocument())
+    expect(screen.getByText('公开隐私预检')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        screen.getByText('public / 3 public surfaces / 3 moderation subjects / 1 portal fields'),
+      ).toBeInTheDocument()
+    })
+    expect(screen.getByText('4 privacy preflight checks need attention')).toBeInTheDocument()
+    expect(screen.getByText('public / 3 public surfaces / search on')).toBeInTheDocument()
+    expect(
+      screen.getByText('1 pending / 1 approved / request pending / comment pending'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('identity display_name / submitter on / timestamps visible'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('1 fields / 1 required / page URL on')).toBeInTheDocument()
+    expect(screen.getByText('1 blocked / 1 reasoned / 3 subjects')).toBeInTheDocument()
     expect(screen.getByText('审核队列')).toBeInTheDocument()
     expect(screen.getByText('公开需求资料')).toBeInTheDocument()
     expect(screen.getByText('门户投稿表单')).toBeInTheDocument()
@@ -996,6 +1012,13 @@ describe('PublicVisibilityPage', () => {
     renderWithProviders(<PublicVisibilityPage />)
 
     await waitFor(() => expect(screen.getByText('审核队列')).toBeInTheDocument())
+    expect(screen.getByText('公开隐私预检')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'public policy unknown / 0 public surfaces / 0 moderation subjects / 0 portal fields',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText('5 privacy preflight checks need evidence')).toBeInTheDocument()
     expect(screen.queryByText('公开策略')).not.toBeInTheDocument()
     expect(screen.queryByText('公开需求资料')).not.toBeInTheDocument()
     expect(screen.getByText('没有待显示的审核项')).toBeInTheDocument()

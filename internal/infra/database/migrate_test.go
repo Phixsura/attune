@@ -242,7 +242,7 @@ func TestMigrationCount(t *testing.T) {
 
 	count := MigrationCount()
 	require.Greater(t, count, 0, "should have at least one migration")
-	require.Equal(t, 122, count, "should match current migration count")
+	require.Equal(t, 128, count, "should match current migration count")
 }
 
 func firstEffectiveLine(body []byte) string {
@@ -263,6 +263,68 @@ func lastEffectiveLine(body []byte) string {
 		}
 	}
 	return ""
+}
+
+func TestFeedbackSignalTraceMigrationDefinesDurableTraceAnchor(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/128_feedback_signal_trace.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	require.Contains(t, sql, "ADD COLUMN IF NOT EXISTS signal_trace_id")
+	require.Contains(t, sql, "chk_user_feedback_signal_trace_id_shape")
+	require.Contains(t, sql, "idx_user_feedback_signal_trace")
+	require.Contains(t, sql, "ON user_feedback (tenant_id, signal_trace_id)")
+}
+
+func TestClassificationReviewLearningMigrationDefinesLedgerAndAuditAction(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/127_classification_review_learning.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS classification_review_events")
+	require.Contains(t, sql, "semantic_run_id")
+	require.Contains(t, sql, "classification_confidence")
+	require.Contains(t, sql, "'classification_review.record'")
+	require.Contains(t, sql, "idx_classification_review_events_window")
+}
+
+func TestSignalIdentityGraphMigrationAllowsMergeAuditAction(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/124_signal_identity_graph.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS signal_subjects")
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS signal_subject_identities")
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS signal_subject_merge_events")
+	require.Contains(t, sql, "'signal_subject.merge'")
+	require.Contains(t, sql, "'signal_subject.split'")
+}
+
+func TestFeedbackAssignmentPolicyMigrationAllowsAuditAction(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/126_feedback_assignment_policy.sql")
+	require.NoError(t, err)
+	require.Contains(t, string(body), "'feedback_assignment.policy_update'")
+	require.Contains(t, string(body), "'feedback_assignment.policy_restore'")
+}
+
+func TestFeedbackAssignmentMigrationDefinesDurableOwnerSLA(t *testing.T) {
+	t.Parallel()
+
+	body, err := migrationFS.ReadFile("migrations/125_feedback_assignment.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	require.Contains(t, sql, "owner_member_id UUID")
+	require.Contains(t, sql, "feedback_sla_due_at TIMESTAMPTZ")
+	require.Contains(t, sql, "owner_assignment_note TEXT")
+	require.Contains(t, sql, "fk_user_feedback_owner_member")
+	require.Contains(t, sql, "REFERENCES tenant_members(id)")
+	require.Contains(t, sql, "idx_user_feedback_assignment_owner")
+	require.Contains(t, sql, "idx_user_feedback_assignment_sla")
 }
 
 func TestPublicVisibilityMigrationAllowsPublicModerationAuditActions(t *testing.T) {

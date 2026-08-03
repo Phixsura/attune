@@ -1,0 +1,18 @@
+{
+  "provider": "jira",
+  "eventType": "issue_updated",
+  "rawPayload": {
+    "issueKey": "JIRA-101",
+    "summary": "Expose audit export filters",
+    "status": "In Progress",
+    "labels": ["enterprise", "audit"]
+  },
+  "normalized": {
+    "type": "customer_request",
+    "action": "upsert",
+    "externalId": "jira:JIRA-101",
+    "title": "Expose audit export filters",
+    "status": "in_progress",
+    "source": "jira"
+  }
+}

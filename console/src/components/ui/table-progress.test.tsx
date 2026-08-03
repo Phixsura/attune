@@ -51,12 +51,12 @@ describe('table wrapper', () => {
 })
 
 describe('progress wrapper', () => {
-  it('uses the provided value to position the indicator', () => {
+  it('uses the provided value to size the indicator', () => {
     render(<Progress className="progress-extra" value={35} />)
 
     expect(document.querySelector('[data-slot="progress"]')).toHaveClass('progress-extra')
     expect(document.querySelector('[data-slot="progress-indicator"]')).toHaveStyle({
-      transform: 'translateX(-65%)',
+      width: '35%',
     })
   })
 
@@ -64,7 +64,7 @@ describe('progress wrapper', () => {
     render(<Progress />)
 
     expect(document.querySelector('[data-slot="progress-indicator"]')).toHaveStyle({
-      transform: 'translateX(-100%)',
+      width: '0%',
     })
   })
 })

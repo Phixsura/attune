@@ -1,0 +1,32 @@
+[
+  {
+    "external_id": "cr-2001",
+    "title": "Expose schema preview before import",
+    "status": "open",
+    "source": "csv",
+    "account_key": "acct:acme",
+    "revenue_impact_cents": "2400000",
+    "evidence_url": "https://support.example.test/tickets/1001",
+    "tags": ["import", "schema"]
+  },
+  {
+    "external_id": "cr-2002",
+    "title": "Export decision evidence as JSON",
+    "status": "planned",
+    "source": "api",
+    "account_key": "acct:globex",
+    "revenue_impact_cents": "800000",
+    "evidence_url": "https://crm.example.test/cases/1002",
+    "tags": ["export", "governance"]
+  },
+  {
+    "external_id": "cr-2003",
+    "title": "Recover rejected rows from bulk import",
+    "status": "open",
+    "source": "github",
+    "account_key": "acct:initech",
+    "revenue_impact_cents": "0",
+    "evidence_url": "https://github.example.test/issues/1003",
+    "tags": ["recovery", "bulk"]
+  }
+]

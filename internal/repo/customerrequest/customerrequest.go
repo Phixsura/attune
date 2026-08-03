@@ -99,6 +99,30 @@ const (
 	DeliveryHealthFailed  DeliveryHealth = "failed"
 )
 
+type DecisionScoreFactorKind string
+
+const (
+	DecisionScoreFactorPriority       DecisionScoreFactorKind = "priority"
+	DecisionScoreFactorFeedback       DecisionScoreFactorKind = "feedback"
+	DecisionScoreFactorCustomers      DecisionScoreFactorKind = "customers"
+	DecisionScoreFactorAccounts       DecisionScoreFactorKind = "accounts"
+	DecisionScoreFactorVotes          DecisionScoreFactorKind = "votes"
+	DecisionScoreFactorRevenue        DecisionScoreFactorKind = "revenue"
+	DecisionScoreFactorDeliveryHealth DecisionScoreFactorKind = "delivery_health"
+)
+
+type AccountEventKind string
+
+const (
+	AccountEventRequestCreated AccountEventKind = "request_created"
+	AccountEventFeedbackLinked AccountEventKind = "feedback_linked"
+	AccountEventCustomerLinked AccountEventKind = "customer_linked"
+	AccountEventVoteAdded      AccountEventKind = "vote_added"
+	AccountEventIssueLinked    AccountEventKind = "issue_linked"
+	AccountEventIssueSynced    AccountEventKind = "issue_synced"
+	AccountEventNoteAdded      AccountEventKind = "note_added"
+)
+
 var (
 	ErrNotFound         = errors.New("customer request not found")
 	ErrConflict         = errors.New("customer request conflict")
@@ -134,6 +158,7 @@ type Summary struct {
 	UpdatedAt                time.Time
 	ArchivedAt               *time.Time
 	SupportingFeedbackCount  int
+	EvidenceSourceCount      int
 	CustomerCount            int
 	AccountCount             int
 	LinkedIssueCount         int
@@ -151,8 +176,63 @@ type Summary struct {
 	FailedIssueCount         int
 	PendingIssueCount        int
 	ManualIssueCount         int
+	DecisionScoreFactors     []DecisionScoreFactor
+	EvidenceQuality          EvidenceQuality
 	FirstFeedbackAt          *time.Time
 	LatestFeedbackAt         *time.Time
+}
+
+type DecisionScoreFactor struct {
+	Kind               DecisionScoreFactorKind
+	RawCount           int
+	RawValueCents      int64
+	Weight             int
+	Cap                int
+	UnitCents          int64
+	Contribution       int
+	Capped             bool
+	ContributesToScore bool
+}
+
+type EvidenceConfidence string
+
+const (
+	EvidenceConfidenceLow    EvidenceConfidence = "low"
+	EvidenceConfidenceMedium EvidenceConfidence = "medium"
+	EvidenceConfidenceHigh   EvidenceConfidence = "high"
+)
+
+type EvidenceQualityReason string
+
+const (
+	EvidenceReasonNoSupportingFeedback EvidenceQualityReason = "no_supporting_feedback"
+	EvidenceReasonLowFeedbackVolume    EvidenceQualityReason = "low_feedback_volume"
+	EvidenceReasonSingleCustomer       EvidenceQualityReason = "single_customer"
+	EvidenceReasonNoAccountContext     EvidenceQualityReason = "no_account_context"
+	EvidenceReasonStaleEvidence        EvidenceQualityReason = "stale_evidence"
+	EvidenceReasonNoDeliveryLink       EvidenceQualityReason = "no_delivery_link"
+	EvidenceReasonHiddenFeedback       EvidenceQualityReason = "hidden_feedback"
+	EvidenceReasonSingleSource         EvidenceQualityReason = "single_source"
+	EvidenceReasonSupportingFeedback   EvidenceQualityReason = "supporting_feedback"
+	EvidenceReasonMultiCustomer        EvidenceQualityReason = "multi_customer"
+	EvidenceReasonAccountContext       EvidenceQualityReason = "account_context"
+	EvidenceReasonFreshEvidence        EvidenceQualityReason = "fresh_evidence"
+	EvidenceReasonDeliveryLinked       EvidenceQualityReason = "delivery_linked"
+	EvidenceReasonMultiSource          EvidenceQualityReason = "multi_source"
+)
+
+type EvidenceQuality struct {
+	Score            int
+	Confidence       EvidenceConfidence
+	EvidenceCount    int
+	SourceCount      int
+	CustomerCount    int
+	AccountCount     int
+	LatestEvidenceAt *time.Time
+	Stale            bool
+	LowConfidence    bool
+	GapReasons       []EvidenceQualityReason
+	Strengths        []EvidenceQualityReason
 }
 
 type ScoringSettings struct {
@@ -363,6 +443,47 @@ type Detail struct {
 	AccountProfiles []AccountProfile
 }
 
+type AccountSummary struct {
+	AccountKey               string
+	AccountProfile           *AccountProfile
+	RequestCount             int
+	FeedbackCount            int
+	CustomerCount            int
+	VoteCount                int
+	IssueCount               int
+	SyncedIssueCount         int
+	StaleIssueCount          int
+	FailedIssueCount         int
+	PendingIssueCount        int
+	ManualIssueCount         int
+	RevenueImpactCents       int64
+	RevenueCurrency          string
+	HighPriorityRequestCount int
+	ShippedRequestCount      int
+	StaleOrFailedIssueCount  int
+	AverageDecisionScore     int
+	TopDecisionScore         int
+	Timeline                 []Summary
+	Events                   []AccountEvent
+}
+
+type AccountEvent struct {
+	Kind             AccountEventKind
+	RequestID        uuid.UUID
+	RequestDisplayID string
+	RequestTitle     string
+	OccurredAt       time.Time
+	ActorID          string
+	SubjectDisplay   string
+	Source           string
+	Description      string
+	FeedbackID       int64
+	IssueProvider    string
+	IssueKey         string
+	IssueURL         string
+	IssueSyncState   IssueSyncState
+}
+
 type ListFilter struct {
 	TenantID      string
 	Query         string
@@ -376,7 +497,9 @@ type ListFilter struct {
 	Cursor        string
 	FeedbackID    int64
 	CohortID      *string
+	AccountKey    string
 	EvidenceLimit int
+	EventLimit    int
 }
 
 type ListResult struct {
@@ -713,7 +836,58 @@ func (r *Repo) List(ctx context.Context, filter ListFilter) (ListResult, error) 
 	return ListResult{Items: items, NextCursor: next}, nil
 }
 
+func (r *Repo) GetAccountSummary(ctx context.Context, filter ListFilter) (AccountSummary, error) {
+	filter.AccountKey = strings.TrimSpace(filter.AccountKey)
+	filter.Cursor = ""
+	filter.Limit = accountSummaryTimelineLimit(filter.Limit)
+	query, args := buildAccountSummaryQuery(filter)
+	out, err := scanAccountSummary(r.pool.QueryRow(ctx, query, args...))
+	if err != nil {
+		return AccountSummary{}, fmt.Errorf("get customer request account summary: %w", err)
+	}
+	timeline, err := r.List(ctx, filter)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	out.Timeline = timeline.Items
+	events, err := r.listAccountEvents(ctx, filter)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	out.Events = events
+	return out, nil
+}
+
+func accountSummaryTimelineLimit(limit int) int {
+	if limit <= 0 {
+		return 5
+	}
+	if limit > 25 {
+		return 25
+	}
+	return limit
+}
+
+func accountSummaryEventLimit(limit int) int {
+	if limit <= 0 {
+		return 12
+	}
+	if limit > 50 {
+		return 50
+	}
+	return limit
+}
+
 func buildListQuery(filter ListFilter, limit, offset int) (string, []any) {
+	clauses, args := buildListFilterClauses(filter)
+	args = append(args, limit, offset)
+	return summarySelectSQL() + `
+		WHERE ` + strings.Join(clauses, " AND ") + `
+		ORDER BY ` + orderByClause(filter.Sort, filter.Direction) + `
+		LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args)), args
+}
+
+func buildListFilterClauses(filter ListFilter) ([]string, []any) {
 	args := []any{filter.TenantID}
 	clauses := []string{"cr.tenant_id = $1"}
 	clauses = appendVisibilityClause(clauses, filter.Visibility)
@@ -764,14 +938,326 @@ func buildListQuery(filter ListFilter, limit, offset int) (string, []any) {
 			  AND cm.left_at IS NULL
 			WHERE fl.tenant_id = cr.tenant_id
 			  AND fl.request_id = cr.id
-			  AND f.subject_key <> ''
-		)`, len(args)))
+				  AND f.subject_key <> ''
+			)`, len(args)))
 	}
-	args = append(args, limit, offset)
-	return summarySelectSQL() + `
-		WHERE ` + strings.Join(clauses, " AND ") + `
-		ORDER BY ` + orderByClause(filter.Sort, filter.Direction) + `
-		LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args)), args
+	if accountKey := strings.TrimSpace(filter.AccountKey); accountKey != "" {
+		args = append(args, accountKey)
+		clauses = append(clauses, fmt.Sprintf(`(
+			EXISTS (
+				SELECT 1
+				FROM customer_request_customer_links acl
+				WHERE acl.tenant_id = cr.tenant_id
+				  AND acl.request_id = cr.id
+				  AND acl.account_key = $%d
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM customer_request_votes av
+				WHERE av.tenant_id = cr.tenant_id
+				  AND av.request_id = cr.id
+				  AND av.account_key = $%d
+			)
+			)`, len(args), len(args)))
+	}
+	return clauses, args
+}
+
+func (r *Repo) listAccountEvents(ctx context.Context, filter ListFilter) ([]AccountEvent, error) {
+	filter.EventLimit = accountSummaryEventLimit(filter.EventLimit)
+	query, args := buildAccountEventsQuery(filter)
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list customer request account events: %w", err)
+	}
+	defer rows.Close()
+	return scanAccountEvents(rows)
+}
+
+func buildAccountEventsQuery(filter ListFilter) (string, []any) {
+	clauses, args := buildListFilterClauses(filter)
+	accountParam := len(args)
+	args = append(args, accountSummaryEventLimit(filter.EventLimit))
+	limitParam := len(args)
+	return `
+		WITH account_requests AS (
+			SELECT cr.tenant_id, cr.id, cr.display_id, cr.title, cr.created_by, cr.created_at
+			FROM customer_requests cr
+			WHERE ` + strings.Join(clauses, " AND ") + `
+		),
+		events AS (
+			` + requestCreatedEventsSQL() + `
+			UNION ALL
+			` + feedbackLinkedEventsSQL() + `
+			UNION ALL
+			` + accountScopedEventsSQL(accountParam) + `
+			UNION ALL
+			` + issueLinkedEventsSQL() + `
+			UNION ALL
+			` + issueSyncedEventsSQL() + `
+			UNION ALL
+			` + noteAddedEventsSQL() + `
+		)
+		SELECT
+			kind,
+			request_id,
+			request_display_id,
+			request_title,
+			occurred_at,
+			actor_id,
+			subject_display,
+			source,
+			description,
+			feedback_id,
+			issue_provider,
+			issue_key,
+			issue_url,
+			issue_sync_state
+		FROM events
+		ORDER BY occurred_at DESC, request_display_id DESC, kind DESC
+		LIMIT $` + strconv.Itoa(limitParam), args
+}
+
+func requestCreatedEventsSQL() string {
+	return `
+			SELECT
+				'request_created'::text AS kind,
+				ar.id AS request_id,
+				ar.display_id AS request_display_id,
+				ar.title AS request_title,
+				ar.created_at AS occurred_at,
+				ar.created_by AS actor_id,
+				''::text AS subject_display,
+				'customer_request'::text AS source,
+				ar.title AS description,
+				0::bigint AS feedback_id,
+				''::text AS issue_provider,
+				''::text AS issue_key,
+				''::text AS issue_url,
+				''::text AS issue_sync_state
+			FROM account_requests ar`
+}
+
+func feedbackLinkedEventsSQL() string {
+	return `
+			SELECT
+				'feedback_linked'::text AS kind,
+				ar.id AS request_id,
+				ar.display_id AS request_display_id,
+				ar.title AS request_title,
+				fl.created_at AS occurred_at,
+				fl.created_by AS actor_id,
+				COALESCE(NULLIF(uf.subject_display, ''), NULLIF(uf.user_id, ''), NULLIF(uf.subject_key, ''), NULLIF(uf.subject_hash, ''), '') AS subject_display,
+				uf.source AS source,
+				LEFT(COALESCE(NULLIF(uf.enriched_title, ''), uf.content), 500) AS description,
+				fl.feedback_id AS feedback_id,
+				''::text AS issue_provider,
+				''::text AS issue_key,
+				''::text AS issue_url,
+				''::text AS issue_sync_state
+			FROM account_requests ar
+			JOIN customer_request_feedback_links fl
+			  ON fl.tenant_id = ar.tenant_id
+			 AND fl.request_id = ar.id
+			JOIN user_feedback uf
+			  ON uf.tenant_id = fl.tenant_id
+			 AND uf.id = fl.feedback_id
+			 AND uf.deleted_at IS NULL`
+}
+
+func accountScopedEventsSQL(accountParam int) string {
+	accountRef := "$" + strconv.Itoa(accountParam)
+	return `
+			SELECT
+				'customer_linked'::text AS kind,
+				ar.id AS request_id,
+				ar.display_id AS request_display_id,
+				ar.title AS request_title,
+				cl.created_at AS occurred_at,
+				cl.created_by AS actor_id,
+				COALESCE(NULLIF(cl.subject_display, ''), NULLIF(cl.subject_key, ''), NULLIF(cl.subject_hash, ''), NULLIF(cl.account_display, ''), cl.account_key) AS subject_display,
+				'account_customer'::text AS source,
+				cl.note AS description,
+				0::bigint AS feedback_id,
+				''::text AS issue_provider,
+				''::text AS issue_key,
+				''::text AS issue_url,
+				''::text AS issue_sync_state
+			FROM account_requests ar
+			JOIN customer_request_customer_links cl
+			  ON cl.tenant_id = ar.tenant_id
+			 AND cl.request_id = ar.id
+			 AND cl.account_key = ` + accountRef + `
+			UNION ALL
+			SELECT
+				'vote_added'::text AS kind,
+				ar.id AS request_id,
+				ar.display_id AS request_display_id,
+				ar.title AS request_title,
+				v.created_at AS occurred_at,
+				v.created_by AS actor_id,
+				COALESCE(NULLIF(v.subject_display, ''), NULLIF(v.subject_key, ''), NULLIF(v.subject_hash, ''), NULLIF(v.account_display, ''), v.account_key) AS subject_display,
+				'vote'::text AS source,
+				v.note AS description,
+				0::bigint AS feedback_id,
+				''::text AS issue_provider,
+				''::text AS issue_key,
+				''::text AS issue_url,
+				''::text AS issue_sync_state
+			FROM account_requests ar
+			JOIN customer_request_votes v
+			  ON v.tenant_id = ar.tenant_id
+			 AND v.request_id = ar.id
+			 AND v.account_key = ` + accountRef
+}
+
+func issueLinkedEventsSQL() string {
+	return `
+			SELECT
+				'issue_linked'::text AS kind,
+				ar.id AS request_id,
+				ar.display_id AS request_display_id,
+				ar.title AS request_title,
+				il.created_at AS occurred_at,
+				il.created_by AS actor_id,
+				COALESCE(NULLIF(il.external_assignee, ''), '') AS subject_display,
+				il.provider AS source,
+				COALESCE(NULLIF(il.title, ''), il.external_key) AS description,
+				0::bigint AS feedback_id,
+				il.provider AS issue_provider,
+				il.external_key AS issue_key,
+				il.external_url AS issue_url,
+				il.sync_state AS issue_sync_state
+			FROM account_requests ar
+			JOIN customer_request_issue_links il
+			  ON il.tenant_id = ar.tenant_id
+			 AND il.request_id = ar.id`
+}
+
+func issueSyncedEventsSQL() string {
+	return `
+			SELECT
+				'issue_synced'::text AS kind,
+				ar.id AS request_id,
+				ar.display_id AS request_display_id,
+				ar.title AS request_title,
+				COALESCE(il.last_synced_at, il.updated_at) AS occurred_at,
+				il.created_by AS actor_id,
+				COALESCE(NULLIF(il.external_assignee, ''), '') AS subject_display,
+				il.provider AS source,
+				COALESCE(NULLIF(il.sync_error, ''), NULLIF(il.external_status_category, ''), NULLIF(il.status, ''), il.external_key) AS description,
+				0::bigint AS feedback_id,
+				il.provider AS issue_provider,
+				il.external_key AS issue_key,
+				il.external_url AS issue_url,
+				il.sync_state AS issue_sync_state
+			FROM account_requests ar
+			JOIN customer_request_issue_links il
+			  ON il.tenant_id = ar.tenant_id
+			 AND il.request_id = ar.id
+			 AND il.sync_state <> 'manual'`
+}
+
+func noteAddedEventsSQL() string {
+	return `
+			SELECT
+				'note_added'::text AS kind,
+				ar.id AS request_id,
+				ar.display_id AS request_display_id,
+				ar.title AS request_title,
+				n.created_at AS occurred_at,
+				n.created_by AS actor_id,
+				''::text AS subject_display,
+				'note'::text AS source,
+				LEFT(n.body, 500) AS description,
+				0::bigint AS feedback_id,
+				''::text AS issue_provider,
+				''::text AS issue_key,
+				''::text AS issue_url,
+				''::text AS issue_sync_state
+			FROM account_requests ar
+			JOIN customer_request_notes n
+			  ON n.tenant_id = ar.tenant_id
+			 AND n.request_id = ar.id`
+}
+
+func buildAccountSummaryQuery(filter ListFilter) (string, []any) {
+	clauses, args := buildListFilterClauses(filter)
+	args = append(args, strings.TrimSpace(filter.AccountKey))
+	accountParam := len(args)
+	return `
+		WITH scoped AS (` + summarySelectSQL() + `
+			WHERE ` + strings.Join(clauses, " AND ") + `
+		),
+		aggregate AS (
+			SELECT
+				COUNT(*)::int AS request_count,
+				COALESCE(SUM(supporting_feedback_count), 0)::int AS feedback_count,
+				COALESCE(SUM(customer_count), 0)::int AS customer_count,
+				COALESCE(SUM(vote_count), 0)::int AS vote_count,
+				COALESCE(SUM(linked_issue_count), 0)::int AS issue_count,
+				COALESCE(SUM(synced_issue_count), 0)::int AS synced_issue_count,
+				COALESCE(SUM(stale_issue_count), 0)::int AS stale_issue_count,
+				COALESCE(SUM(failed_issue_count), 0)::int AS failed_issue_count,
+				COALESCE(SUM(pending_issue_count), 0)::int AS pending_issue_count,
+				COALESCE(SUM(manual_issue_count), 0)::int AS manual_issue_count,
+				COALESCE(SUM(revenue_impact_cents), 0)::bigint AS revenue_impact_cents,
+				COALESCE(MIN(NULLIF(revenue_currency, '')), '') AS revenue_currency,
+				COUNT(*) FILTER (WHERE priority IN ('urgent', 'high'))::int AS high_priority_request_count,
+				COUNT(*) FILTER (WHERE status = 'shipped')::int AS shipped_request_count,
+				COUNT(*) FILTER (WHERE failed_issue_count > 0 OR stale_issue_count > 0)::int AS stale_or_failed_issue_count,
+				COALESCE(ROUND(AVG(decision_score)), 0)::int AS average_decision_score,
+				COALESCE(MAX(decision_score), 0)::int AS top_decision_score
+			FROM scoped
+		),
+		profile AS (
+			SELECT
+				account_key,
+				account_display,
+				revenue_cents,
+				revenue_currency,
+				tier,
+				size_segment,
+				lifecycle_status,
+				crm_provider,
+				crm_external_id,
+				source,
+				updated_at
+			FROM customer_request_accounts
+			WHERE tenant_id = $1 AND account_key = $` + strconv.Itoa(accountParam) + `
+		)
+		SELECT
+			$` + strconv.Itoa(accountParam) + `::text,
+			profile.account_key,
+			profile.account_display,
+			profile.revenue_cents,
+			profile.revenue_currency,
+			profile.tier,
+			profile.size_segment,
+			profile.lifecycle_status,
+			profile.crm_provider,
+			profile.crm_external_id,
+			profile.source,
+			profile.updated_at,
+			aggregate.request_count,
+			aggregate.feedback_count,
+			aggregate.customer_count,
+			aggregate.vote_count,
+			aggregate.issue_count,
+			aggregate.synced_issue_count,
+			aggregate.stale_issue_count,
+			aggregate.failed_issue_count,
+			aggregate.pending_issue_count,
+			aggregate.manual_issue_count,
+			aggregate.revenue_impact_cents,
+			COALESCE(NULLIF(aggregate.revenue_currency, ''), NULLIF(profile.revenue_currency, ''), 'USD'),
+			aggregate.high_priority_request_count,
+			aggregate.shipped_request_count,
+			aggregate.stale_or_failed_issue_count,
+			aggregate.average_decision_score,
+			aggregate.top_decision_score
+			FROM aggregate
+			LEFT JOIN profile ON TRUE`, args
 }
 
 func appendVisibilityClause(clauses []string, visibility Visibility) []string {
@@ -1864,15 +2350,16 @@ const summarySelectSQLText = `
 			tm.user_id,
 			COALESCE(tm.email, ''),
 			tm.role,
-			COALESCE(fc.supporting_feedback_count, 0),
-			COALESCE(sc.customer_count, 0),
-			COALESCE(sc.account_count, 0),
-			COALESCE(ic.linked_issue_count, 0),
-			COALESCE(vc.vote_count, 0),
-			COALESCE(dc.duplicate_request_count, 0),
-			COALESCE(fc.hidden_feedback_count, 0),
-			COALESCE(ai.revenue_impact_cents, 0),
-			COALESCE(ai.revenue_currency, 'USD'),
+			COALESCE(fc.supporting_feedback_count, 0) AS supporting_feedback_count,
+			COALESCE(fc.source_count, 0) AS evidence_source_count,
+			COALESCE(sc.customer_count, 0) AS customer_count,
+			COALESCE(sc.account_count, 0) AS account_count,
+			COALESCE(ic.linked_issue_count, 0) AS linked_issue_count,
+			COALESCE(vc.vote_count, 0) AS vote_count,
+			COALESCE(dc.duplicate_request_count, 0) AS duplicate_request_count,
+			COALESCE(fc.hidden_feedback_count, 0) AS hidden_feedback_count,
+			COALESCE(ai.revenue_impact_cents, 0) AS revenue_impact_cents,
+			COALESCE(ai.revenue_currency, 'USD') AS revenue_currency,
 			(
 				CASE cr.priority
 					WHEN 'urgent' THEN COALESCE(css.priority_urgent_weight, 80)
@@ -1902,6 +2389,43 @@ const summarySelectSQLText = `
 					COALESCE(css.revenue_cap, 100)
 				)
 			)::int AS decision_score,
+			CASE cr.priority
+				WHEN 'urgent' THEN COALESCE(css.priority_urgent_weight, 80)
+				WHEN 'high' THEN COALESCE(css.priority_high_weight, 60)
+				WHEN 'medium' THEN COALESCE(css.priority_medium_weight, 40)
+				WHEN 'low' THEN COALESCE(css.priority_low_weight, 20)
+				ELSE COALESCE(css.priority_none_weight, 0)
+			END AS decision_priority_contribution,
+			COALESCE(css.feedback_weight, 2) AS decision_feedback_weight,
+			COALESCE(css.feedback_cap, 80) AS decision_feedback_cap,
+			LEAST(
+				COALESCE(fc.supporting_feedback_count, 0) * COALESCE(css.feedback_weight, 2),
+				COALESCE(css.feedback_cap, 80)
+			)::int AS decision_feedback_contribution,
+			COALESCE(css.customer_weight, 5) AS decision_customer_weight,
+			COALESCE(css.customer_cap, 100) AS decision_customer_cap,
+			LEAST(
+				COALESCE(sc.customer_count, 0) * COALESCE(css.customer_weight, 5),
+				COALESCE(css.customer_cap, 100)
+			)::int AS decision_customer_contribution,
+			COALESCE(css.account_weight, 8) AS decision_account_weight,
+			COALESCE(css.account_cap, 120) AS decision_account_cap,
+			LEAST(
+				COALESCE(sc.account_count, 0) * COALESCE(css.account_weight, 8),
+				COALESCE(css.account_cap, 120)
+			)::int AS decision_account_contribution,
+			COALESCE(css.vote_weight, 4) AS decision_vote_weight,
+			COALESCE(css.vote_cap, 80) AS decision_vote_cap,
+			LEAST(
+				COALESCE(vc.vote_count, 0) * COALESCE(css.vote_weight, 4),
+				COALESCE(css.vote_cap, 80)
+			)::int AS decision_vote_contribution,
+			COALESCE(NULLIF(css.revenue_cents_per_point, 0), 100000) AS decision_revenue_cents_per_point,
+			COALESCE(css.revenue_cap, 100) AS decision_revenue_cap,
+			LEAST(
+				(COALESCE(ai.revenue_impact_cents, 0) / COALESCE(NULLIF(css.revenue_cents_per_point, 0), 100000))::int,
+				COALESCE(css.revenue_cap, 100)
+			)::int AS decision_revenue_contribution,
 			CASE
 				WHEN COALESCE(ic.linked_issue_count, 0) = 0 THEN 'no_links'
 				WHEN COALESCE(ic.failed_issue_count, 0) > 0 THEN 'failed'
@@ -1918,11 +2442,11 @@ const summarySelectSQLText = `
 				WHEN COALESCE(ic.synced_issue_count, 0) = COALESCE(ic.linked_issue_count, 0) THEN 1
 				ELSE 2
 			END AS delivery_health_rank,
-			COALESCE(ic.synced_issue_count, 0),
-			COALESCE(ic.stale_issue_count, 0),
-			COALESCE(ic.failed_issue_count, 0),
-			COALESCE(ic.pending_issue_count, 0),
-			COALESCE(ic.manual_issue_count, 0),
+			COALESCE(ic.synced_issue_count, 0) AS synced_issue_count,
+			COALESCE(ic.stale_issue_count, 0) AS stale_issue_count,
+			COALESCE(ic.failed_issue_count, 0) AS failed_issue_count,
+			COALESCE(ic.pending_issue_count, 0) AS pending_issue_count,
+			COALESCE(ic.manual_issue_count, 0) AS manual_issue_count,
 			fc.first_feedback_at,
 			fc.latest_feedback_at
 		FROM customer_requests cr
@@ -1934,6 +2458,7 @@ const summarySelectSQLText = `
 		LEFT JOIN LATERAL (
 			SELECT
 				COUNT(*) FILTER (WHERE uf.id IS NOT NULL AND uf.deleted_at IS NULL)::int AS supporting_feedback_count,
+				COUNT(DISTINCT NULLIF(uf.source, '')) FILTER (WHERE uf.id IS NOT NULL AND uf.deleted_at IS NULL)::int AS source_count,
 				MIN(uf.created_at) FILTER (WHERE uf.id IS NOT NULL AND uf.deleted_at IS NULL) AS first_feedback_at,
 				MAX(uf.created_at) FILTER (WHERE uf.id IS NOT NULL AND uf.deleted_at IS NULL) AS latest_feedback_at,
 				COUNT(*) FILTER (WHERE uf.id IS NULL OR uf.deleted_at IS NOT NULL)::int AS hidden_feedback_count
@@ -2029,10 +2554,30 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+type decisionScoreFactorInputs struct {
+	PriorityContribution int
+	FeedbackWeight       int
+	FeedbackCap          int
+	FeedbackContribution int
+	CustomerWeight       int
+	CustomerCap          int
+	CustomerContribution int
+	AccountWeight        int
+	AccountCap           int
+	AccountContribution  int
+	VoteWeight           int
+	VoteCap              int
+	VoteContribution     int
+	RevenueUnitCents     int64
+	RevenueCap           int
+	RevenueContribution  int
+}
+
 func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 	var ownerMemberID, mergedInto sql.NullString
 	var ownerID, ownerType, ownerUserID, ownerEmail, ownerRole sql.NullString
 	var status, priority, deliveryHealth string
+	var scoreInputs decisionScoreFactorInputs
 	err := row.Scan(
 		&out.ID,
 		&out.TenantID,
@@ -2055,6 +2600,7 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 		&ownerEmail,
 		&ownerRole,
 		&out.SupportingFeedbackCount,
+		&out.EvidenceSourceCount,
 		&out.CustomerCount,
 		&out.AccountCount,
 		&out.LinkedIssueCount,
@@ -2064,6 +2610,22 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 		&out.RevenueImpactCents,
 		&out.RevenueCurrency,
 		&out.DecisionScore,
+		&scoreInputs.PriorityContribution,
+		&scoreInputs.FeedbackWeight,
+		&scoreInputs.FeedbackCap,
+		&scoreInputs.FeedbackContribution,
+		&scoreInputs.CustomerWeight,
+		&scoreInputs.CustomerCap,
+		&scoreInputs.CustomerContribution,
+		&scoreInputs.AccountWeight,
+		&scoreInputs.AccountCap,
+		&scoreInputs.AccountContribution,
+		&scoreInputs.VoteWeight,
+		&scoreInputs.VoteCap,
+		&scoreInputs.VoteContribution,
+		&scoreInputs.RevenueUnitCents,
+		&scoreInputs.RevenueCap,
+		&scoreInputs.RevenueContribution,
 		&deliveryHealth,
 		&out.DeliveryHealthRank,
 		&out.SyncedIssueCount,
@@ -2077,10 +2639,7 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 	if err != nil {
 		return err
 	}
-	out.Status = Status(status)
-	out.Priority = Priority(priority)
-	out.DeliveryHealth = DeliveryHealth(deliveryHealth)
-	out.DecisionScoreExplanation = decisionScoreExplanation(out)
+	finalizeSummary(out, scoreInputs, status, priority, deliveryHealth)
 	if ownerMemberID.Valid {
 		parsed, parseErr := uuid.Parse(ownerMemberID.String)
 		if parseErr != nil {
@@ -2109,6 +2668,15 @@ func scanSummary(row scanner, out *Summary) error { // ptrext:allow scan-target
 		})
 	}
 	return nil
+}
+
+func finalizeSummary(out *Summary, scoreInputs decisionScoreFactorInputs, status, priority, deliveryHealth string) {
+	out.Status = Status(status)
+	out.Priority = Priority(priority)
+	out.DeliveryHealth = DeliveryHealth(deliveryHealth)
+	out.DecisionScoreFactors = decisionScoreFactors(out, scoreInputs)
+	out.DecisionScoreExplanation = decisionScoreExplanation(out)
+	out.EvidenceQuality = evidenceQuality(out, time.Now().UTC())
 }
 
 func scoringSettingsSelectSQL() string {
@@ -2158,6 +2726,83 @@ func scanScoringSettings(row scanner) (ScoringSettings, error) { // ptrext:allow
 		&out.UpdatedAt,
 	)
 	return out, err
+}
+
+func scanAccountSummary(row scanner) (AccountSummary, error) { // ptrext:allow scan-target
+	var out AccountSummary
+	var profile accountProfileScan
+	err := row.Scan(
+		&out.AccountKey,
+		&profile.AccountKey,
+		&profile.AccountDisplay,
+		&profile.RevenueCents,
+		&profile.RevenueCurrency,
+		&profile.Tier,
+		&profile.SizeSegment,
+		&profile.LifecycleStatus,
+		&profile.CRMProvider,
+		&profile.CRMExternalID,
+		&profile.Source,
+		&profile.UpdatedAt,
+		&out.RequestCount,
+		&out.FeedbackCount,
+		&out.CustomerCount,
+		&out.VoteCount,
+		&out.IssueCount,
+		&out.SyncedIssueCount,
+		&out.StaleIssueCount,
+		&out.FailedIssueCount,
+		&out.PendingIssueCount,
+		&out.ManualIssueCount,
+		&out.RevenueImpactCents,
+		&out.RevenueCurrency,
+		&out.HighPriorityRequestCount,
+		&out.ShippedRequestCount,
+		&out.StaleOrFailedIssueCount,
+		&out.AverageDecisionScore,
+		&out.TopDecisionScore,
+	)
+	if err != nil {
+		return AccountSummary{}, err
+	}
+	out.AccountProfile = profile.toProfile()
+	if out.RevenueCurrency == "" {
+		out.RevenueCurrency = "USD"
+	}
+	return out, nil
+}
+
+func scanAccountEvents(rows pgx.Rows) ([]AccountEvent, error) {
+	out := make([]AccountEvent, 0)
+	for rows.Next() {
+		var item AccountEvent
+		var kind, syncState string
+		if err := rows.Scan(
+			&kind,
+			&item.RequestID,
+			&item.RequestDisplayID,
+			&item.RequestTitle,
+			&item.OccurredAt,
+			&item.ActorID,
+			&item.SubjectDisplay,
+			&item.Source,
+			&item.Description,
+			&item.FeedbackID,
+			&item.IssueProvider,
+			&item.IssueKey,
+			&item.IssueURL,
+			&syncState,
+		); err != nil {
+			return nil, err
+		}
+		item.Kind = AccountEventKind(kind)
+		item.IssueSyncState = IssueSyncState(syncState)
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func listEvidence(ctx context.Context, db queryer, tenantID string, requestID uuid.UUID, limit int) ([]FeedbackEvidence, error) {
@@ -3237,6 +3882,65 @@ func appendSyncStateCount(parts []string, count int, label string) []string {
 	return append(parts, fmt.Sprintf("%d %s", count, label))
 }
 
+func decisionScoreFactors(summary *Summary, in decisionScoreFactorInputs) []DecisionScoreFactor {
+	if summary == nil {
+		return nil
+	}
+	return []DecisionScoreFactor{
+		{
+			Kind:               DecisionScoreFactorPriority,
+			RawCount:           1,
+			Weight:             in.PriorityContribution,
+			Contribution:       in.PriorityContribution,
+			ContributesToScore: true,
+		},
+		countScoreFactor(DecisionScoreFactorFeedback, summary.SupportingFeedbackCount, in.FeedbackWeight, in.FeedbackCap, in.FeedbackContribution),
+		countScoreFactor(DecisionScoreFactorCustomers, summary.CustomerCount, in.CustomerWeight, in.CustomerCap, in.CustomerContribution),
+		countScoreFactor(DecisionScoreFactorAccounts, summary.AccountCount, in.AccountWeight, in.AccountCap, in.AccountContribution),
+		countScoreFactor(DecisionScoreFactorVotes, summary.VoteCount, in.VoteWeight, in.VoteCap, in.VoteContribution),
+		revenueScoreFactor(summary.RevenueImpactCents, in.RevenueUnitCents, in.RevenueCap, in.RevenueContribution),
+		deliveryHealthFactor(summary),
+	}
+}
+
+func countScoreFactor(kind DecisionScoreFactorKind, count int, weight int, limit int, contribution int) DecisionScoreFactor {
+	return DecisionScoreFactor{
+		Kind:               kind,
+		RawCount:           count,
+		Weight:             weight,
+		Cap:                limit,
+		Contribution:       contribution,
+		Capped:             count*weight > limit,
+		ContributesToScore: true,
+	}
+}
+
+func revenueScoreFactor(valueCents int64, unitCents int64, limit int, contribution int) DecisionScoreFactor {
+	rawContribution := int64(0)
+	if unitCents > 0 {
+		rawContribution = valueCents / unitCents
+	}
+	return DecisionScoreFactor{
+		Kind:               DecisionScoreFactorRevenue,
+		RawValueCents:      valueCents,
+		UnitCents:          unitCents,
+		Cap:                limit,
+		Contribution:       contribution,
+		Capped:             rawContribution > int64(limit),
+		ContributesToScore: true,
+	}
+}
+
+func deliveryHealthFactor(summary *Summary) DecisionScoreFactor {
+	return DecisionScoreFactor{
+		Kind:               DecisionScoreFactorDeliveryHealth,
+		RawCount:           summary.LinkedIssueCount,
+		Contribution:       0,
+		Capped:             summary.StaleIssueCount > 0 || summary.FailedIssueCount > 0,
+		ContributesToScore: false,
+	}
+}
+
 func decisionScoreExplanation(summary *Summary) string {
 	if summary == nil {
 		return ""
@@ -3251,6 +3955,144 @@ func decisionScoreExplanation(summary *Summary) string {
 		summary.RevenueImpactCents,
 		summary.DeliveryHealth,
 	)
+}
+
+func evidenceQuality(summary *Summary, now time.Time) EvidenceQuality {
+	if summary == nil {
+		return EvidenceQuality{Confidence: EvidenceConfidenceLow, LowConfidence: true}
+	}
+	score := evidenceVolumeScore(summary) +
+		customerCoverageScore(summary) +
+		accountContextScore(summary) +
+		freshnessScore(summary, now) +
+		deliveryLinkScore(summary)
+	if score > 100 {
+		score = 100
+	}
+	confidence := evidenceConfidence(score)
+	return EvidenceQuality{
+		Score:            score,
+		Confidence:       confidence,
+		EvidenceCount:    summary.SupportingFeedbackCount,
+		SourceCount:      summary.EvidenceSourceCount,
+		CustomerCount:    summary.CustomerCount,
+		AccountCount:     summary.AccountCount,
+		LatestEvidenceAt: summary.LatestFeedbackAt,
+		Stale:            evidenceIsStale(summary, now),
+		LowConfidence:    confidence == EvidenceConfidenceLow,
+		GapReasons:       evidenceQualityReasons(summary, now),
+		Strengths:        evidenceQualityStrengths(summary, now),
+	}
+}
+
+func evidenceVolumeScore(summary *Summary) int {
+	return minInt(summary.SupportingFeedbackCount, 4) * 10
+}
+
+func customerCoverageScore(summary *Summary) int {
+	return minInt(summary.CustomerCount, 5) * 5
+}
+
+func accountContextScore(summary *Summary) int {
+	if summary.AccountCount > 0 {
+		return 15
+	}
+	return 0
+}
+
+func freshnessScore(summary *Summary, now time.Time) int {
+	if summary.LatestFeedbackAt == nil {
+		return 0
+	}
+	age := now.Sub(ptrext.Indirect(summary.LatestFeedbackAt))
+	if age <= 30*24*time.Hour {
+		return 10
+	}
+	if age <= 90*24*time.Hour {
+		return 5
+	}
+	return 0
+}
+
+func deliveryLinkScore(summary *Summary) int {
+	if summary.LinkedIssueCount > 0 {
+		return 10
+	}
+	return 0
+}
+
+func evidenceConfidence(score int) EvidenceConfidence {
+	if score >= 75 {
+		return EvidenceConfidenceHigh
+	}
+	if score >= 50 {
+		return EvidenceConfidenceMedium
+	}
+	return EvidenceConfidenceLow
+}
+
+func evidenceIsStale(summary *Summary, now time.Time) bool {
+	return summary.SupportingFeedbackCount > 0 &&
+		summary.LatestFeedbackAt != nil &&
+		now.Sub(ptrext.Indirect(summary.LatestFeedbackAt)) > 90*24*time.Hour
+}
+
+func evidenceQualityReasons(summary *Summary, now time.Time) []EvidenceQualityReason {
+	reasons := make([]EvidenceQualityReason, 0, 7)
+	if summary.SupportingFeedbackCount == 0 {
+		reasons = append(reasons, EvidenceReasonNoSupportingFeedback)
+	} else if summary.SupportingFeedbackCount < 3 {
+		reasons = append(reasons, EvidenceReasonLowFeedbackVolume)
+	}
+	if summary.SupportingFeedbackCount >= 2 && summary.EvidenceSourceCount < 2 {
+		reasons = append(reasons, EvidenceReasonSingleSource)
+	}
+	if summary.CustomerCount < 2 {
+		reasons = append(reasons, EvidenceReasonSingleCustomer)
+	}
+	if summary.AccountCount == 0 {
+		reasons = append(reasons, EvidenceReasonNoAccountContext)
+	}
+	if evidenceIsStale(summary, now) {
+		reasons = append(reasons, EvidenceReasonStaleEvidence)
+	}
+	if summary.LinkedIssueCount == 0 {
+		reasons = append(reasons, EvidenceReasonNoDeliveryLink)
+	}
+	if summary.HiddenFeedbackCount > 0 {
+		reasons = append(reasons, EvidenceReasonHiddenFeedback)
+	}
+	return reasons
+}
+
+func evidenceQualityStrengths(summary *Summary, now time.Time) []EvidenceQualityReason {
+	strengths := make([]EvidenceQualityReason, 0, 5)
+	if summary.SupportingFeedbackCount >= 3 {
+		strengths = append(strengths, EvidenceReasonSupportingFeedback)
+	}
+	if summary.EvidenceSourceCount >= 2 {
+		strengths = append(strengths, EvidenceReasonMultiSource)
+	}
+	if summary.CustomerCount >= 2 {
+		strengths = append(strengths, EvidenceReasonMultiCustomer)
+	}
+	if summary.AccountCount > 0 {
+		strengths = append(strengths, EvidenceReasonAccountContext)
+	}
+	if freshnessScore(summary, now) == 10 {
+		strengths = append(strengths, EvidenceReasonFreshEvidence)
+	}
+	if summary.LinkedIssueCount > 0 {
+		strengths = append(strengths, EvidenceReasonDeliveryLinked)
+	}
+	return strengths
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func scanOwner(row scanner) (*Owner, error) { // ptrext:allow scan-target

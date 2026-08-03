@@ -76,6 +76,7 @@ type repository interface {
 	MarkDeliveryDead(ctx context.Context, id int64, owner string, reason string, failureKind string, httpStatus int) (int64, error)
 	RetryDelivery(ctx context.Context, tenantID string, id int64, actorID string) (repo.Delivery, error)
 	ListDeliveries(ctx context.Context, filter repo.ListDeliveryFilter) ([]repo.Delivery, error)
+	ListStatusEvidence(ctx context.Context, tenantID string) ([]repo.StatusEvidence, error)
 	ListWebhookTargets(ctx context.Context, tenantID string) ([]repo.WebhookTarget, error)
 	ListActiveWebhookTargets(ctx context.Context, tenantID string) ([]repo.WebhookTarget, error)
 	GetWebhookTarget(ctx context.Context, tenantID string, id uuid.UUID) (repo.WebhookTarget, error)

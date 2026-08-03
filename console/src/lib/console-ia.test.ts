@@ -156,6 +156,15 @@ describe('console IA', () => {
     expect(resolveLegacySettingsPath(undefined, 'viewer')).toBe('/feedback')
   })
 
+  it('keeps delegated administration defaults focused on operational audit review', () => {
+    const delegatedItems = getConsoleItemsForRole('delegated_admin')
+
+    expect(getConsoleGroupDefaultPath('administration', 'delegated_admin')).toBe(
+      '/administration/audit-log',
+    )
+    expect(delegatedItems.some((item) => item.path === '/administration/members')).toBe(true)
+  })
+
   it('keeps every default group path inside that group for each role', () => {
     const roles: Role[] = ['admin', 'delegated_admin', 'member', 'viewer']
 

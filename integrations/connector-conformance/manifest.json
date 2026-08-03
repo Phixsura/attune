@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "attune.connector.conformance.v1",
+  "requiredHooks": [
+    "install",
+    "verifyWebhookSignature",
+    "normalizeWebhook",
+    "mapFields",
+    "classifyError",
+    "recover"
+  ],
+  "providers": [
+    {
+      "id": "github_issues",
+      "displayName": "GitHub Issues",
+      "contractVersion": "2026-08-02.github-issues.v1",
+      "install": {
+        "docs": "docs/external-sync-adapters.md",
+        "credentialTypes": ["token", "github_app"],
+        "scopes": ["issues:read", "issues:write", "webhook:read"],
+        "webhookEvents": ["issues.opened", "issues.edited", "issues.closed"]
+      },
+      "webhookSignature": {
+        "algorithm": "sha256",
+        "header": "x-hub-signature-256",
+        "secretFixture": "connector-secret"
+      },
+      "fieldMapping": {
+        "localObjectType": "customer_request",
+        "externalObjectType": "issue",
+        "requiredLocalFields": ["title", "description", "status", "external_key"],
+        "requiredExternalFields": ["number", "title", "state", "html_url", "updated_at"],
+        "sampleMapping": {
+          "title": "title",
+          "description": "body",
+          "status": "state",
+          "external_key": "externalKey",
+          "source_url": "url",
+          "labels": "labels"
+        }
+      },
+      "fixtures": [
+        {
+          "name": "issues.opened",
+          "path": "fixtures/github/issues.opened.json",
+          "gate": "fixture_replay"
+        },
+        {
+          "name": "issues.edited",
+          "path": "fixtures/github/issues.edited.json",
+          "gate": "fixture_replay"
+        },
+        {
+          "name": "issues.closed",
+          "path": "fixtures/github/issues.closed.json",
+          "gate": "fixture_replay"
+        }
+      ],
+      "recovery": [
+        {
+          "kind": "rate_limit",
+          "httpStatus": 429,
+          "retryAfterSeconds": 60,
+          "expected": "retry_after"
+        },
+        {
+          "kind": "unauthorized",
+          "httpStatus": 401,
+          "expected": "reauthorize"
+        },
+        {
+          "kind": "validation",
+          "httpStatus": 422,
+          "expected": "dead_letter"
+        },
+        {
+          "kind": "provider_unavailable",
+          "httpStatus": 503,
+          "expected": "retry"
+        }
+      ]
+    }
+  ]
+}

@@ -10,6 +10,22 @@ import { type WorkflowState } from "./workflow";
 
 export const protobufPackage = "attune.v1";
 
+export enum FeedbackIdentityResolutionStrength {
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_UNSPECIFIED = "FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_UNSPECIFIED",
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_STRONG = "FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_STRONG",
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_MEDIUM = "FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_MEDIUM",
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_WEAK = "FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_WEAK",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum FeedbackIdentityRecommendedAction {
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_UNSPECIFIED = "FEEDBACK_IDENTITY_RECOMMENDED_ACTION_UNSPECIFIED",
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_MERGE = "FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_MERGE",
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_WITH_CONTEXT = "FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_WITH_CONTEXT",
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_CAPTURE_MORE_KEYS = "FEEDBACK_IDENTITY_RECOMMENDED_ACTION_CAPTURE_MORE_KEYS",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
 /**
  * IngestRequest is the JSON body of POST /v1/feedback/ingest.
  *
@@ -101,6 +117,8 @@ export interface Feedback {
   enrichmentFailureChannelName?: string | undefined;
   enrichmentFailureConfigFingerprint?: string | undefined;
   enrichmentFailurePromptVersion?: string | undefined;
+  assignment?: FeedbackAssignment | undefined;
+  accountContext?: FeedbackAccountContext | undefined;
 }
 
 /** FeedbackDetail is the single-row view: the list fields plus extras (flat). */
@@ -179,12 +197,390 @@ export interface FeedbackDetail {
   enrichmentFailureConfigFingerprint?: string | undefined;
   enrichmentFailurePromptVersion?: string | undefined;
   replyDraftWorkflow?: ReplyDraftWorkflow | undefined;
+  identityEvidence?: FeedbackIdentityEvidence | undefined;
+  assignment?: FeedbackAssignment | undefined;
+  accountContext?: FeedbackAccountContext | undefined;
+}
+
+/**
+ * FeedbackAccountContext normalizes account/company hints embedded in source
+ * metadata so raw feedback can participate in account-level filtering before a
+ * durable account table owns the canonical profile.
+ */
+export interface FeedbackAccountContext {
+  accountKey: string;
+  accountDisplay: string;
+  source: string;
+}
+
+export interface FeedbackAssignmentOwner {
+  memberId: string;
+  memberType: string;
+  userId: string;
+  email: string;
+  role: string;
+}
+
+export interface FeedbackAssignment {
+  feedbackId: string;
+  owner?: FeedbackAssignmentOwner | undefined;
+  assignedAt?: string | undefined;
+  assignedBy: string;
+  slaDueAt?: string | undefined;
+  slaStatus: string;
+  note: string;
+}
+
+export interface AssignFeedbackRequest {
+  feedbackId: string;
+  ownerMemberId?: string | undefined;
+  slaDueAt?: string | undefined;
+  note: string;
+}
+
+export interface BatchAssignFeedbackRequest {
+  feedbackIds: string[];
+  ownerMemberIdSet: boolean;
+  ownerMemberId?: string | undefined;
+  slaDueAtSet: boolean;
+  slaDueAt?: string | undefined;
+  note: string;
+}
+
+export interface BatchAssignFeedbackResponse {
+  totalMatched: number;
+  succeeded: number;
+  failed: BatchAssignFeedbackFailure[];
+}
+
+export interface BatchAssignFeedbackFailure {
+  feedbackId: string;
+  code: string;
+  message: string;
+}
+
+export interface RecommendFeedbackAssignmentRequest {
+  feedbackIds: string[];
+}
+
+export interface FeedbackAssignmentRecommendation {
+  feedbackId: string;
+  ruleKey: string;
+  ruleName: string;
+  ownerLane: string;
+  severity: string;
+  slaHours: number;
+  recommendedSlaDueAt?: string | undefined;
+  rationale: string;
+  alreadySatisfied: boolean;
+  currentAssignment?: FeedbackAssignment | undefined;
+  recommendedOwnerMemberId?: string | undefined;
+}
+
+export interface RecommendFeedbackAssignmentResponse {
+  totalMatched: number;
+  recommendations: FeedbackAssignmentRecommendation[];
+  failed: BatchAssignFeedbackFailure[];
+}
+
+export interface ApplyFeedbackAssignmentRecommendationsRequest {
+  feedbackIds: string[];
+  ownerMemberId?: string | undefined;
+  note: string;
+}
+
+export interface ApplyFeedbackAssignmentRecommendationsResponse {
+  totalMatched: number;
+  succeeded: number;
+  skipped: number;
+  failed: BatchAssignFeedbackFailure[];
+  applied: FeedbackAssignmentRecommendation[];
+}
+
+export interface GetFeedbackAssignmentEscalationsRequest {
+  limit?: number | undefined;
+}
+
+export interface FeedbackAssignmentEscalationQueue {
+  generatedAt: string;
+  overdueCount: string;
+  dueSoonCount: string;
+  missingOwnerCount: string;
+  missingSlaCount: string;
+  items: FeedbackAssignmentEscalation[];
+}
+
+export interface FeedbackAssignmentEscalation {
+  feedbackId: string;
+  title: string;
+  source: string;
+  type: string;
+  isUrgent: boolean;
+  createdAt: string;
+  assignment?: FeedbackAssignment | undefined;
+  escalationReasons: string[];
+  hoursUntilDue?: number | undefined;
+  priority: string;
+  accountContext?: FeedbackAccountContext | undefined;
+}
+
+export interface GetFeedbackAssignmentPolicyRequest {
+}
+
+export interface FeedbackAssignmentPolicyRule {
+  ruleKey: string;
+  ruleName: string;
+  ownerLane: string;
+  severity: string;
+  slaHours: number;
+  defaultOwnerMemberId?: string | undefined;
+  enabled: boolean;
+  rationale: string;
+}
+
+export interface FeedbackAssignmentPolicy {
+  rules: FeedbackAssignmentPolicyRule[];
+  version: number;
+  updatedAt?: string | undefined;
+  updatedBy: string;
+  note: string;
+}
+
+export interface UpdateFeedbackAssignmentPolicyRequest {
+  rules: FeedbackAssignmentPolicyRule[];
+  note: string;
+}
+
+export interface ListFeedbackAssignmentPolicyRevisionsRequest {
+}
+
+export interface FeedbackAssignmentPolicyRevision {
+  version: number;
+  updatedAt?: string | undefined;
+  updatedBy: string;
+  note: string;
+  rules: FeedbackAssignmentPolicyRule[];
+}
+
+export interface ListFeedbackAssignmentPolicyRevisionsResponse {
+  revisions: FeedbackAssignmentPolicyRevision[];
+}
+
+export interface DryRunFeedbackAssignmentPolicyRequest {
+  rules: FeedbackAssignmentPolicyRule[];
+  feedbackIds: string[];
+}
+
+export interface FeedbackAssignmentPolicyDryRunImpact {
+  feedbackId: string;
+  currentRuleKey: string;
+  currentRuleName: string;
+  currentOwnerLane: string;
+  currentSlaHours: number;
+  currentOwnerMemberId?: string | undefined;
+  draftRuleKey: string;
+  draftRuleName: string;
+  draftOwnerLane: string;
+  draftSlaHours: number;
+  draftOwnerMemberId?: string | undefined;
+  changed: boolean;
+}
+
+export interface DryRunFeedbackAssignmentPolicyResponse {
+  totalMatched: number;
+  changed: number;
+  recommendations: FeedbackAssignmentRecommendation[];
+  failed: BatchAssignFeedbackFailure[];
+  impacts: FeedbackAssignmentPolicyDryRunImpact[];
+}
+
+export interface RestoreFeedbackAssignmentPolicyRequest {
+  version: number;
+  note: string;
 }
 
 export interface Attachment {
   url: string;
   mime?: string | undefined;
   size?: string | undefined;
+}
+
+/**
+ * FeedbackIdentityEvidence normalizes the customer identity signals embedded in
+ * user_feedback.user_id and source_meta so console detail views can show which
+ * fields are available for identity-graph merging.
+ */
+export interface FeedbackIdentityEvidence {
+  sourceUser: string;
+  keys: FeedbackIdentityKey[];
+  mergeCandidateCount: number;
+  hasEmail: boolean;
+  hasExternalId: boolean;
+  hasSourceContactId: boolean;
+  hasCrmId: boolean;
+  hasSupportId: boolean;
+  assessment?: FeedbackIdentityAssessment | undefined;
+}
+
+export interface FeedbackIdentityKey {
+  kind: string;
+  value: string;
+  source: string;
+}
+
+/**
+ * FeedbackIdentityAssessment gives operators a deterministic first-pass
+ * resolution-quality read before the full signal graph supports reversible
+ * merge and split operations.
+ */
+export interface FeedbackIdentityAssessment {
+  strength: FeedbackIdentityResolutionStrength;
+  recommendedAction: FeedbackIdentityRecommendedAction;
+  missingKinds: string[];
+  riskReasons: string[];
+  stableKeyCount: number;
+  sourceCount: number;
+}
+
+export interface GetFeedbackIdentityReviewRequest {
+}
+
+export interface GetFeedbackIdentityReviewResponse {
+  summary?: FeedbackIdentityReviewSummary | undefined;
+  mergeCandidates: FeedbackIdentityMergeCandidate[];
+  needsEvidence: FeedbackIdentityNeedsEvidenceItem[];
+  recentMerges: FeedbackIdentityReviewedMerge[];
+  subjectRoster?: FeedbackIdentitySubjectRoster | undefined;
+}
+
+export interface GetFeedbackIdentitySubjectRequest {
+  subjectId: string;
+}
+
+export interface MergeFeedbackIdentityReviewRequest {
+  identityKind: string;
+  identityValue: string;
+  feedbackIds: string[];
+  note: string;
+}
+
+export interface MergeFeedbackIdentityReviewResponse {
+  subject?: FeedbackIdentitySubject | undefined;
+  evidenceCount: number;
+  createdSubject: boolean;
+  action: string;
+}
+
+export interface SplitFeedbackIdentityReviewRequest {
+  subjectId: string;
+  identityKind: string;
+  identityValue: string;
+  note: string;
+}
+
+export interface SplitFeedbackIdentityReviewResponse {
+  subject?: FeedbackIdentitySubject | undefined;
+  evidenceCount: number;
+  action: string;
+}
+
+export interface FeedbackIdentitySubject {
+  id: string;
+  displayName: string;
+  primaryIdentityKind: string;
+  primaryIdentityValue: string;
+  status: string;
+  identityCount: number;
+  evidenceCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedbackIdentityReviewedMerge {
+  eventId: string;
+  subject?: FeedbackIdentitySubject | undefined;
+  identityKind: string;
+  identityValue: string;
+  evidenceCount: number;
+  feedbackIds: string[];
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface FeedbackIdentitySubjectRoster {
+  activeSubjectCount: number;
+  activeIdentityCount: number;
+  evidenceCount: number;
+  subjects: FeedbackIdentitySubject[];
+}
+
+export interface FeedbackIdentitySubjectDetail {
+  subject?: FeedbackIdentitySubject | undefined;
+  identities: FeedbackIdentitySubjectIdentity[];
+  events: FeedbackIdentitySubjectEvent[];
+}
+
+export interface FeedbackIdentitySubjectIdentity {
+  id: string;
+  kind: string;
+  value: string;
+  source: string;
+  confidence: string;
+  evidenceCount: number;
+  firstFeedbackId: string;
+  latestFeedbackId: string;
+  revoked: boolean;
+  revokedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FeedbackIdentitySubjectEvent {
+  id: string;
+  action: string;
+  identityKind: string;
+  identityValue: string;
+  evidenceCount: number;
+  feedbackIds: string[];
+  note: string;
+  createdBy: string;
+  createdAt: string;
+  evidence: FeedbackIdentityReviewEvidence[];
+}
+
+export interface FeedbackIdentityReviewSummary {
+  scannedFeedbackCount: number;
+  mergeCandidateCount: number;
+  needsEvidenceCount: number;
+  strongCandidateCount: number;
+  weakFeedbackCount: number;
+}
+
+export interface FeedbackIdentityMergeCandidate {
+  identityKind: string;
+  identityValue: string;
+  feedbackCount: number;
+  sourceCount: number;
+  stableKeyCount: number;
+  latestFeedbackAt: string;
+  strength: FeedbackIdentityResolutionStrength;
+  recommendedAction: FeedbackIdentityRecommendedAction;
+  riskReasons: string[];
+  evidence: FeedbackIdentityReviewEvidence[];
+}
+
+export interface FeedbackIdentityNeedsEvidenceItem {
+  evidence?: FeedbackIdentityReviewEvidence | undefined;
+  assessment?: FeedbackIdentityAssessment | undefined;
+}
+
+export interface FeedbackIdentityReviewEvidence {
+  feedbackId: string;
+  source: string;
+  sourceUser: string;
+  createdAt: string;
+  excerpt: string;
+  keys: FeedbackIdentityKey[];
 }
 
 /**
@@ -237,6 +633,7 @@ export interface ListFeedbackRequest {
   source?: string | undefined;
   type?: string | undefined;
   cohortId?: string | undefined;
+  accountKey?: string | undefined;
 }
 
 export interface ListFeedbackResponse {
@@ -248,6 +645,45 @@ export interface ListFeedbackResponse {
 export interface GetFeedbackRequest {
   /** path param */
   id: string;
+}
+
+export interface GetFeedbackSignalTraceRequest {
+  /** path param */
+  feedbackId: string;
+  limit?: number | undefined;
+}
+
+export interface FeedbackSignalTrace {
+  feedbackId: string;
+  signalTraceId: string;
+  source: string;
+  terminalStatus: string;
+  complete: boolean;
+  missingStages: string[];
+  stages: FeedbackSignalTraceStage[];
+  events: FeedbackSignalTraceEvent[];
+  /** RFC3339 */
+  generatedAt: string;
+}
+
+export interface FeedbackSignalTraceStage {
+  key: string;
+  label: string;
+  status: string;
+  eventCount: number;
+  /** RFC3339 */
+  lastEventAt?: string | undefined;
+}
+
+export interface FeedbackSignalTraceEvent {
+  stage: string;
+  kind: string;
+  status: string;
+  traceId: string;
+  summary: string;
+  /** RFC3339 */
+  occurredAt: string;
+  metadata?: { [key: string]: any } | undefined;
 }
 
 /** RegenerateReplyDraftRequest re-runs reply-draft generation for one row (#26). */
@@ -459,6 +895,9 @@ export interface GetFeedbackStatsRequest {
 export interface GetTerminalFailureWorkbenchRequest {
 }
 
+export interface GetFeedbackTriageCommandCenterRequest {
+}
+
 /** ValueCount is one bucket of a per-dim distribution. */
 export interface ValueCount {
   value: string;
@@ -502,6 +941,35 @@ export interface GetTerminalFailureWorkbenchResponse {
   ageBucketClusters: TerminalFailureCluster[];
 }
 
+export interface FeedbackTriageCommandCenter {
+  generatedAt: string;
+  openCount: string;
+  activeCount: string;
+  closedCount: string;
+  urgentOpenCount: string;
+  terminalFailureCount: string;
+  identityDebtCount: string;
+  overdueCount: string;
+  dueSoonCount: string;
+  lanes: FeedbackTriageLane[];
+}
+
+export interface FeedbackTriageLane {
+  key: string;
+  label: string;
+  ownerLane: string;
+  severity: string;
+  slaHours: number;
+  count: string;
+  overdueCount: string;
+  dueSoonCount: string;
+  oldestCreatedAt: string;
+  nextDeadlineAt: string;
+  recommendedAction: string;
+  filterQuery: string;
+  sampleFeedbackIds: string[];
+}
+
 /**
  * FeedbackService is attune's feedback API. Today it exposes Ingest
  * (POST /v1/feedback/ingest, public, API-key auth); the console feedback reads
@@ -525,12 +993,58 @@ export interface FeedbackService {
   ListFeedback(request: ListFeedbackRequest): Promise<ListFeedbackResponse>;
   /** GET /fb/v1/console/feedback/{id} */
   GetFeedback(request: GetFeedbackRequest): Promise<FeedbackDetail>;
+  /** GET /fb/v1/console/feedback/{feedback_id}/signal-trace */
+  GetFeedbackSignalTrace(request: GetFeedbackSignalTraceRequest): Promise<FeedbackSignalTrace>;
   /** GET /fb/v1/console/feedback/stats */
   GetFeedbackStats(request: GetFeedbackStatsRequest): Promise<GetFeedbackStatsResponse>;
+  /** GET /fb/v1/console/feedback/identity-review */
+  GetFeedbackIdentityReview(request: GetFeedbackIdentityReviewRequest): Promise<GetFeedbackIdentityReviewResponse>;
+  /** GET /fb/v1/console/feedback/identity-review/subjects/{subject_id} */
+  GetFeedbackIdentitySubject(request: GetFeedbackIdentitySubjectRequest): Promise<FeedbackIdentitySubjectDetail>;
+  /** POST /fb/v1/console/feedback/identity-review/merge */
+  MergeFeedbackIdentityReview(
+    request: MergeFeedbackIdentityReviewRequest,
+  ): Promise<MergeFeedbackIdentityReviewResponse>;
+  /** POST /fb/v1/console/feedback/identity-review/split */
+  SplitFeedbackIdentityReview(
+    request: SplitFeedbackIdentityReviewRequest,
+  ): Promise<SplitFeedbackIdentityReviewResponse>;
   /** GET /fb/v1/console/feedback/terminal-failures */
   GetTerminalFailureWorkbench(
     request: GetTerminalFailureWorkbenchRequest,
   ): Promise<GetTerminalFailureWorkbenchResponse>;
+  /** GET /fb/v1/console/feedback/triage-command-center */
+  GetFeedbackTriageCommandCenter(request: GetFeedbackTriageCommandCenterRequest): Promise<FeedbackTriageCommandCenter>;
+  /** PATCH /fb/v1/console/feedback/{feedback_id}/assignment */
+  AssignFeedback(request: AssignFeedbackRequest): Promise<FeedbackAssignment>;
+  /** POST /fb/v1/console/feedback/assignment:batch */
+  BatchAssignFeedback(request: BatchAssignFeedbackRequest): Promise<BatchAssignFeedbackResponse>;
+  /** POST /fb/v1/console/feedback/assignment:recommend */
+  RecommendFeedbackAssignment(
+    request: RecommendFeedbackAssignmentRequest,
+  ): Promise<RecommendFeedbackAssignmentResponse>;
+  /** POST /fb/v1/console/feedback/assignment:apply-recommendations */
+  ApplyFeedbackAssignmentRecommendations(
+    request: ApplyFeedbackAssignmentRecommendationsRequest,
+  ): Promise<ApplyFeedbackAssignmentRecommendationsResponse>;
+  /** GET /fb/v1/console/feedback/assignment/escalations */
+  GetFeedbackAssignmentEscalations(
+    request: GetFeedbackAssignmentEscalationsRequest,
+  ): Promise<FeedbackAssignmentEscalationQueue>;
+  /** GET /fb/v1/console/feedback/assignment/policy */
+  GetFeedbackAssignmentPolicy(request: GetFeedbackAssignmentPolicyRequest): Promise<FeedbackAssignmentPolicy>;
+  /** PUT /fb/v1/console/feedback/assignment/policy */
+  UpdateFeedbackAssignmentPolicy(request: UpdateFeedbackAssignmentPolicyRequest): Promise<FeedbackAssignmentPolicy>;
+  /** GET /fb/v1/console/feedback/assignment/policy/revisions */
+  ListFeedbackAssignmentPolicyRevisions(
+    request: ListFeedbackAssignmentPolicyRevisionsRequest,
+  ): Promise<ListFeedbackAssignmentPolicyRevisionsResponse>;
+  /** POST /fb/v1/console/feedback/assignment/policy:dry-run */
+  DryRunFeedbackAssignmentPolicy(
+    request: DryRunFeedbackAssignmentPolicyRequest,
+  ): Promise<DryRunFeedbackAssignmentPolicyResponse>;
+  /** POST /fb/v1/console/feedback/assignment/policy:restore */
+  RestoreFeedbackAssignmentPolicy(request: RestoreFeedbackAssignmentPolicyRequest): Promise<FeedbackAssignmentPolicy>;
   /** POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; member session auth) */
   RegenerateReplyDraft(request: RegenerateReplyDraftRequest): Promise<RegenerateReplyDraftResponse>;
   /** POST /fb/v1/console/feedback/{id}/reply-draft/edit (console; member session auth) */

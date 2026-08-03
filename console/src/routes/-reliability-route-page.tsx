@@ -3,6 +3,8 @@ import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 import { useTranslation } from 'react-i18next'
 import { apiKeysQuery } from '@/features/api-keys/api/list-api-keys'
+import { customerRequestsQuery } from '@/features/customer-requests/api/customer-requests'
+import { feedbackStatsQuery } from '@/features/feedback/api/get-feedback-stats'
 import { gdprOperationsQuery } from '@/features/gdpr/api/gdpr-control'
 import { mcpClientsQuery } from '@/features/mcp-clients/api/list-mcp-clients'
 import { deliveriesQuery } from '@/features/outbox-dead/api/list-deliveries'
@@ -11,17 +13,40 @@ import {
   recoveryContextQuery,
 } from '@/features/reliability/api/get-recovery-context'
 import { releaseContextQuery } from '@/features/reliability/api/get-release-context'
+import { buildBackupRestoreDrill } from '@/features/reliability/backup-restore-drill'
 import {
   type ReliabilityMetric,
   ReliabilityPage,
   type ReliabilityReadinessMetric,
   type Tone,
 } from '@/features/reliability/components/reliability-page'
+import { buildConsistencyChecks } from '@/features/reliability/consistency-checks'
+import { buildErrorBudgetLedger } from '@/features/reliability/error-budget-ledger'
+import { buildIncidentTimeline } from '@/features/reliability/incident-timeline'
+import { buildPipelineSloLedger } from '@/features/reliability/pipeline-slo-ledger'
+import { buildReleaseHealthLedger } from '@/features/reliability/release-health-ledger'
+import { buildReplayDrill } from '@/features/reliability/replay-drill'
+import { buildTenantQuotaSaturation } from '@/features/reliability/tenant-quota-saturation'
+import { requestNotificationStatusEvidenceQuery } from '@/features/request-notifications/api/request-notifications'
 import { authModeQuery } from '@/features/security/api/auth-mode'
 import { meQuery } from '@/features/session/api/get-me'
+import { surveyAnalyticsQuery } from '@/features/surveys/api/surveys'
 import { type PreflightStatus, preflightQuery } from '@/features/system-readiness/api/get-preflight'
+import { llmUsageQuery } from '@/features/usage/api/get-llm-usage'
+import { usageQuery } from '@/features/usage/api/get-usage'
+import {
+  CustomerRequestSort,
+  CustomerRequestVisibility,
+  SortDirection,
+} from '@/proto/attune/v1/customer_request'
 
 type TranslationFunction = ReturnType<typeof useTranslation>['t']
+
+export const reliabilityCustomerRequestFilters = {
+  direction: SortDirection.SORT_DIRECTION_DESC,
+  sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
+  visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+} as const
 
 function safeErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -204,6 +229,12 @@ export function ReliabilityRoutePage() {
   const deadDeliveries = useQuery(deliveriesQuery('dead'))
   const recoveryContext = useQuery(recoveryContextQuery())
   const releaseContext = useQuery(releaseContextQuery())
+  const feedbackStats = useQuery(feedbackStatsQuery())
+  const notificationStatusEvidence = useQuery(requestNotificationStatusEvidenceQuery())
+  const usage = useQuery(usageQuery())
+  const llmUsage = useQuery(llmUsageQuery({ granularity: 'week', range: 'now-30d' }))
+  const customerRequests = useQuery(customerRequestsQuery(reliabilityCustomerRequestFilters))
+  const surveyAnalytics = useQuery(surveyAnalyticsQuery())
 
   const tenantName = me.data?.tenant?.name ?? t('common.loading', 'Loading...')
   const tenantSlug = me.data?.tenant?.slug
@@ -269,6 +300,9 @@ export function ReliabilityRoutePage() {
   const releaseGlossaryValue = releaseData
     ? joinSemanticLabels(releaseData.glossary)
     : t('common.loading', 'Loading...')
+  const feedbackHref = tenantSlug
+    ? `/feedback?account_key=${encodeURIComponent(tenantSlug)}`
+    : '/feedback'
 
   const readinessStatus = preflight.data?.status
   const readinessTone = readinessStatus ? statusTone(readinessStatus) : 'default'
@@ -352,6 +386,30 @@ export function ReliabilityRoutePage() {
       label: t('reliability.links.release_context', '发布与归属'),
       message: safeErrorMessage(releaseContext.error, t('common.error', 'Error')),
     },
+    feedbackStats.error && {
+      label: t('reliability.release_health.feedback_pressure', 'Feedback pressure'),
+      message: safeErrorMessage(feedbackStats.error, t('common.error', 'Error')),
+    },
+    notificationStatusEvidence.error && {
+      label: t('reliability.release_health.notification_failures', 'Notification failures'),
+      message: safeErrorMessage(notificationStatusEvidence.error, t('common.error', 'Error')),
+    },
+    usage.error && {
+      label: t('reliability.tenant_quota.ingest_usage', 'Ingest usage'),
+      message: safeErrorMessage(usage.error, t('common.error', 'Error')),
+    },
+    llmUsage.error && {
+      label: t('reliability.tenant_quota.llm_usage', 'LLM usage'),
+      message: safeErrorMessage(llmUsage.error, t('common.error', 'Error')),
+    },
+    customerRequests.error && {
+      label: t('reliability.consistency.customer_requests', 'Customer requests'),
+      message: safeErrorMessage(customerRequests.error, t('common.error', 'Error')),
+    },
+    surveyAnalytics.error && {
+      label: t('reliability.consistency.survey_analytics', 'Survey analytics'),
+      message: safeErrorMessage(surveyAnalytics.error, t('common.error', 'Error')),
+    },
   ].filter(Boolean) as Array<{ label: string; message: string }>
 
   const isRefreshing =
@@ -363,7 +421,13 @@ export function ReliabilityRoutePage() {
     gdprOps.isFetching ||
     deadDeliveries.isFetching ||
     recoveryContext.isFetching ||
-    releaseContext.isFetching
+    releaseContext.isFetching ||
+    feedbackStats.isFetching ||
+    notificationStatusEvidence.isFetching ||
+    usage.isFetching ||
+    llmUsage.isFetching ||
+    customerRequests.isFetching ||
+    surveyAnalytics.isFetching
 
   const refreshAll = () => {
     void Promise.all([
@@ -376,6 +440,18 @@ export function ReliabilityRoutePage() {
       queryClient.invalidateQueries({ queryKey: deliveriesQuery('dead').queryKey }),
       queryClient.invalidateQueries({ queryKey: recoveryContextQuery().queryKey }),
       queryClient.invalidateQueries({ queryKey: releaseContextQuery().queryKey }),
+      queryClient.invalidateQueries({ queryKey: feedbackStatsQuery().queryKey }),
+      queryClient.invalidateQueries({
+        queryKey: requestNotificationStatusEvidenceQuery().queryKey,
+      }),
+      queryClient.invalidateQueries({ queryKey: usageQuery().queryKey }),
+      queryClient.invalidateQueries({
+        queryKey: llmUsageQuery({ granularity: 'week', range: 'now-30d' }).queryKey,
+      }),
+      queryClient.invalidateQueries({
+        queryKey: customerRequestsQuery(reliabilityCustomerRequestFilters).queryKey,
+      }),
+      queryClient.invalidateQueries({ queryKey: surveyAnalyticsQuery().queryKey }),
     ])
   }
 
@@ -462,6 +538,112 @@ export function ReliabilityRoutePage() {
     value: releaseCompatibilityValue,
     hint: releaseCompatibilityHintValue,
   }
+  const replayDrill = buildReplayDrill({
+    activeGdpr,
+    dashboardHref,
+    deadDeliveryCount,
+    inflightDeadDeliveries,
+    queuedGdpr,
+    readinessStatus,
+    recoveryStatus: recoveryData?.status,
+    releaseLifecycleState: releaseData?.lifecycleState,
+    retryableDeadDeliveries,
+    scheduledDeletes,
+    tenantName,
+  })
+  const errorBudgetLedger = buildErrorBudgetLedger({
+    activeApiKeys: apiKeys.data ? activeApiKeys : undefined,
+    activeGdpr: gdprOps.data ? activeGdpr : undefined,
+    activeMcpClients: mcpClients.data ? activeMcpClients : undefined,
+    authMode: authMode.data?.mode,
+    dashboardHref,
+    deadDeliveryCount: deadDeliveries.data ? deadDeliveryCount : undefined,
+    inflightDeadDeliveries: deadDeliveries.data ? inflightDeadDeliveries : undefined,
+    queuedGdpr: gdprOps.data ? queuedGdpr : undefined,
+    readinessStatus,
+    recoveryStatus: recoveryData?.status,
+    releaseLifecycleState: releaseData?.lifecycleState,
+    retryableDeadDeliveries: deadDeliveries.data ? retryableDeadDeliveries : undefined,
+    scheduledDeletes: gdprOps.data ? scheduledDeletes : undefined,
+    tenantName,
+    totalApiKeys: apiKeys.data ? totalApiKeys : undefined,
+    totalMcpClients: mcpClients.data ? totalMcpClients : undefined,
+  })
+  const releaseHealthLedger = buildReleaseHealthLedger({
+    dashboardHref,
+    escalationHref:
+      releaseData?.escalationUrl || 'https://github.com/Phixsura/attune/issues/new/choose',
+    feedbackHref,
+    feedbackStats: feedbackStats.data,
+    notificationEvidence: notificationStatusEvidence.data,
+    notificationHref: '/integrations/request-notifications',
+    readinessStatus,
+    recovery: recoveryData,
+    release: releaseData,
+  })
+  const incidentTimeline = buildIncidentTimeline({
+    activeGdpr: gdprOps.data ? activeGdpr : undefined,
+    dashboardHref,
+    deadDeliveryCount: deadDeliveries.data ? deadDeliveryCount : undefined,
+    feedbackHref,
+    feedbackStats: feedbackStats.data,
+    inflightDeadDeliveries: deadDeliveries.data ? inflightDeadDeliveries : undefined,
+    notificationEvidence: notificationStatusEvidence.data,
+    notificationHref: '/integrations/request-notifications',
+    preflightChecks: preflight.data?.checks,
+    queuedGdpr: gdprOps.data ? queuedGdpr : undefined,
+    readinessStatus,
+    recovery: recoveryData,
+    release: releaseData,
+    retryableDeadDeliveries: deadDeliveries.data ? retryableDeadDeliveries : undefined,
+    scheduledDeletes: gdprOps.data ? scheduledDeletes : undefined,
+    tenantName,
+  })
+  const tenantQuotaSaturation = buildTenantQuotaSaturation({
+    apiKeys: apiKeys.data,
+    dashboardHref,
+    deadDeliveryCount: deadDeliveries.data ? deadDeliveryCount : undefined,
+    gdprOperations: gdprOps.data,
+    inflightDeadDeliveries: deadDeliveries.data ? inflightDeadDeliveries : undefined,
+    llmUsage: llmUsage.data,
+    mcpClients: mcpClients.data,
+    retryableDeadDeliveries: deadDeliveries.data ? retryableDeadDeliveries : undefined,
+    tenantName,
+    usage: usage.data,
+  })
+  const backupRestoreDrill = buildBackupRestoreDrill({
+    dashboardHref,
+    preflightChecks: preflight.data?.checks,
+    recovery: recoveryData,
+    release: releaseData,
+    tenantName,
+  })
+  const consistencyChecks = buildConsistencyChecks({
+    customerRequests: customerRequests.data,
+    dashboardHref,
+    feedbackHref,
+    feedbackStats: feedbackStats.data,
+    notificationEvidence: notificationStatusEvidence.data,
+    notificationHref: '/integrations/request-notifications',
+    surveyAnalytics: surveyAnalytics.data,
+    surveyHref: '/integrations/surveys',
+    tenantName,
+    usage: usage.data,
+  })
+  const pipelineSloLedger = buildPipelineSloLedger({
+    customerRequests: customerRequests.data,
+    dashboardHref,
+    deadDeliveryCount: deadDeliveries.data ? deadDeliveryCount : undefined,
+    feedbackHref,
+    inflightDeadDeliveries: deadDeliveries.data ? inflightDeadDeliveries : undefined,
+    llmUsage: llmUsage.data,
+    preflightChecks: preflight.data?.checks,
+    readinessStatus,
+    releaseLifecycleState: releaseData?.lifecycleState,
+    retryableDeadDeliveries: deadDeliveries.data ? retryableDeadDeliveries : undefined,
+    tenantName,
+    usage: usage.data,
+  })
 
   return (
     <ReliabilityPage
@@ -476,6 +658,14 @@ export function ReliabilityRoutePage() {
       mcpClients={mcpMetric}
       gdpr={gdprMetric}
       deadDeliveries={deadMetric}
+      backupRestoreDrill={backupRestoreDrill}
+      consistencyChecks={consistencyChecks}
+      errorBudgetLedger={errorBudgetLedger}
+      incidentTimeline={incidentTimeline}
+      pipelineSloLedger={pipelineSloLedger}
+      releaseHealthLedger={releaseHealthLedger}
+      replayDrill={replayDrill}
+      tenantQuotaSaturation={tenantQuotaSaturation}
       releaseContext={{
         version: releaseVersionMetric,
         environment: releaseEnvironmentMetric,

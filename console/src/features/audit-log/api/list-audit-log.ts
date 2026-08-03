@@ -1,4 +1,4 @@
-import { infiniteQueryOptions } from '@tanstack/react-query'
+import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import { triggerBlobDownload } from '@/lib/blob-download'
 import type { AuditLogEntry, ListAuditLogResponse } from '@/proto/attune/v1/audit'
@@ -45,6 +45,20 @@ export const auditLogInfiniteQuery = (filters: AuditLogFilters) =>
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? null,
+    staleTime: 15_000,
+  })
+
+export const auditLogQuery = (filters: AuditLogFilters) =>
+  queryOptions({
+    queryKey: ['console', 'audit-log', 'snapshot', filters] as const,
+    queryFn: async ({ signal }) => {
+      const params = toSearchParams(filters)
+      const suffix = params.toString() ? `?${params.toString()}` : ''
+      const response = await api<ListAuditLogResponse>(`/fb/v1/console/audit-log${suffix}`, {
+        signal,
+      })
+      return response.items ?? []
+    },
     staleTime: 15_000,
   })
 

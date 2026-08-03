@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { AssignmentRecommendationDialog } from '@/features/feedback/components/assignment-recommendation-dialog'
+import { BatchAssignmentDialog } from '@/features/feedback/components/batch-assignment-dialog'
 import { BatchConfirmDialog } from '@/features/feedback/components/batch-confirm-dialog'
 import { BatchDeleteDialog } from '@/features/feedback/components/batch-delete-dialog'
 import { DeleteFeedbackDialog } from '@/features/feedback/components/delete-feedback-dialog'
@@ -128,6 +130,125 @@ describe('BatchConfirmDialog', () => {
   it('does not render content when closed', () => {
     renderWithProviders(<BatchConfirmDialog {...defaultProps} open={false} />)
     expect(screen.queryByText('批量修改标签')).not.toBeInTheDocument()
+  })
+})
+
+describe('BatchAssignmentDialog', () => {
+  const defaultProps = {
+    open: true,
+    count: 2,
+    members: [
+      {
+        id: 'member-1',
+        memberType: 'tenant_user',
+        userId: 'owner-1',
+        email: 'owner@example.com',
+        role: 'member',
+        roleSource: 'manual',
+        invitedAt: '0',
+        acceptedAt: '1',
+      },
+    ],
+    isMembersLoading: false,
+    isLoading: false,
+    onConfirm: vi.fn(),
+    onCancel: vi.fn(),
+  }
+
+  it('keeps apply disabled until a bulk assignment intent is selected', () => {
+    renderWithProviders(<BatchAssignmentDialog {...defaultProps} />)
+    expect(screen.getByRole('button', { name: '应用分派' })).toBeDisabled()
+  })
+
+  it('submits owner, SLA, and handoff note changes', async () => {
+    const onConfirm = vi.fn()
+    const { user } = renderWithProviders(
+      <BatchAssignmentDialog {...defaultProps} onConfirm={onConfirm} />,
+    )
+
+    await user.click(screen.getByLabelText('负责人'))
+    await user.click(screen.getByRole('option', { name: 'owner@example.com' }))
+    await user.click(screen.getByLabelText('SLA'))
+    await user.click(screen.getByRole('option', { name: '设置 SLA' }))
+    await user.type(screen.getByLabelText('截止时间'), '2026-08-02T09:30')
+    await user.type(screen.getByLabelText('交接备注'), 'Enterprise escalation')
+    await user.click(screen.getByRole('button', { name: '应用分派' }))
+
+    expect(onConfirm).toHaveBeenCalledWith({
+      ownerMemberIdSet: true,
+      ownerMemberId: 'member-1',
+      slaDueAtSet: true,
+      slaDueAt: expect.stringMatching(/^2026-08-02T.*Z$/),
+      note: 'Enterprise escalation',
+    })
+  })
+})
+
+describe('AssignmentRecommendationDialog', () => {
+  const defaultProps = {
+    open: true,
+    count: 2,
+    response: {
+      totalMatched: 2,
+      recommendations: [
+        {
+          feedbackId: '101',
+          ruleKey: 'urgent_open',
+          ruleName: 'Urgent open feedback',
+          ownerLane: 'support_triage',
+          severity: 'critical',
+          slaHours: 24,
+          recommendedSlaDueAt: '2026-08-02T09:30:00Z',
+          rationale: 'urgent',
+          alreadySatisfied: false,
+        },
+      ],
+      failed: [],
+    },
+    members: [
+      {
+        id: 'member-1',
+        memberType: 'tenant_user',
+        userId: 'owner-1',
+        email: 'owner@example.com',
+        role: 'member',
+        roleSource: 'manual',
+        invitedAt: '0',
+        acceptedAt: '1',
+      },
+    ],
+    isMembersLoading: false,
+    isPreviewLoading: false,
+    isApplying: false,
+    onConfirm: vi.fn(),
+    onCancel: vi.fn(),
+  }
+
+  it('keeps apply disabled when no recommendations match', () => {
+    renderWithProviders(
+      <AssignmentRecommendationDialog
+        {...defaultProps}
+        response={{ totalMatched: 1, recommendations: [], failed: [] }}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '应用建议' })).toBeDisabled()
+  })
+
+  it('submits owner override and policy note', async () => {
+    const onConfirm = vi.fn()
+    const { user } = renderWithProviders(
+      <AssignmentRecommendationDialog {...defaultProps} onConfirm={onConfirm} />,
+    )
+
+    await user.click(screen.getByLabelText('实际负责人'))
+    await user.click(screen.getByRole('option', { name: 'owner@example.com' }))
+    await user.type(screen.getByLabelText('应用备注'), 'Policy sweep')
+    await user.click(screen.getByRole('button', { name: '应用建议' }))
+
+    expect(onConfirm).toHaveBeenCalledWith({
+      ownerMemberId: 'member-1',
+      note: 'Policy sweep',
+    })
   })
 })
 

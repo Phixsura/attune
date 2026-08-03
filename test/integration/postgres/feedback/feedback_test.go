@@ -10,10 +10,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	"github.com/Phixsura/attune/internal/repo/feedback"
+	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
+	systemsettingsrepo "github.com/Phixsura/attune/internal/repo/systemsettings"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	feedbackassignmentsvc "github.com/Phixsura/attune/internal/service/feedbackassignment"
 	"github.com/Phixsura/attune/internal/testdb"
 )
 
@@ -106,6 +112,736 @@ func TestPG_TryClaim_FlipsStatusOnce(t *testing.T) {
 	}
 	if ok2 {
 		t.Error("second claim within 5min should lose contention")
+	}
+}
+
+func TestPG_AssignFeedbackPersistsOwnerSLAAndConsoleProjection(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, id := seedTenantAndRow(t, pool, "assignable feedback")
+	repo := feedback.NewFeedback(pool)
+	ctx := context.Background()
+
+	var ownerID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO tenant_members (
+			tenant_id, member_type, user_id, email, role, role_source, accepted_at
+		)
+		VALUES ($1, 'tenant_user', 'pm-user', 'pm@example.com', 'member', 'manual', NOW())
+		RETURNING id::text`,
+		tenantID,
+	).Scan(&ownerID)
+	if err != nil {
+		t.Fatalf("insert tenant member: %v", err)
+	}
+	if err := repo.ValidateAssignmentOwner(ctx, tenantID, ownerID); err != nil {
+		t.Fatalf("validate assignment owner: %v", err)
+	}
+
+	dueAt := time.Date(2026, 6, 26, 9, 30, 0, 0, time.UTC)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin assignment tx: %v", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	assigned, err := repo.AssignFeedbackTx(ctx, tx, tenantID, id, feedback.AssignmentInput{
+		OwnerMemberIDSet: true,
+		OwnerMemberID:    ptrext.Of(ownerID),
+		SLADueAtSet:      true,
+		SLADueAt:         ptrext.Of(dueAt),
+		Note:             "Own release readiness.",
+		ActorID:          "operator-1",
+	})
+	if err != nil {
+		t.Fatalf("assign feedback: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit assignment tx: %v", err)
+	}
+	if got := ptrext.IndirectOr(assigned.OwnerMemberID, ""); got != ownerID {
+		t.Fatalf("assigned owner = %q, want %q", got, ownerID)
+	}
+
+	detail, err := repo.GetForConsole(ctx, tenantID, id)
+	if err != nil {
+		t.Fatalf("get console feedback: %v", err)
+	}
+	if got := ptrext.IndirectOr(detail.Assignment.OwnerMemberID, ""); got != ownerID {
+		t.Fatalf("projected owner = %q, want %q", got, ownerID)
+	}
+	if detail.Assignment.OwnerEmail != "pm@example.com" {
+		t.Fatalf("projected owner email = %q", detail.Assignment.OwnerEmail)
+	}
+	if detail.Assignment.AssignedBy != "operator-1" {
+		t.Fatalf("projected assigned_by = %q", detail.Assignment.AssignedBy)
+	}
+	if detail.Assignment.Note != "Own release readiness." {
+		t.Fatalf("projected note = %q", detail.Assignment.Note)
+	}
+	if detail.Assignment.SLADueAt == nil || !detail.Assignment.SLADueAt.Equal(dueAt) {
+		t.Fatalf("projected due_at = %v, want %v", detail.Assignment.SLADueAt, dueAt)
+	}
+}
+
+func TestPG_AssignmentEscalationQueuePrioritizesDurableSLAWork(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, overdueID := seedTenantAndRow(t, pool, "overdue enterprise blocker")
+	_, missingOwnerID := seedTenantAndRow(t, pool, "unowned renewal blocker")
+	_, missingSLAID := seedTenantAndRow(t, pool, "owned work missing commitment")
+	_, dueSoonID := seedTenantAndRow(t, pool, "deadline approaching")
+	_, healthyID := seedTenantAndRow(t, pool, "healthy assigned feedback")
+	_, closedID := seedTenantAndRow(t, pool, "closed item should not escalate")
+	ctx := context.Background()
+	repo := feedback.NewFeedback(pool)
+	ownerID := seedAssignmentMember(t, ctx, pool, tenantID, "escalation-owner", "escalation-owner@example.com")
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+
+	prepareAssignmentEscalationFeedback(t, ctx, pool, overdueID, assignmentEscalationSeed{
+		Title:         "Overdue enterprise blocker",
+		Source:        "portal",
+		FeedbackType:  "bug",
+		CreatedAt:     now.Add(-30 * time.Hour),
+		IsUrgent:      true,
+		OwnerMemberID: ptrext.Of(ownerID),
+		SLADueAt:      ptrext.Of(now.Add(-2 * time.Hour)),
+	})
+	prepareAssignmentEscalationFeedback(t, ctx, pool, missingOwnerID, assignmentEscalationSeed{
+		Title:        "Unowned renewal blocker",
+		Source:       "github",
+		FeedbackType: "bug",
+		CreatedAt:    now.Add(-20 * time.Hour),
+		IsUrgent:     false,
+		SLADueAt:     ptrext.Of(now.Add(24 * time.Hour)),
+	})
+	prepareAssignmentEscalationFeedback(t, ctx, pool, missingSLAID, assignmentEscalationSeed{
+		Title:         "Owned work missing commitment",
+		Source:        "api",
+		FeedbackType:  "question",
+		CreatedAt:     now.Add(-18 * time.Hour),
+		OwnerMemberID: ptrext.Of(ownerID),
+	})
+	prepareAssignmentEscalationFeedback(t, ctx, pool, dueSoonID, assignmentEscalationSeed{
+		Title:         "Deadline approaching",
+		Source:        "lark",
+		FeedbackType:  "feature",
+		CreatedAt:     now.Add(-12 * time.Hour),
+		IsUrgent:      true,
+		OwnerMemberID: ptrext.Of(ownerID),
+		SLADueAt:      ptrext.Of(now.Add(3 * time.Hour)),
+	})
+	prepareAssignmentEscalationFeedback(t, ctx, pool, healthyID, assignmentEscalationSeed{
+		Title:         "Healthy assigned feedback",
+		Source:        "api",
+		FeedbackType:  "feature",
+		CreatedAt:     now.Add(-10 * time.Hour),
+		OwnerMemberID: ptrext.Of(ownerID),
+		SLADueAt:      ptrext.Of(now.Add(48 * time.Hour)),
+	})
+	closedStateID := seedClosedWorkflowState(t, ctx, pool, tenantID)
+	prepareAssignmentEscalationFeedback(t, ctx, pool, closedID, assignmentEscalationSeed{
+		Title:        "Closed item should not escalate",
+		Source:       "api",
+		FeedbackType: "bug",
+		CreatedAt:    now.Add(-72 * time.Hour),
+		IsUrgent:     true,
+		StateID:      ptrext.Of(closedStateID),
+	})
+
+	queue, err := repo.FeedbackAssignmentEscalations(ctx, tenantID, now, 10)
+	if err != nil {
+		t.Fatalf("feedback assignment escalations: %v", err)
+	}
+	assertAssignmentEscalationQueue(t, queue, []int64{overdueID, missingOwnerID, missingSLAID, dueSoonID})
+
+	limited, err := repo.FeedbackAssignmentEscalations(ctx, tenantID, now, 2)
+	if err != nil {
+		t.Fatalf("limited feedback assignment escalations: %v", err)
+	}
+	assertAssignmentEscalationQueue(t, limited, []int64{overdueID, missingOwnerID})
+}
+
+func TestPG_BatchAssignFeedbackPersistsOwnerSLAAndAudit(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, firstID := seedTenantAndRow(t, pool, "first batch assignable feedback")
+	_, secondID := seedTenantAndRow(t, pool, "second batch assignable feedback")
+	repo := feedback.NewFeedback(pool)
+	auditRepo := feedbackauditrepo.New(pool)
+	service := feedbackassignmentsvc.New(repo, auditRepo, pool)
+	ctx := context.Background()
+	ownerID := seedAssignmentMember(t, ctx, pool, tenantID, "batch-pm-user", "batch-pm@example.com")
+
+	dueAt := time.Date(2026, 8, 2, 11, 0, 0, 0, time.UTC)
+	missingID := secondID + 1_000_000
+	result, err := service.AssignBatch(ctx, feedbackassignmentsvc.BatchInput{
+		TenantID:         tenantID,
+		FeedbackIDs:      []int64{firstID, secondID, firstID, missingID},
+		OwnerMemberIDSet: true,
+		OwnerMemberID:    ptrext.Of(ownerID),
+		SLADueAtSet:      true,
+		SLADueAt:         ptrext.Of(dueAt),
+		Note:             "Batch owner handoff.",
+		ActorID:          "operator-2",
+	})
+	if err != nil {
+		t.Fatalf("batch assign feedback: %v", err)
+	}
+	assertBatchAssignmentResult(t, result, missingID)
+
+	detail, err := repo.GetForConsole(ctx, tenantID, firstID)
+	if err != nil {
+		t.Fatalf("get console feedback: %v", err)
+	}
+	assertBatchAssignmentProjection(t, detail, ownerID, dueAt)
+
+	entries, _, err := auditRepo.List(ctx, tenantID, firstID, "", 10)
+	if err != nil {
+		t.Fatalf("list assignment audit: %v", err)
+	}
+	assertBatchAssignmentAudit(t, entries)
+}
+
+func TestPG_ApplyAssignmentRecommendationsPersistsSLAAndAudit(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, urgentID := seedTenantAndRow(t, pool, "urgent policy feedback")
+	_, coveredID := seedTenantAndRow(t, pool, "covered policy feedback")
+	repo := feedback.NewFeedback(pool)
+	auditRepo := feedbackauditrepo.New(pool)
+	service := feedbackassignmentsvc.New(repo, auditRepo, pool)
+	ctx := context.Background()
+
+	createdAt := time.Date(2026, 8, 1, 8, 0, 0, 0, time.UTC)
+	prepareRecommendedFeedback(t, ctx, pool, urgentID, createdAt, true, nil, "urgent@example.com")
+	strictDue := createdAt.Add(70 * time.Hour)
+	prepareRecommendedFeedback(t, ctx, pool, coveredID, createdAt, false, ptrext.Of(strictDue), "covered@example.com")
+
+	missingID := coveredID + 1_000_000
+	result, err := service.ApplyRecommendations(ctx, feedbackassignmentsvc.ApplyRecommendationInput{
+		TenantID:    tenantID,
+		FeedbackIDs: []int64{urgentID, coveredID, missingID},
+		ActorID:     "operator-3",
+		Now:         createdAt.Add(2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("apply assignment recommendations: %v", err)
+	}
+	assertRecommendationApplyResult(t, result, missingID)
+
+	detail, err := repo.GetForConsole(ctx, tenantID, urgentID)
+	if err != nil {
+		t.Fatalf("get urgent feedback detail: %v", err)
+	}
+	assertRecommendedAssignmentProjection(t, detail, createdAt.Add(24*time.Hour))
+
+	entries, _, err := auditRepo.List(ctx, tenantID, urgentID, "", 10)
+	if err != nil {
+		t.Fatalf("list recommended assignment audit: %v", err)
+	}
+	assertRecommendedAssignmentAudit(t, entries)
+}
+
+func TestPG_AssignmentPolicyPersistsDefaultOwnerAndAudit(t *testing.T) {
+	fixture := newPGAssignmentPolicyFixture(t)
+	updatePGAssignmentPolicy(t, fixture, "policy-admin", "route urgent feedback to enterprise triage", 8)
+	policy, err := fixture.service.GetPolicy(fixture.ctx, fixture.tenantID)
+	if err != nil {
+		t.Fatalf("get assignment policy: %v", err)
+	}
+	assertAssignmentPolicyRule(t, policy, fixture.ownerID)
+	assertAssignmentPolicyRevisions(t, fixture.service, fixture.ctx, fixture.tenantID, []int{1})
+	assertPGAssignmentPolicyDryRun(t, fixture)
+	assertPGConfiguredRecommendationAndApply(t, fixture)
+	updatePGAssignmentPolicy(t, fixture, "policy-admin-2", "tighten urgent SLA", 4)
+	assertAssignmentPolicyRevisions(t, fixture.service, fixture.ctx, fixture.tenantID, []int{2, 1})
+	assertPGAssignmentPolicyRestore(t, fixture)
+	assertPGAssignmentPolicyAudit(t, fixture)
+}
+
+type pgAssignmentPolicyFixture struct {
+	ctx       context.Context
+	pool      *pgxpool.Pool
+	tenantID  string
+	urgentID  int64
+	repo      *feedback.FeedbackRepo
+	auditRepo *auditlogrepo.Repo
+	service   *feedbackassignmentsvc.Service
+	ownerID   string
+	createdAt time.Time
+}
+
+func newPGAssignmentPolicyFixture(t *testing.T) pgAssignmentPolicyFixture {
+	t.Helper()
+	pool := testdb.NewPool(t)
+	tenantID, urgentID := seedTenantAndRow(t, pool, "urgent configured assignment policy feedback")
+	repo := feedback.NewFeedback(pool)
+	feedbackAuditRepo := feedbackauditrepo.New(pool)
+	auditRepo := auditlogrepo.New(pool)
+	service := feedbackassignmentsvc.New(repo, feedbackAuditRepo, pool)
+	service.SetPolicyStore(systemsettingsrepo.NewRepo(pool))
+	service.SetAuditLogger(auditlogsvc.New(auditRepo))
+	ctx := context.Background()
+	ownerID := seedAssignmentMember(t, ctx, pool, tenantID, "policy-pm-user", "policy-pm@example.com")
+	createdAt := time.Date(2026, 8, 1, 8, 0, 0, 0, time.UTC)
+	prepareRecommendedFeedback(t, ctx, pool, urgentID, createdAt, true, nil, "policy-urgent@example.com")
+	return pgAssignmentPolicyFixture{
+		ctx:       ctx,
+		pool:      pool,
+		tenantID:  tenantID,
+		urgentID:  urgentID,
+		repo:      repo,
+		auditRepo: auditRepo,
+		service:   service,
+		ownerID:   ownerID,
+		createdAt: createdAt,
+	}
+}
+
+func updatePGAssignmentPolicy(
+	t *testing.T,
+	fixture pgAssignmentPolicyFixture,
+	actorID string,
+	note string,
+	slaHours int,
+) {
+	t.Helper()
+	_, err := fixture.service.UpdatePolicy(fixture.ctx, feedbackassignmentsvc.UpdatePolicyInput{
+		TenantID: fixture.tenantID,
+		Actor:    auditlogsvc.Actor{Type: "user", ID: actorID},
+		Note:     note,
+		Rules: []feedbackassignmentsvc.PolicyRule{{
+			RuleKey:              "urgent_open",
+			OwnerLane:            "enterprise_triage",
+			SLAHours:             slaHours,
+			DefaultOwnerMemberID: ptrext.Of(fixture.ownerID),
+			Enabled:              true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("update assignment policy: %v", err)
+	}
+}
+
+func assertPGAssignmentPolicyDryRun(t *testing.T, fixture pgAssignmentPolicyFixture) {
+	t.Helper()
+	dryRun, err := fixture.service.DryRunPolicy(fixture.ctx, feedbackassignmentsvc.DryRunPolicyInput{
+		TenantID:    fixture.tenantID,
+		FeedbackIDs: []int64{fixture.urgentID},
+		Now:         fixture.createdAt.Add(time.Hour),
+		Rules: []feedbackassignmentsvc.PolicyRule{{
+			RuleKey:              "urgent_open",
+			OwnerLane:            "enterprise_triage",
+			SLAHours:             4,
+			DefaultOwnerMemberID: ptrext.Of(fixture.ownerID),
+			Enabled:              true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("dry-run assignment policy: %v", err)
+	}
+	assertAssignmentPolicyDryRun(t, dryRun)
+}
+
+func assertPGConfiguredRecommendationAndApply(t *testing.T, fixture pgAssignmentPolicyFixture) {
+	t.Helper()
+	recs, err := fixture.service.RecommendBatch(fixture.ctx, feedbackassignmentsvc.RecommendationInput{
+		TenantID:    fixture.tenantID,
+		FeedbackIDs: []int64{fixture.urgentID},
+		Now:         fixture.createdAt.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("recommend with assignment policy: %v", err)
+	}
+	assertConfiguredRecommendation(t, recs, fixture.ownerID)
+
+	applied, err := fixture.service.ApplyRecommendations(fixture.ctx, feedbackassignmentsvc.ApplyRecommendationInput{
+		TenantID:    fixture.tenantID,
+		FeedbackIDs: []int64{fixture.urgentID},
+		ActorID:     "policy-operator",
+		Now:         fixture.createdAt.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("apply configured recommendation: %v", err)
+	}
+	if applied.Succeeded != 1 {
+		t.Fatalf("configured apply result = %#v, want one success", applied)
+	}
+	detail, err := fixture.repo.GetForConsole(fixture.ctx, fixture.tenantID, fixture.urgentID)
+	if err != nil {
+		t.Fatalf("get configured urgent detail: %v", err)
+	}
+	assertConfiguredAssignmentProjection(t, detail, fixture.ownerID, fixture.createdAt.Add(8*time.Hour))
+}
+
+func assertPGAssignmentPolicyRestore(t *testing.T, fixture pgAssignmentPolicyFixture) {
+	t.Helper()
+	restored, err := fixture.service.RestorePolicy(fixture.ctx, feedbackassignmentsvc.RestorePolicyInput{
+		TenantID: fixture.tenantID,
+		Version:  1,
+		Actor:    auditlogsvc.Actor{Type: "user", ID: "policy-admin-3"},
+	})
+	if err != nil {
+		t.Fatalf("restore assignment policy: %v", err)
+	}
+	if restored.Version != 3 {
+		t.Fatalf("restored policy version = %d, want 3", restored.Version)
+	}
+	assertAssignmentPolicyRule(t, restored, fixture.ownerID)
+	assertAssignmentPolicyRevisions(t, fixture.service, fixture.ctx, fixture.tenantID, []int{3, 2, 1})
+}
+
+func assertPGAssignmentPolicyAudit(t *testing.T, fixture pgAssignmentPolicyFixture) {
+	t.Helper()
+	auditRows, err := fixture.auditRepo.List(fixture.ctx, auditlogrepo.ListFilter{
+		TenantID:   fixture.tenantID,
+		Actions:    []string{"feedback_assignment.policy_update", "feedback_assignment.policy_restore"},
+		TargetType: "feedback_assignment_policy",
+		TargetID:   fixture.tenantID,
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("list assignment policy audit: %v", err)
+	}
+	assertAssignmentPolicyAuditRows(t, auditRows.Items)
+}
+
+func assertConfiguredRecommendation(
+	t *testing.T,
+	recs feedbackassignmentsvc.RecommendationResult,
+	ownerID string,
+) {
+	t.Helper()
+	if len(recs.Recommendations) != 1 {
+		t.Fatalf("recommendations = %#v, want one configured urgent recommendation", recs)
+	}
+	rec := recs.Recommendations[0]
+	if rec.OwnerLane != "enterprise_triage" || rec.SLAHours != 8 || ptrext.Indirect(rec.RecommendedOwnerMemberID) != ownerID {
+		t.Fatalf("configured recommendation = %#v", rec)
+	}
+}
+
+func assertConfiguredAssignmentProjection(
+	t *testing.T,
+	detail *feedback.ConsoleDetailRow,
+	ownerID string,
+	wantDue time.Time,
+) {
+	t.Helper()
+	if got := ptrext.IndirectOr(detail.Assignment.OwnerMemberID, ""); got != ownerID {
+		t.Fatalf("configured assignment owner = %q, want %q", got, ownerID)
+	}
+	if detail.Assignment.SLADueAt == nil || !detail.Assignment.SLADueAt.Equal(wantDue) {
+		t.Fatalf("configured assignment SLA = %v, want %v", detail.Assignment.SLADueAt, wantDue)
+	}
+}
+
+func assertAssignmentPolicyAuditRows(t *testing.T, entries []auditlogrepo.Entry) {
+	t.Helper()
+	actions := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		actions[entry.Action] = struct{}{}
+	}
+	if _, ok := actions["feedback_assignment.policy_update"]; !ok {
+		t.Fatalf("assignment policy audit rows = %#v, missing update audit", entries)
+	}
+	if _, ok := actions["feedback_assignment.policy_restore"]; !ok {
+		t.Fatalf("assignment policy audit rows = %#v, missing restore audit", entries)
+	}
+}
+
+func assertAssignmentPolicyRevisions(
+	t *testing.T,
+	service *feedbackassignmentsvc.Service,
+	ctx context.Context,
+	tenantID string,
+	wantVersions []int,
+) {
+	t.Helper()
+	revisions, err := service.ListPolicyRevisions(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("list assignment policy revisions: %v", err)
+	}
+	if len(revisions) < len(wantVersions) {
+		t.Fatalf("assignment policy revisions = %#v, want at least %v", revisions, wantVersions)
+	}
+	for i, want := range wantVersions {
+		if revisions[i].Version != want {
+			t.Fatalf("assignment policy revisions = %#v, want version %d at index %d", revisions, want, i)
+		}
+	}
+}
+
+func assertAssignmentPolicyDryRun(t *testing.T, dryRun feedbackassignmentsvc.DryRunPolicyResult) {
+	t.Helper()
+	if dryRun.TotalMatched != 1 || dryRun.Changed != 1 || len(dryRun.Impacts) != 1 {
+		t.Fatalf("assignment policy dry-run = %#v, want one changed impact", dryRun)
+	}
+	impact := dryRun.Impacts[0]
+	if impact.CurrentSLAHours != 8 || impact.DraftSLAHours != 4 || !impact.Changed {
+		t.Fatalf("assignment policy dry-run impact = %#v, want 8h -> 4h", impact)
+	}
+}
+
+func assertAssignmentPolicyRule(t *testing.T, policy feedbackassignmentsvc.Policy, ownerID string) {
+	t.Helper()
+	for _, rule := range policy.Rules {
+		if rule.RuleKey != "urgent_open" {
+			continue
+		}
+		if rule.OwnerLane != "enterprise_triage" || rule.SLAHours != 8 || ptrext.Indirect(rule.DefaultOwnerMemberID) != ownerID {
+			t.Fatalf("urgent policy rule = %#v, want configured lane/SLA/owner", rule)
+		}
+		return
+	}
+	t.Fatalf("assignment policy rules = %#v, missing urgent_open", policy.Rules)
+}
+
+type assignmentEscalationSeed struct {
+	Title         string
+	Source        string
+	FeedbackType  string
+	CreatedAt     time.Time
+	IsUrgent      bool
+	OwnerMemberID *string
+	SLADueAt      *time.Time
+	StateID       *string
+}
+
+func prepareAssignmentEscalationFeedback(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	feedbackID int64,
+	seed assignmentEscalationSeed,
+) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		UPDATE user_feedback
+		   SET enriched_title = $2,
+		       source = $3,
+		       type = $4,
+		       created_at = $5,
+		       is_urgent = $6,
+		       owner_member_id = $7::uuid,
+		       feedback_sla_due_at = $8,
+		       workflow_state_id = $9::uuid
+		 WHERE id = $1`,
+		feedbackID,
+		seed.Title,
+		seed.Source,
+		seed.FeedbackType,
+		seed.CreatedAt,
+		seed.IsUrgent,
+		seed.OwnerMemberID,
+		seed.SLADueAt,
+		seed.StateID,
+	)
+	if err != nil {
+		t.Fatalf("prepare assignment escalation row: %v", err)
+	}
+}
+
+func seedClosedWorkflowState(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+) string {
+	t.Helper()
+	var stateID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO tenant_workflow_states (tenant_id, name, color, category, position, is_default)
+		VALUES ($1, 'Escalation closed', '#64748b', 'closed', 90, false)
+		RETURNING id::text`,
+		tenantID,
+	).Scan(&stateID)
+	if err != nil {
+		t.Fatalf("insert closed workflow state: %v", err)
+	}
+	return stateID
+}
+
+func assertAssignmentEscalationQueue(
+	t *testing.T,
+	queue feedback.AssignmentEscalationQueue,
+	wantIDs []int64,
+) {
+	t.Helper()
+	if queue.OverdueCount != 1 || queue.DueSoonCount != 1 ||
+		queue.MissingOwnerCount != 1 || queue.MissingSLACount != 1 {
+		t.Fatalf("assignment escalation counts = %#v, want one per durable breach type", queue)
+	}
+	if len(queue.Items) != len(wantIDs) {
+		t.Fatalf("assignment escalation items = %#v, want ids %v", queue.Items, wantIDs)
+	}
+	for i, wantID := range wantIDs {
+		if queue.Items[i].FeedbackID != wantID {
+			t.Fatalf("assignment escalation item[%d] = %#v, want feedback id %d", i, queue.Items[i], wantID)
+		}
+	}
+	if len(queue.Items) == 0 {
+		return
+	}
+	first := queue.Items[0]
+	if first.Priority != "critical" || !containsEscalationReason(first.Reasons, "overdue") ||
+		ptrext.Indirect(first.HoursUntilDue) != -2 {
+		t.Fatalf("first assignment escalation = %#v, want overdue critical item", first)
+	}
+}
+
+func containsEscalationReason(reasons []string, want string) bool {
+	for _, reason := range reasons {
+		if reason == want {
+			return true
+		}
+	}
+	return false
+}
+
+func prepareRecommendedFeedback(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	feedbackID int64,
+	createdAt time.Time,
+	urgent bool,
+	dueAt *time.Time,
+	email string,
+) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		UPDATE user_feedback
+		   SET created_at = $2,
+		       is_urgent = $3,
+		       feedback_sla_due_at = $4,
+		       source_meta = jsonb_build_object('email', $5::text)
+		 WHERE id = $1`,
+		feedbackID,
+		createdAt,
+		urgent,
+		dueAt,
+		email,
+	)
+	if err != nil {
+		t.Fatalf("prepare recommended feedback row: %v", err)
+	}
+}
+
+func seedAssignmentMember(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	userID string,
+	email string,
+) string {
+	t.Helper()
+	var ownerID string
+	err := pool.QueryRow(ctx, `
+		INSERT INTO tenant_members (
+			tenant_id, member_type, user_id, email, role, role_source, accepted_at
+		)
+		VALUES ($1, 'tenant_user', $2, $3, 'member', 'manual', NOW())
+		RETURNING id::text`,
+		tenantID,
+		userID,
+		email,
+	).Scan(&ownerID)
+	if err != nil {
+		t.Fatalf("insert tenant member: %v", err)
+	}
+	return ownerID
+}
+
+func assertRecommendationApplyResult(
+	t *testing.T,
+	result feedbackassignmentsvc.ApplyRecommendationResult,
+	missingID int64,
+) {
+	t.Helper()
+	if result.TotalMatched != 3 || result.Succeeded != 1 || result.Skipped != 1 || len(result.Failed) != 1 {
+		t.Fatalf("recommendation result = %#v, want 3 matched, 1 succeeded, 1 skipped, 1 failed", result)
+	}
+	if result.Failed[0].FeedbackID != missingID || result.Failed[0].Code != "NOT_FOUND" {
+		t.Fatalf("recommendation failure = %#v, want missing feedback id", result.Failed[0])
+	}
+}
+
+func assertRecommendedAssignmentProjection(
+	t *testing.T,
+	detail *feedback.ConsoleDetailRow,
+	dueAt time.Time,
+) {
+	t.Helper()
+	if detail.Assignment.SLADueAt == nil || !detail.Assignment.SLADueAt.Equal(dueAt) {
+		t.Fatalf("recommended due_at = %v, want %v", detail.Assignment.SLADueAt, dueAt)
+	}
+	if !strings.Contains(detail.Assignment.Note, "Assignment policy: Urgent open feedback") {
+		t.Fatalf("recommended note = %q", detail.Assignment.Note)
+	}
+}
+
+func assertRecommendedAssignmentAudit(t *testing.T, entries []feedbackauditrepo.Entry) {
+	t.Helper()
+	gotFields := map[string]bool{}
+	for _, entry := range entries {
+		gotFields[entry.FieldName] = true
+		if entry.EntityType != "feedback_assignment" || entry.ChangedBy != "operator-3" {
+			t.Fatalf("recommended audit entry = %#v, want assignment audit by operator-3", entry)
+		}
+	}
+	for _, field := range []string{"feedback_sla_due_at", "owner_assignment_note"} {
+		if !gotFields[field] {
+			t.Fatalf("recommended audit fields = %v, missing %s", gotFields, field)
+		}
+	}
+}
+
+func assertBatchAssignmentResult(
+	t *testing.T,
+	result feedbackassignmentsvc.BatchResult,
+	missingID int64,
+) {
+	t.Helper()
+	if result.TotalMatched != 3 || result.Succeeded != 2 || len(result.Failed) != 1 {
+		t.Fatalf("batch result = %#v, want 3 matched, 2 succeeded, 1 failed", result)
+	}
+	if result.Failed[0].FeedbackID != missingID || result.Failed[0].Code != "NOT_FOUND" {
+		t.Fatalf("batch failure = %#v, want missing feedback id", result.Failed[0])
+	}
+}
+
+func assertBatchAssignmentProjection(
+	t *testing.T,
+	detail *feedback.ConsoleDetailRow,
+	ownerID string,
+	dueAt time.Time,
+) {
+	t.Helper()
+	if got := ptrext.IndirectOr(detail.Assignment.OwnerMemberID, ""); got != ownerID {
+		t.Fatalf("projected owner = %q, want %q", got, ownerID)
+	}
+	if detail.Assignment.OwnerEmail != "batch-pm@example.com" {
+		t.Fatalf("projected owner email = %q", detail.Assignment.OwnerEmail)
+	}
+	if detail.Assignment.AssignedBy != "operator-2" {
+		t.Fatalf("projected assigned_by = %q", detail.Assignment.AssignedBy)
+	}
+	if detail.Assignment.SLADueAt == nil || !detail.Assignment.SLADueAt.Equal(dueAt) {
+		t.Fatalf("projected due_at = %v, want %v", detail.Assignment.SLADueAt, dueAt)
+	}
+}
+
+func assertBatchAssignmentAudit(t *testing.T, entries []feedbackauditrepo.Entry) {
+	t.Helper()
+	gotFields := map[string]bool{}
+	for _, entry := range entries {
+		gotFields[entry.FieldName] = true
+		if entry.EntityType != "feedback_assignment" || entry.ChangedBy != "operator-2" {
+			t.Fatalf("audit entry = %#v, want assignment audit by operator-2", entry)
+		}
+	}
+	for _, field := range []string{"owner_member_id", "feedback_sla_due_at", "owner_assignment_note"} {
+		if !gotFields[field] {
+			t.Fatalf("audit fields = %v, missing %s", gotFields, field)
+		}
 	}
 }
 
@@ -279,6 +1015,101 @@ func TestPG_MarkDoneAndContainmentQuery(t *testing.T) {
 	if len(rows) != 1 {
 		t.Errorf("labels=payment should match 1 row, got %d", len(rows))
 	}
+}
+
+func TestPG_FeedbackAccountContextFiltersRawSignals(t *testing.T) {
+	pool := testdb.NewPool(t)
+	tenantID, acmeID := seedTenantAndRow(t, pool, "acme renewal blocker")
+	_, betaID := seedTenantAndRow(t, pool, "beta onboarding request")
+	repo := feedback.NewFeedback(pool)
+	ctx := context.Background()
+	now := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+
+	seedFeedbackAccountContext(
+		t, ctx, pool, acmeID, "portal", "bug", "Acme renewal blocker",
+		now.Add(-2*time.Hour),
+		`{"account":{"key":"acct:acme","name":"Acme Corp"},"email":"ada@example.com"}`,
+	)
+	seedFeedbackAccountContext(
+		t, ctx, pool, betaID, "api", "feature", "Beta onboarding request",
+		now.Add(-time.Hour),
+		`{"companyId":"acct:beta","companyName":"Beta LLC"}`,
+	)
+
+	acmeRow := assertFeedbackAccountListRow(t, ctx, repo, tenantID, "acct:acme", acmeID)
+	require.Equal(t, "Acme Corp", acmeRow.AccountContext.AccountDisplay)
+	require.Equal(t, "source_meta", acmeRow.AccountContext.Source)
+
+	betaRow := assertFeedbackAccountListRow(t, ctx, repo, tenantID, "acct:beta", betaID)
+	require.Equal(t, "Beta LLC", betaRow.AccountContext.AccountDisplay)
+
+	detail, err := repo.GetForConsole(ctx, tenantID, acmeID)
+	require.NoError(t, err)
+	require.Equal(t, "acct:acme", detail.AccountContext.AccountKey)
+
+	queue, err := repo.FeedbackAssignmentEscalations(ctx, tenantID, now, 25)
+	require.NoError(t, err)
+	found := assignmentEscalationByFeedbackID(queue.Items, acmeID)
+	require.NotNil(t, found)
+	require.Equal(t, "acct:acme", found.Account.AccountKey)
+	require.Equal(t, "Acme Corp", found.Account.AccountDisplay)
+}
+
+func seedFeedbackAccountContext(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	feedbackID int64,
+	source string,
+	feedbackType string,
+	title string,
+	createdAt time.Time,
+	sourceMeta string,
+) {
+	t.Helper()
+	_, err := pool.Exec(ctx, `
+		UPDATE user_feedback
+		SET source = $2,
+		    type = $3,
+		    enriched_title = $4,
+		    created_at = $5,
+		    source_meta = $6::jsonb
+		WHERE id = $1`,
+		feedbackID, source, feedbackType, title, createdAt, sourceMeta,
+	)
+	require.NoError(t, err)
+}
+
+func assertFeedbackAccountListRow(
+	t *testing.T,
+	ctx context.Context,
+	repo *feedback.FeedbackRepo,
+	tenantID string,
+	accountKey string,
+	wantID int64,
+) feedback.ConsoleListRow {
+	t.Helper()
+	rows, err := repo.ListForConsole(ctx, tenantID, feedback.ConsoleListOpts{
+		AccountKey: ptrext.Of(accountKey),
+		Limit:      10,
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, wantID, rows[0].ID)
+	require.Equal(t, accountKey, rows[0].AccountContext.AccountKey)
+	return rows[0]
+}
+
+func assignmentEscalationByFeedbackID(
+	items []feedback.AssignmentEscalation,
+	feedbackID int64,
+) *feedback.AssignmentEscalation {
+	for i := range items {
+		if items[i].FeedbackID == feedbackID {
+			return &items[i]
+		}
+	}
+	return nil
 }
 
 func assertPendingListExcludes(t *testing.T, repo *feedback.FeedbackRepo, blockedID int64) {

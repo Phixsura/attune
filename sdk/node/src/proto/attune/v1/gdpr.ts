@@ -89,6 +89,11 @@ export interface GdprExportStatusResponse {
   expiresAt?: string | undefined;
   downloadedAt?: string | undefined;
   revokedAt?: string | undefined;
+  surveyInvitationCount: number;
+  surveyResponseCount: number;
+  surveyLowScoreReviewCount: number;
+  surveyProviderEventCount: number;
+  surveyRecoveryNotificationCount: number;
 }
 
 export interface DeleteGdprSubjectRequest {
@@ -105,6 +110,11 @@ export interface DeleteGdprSubjectResponse {
   feedbackAuditCount: number;
   llmAuditCount: number;
   outboxCount: number;
+  surveyInvitationCount: number;
+  surveyResponseCount: number;
+  surveyLowScoreReviewCount: number;
+  surveyProviderEventCount: number;
+  surveyRecoveryNotificationCount: number;
 }
 
 export interface CancelGdprRequestRequest {
@@ -144,6 +154,11 @@ export interface GdprRequestSummary {
   cancelledAt?: string | undefined;
   revokedAt?: string | undefined;
   outboxCount: number;
+  surveyInvitationCount: number;
+  surveyResponseCount: number;
+  surveyLowScoreReviewCount: number;
+  surveyProviderEventCount: number;
+  surveyRecoveryNotificationCount: number;
 }
 
 export interface ListGdprRequestsResponse {

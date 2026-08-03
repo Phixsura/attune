@@ -1,0 +1,76 @@
+{
+  "id": "attune.import_export.workbench.v1",
+  "version": "2026-08-02",
+  "formats": ["csv", "json"],
+  "templates": [
+    {
+      "id": "feedback-import",
+      "direction": "import",
+      "format": "csv",
+      "object": "feedback",
+      "path": "fixtures/feedback-import.csv"
+    },
+    {
+      "id": "customer-request-import",
+      "direction": "import",
+      "format": "json",
+      "object": "customer_request",
+      "path": "fixtures/customer-request-import.json"
+    },
+    {
+      "id": "decision-evidence-export",
+      "direction": "export",
+      "format": "json",
+      "object": "decision_evidence",
+      "path": "fixtures/decision-evidence-export.json"
+    },
+    {
+      "id": "audit-log-export",
+      "direction": "export",
+      "format": "csv",
+      "object": "audit_log",
+      "path": "fixtures/audit-log-export.csv"
+    }
+  ],
+  "schema": {
+    "object": "customer_request",
+    "requiredFields": ["external_id", "title", "status", "source"],
+    "fields": [
+      { "name": "external_id", "type": "string", "required": true },
+      { "name": "title", "type": "string", "required": true },
+      { "name": "status", "type": "enum", "required": true },
+      { "name": "source", "type": "string", "required": true },
+      { "name": "account_key", "type": "string", "required": false },
+      { "name": "revenue_impact_cents", "type": "int64", "required": false },
+      { "name": "evidence_url", "type": "url", "required": false },
+      { "name": "tags", "type": "string_array", "required": false }
+    ]
+  },
+  "fieldMapping": {
+    "external_id": "External ID",
+    "title": "Title",
+    "status": "State",
+    "source": "Source",
+    "account_key": "Account Key",
+    "revenue_impact_cents": "Revenue Impact Cents",
+    "evidence_url": "Evidence URL",
+    "tags": "Tags"
+  },
+  "dryRun": {
+    "path": "fixtures/customer-request-dry-run.json",
+    "minimumActions": ["create", "update", "reject"]
+  },
+  "recovery": {
+    "classes": [
+      { "code": "missing_required_field", "action": "quarantine" },
+      { "code": "invalid_enum", "action": "map_status" },
+      { "code": "duplicate_external_id", "action": "merge_or_skip" },
+      { "code": "permission_denied", "action": "request_scope" }
+    ]
+  },
+  "governance": {
+    "requiredScopes": ["feedback:write", "customer_request:write", "audit:read"],
+    "auditEvents": ["import.dry_run", "import.commit", "export.download"],
+    "piiRedaction": true
+  }
+}

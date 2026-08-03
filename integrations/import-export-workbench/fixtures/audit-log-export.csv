@@ -1,0 +1,4 @@
+event_id,action,actor,target,created_at
+audit-1,import.dry_run,apikey:ci-bot,customer_request_import,2026-08-02T00:01:00Z
+audit-2,import.commit,apikey:ci-bot,customer_request_import,2026-08-02T00:02:00Z
+audit-3,export.download,member:product-ops,decision_evidence_export,2026-08-02T00:03:00Z

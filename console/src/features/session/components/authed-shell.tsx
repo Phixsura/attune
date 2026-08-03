@@ -157,7 +157,7 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
   )
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.9)),radial-gradient(circle_at_top_left,rgba(251,191,36,0.08),transparent_22%),var(--background)]">
+    <div className="min-h-screen overflow-x-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(255,255,255,0.9)),radial-gradient(circle_at_top_left,rgba(251,191,36,0.08),transparent_22%),var(--background)]">
       {/* biome-ignore lint/a11y/useValidAnchor: Skip links are intra-page anchors; the handler preserves focus across SPA routing. */}
       <a
         href="#main-content"
@@ -244,8 +244,8 @@ export function AuthedShell({ me, children }: AuthedShellProps) {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-[1640px] gap-4 px-4 py-6 sm:px-6">
-        <aside className="hidden w-52 shrink-0 self-start lg:block">
+      <div className="mx-auto flex w-full max-w-[1640px] gap-[16px] px-4 py-6 sm:px-6">
+        <aside className="hidden w-[208px] shrink-0 self-start lg:block">
           <div
             data-testid="shell-sidebar-scroll"
             className="sticky top-24 max-h-[calc(100dvh-7rem)] overflow-y-auto overscroll-contain pr-2"

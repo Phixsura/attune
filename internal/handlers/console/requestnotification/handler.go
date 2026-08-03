@@ -48,8 +48,11 @@ type notificationService interface {
 	DeleteWebhookTarget(ctx context.Context, tenantID string, id uuid.UUID) error
 	TestWebhookTarget(ctx context.Context, tenantID string, id uuid.UUID) (svc.WebhookTestResult, error)
 	Preview(ctx context.Context, in svc.PublishInput) (svc.PreviewResult, error)
+	BatchPreview(ctx context.Context, in svc.BatchPublishInput) (svc.BatchPreviewResult, error)
 	Publish(ctx context.Context, in svc.PublishInput) (repo.Event, error)
+	BatchPublish(ctx context.Context, in svc.BatchPublishInput) (svc.BatchPublishResult, error)
 	ListDeliveries(ctx context.Context, filter repo.ListDeliveryFilter) ([]repo.Delivery, error)
+	ListStatusEvidence(ctx context.Context, tenantID string) ([]repo.StatusEvidence, error)
 	RetryDelivery(ctx context.Context, tenantID string, id int64, actorID string) (repo.Delivery, error)
 	ListSubscribers(ctx context.Context, tenantID string, requestID uuid.UUID) ([]repo.Subscriber, error)
 	SuppressSubscriber(ctx context.Context, tenantID string, contactID uuid.UUID, reason string) (repo.Subscriber, error)
@@ -309,6 +312,17 @@ func (h *Handler) Preview(
 	}))
 }
 
+func (h *Handler) BatchPreview(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.BatchPreviewRequestNotificationsRequest,
+) (dispatcher.Result[*attunev1.BatchPreviewRequestNotificationsResponse], error) {
+	result, err := h.service.BatchPreview(ctx, h.batchPublishInput(ctx.Auth, req.GetUpdates(), req.GetChannels()))
+	if err != nil {
+		return consoleError[*attunev1.BatchPreviewRequestNotificationsResponse](err, "request notification batch preview failed")
+	}
+	return dispatcher.OK(batchPreviewToProto(result))
+}
+
 func (h *Handler) Publish(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	req *attunev1.PublishRequestUpdateRequest,
@@ -324,6 +338,22 @@ func (h *Handler) Publish(
 	}
 	_ = h.record(ctx, "request_notification.public_update_publish", "request_notification_event", event.ID.String(), "Published request update")
 	return dispatcher.Created(eventToProto(event))
+}
+
+func (h *Handler) BatchPublish(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.BatchPublishRequestUpdatesRequest,
+) (dispatcher.Result[*attunev1.BatchPublishRequestUpdatesResponse], error) {
+	input := h.batchPublishInput(ctx.Auth, req.GetUpdates(), req.GetChannels())
+	input.ConfirmLargeAudience = req.GetConfirmLargeAudience()
+	result, err := h.service.BatchPublish(ctx, input)
+	if err != nil {
+		return consoleError[*attunev1.BatchPublishRequestUpdatesResponse](err, "request notification batch publish failed")
+	}
+	for _, event := range result.Events {
+		_ = h.record(ctx, "request_notification.public_update_publish", "request_notification_event", event.ID.String(), "Published request update")
+	}
+	return dispatcher.Created(batchPublishToProto(result))
 }
 
 func (h *Handler) ListDeliveries(
@@ -351,6 +381,23 @@ func (h *Handler) ListDeliveries(
 	for _, item := range items {
 		out.Deliveries = append(out.Deliveries, deliveryToProto(item))
 		out.NextBeforeId = item.ID
+	}
+	return dispatcher.OK(out)
+}
+
+func (h *Handler) GetStatusEvidence(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	_ *attunev1.GetRequestNotificationStatusEvidenceRequest,
+) (dispatcher.Result[*attunev1.RequestNotificationStatusEvidenceResponse], error) {
+	items, err := h.service.ListStatusEvidence(ctx, ctx.Auth.TenantID)
+	if err != nil {
+		return consoleError[*attunev1.RequestNotificationStatusEvidenceResponse](err, "request notification status evidence failed")
+	}
+	out := ptrext.Of(attunev1.RequestNotificationStatusEvidenceResponse{
+		Items: make([]*attunev1.RequestNotificationStatusEvidenceItem, 0, len(items)),
+	})
+	for _, item := range items {
+		out.Items = append(out.Items, statusEvidenceToProto(item))
 	}
 	return dispatcher.OK(out)
 }
@@ -453,6 +500,32 @@ func (h *Handler) publishInput(
 			ID:   auth.UserID,
 		},
 	}, nil
+}
+
+func (h *Handler) batchPublishInput(
+	auth *session.AuthCtx,
+	drafts []*attunev1.RequestNotificationUpdateDraft,
+	channels []attunev1.RequestNotificationChannel,
+) svc.BatchPublishInput {
+	out := svc.BatchPublishInput{
+		TenantID: auth.TenantID,
+		Updates:  make([]svc.BatchUpdateInput, 0, len(drafts)),
+		Channels: channelsFromProto(channels),
+		Actor:    auditlogsvc.Actor{Type: auth.UserType, ID: auth.UserID},
+	}
+	for _, draft := range drafts {
+		if draft == nil {
+			out.Updates = append(out.Updates, svc.BatchUpdateInput{})
+			continue
+		}
+		out.Updates = append(out.Updates, svc.BatchUpdateInput{
+			RequestID: draft.GetRequestId(),
+			Title:     draft.GetTitle(),
+			Body:      draft.GetBody(),
+			Kind:      draft.GetKind(),
+		})
+	}
+	return out
 }
 
 func channelsFromProto(channels []attunev1.RequestNotificationChannel) []string {
@@ -584,6 +657,55 @@ func eventToProto(event repo.Event) *attunev1.RequestNotificationEvent {
 	return out
 }
 
+func batchPreviewToProto(result svc.BatchPreviewResult) *attunev1.BatchPreviewRequestNotificationsResponse {
+	out := ptrext.Of(attunev1.BatchPreviewRequestNotificationsResponse{
+		TotalMatched:       int32(result.TotalMatched),
+		EligibleRecipients: int32(result.EligibleRecipients),
+		ExcludedRecipients: int32(result.ExcludedRecipients),
+		Items:              make([]*attunev1.BatchRequestNotificationPreviewItem, 0, len(result.Items)),
+		Failed:             make([]*attunev1.BatchRequestNotificationFailure, 0, len(result.Failed)),
+	})
+	for _, item := range result.Items {
+		out.Items = append(out.Items, ptrext.Of(attunev1.BatchRequestNotificationPreviewItem{
+			RequestId:          item.RequestID,
+			EligibleRecipients: int32(item.Preview.EligibleRecipients),
+			ExcludedRecipients: int32(item.Preview.ExcludedRecipients),
+			ExcludedByReason:   mapStruct(item.Preview.ExcludedByReason),
+			EmailPayload:       mapStruct(item.Preview.EmailPayload),
+			WebhookPayload:     mapStruct(item.Preview.WebhookPayload),
+		}))
+	}
+	for _, failure := range result.Failed {
+		out.Failed = append(out.Failed, batchFailureToProto(failure))
+	}
+	return out
+}
+
+func batchPublishToProto(result svc.BatchPublishResult) *attunev1.BatchPublishRequestUpdatesResponse {
+	out := ptrext.Of(attunev1.BatchPublishRequestUpdatesResponse{
+		TotalMatched: int32(result.TotalMatched),
+		Succeeded:    int32(result.Succeeded),
+		Skipped:      int32(result.Skipped),
+		Events:       make([]*attunev1.RequestNotificationEvent, 0, len(result.Events)),
+		Failed:       make([]*attunev1.BatchRequestNotificationFailure, 0, len(result.Failed)),
+	})
+	for _, event := range result.Events {
+		out.Events = append(out.Events, eventToProto(event))
+	}
+	for _, failure := range result.Failed {
+		out.Failed = append(out.Failed, batchFailureToProto(failure))
+	}
+	return out
+}
+
+func batchFailureToProto(failure svc.BatchNotificationFailure) *attunev1.BatchRequestNotificationFailure {
+	return ptrext.Of(attunev1.BatchRequestNotificationFailure{
+		RequestId: failure.RequestID,
+		Code:      failure.Code,
+		Message:   failure.Message,
+	})
+}
+
 func deliveryToProto(delivery repo.Delivery) *attunev1.RequestNotificationDelivery {
 	out := ptrext.Of(attunev1.RequestNotificationDelivery{
 		Id:               strconv.FormatInt(delivery.ID, 10),
@@ -612,6 +734,22 @@ func deliveryToProto(delivery repo.Delivery) *attunev1.RequestNotificationDelive
 	}
 	if delivery.LastManualRetryAt != nil {
 		out.LastManualRetryAt = ptrext.Of(timeString(ptrext.Indirect(delivery.LastManualRetryAt)))
+	}
+	return out
+}
+
+func statusEvidenceToProto(item repo.StatusEvidence) *attunev1.RequestNotificationStatusEvidenceItem {
+	out := ptrext.Of(attunev1.RequestNotificationStatusEvidenceItem{
+		RequestStatus:            item.RequestStatus,
+		ExpectedCustomers:        int32(item.ExpectedCustomers),
+		NotifiedCustomers:        int32(item.NotifiedCustomers),
+		FailedCustomers:          int32(item.FailedCustomers),
+		SuppressedCustomers:      int32(item.SuppressedCustomers),
+		RecoveryPendingCustomers: int32(item.RecoveryPendingCustomers),
+		EventCount:               int32(item.EventCount),
+	})
+	if item.LastEventAt != nil {
+		out.LastEventAt = ptrext.Of(timeString(ptrext.Indirect(item.LastEventAt)))
 	}
 	return out
 }

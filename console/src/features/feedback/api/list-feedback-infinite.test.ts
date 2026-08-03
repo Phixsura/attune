@@ -65,6 +65,15 @@ describe('feedbackListInfiniteQuery URL builder', () => {
     expect(url.searchParams.get('urgent')).toBe('false') // string, not omitted
   })
 
+  it('accountKey maps to the account_key backend filter', async () => {
+    const captured: { url?: string } = {}
+    captureRequestURL(captured)
+    const filters: FeedbackListFilters = { attrs: [], accountKey: 'acct:acme' }
+    await makeQc().fetchInfiniteQuery(feedbackListInfiniteQuery(filters))
+    const url = new URL(captured.url ?? '')
+    expect(url.searchParams.get('account_key')).toBe('acct:acme')
+  })
+
   it('urgent: true sent as "true"', async () => {
     const captured: { url?: string } = {}
     captureRequestURL(captured)

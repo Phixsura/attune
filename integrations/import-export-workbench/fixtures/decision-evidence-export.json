@@ -1,0 +1,14 @@
+{
+  "export_id": "decision-evidence-export-2026-08-02",
+  "generated_at": "2026-08-02T00:00:00Z",
+  "format": "json",
+  "requests": [
+    {
+      "request_id": "11111111-1111-1111-1111-111111111111",
+      "title": "Expose schema preview before import",
+      "decision_score": 114,
+      "evidence_bundle": "customer-request/11111111-1111-1111-1111-111111111111/evidence/CR-1",
+      "public_safe": false
+    }
+  ]
+}

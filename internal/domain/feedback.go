@@ -172,6 +172,9 @@ type IngestInput struct {
 	// service.Ingestor dedups repeated ingests so a client retry of an
 	// at-least-once delivery cannot create a duplicate feedback row.
 	IdempotencyKey string `json:"-"`
+	// SignalTraceID is the durable business trace that connects source ingest,
+	// enrichment, request linkage, customer notification, and survey follow-up.
+	SignalTraceID string `json:"-"`
 }
 
 // Validate enforces server-side invariants on input. Returns nil on

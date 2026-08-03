@@ -71,13 +71,104 @@ service FeedbackService {
   rpc GetFeedback(GetFeedbackRequest) returns (FeedbackDetail) {
     option (google.api.http) = {get: "/fb/v1/console/feedback/{id}"};
   }
+  // GET /fb/v1/console/feedback/{feedback_id}/signal-trace
+  rpc GetFeedbackSignalTrace(GetFeedbackSignalTraceRequest) returns (FeedbackSignalTrace) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/{feedback_id}/signal-trace"};
+  }
   // GET /fb/v1/console/feedback/stats
   rpc GetFeedbackStats(GetFeedbackStatsRequest) returns (GetFeedbackStatsResponse) {
     option (google.api.http) = {get: "/fb/v1/console/feedback/stats"};
   }
+  // GET /fb/v1/console/feedback/identity-review
+  rpc GetFeedbackIdentityReview(GetFeedbackIdentityReviewRequest) returns (GetFeedbackIdentityReviewResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/identity-review"};
+  }
+  // GET /fb/v1/console/feedback/identity-review/subjects/{subject_id}
+  rpc GetFeedbackIdentitySubject(GetFeedbackIdentitySubjectRequest) returns (FeedbackIdentitySubjectDetail) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/identity-review/subjects/{subject_id}"};
+  }
+  // POST /fb/v1/console/feedback/identity-review/merge
+  rpc MergeFeedbackIdentityReview(MergeFeedbackIdentityReviewRequest) returns (MergeFeedbackIdentityReviewResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/identity-review/merge"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/identity-review/split
+  rpc SplitFeedbackIdentityReview(SplitFeedbackIdentityReviewRequest) returns (SplitFeedbackIdentityReviewResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/identity-review/split"
+      body: "*"
+    };
+  }
   // GET /fb/v1/console/feedback/terminal-failures
   rpc GetTerminalFailureWorkbench(GetTerminalFailureWorkbenchRequest) returns (GetTerminalFailureWorkbenchResponse) {
     option (google.api.http) = {get: "/fb/v1/console/feedback/terminal-failures"};
+  }
+  // GET /fb/v1/console/feedback/triage-command-center
+  rpc GetFeedbackTriageCommandCenter(GetFeedbackTriageCommandCenterRequest) returns (FeedbackTriageCommandCenter) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/triage-command-center"};
+  }
+  // PATCH /fb/v1/console/feedback/{feedback_id}/assignment
+  rpc AssignFeedback(AssignFeedbackRequest) returns (FeedbackAssignment) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/feedback/{feedback_id}/assignment"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/assignment:batch
+  rpc BatchAssignFeedback(BatchAssignFeedbackRequest) returns (BatchAssignFeedbackResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/assignment:batch"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/assignment:recommend
+  rpc RecommendFeedbackAssignment(RecommendFeedbackAssignmentRequest) returns (RecommendFeedbackAssignmentResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/assignment:recommend"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/assignment:apply-recommendations
+  rpc ApplyFeedbackAssignmentRecommendations(ApplyFeedbackAssignmentRecommendationsRequest) returns (ApplyFeedbackAssignmentRecommendationsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/assignment:apply-recommendations"
+      body: "*"
+    };
+  }
+  // GET /fb/v1/console/feedback/assignment/escalations
+  rpc GetFeedbackAssignmentEscalations(GetFeedbackAssignmentEscalationsRequest) returns (FeedbackAssignmentEscalationQueue) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/assignment/escalations"};
+  }
+  // GET /fb/v1/console/feedback/assignment/policy
+  rpc GetFeedbackAssignmentPolicy(GetFeedbackAssignmentPolicyRequest) returns (FeedbackAssignmentPolicy) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/assignment/policy"};
+  }
+  // PUT /fb/v1/console/feedback/assignment/policy
+  rpc UpdateFeedbackAssignmentPolicy(UpdateFeedbackAssignmentPolicyRequest) returns (FeedbackAssignmentPolicy) {
+    option (google.api.http) = {
+      put: "/fb/v1/console/feedback/assignment/policy"
+      body: "*"
+    };
+  }
+  // GET /fb/v1/console/feedback/assignment/policy/revisions
+  rpc ListFeedbackAssignmentPolicyRevisions(ListFeedbackAssignmentPolicyRevisionsRequest) returns (ListFeedbackAssignmentPolicyRevisionsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/feedback/assignment/policy/revisions"};
+  }
+  // POST /fb/v1/console/feedback/assignment/policy:dry-run
+  rpc DryRunFeedbackAssignmentPolicy(DryRunFeedbackAssignmentPolicyRequest) returns (DryRunFeedbackAssignmentPolicyResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/assignment/policy:dry-run"
+      body: "*"
+    };
+  }
+  // POST /fb/v1/console/feedback/assignment/policy:restore
+  rpc RestoreFeedbackAssignmentPolicy(RestoreFeedbackAssignmentPolicyRequest) returns (FeedbackAssignmentPolicy) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/feedback/assignment/policy:restore"
+      body: "*"
+    };
   }
   // POST /fb/v1/console/feedback/{id}/reply-draft/regenerate (console; member session auth)
   rpc RegenerateReplyDraft(RegenerateReplyDraftRequest) returns (RegenerateReplyDraftResponse) {
@@ -243,6 +334,8 @@ message Feedback {
   optional string enrichment_failure_channel_name = 24;
   optional string enrichment_failure_config_fingerprint = 25;
   optional string enrichment_failure_prompt_version = 26;
+  optional FeedbackAssignment assignment = 27;
+  optional FeedbackAccountContext account_context = 28;
 }
 
 // FeedbackDetail is the single-row view: the list fields plus extras (flat).
@@ -288,12 +381,395 @@ message FeedbackDetail {
   optional string enrichment_failure_config_fingerprint = 34;
   optional string enrichment_failure_prompt_version = 35;
   optional ReplyDraftWorkflow reply_draft_workflow = 36;
+  FeedbackIdentityEvidence identity_evidence = 37;
+  optional FeedbackAssignment assignment = 38;
+  optional FeedbackAccountContext account_context = 39;
+}
+
+// FeedbackAccountContext normalizes account/company hints embedded in source
+// metadata so raw feedback can participate in account-level filtering before a
+// durable account table owns the canonical profile.
+message FeedbackAccountContext {
+  string account_key = 1;
+  string account_display = 2;
+  string source = 3;
+}
+
+message FeedbackAssignmentOwner {
+  string member_id = 1;
+  string member_type = 2;
+  string user_id = 3;
+  string email = 4;
+  string role = 5;
+}
+
+message FeedbackAssignment {
+  int64 feedback_id = 1;
+  optional FeedbackAssignmentOwner owner = 2;
+  optional string assigned_at = 3;
+  string assigned_by = 4;
+  optional string sla_due_at = 5;
+  string sla_status = 6;
+  string note = 7;
+}
+
+message AssignFeedbackRequest {
+  int64 feedback_id = 1;
+  optional string owner_member_id = 2;
+  optional string sla_due_at = 3;
+  string note = 4;
+}
+
+message BatchAssignFeedbackRequest {
+  repeated int64 feedback_ids = 1;
+  bool owner_member_id_set = 2;
+  optional string owner_member_id = 3;
+  bool sla_due_at_set = 4;
+  optional string sla_due_at = 5;
+  string note = 6;
+}
+
+message BatchAssignFeedbackResponse {
+  int32 total_matched = 1;
+  int32 succeeded = 2;
+  repeated BatchAssignFeedbackFailure failed = 3;
+}
+
+message BatchAssignFeedbackFailure {
+  int64 feedback_id = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message RecommendFeedbackAssignmentRequest {
+  repeated int64 feedback_ids = 1;
+}
+
+message FeedbackAssignmentRecommendation {
+  int64 feedback_id = 1;
+  string rule_key = 2;
+  string rule_name = 3;
+  string owner_lane = 4;
+  string severity = 5;
+  int32 sla_hours = 6;
+  optional string recommended_sla_due_at = 7;
+  string rationale = 8;
+  bool already_satisfied = 9;
+  optional FeedbackAssignment current_assignment = 10;
+  optional string recommended_owner_member_id = 11;
+}
+
+message RecommendFeedbackAssignmentResponse {
+  int32 total_matched = 1;
+  repeated FeedbackAssignmentRecommendation recommendations = 2;
+  repeated BatchAssignFeedbackFailure failed = 3;
+}
+
+message ApplyFeedbackAssignmentRecommendationsRequest {
+  repeated int64 feedback_ids = 1;
+  optional string owner_member_id = 2;
+  string note = 3;
+}
+
+message ApplyFeedbackAssignmentRecommendationsResponse {
+  int32 total_matched = 1;
+  int32 succeeded = 2;
+  int32 skipped = 3;
+  repeated BatchAssignFeedbackFailure failed = 4;
+  repeated FeedbackAssignmentRecommendation applied = 5;
+}
+
+message GetFeedbackAssignmentEscalationsRequest {
+  optional int32 limit = 1;
+}
+
+message FeedbackAssignmentEscalationQueue {
+  string generated_at = 1;
+  int64 overdue_count = 2;
+  int64 due_soon_count = 3;
+  int64 missing_owner_count = 4;
+  int64 missing_sla_count = 5;
+  repeated FeedbackAssignmentEscalation items = 6;
+}
+
+message FeedbackAssignmentEscalation {
+  int64 feedback_id = 1;
+  string title = 2;
+  string source = 3;
+  string type = 4;
+  bool is_urgent = 5;
+  string created_at = 6;
+  optional FeedbackAssignment assignment = 7;
+  repeated string escalation_reasons = 8;
+  optional int32 hours_until_due = 9;
+  string priority = 10;
+  optional FeedbackAccountContext account_context = 11;
+}
+
+message GetFeedbackAssignmentPolicyRequest {}
+
+message FeedbackAssignmentPolicyRule {
+  string rule_key = 1;
+  string rule_name = 2;
+  string owner_lane = 3;
+  string severity = 4;
+  int32 sla_hours = 5;
+  optional string default_owner_member_id = 6;
+  bool enabled = 7;
+  string rationale = 8;
+}
+
+message FeedbackAssignmentPolicy {
+  repeated FeedbackAssignmentPolicyRule rules = 1;
+  int32 version = 2;
+  optional string updated_at = 3;
+  string updated_by = 4;
+  string note = 5;
+}
+
+message UpdateFeedbackAssignmentPolicyRequest {
+  repeated FeedbackAssignmentPolicyRule rules = 1;
+  string note = 2;
+}
+
+message ListFeedbackAssignmentPolicyRevisionsRequest {}
+
+message FeedbackAssignmentPolicyRevision {
+  int32 version = 1;
+  optional string updated_at = 2;
+  string updated_by = 3;
+  string note = 4;
+  repeated FeedbackAssignmentPolicyRule rules = 5;
+}
+
+message ListFeedbackAssignmentPolicyRevisionsResponse {
+  repeated FeedbackAssignmentPolicyRevision revisions = 1;
+}
+
+message DryRunFeedbackAssignmentPolicyRequest {
+  repeated FeedbackAssignmentPolicyRule rules = 1;
+  repeated int64 feedback_ids = 2;
+}
+
+message FeedbackAssignmentPolicyDryRunImpact {
+  int64 feedback_id = 1;
+  string current_rule_key = 2;
+  string current_rule_name = 3;
+  string current_owner_lane = 4;
+  int32 current_sla_hours = 5;
+  optional string current_owner_member_id = 6;
+  string draft_rule_key = 7;
+  string draft_rule_name = 8;
+  string draft_owner_lane = 9;
+  int32 draft_sla_hours = 10;
+  optional string draft_owner_member_id = 11;
+  bool changed = 12;
+}
+
+message DryRunFeedbackAssignmentPolicyResponse {
+  int32 total_matched = 1;
+  int32 changed = 2;
+  repeated FeedbackAssignmentRecommendation recommendations = 3;
+  repeated BatchAssignFeedbackFailure failed = 4;
+  repeated FeedbackAssignmentPolicyDryRunImpact impacts = 5;
+}
+
+message RestoreFeedbackAssignmentPolicyRequest {
+  int32 version = 1;
+  string note = 2;
 }
 
 message Attachment {
   string url = 1;
   optional string mime = 2;
   optional int64 size = 3;
+}
+
+// FeedbackIdentityEvidence normalizes the customer identity signals embedded in
+// user_feedback.user_id and source_meta so console detail views can show which
+// fields are available for identity-graph merging.
+message FeedbackIdentityEvidence {
+  string source_user = 1;
+  repeated FeedbackIdentityKey keys = 2;
+  int32 merge_candidate_count = 3;
+  bool has_email = 4;
+  bool has_external_id = 5;
+  bool has_source_contact_id = 6;
+  bool has_crm_id = 7;
+  bool has_support_id = 8;
+  FeedbackIdentityAssessment assessment = 9;
+}
+
+message FeedbackIdentityKey {
+  string kind = 1;
+  string value = 2;
+  string source = 3;
+}
+
+enum FeedbackIdentityResolutionStrength {
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_UNSPECIFIED = 0;
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_STRONG = 1;
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_MEDIUM = 2;
+  FEEDBACK_IDENTITY_RESOLUTION_STRENGTH_WEAK = 3;
+}
+
+enum FeedbackIdentityRecommendedAction {
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_UNSPECIFIED = 0;
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_MERGE = 1;
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_REVIEW_WITH_CONTEXT = 2;
+  FEEDBACK_IDENTITY_RECOMMENDED_ACTION_CAPTURE_MORE_KEYS = 3;
+}
+
+// FeedbackIdentityAssessment gives operators a deterministic first-pass
+// resolution-quality read before the full signal graph supports reversible
+// merge and split operations.
+message FeedbackIdentityAssessment {
+  FeedbackIdentityResolutionStrength strength = 1;
+  FeedbackIdentityRecommendedAction recommended_action = 2;
+  repeated string missing_kinds = 3;
+  repeated string risk_reasons = 4;
+  int32 stable_key_count = 5;
+  int32 source_count = 6;
+}
+
+message GetFeedbackIdentityReviewRequest {}
+
+message GetFeedbackIdentityReviewResponse {
+  FeedbackIdentityReviewSummary summary = 1;
+  repeated FeedbackIdentityMergeCandidate merge_candidates = 2;
+  repeated FeedbackIdentityNeedsEvidenceItem needs_evidence = 3;
+  repeated FeedbackIdentityReviewedMerge recent_merges = 4;
+  FeedbackIdentitySubjectRoster subject_roster = 5;
+}
+
+message GetFeedbackIdentitySubjectRequest {
+  string subject_id = 1;
+}
+
+message MergeFeedbackIdentityReviewRequest {
+  string identity_kind = 1;
+  string identity_value = 2;
+  repeated int64 feedback_ids = 3;
+  string note = 4;
+}
+
+message MergeFeedbackIdentityReviewResponse {
+  FeedbackIdentitySubject subject = 1;
+  int32 evidence_count = 2;
+  bool created_subject = 3;
+  string action = 4;
+}
+
+message SplitFeedbackIdentityReviewRequest {
+  string subject_id = 1;
+  string identity_kind = 2;
+  string identity_value = 3;
+  string note = 4;
+}
+
+message SplitFeedbackIdentityReviewResponse {
+  FeedbackIdentitySubject subject = 1;
+  int32 evidence_count = 2;
+  string action = 3;
+}
+
+message FeedbackIdentitySubject {
+  string id = 1;
+  string display_name = 2;
+  string primary_identity_kind = 3;
+  string primary_identity_value = 4;
+  string status = 5;
+  int32 identity_count = 6;
+  int32 evidence_count = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message FeedbackIdentityReviewedMerge {
+  string event_id = 1;
+  FeedbackIdentitySubject subject = 2;
+  string identity_kind = 3;
+  string identity_value = 4;
+  int32 evidence_count = 5;
+  repeated int64 feedback_ids = 6;
+  string created_at = 7;
+  string created_by = 8;
+}
+
+message FeedbackIdentitySubjectRoster {
+  int32 active_subject_count = 1;
+  int32 active_identity_count = 2;
+  int32 evidence_count = 3;
+  repeated FeedbackIdentitySubject subjects = 4;
+}
+
+message FeedbackIdentitySubjectDetail {
+  FeedbackIdentitySubject subject = 1;
+  repeated FeedbackIdentitySubjectIdentity identities = 2;
+  repeated FeedbackIdentitySubjectEvent events = 3;
+}
+
+message FeedbackIdentitySubjectIdentity {
+  string id = 1;
+  string kind = 2;
+  string value = 3;
+  string source = 4;
+  string confidence = 5;
+  int32 evidence_count = 6;
+  int64 first_feedback_id = 7;
+  int64 latest_feedback_id = 8;
+  bool revoked = 9;
+  string revoked_at = 10;
+  string created_at = 11;
+  string updated_at = 12;
+}
+
+message FeedbackIdentitySubjectEvent {
+  string id = 1;
+  string action = 2;
+  string identity_kind = 3;
+  string identity_value = 4;
+  int32 evidence_count = 5;
+  repeated int64 feedback_ids = 6;
+  string note = 7;
+  string created_by = 8;
+  string created_at = 9;
+  repeated FeedbackIdentityReviewEvidence evidence = 10;
+}
+
+message FeedbackIdentityReviewSummary {
+  int32 scanned_feedback_count = 1;
+  int32 merge_candidate_count = 2;
+  int32 needs_evidence_count = 3;
+  int32 strong_candidate_count = 4;
+  int32 weak_feedback_count = 5;
+}
+
+message FeedbackIdentityMergeCandidate {
+  string identity_kind = 1;
+  string identity_value = 2;
+  int32 feedback_count = 3;
+  int32 source_count = 4;
+  int32 stable_key_count = 5;
+  string latest_feedback_at = 6;
+  FeedbackIdentityResolutionStrength strength = 7;
+  FeedbackIdentityRecommendedAction recommended_action = 8;
+  repeated string risk_reasons = 9;
+  repeated FeedbackIdentityReviewEvidence evidence = 10;
+}
+
+message FeedbackIdentityNeedsEvidenceItem {
+  FeedbackIdentityReviewEvidence evidence = 1;
+  FeedbackIdentityAssessment assessment = 2;
+}
+
+message FeedbackIdentityReviewEvidence {
+  int64 feedback_id = 1;
+  string source = 2;
+  string source_user = 3;
+  string created_at = 4;
+  string excerpt = 5;
+  repeated FeedbackIdentityKey keys = 6;
 }
 
 // AttrFilter is one per-dim filter in a console list query. The
@@ -332,6 +808,7 @@ message ListFeedbackRequest {
   optional string source = 18;
   optional string type = 19;
   optional string cohort_id = 20;
+  optional string account_key = 21;
 }
 
 message ListFeedbackResponse {
@@ -341,6 +818,41 @@ message ListFeedbackResponse {
 
 message GetFeedbackRequest {
   int64 id = 1;  // path param
+}
+
+message GetFeedbackSignalTraceRequest {
+  int64 feedback_id = 1;  // path param
+  optional int32 limit = 2;
+}
+
+message FeedbackSignalTrace {
+  int64 feedback_id = 1;
+  string signal_trace_id = 2;
+  string source = 3;
+  string terminal_status = 4;
+  bool complete = 5;
+  repeated string missing_stages = 6;
+  repeated FeedbackSignalTraceStage stages = 7;
+  repeated FeedbackSignalTraceEvent events = 8;
+  string generated_at = 9;  // RFC3339
+}
+
+message FeedbackSignalTraceStage {
+  string key = 1;
+  string label = 2;
+  string status = 3;
+  int32 event_count = 4;
+  optional string last_event_at = 5;  // RFC3339
+}
+
+message FeedbackSignalTraceEvent {
+  string stage = 1;
+  string kind = 2;
+  string status = 3;
+  string trace_id = 4;
+  string summary = 5;
+  string occurred_at = 6;  // RFC3339
+  google.protobuf.Struct metadata = 7;
 }
 
 // RegenerateReplyDraftRequest re-runs reply-draft generation for one row (#26).
@@ -536,6 +1048,8 @@ message GetFeedbackStatsRequest {}
 
 message GetTerminalFailureWorkbenchRequest {}
 
+message GetFeedbackTriageCommandCenterRequest {}
+
 // ValueCount is one bucket of a per-dim distribution.
 message ValueCount {
   string value = 1;
@@ -577,4 +1091,33 @@ message GetTerminalFailureWorkbenchResponse {
   repeated TerminalFailureCluster model_channel_clusters = 6;
   repeated TerminalFailureCluster config_fingerprint_clusters = 7;
   repeated TerminalFailureCluster age_bucket_clusters = 8;
+}
+
+message FeedbackTriageCommandCenter {
+  string generated_at = 1;
+  int64 open_count = 2;
+  int64 active_count = 3;
+  int64 closed_count = 4;
+  int64 urgent_open_count = 5;
+  int64 terminal_failure_count = 6;
+  int64 identity_debt_count = 7;
+  int64 overdue_count = 8;
+  int64 due_soon_count = 9;
+  repeated FeedbackTriageLane lanes = 10;
+}
+
+message FeedbackTriageLane {
+  string key = 1;
+  string label = 2;
+  string owner_lane = 3;
+  string severity = 4;
+  int32 sla_hours = 5;
+  int64 count = 6;
+  int64 overdue_count = 7;
+  int64 due_soon_count = 8;
+  string oldest_created_at = 9;
+  string next_deadline_at = 10;
+  string recommended_action = 11;
+  string filter_query = 12;
+  repeated int64 sample_feedback_ids = 13;
 }

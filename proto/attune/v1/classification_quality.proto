@@ -14,6 +14,17 @@ service ClassificationQualityService {
   rpc GetClassificationQualitySamples(GetClassificationQualitySamplesRequest) returns (GetClassificationQualitySamplesResponse) {
     option (google.api.http) = {get: "/fb/v1/console/classification-quality/samples"};
   }
+
+  rpc GetClassificationReviewLearning(GetClassificationReviewLearningRequest) returns (GetClassificationReviewLearningResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/classification-quality/review-learning"};
+  }
+
+  rpc RecordClassificationReview(RecordClassificationReviewRequest) returns (RecordClassificationReviewResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/classification-quality/reviews"
+      body: "*"
+    };
+  }
 }
 
 message GetClassificationQualityRequest {
@@ -54,6 +65,70 @@ message GetClassificationQualityResponse {
 
 message GetClassificationQualitySamplesResponse {
   repeated ClassificationQualitySample samples = 1;
+}
+
+message GetClassificationReviewLearningRequest {
+  string current_from = 1;
+  string current_to = 2;
+  string signal_reason = 3;
+  int32 limit = 4;
+}
+
+message RecordClassificationReviewRequest {
+  int64 feedback_id = 1;
+  string outcome = 2;  // accepted | edited | dismissed
+  string signal_reason = 3;
+  string note = 4;
+  string correction_json = 5;
+}
+
+message GetClassificationReviewLearningResponse {
+  string generated_at = 1;
+  string current_from = 2;
+  string current_to = 3;
+  int64 total_reviews = 4;
+  int64 accepted = 5;
+  int64 edited = 6;
+  int64 dismissed = 7;
+  int64 training_candidate_count = 8;
+  int64 reviewed_feedback_count = 9;
+  int64 classified_feedback_count = 10;
+  double review_coverage_rate = 11;
+  repeated ClassificationReviewReasonBucket reason_buckets = 12;
+  repeated ClassificationReviewEvent recent_events = 13;
+}
+
+message RecordClassificationReviewResponse {
+  ClassificationReviewEvent event = 1;
+  GetClassificationReviewLearningResponse learning = 2;
+}
+
+message ClassificationReviewReasonBucket {
+  string signal_reason = 1;
+  int64 total_reviews = 2;
+  int64 accepted = 3;
+  int64 edited = 4;
+  int64 dismissed = 5;
+  int64 training_candidate_count = 6;
+  string last_reviewed_at = 7;
+}
+
+message ClassificationReviewEvent {
+  string event_id = 1;
+  int64 feedback_id = 2;
+  string outcome = 3;
+  string signal_reason = 4;
+  string note = 5;
+  string correction_json = 6;
+  string source = 7;
+  string logical_model = 8;
+  string provider_model = 9;
+  string channel_id = 10;
+  string prompt_version = 11;
+  string prompt_version_id = 12;
+  optional double classification_confidence = 13;
+  string reviewed_by = 14;
+  string reviewed_at = 15;
 }
 
 message ClassificationQualitySummary {

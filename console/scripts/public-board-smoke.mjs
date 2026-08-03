@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
-import { constants as fsConstants } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { constants as fsConstants, readFileSync } from 'node:fs'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +14,8 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(scriptDir, '..', '..')
 const consoleDir = path.join(repoRoot, 'console')
 const pickFreePortScript = path.join(repoRoot, 'scripts', 'pick-free-port.mjs')
+const require = createRequire(import.meta.url)
+const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8')
 const workDir = await mkdtemp(path.join(os.tmpdir(), 'attune-public-board-smoke-'))
 const pgDataDir = path.join(workDir, 'pgdata')
 const configPath = path.join(workDir, 'config.yaml')
@@ -50,6 +53,11 @@ try {
   // The smoke script only needs the generated SPA bundle; the console
   // workflow already runs `pnpm tsc -b --noEmit` separately.
   execFileSync('pnpm', ['exec', 'vite', 'build'], {
+    cwd: consoleDir,
+    stdio: 'inherit',
+  })
+  log('check console bundle budget')
+  execFileSync('pnpm', ['run', 'check:bundle'], {
     cwd: consoleDir,
     stdio: 'inherit',
   })
@@ -145,6 +153,7 @@ ${indent(keyset, 4)}
   await runDesktopSmoke(browser, baseURL, tenantASeed, tenantA)
   await runTenantIsolationSmoke(browser, baseURL, tenantASeed, tenantA, tenantB)
   await runMobileSmoke(browser, baseURL, tenantASeed, tenantA)
+  await runPublicSurveySmoke(browser, baseURL, dsn, tenantAId, tenantASeed)
   await verifyRoadmapApi(baseURL, tenantASeed, tenantA)
   await runConsoleSmoke(browser, baseURL, tenantA, tenantASeed)
 
@@ -283,6 +292,7 @@ function buildSeedData() {
   return {
     requests,
     hiddenRequests,
+    survey: buildSurveySeedData(),
     basePageSize: 20,
     searchTitle: 'Audit log actor filter',
     roadmapSearchTitle: 'Search misses exact phrase',
@@ -307,8 +317,25 @@ function buildSeedData() {
   }
 }
 
+function buildSurveySeedData() {
+  return {
+    campaignId: randomUUID(),
+    invitationId: randomUUID(),
+    token: `survey-smoke-${randomUUID().replace(/-/g, '')}`,
+    sourceId: 'public-survey-smoke-source',
+    content: {
+      title: 'Resolution feedback',
+      intro: 'Help us understand whether the customer loop was actually closed.',
+      question: 'How satisfied are you with this resolution?',
+      comment_prompt: 'What should we know?',
+      thank_you: 'Thanks for closing the loop.',
+    },
+  }
+}
+
 function buildSeedSql(tenantId, data) {
   const allRequests = [...data.requests, ...(data.hiddenRequests ?? [])]
+  const survey = data.survey
 
   const requestValues = allRequests
     .map((request) =>
@@ -532,6 +559,90 @@ INSERT INTO public_moderation_subjects (
   reviewed_at
 ) VALUES
   ${commentSubjectValues};
+
+INSERT INTO survey_campaigns (
+  id,
+  tenant_id,
+  name,
+  survey_type,
+  status,
+  trigger_event,
+  distribution_mode,
+  dedupe_policy,
+  trigger_filter,
+  content,
+  locale,
+  content_version,
+  sampling_percent,
+  min_days_between_contact,
+  expires_after_days,
+  max_daily_invitations,
+  low_score_threshold,
+  require_recent_customer_activity,
+  recent_activity_days,
+  suppress_auto_resolved,
+  created_by,
+  updated_by
+) VALUES (
+  ${sqlValue(survey.campaignId)},
+  ${sqlValue(tenantId)},
+  'Public survey smoke',
+  'csat',
+  'active',
+  'manual_link',
+  'source_link',
+  'one_per_source',
+  ${sqlJsonb({})},
+  ${sqlJsonb(survey.content)},
+  'en',
+  1,
+  100,
+  0,
+  14,
+  0,
+  3,
+  FALSE,
+  30,
+  FALSE,
+  'smoke',
+  'smoke'
+);
+
+INSERT INTO survey_invitations (
+  id,
+  tenant_id,
+  campaign_id,
+  campaign_content_version,
+  campaign_snapshot,
+  dedupe_key,
+  source_type,
+  source_id,
+  distribution_mode,
+  token_hash,
+  delivery_status,
+  response_status,
+  suppression_status,
+  recipient_snapshot,
+  expires_at,
+  created_by
+) VALUES (
+  ${sqlValue(survey.invitationId)},
+  ${sqlValue(tenantId)},
+  ${sqlValue(survey.campaignId)},
+  1,
+  ${sqlJsonb({ campaign_id: survey.campaignId, content: survey.content })},
+  ${sqlValue(`manual:${survey.sourceId}`)},
+  'manual',
+  ${sqlValue(survey.sourceId)},
+  'source_link',
+  ${sqlValue(surveyTokenHash(survey.token))},
+  'not_applicable',
+  'not_started',
+  'not_suppressed',
+  ${sqlJsonb({ display_name: 'Browser smoke recipient' })},
+  NOW() + INTERVAL '14 days',
+  'smoke'
+);
 
 COMMIT;
 `
@@ -892,6 +1003,89 @@ async function runMobileSmoke(browserInstance, baseURL, data, tenant) {
   }
 }
 
+async function runPublicSurveySmoke(browserInstance, baseURL, dsn, tenantId, data) {
+  const survey = data.survey
+  const context = await browserInstance.newContext({
+    bypassCSP: true,
+    viewport: { width: 1365, height: 768 },
+  })
+  const page = await context.newPage()
+  const comment = `Browser low-score response ${Date.now()}`
+
+  try {
+    const response = await page.goto(`${baseURL}/surveys/${survey.token}?score=2`, {
+      waitUntil: 'domcontentloaded',
+    })
+    assertPublicSurveyHeaders(response)
+    await expect(page).toHaveTitle('Resolution feedback | Attune survey')
+    await expect(
+      page.getByRole('heading', { name: 'Resolution feedback', exact: true }),
+    ).toBeVisible()
+    await expect(page.getByText(survey.content.intro, { exact: true })).toBeVisible()
+    await expect(page.getByRole('radio', { name: 'Score 2', exact: true })).toBeChecked()
+    await assertNoDocumentOverflow(page, 'public survey desktop')
+    await expectNoAxeViolations(page)
+
+    await assertPublicSurveyMobileRender(browserInstance, baseURL, survey)
+
+    await page.getByLabel(survey.content.comment_prompt, { exact: true }).fill(comment)
+    await page.getByRole('button', { name: 'Submit feedback', exact: true }).click()
+    const status = page.getByRole('status')
+    await expect(status).toContainText(survey.content.thank_you)
+    await expect(status).toContainText('Your response has been flagged for review.')
+    await expect(page.getByRole('button', { name: 'Submit feedback', exact: true })).toHaveCount(0)
+    await assertNoDocumentOverflow(page, 'public survey submitted')
+    await expectNoAxeViolations(page)
+
+    await page.goto(`${baseURL}/surveys/${survey.token}`, { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('status')).toHaveText('This survey has already been submitted.')
+    await expect(page.getByRole('button', { name: 'Submit feedback', exact: true })).toHaveCount(0)
+
+    const responseRecord = await psqlScalar(
+      dsn,
+      `SELECT score::text || '|' || comment
+         FROM survey_responses
+        WHERE tenant_id = ${sqlValue(tenantId)}
+          AND invitation_id = ${sqlValue(survey.invitationId)}`,
+    )
+    if (responseRecord !== `2|${comment}`) {
+      throw new Error(`public survey response row mismatch: ${responseRecord}`)
+    }
+    const reviewCount = await psqlScalar(
+      dsn,
+      `SELECT COUNT(*)
+         FROM survey_low_score_reviews
+        WHERE tenant_id = ${sqlValue(tenantId)}
+          AND campaign_id = ${sqlValue(survey.campaignId)}`,
+    )
+    if (reviewCount !== '1') {
+      throw new Error(`public survey low-score review count = ${reviewCount}, want 1`)
+    }
+  } finally {
+    await context.close()
+  }
+}
+
+async function assertPublicSurveyMobileRender(browserInstance, baseURL, survey) {
+  const context = await browserInstance.newContext({
+    bypassCSP: true,
+    viewport: { width: 390, height: 844 },
+  })
+  const page = await context.newPage()
+  try {
+    const response = await page.goto(`${baseURL}/surveys/${survey.token}?score=5`, {
+      waitUntil: 'domcontentloaded',
+    })
+    assertPublicSurveyHeaders(response)
+    await expect(page.getByRole('radio', { name: 'Score 5', exact: true })).toBeChecked()
+    await expect(page.getByRole('button', { name: 'Submit feedback', exact: true })).toBeVisible()
+    await assertNoDocumentOverflow(page, 'public survey mobile')
+    await expectNoAxeViolations(page)
+  } finally {
+    await context.close()
+  }
+}
+
 async function runConsoleSmoke(browserInstance, baseURL, tenant, data) {
   const context = await browserInstance.newContext({ viewport: { width: 1440, height: 1200 } })
   const page = await context.newPage()
@@ -1228,12 +1422,81 @@ function describeLaunchOption(option) {
   return 'default-launch'
 }
 
+function assertPublicSurveyHeaders(response) {
+  if (!response?.ok()) {
+    throw new Error(`public survey response status = ${response?.status() ?? 'missing'}`)
+  }
+  const headers = response.headers()
+  if (headers['cache-control'] !== 'no-store') {
+    throw new Error(`public survey Cache-Control = ${headers['cache-control']}`)
+  }
+  if (headers['x-robots-tag'] !== 'noindex, nofollow') {
+    throw new Error(`public survey X-Robots-Tag = ${headers['x-robots-tag']}`)
+  }
+  if (headers['referrer-policy'] !== 'no-referrer') {
+    throw new Error(`public survey Referrer-Policy = ${headers['referrer-policy']}`)
+  }
+  if (headers['x-frame-options'] !== 'DENY') {
+    throw new Error(`public survey X-Frame-Options = ${headers['x-frame-options']}`)
+  }
+  if (!headers['content-security-policy']?.includes("frame-ancestors 'none'")) {
+    throw new Error(`public survey CSP = ${headers['content-security-policy']}`)
+  }
+}
+
+async function assertNoDocumentOverflow(page, label) {
+  const metrics = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+    innerWidth: window.innerWidth,
+  }))
+  if (
+    metrics.scrollWidth > metrics.innerWidth + 1 ||
+    metrics.scrollWidth > metrics.clientWidth + 1
+  ) {
+    throw new Error(`${label} overflow: ${JSON.stringify(metrics)}`)
+  }
+}
+
+async function expectNoAxeViolations(page) {
+  await page.addScriptTag({ content: axeSource })
+  const violations = await page.evaluate(async () => {
+    const results = await window.axe.run(document, {
+      resultTypes: ['violations'],
+      rules: {
+        region: { enabled: true },
+      },
+    })
+    return results.violations
+      .filter((violation) => violation.impact !== 'minor')
+      .map((violation) => {
+        const node = violation.nodes[0]
+        return {
+          id: violation.id,
+          impact: violation.impact,
+          help: violation.help,
+          target: node?.target.join(' '),
+          summary: node?.failureSummary,
+        }
+      })
+  })
+  expect(violations).toEqual([])
+}
+
 function sqlValue(value) {
   if (value === null || value === undefined) return 'NULL'
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL'
   if (typeof value === 'object' && value.__rawSql) return value.__rawSql
   return `'${String(value).replace(/'/g, "''")}'`
+}
+
+function sqlJsonb(value) {
+  return `${sqlValue(JSON.stringify(value ?? {}))}::jsonb`
+}
+
+function surveyTokenHash(token) {
+  return createHash('sha256').update(String(token).trim()).digest('hex')
 }
 
 function raw(sql) {

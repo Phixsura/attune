@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import {
   ArrowRight,
   Bookmark,
+  Building2,
   ClipboardList,
   DollarSign,
   ExternalLink,
@@ -48,6 +49,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   type CustomerRequestFilters,
+  customerRequestAccountSummaryQuery,
   customerRequestDetailQuery,
   customerRequestGitHubIssueConnectionOptionsQuery,
   customerRequestSavedViewsQuery,
@@ -75,16 +77,30 @@ import {
   useUpdateCustomerRequestScoringSettings,
 } from '@/features/customer-requests/api/customer-requests'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
+import { useDocumentTitle } from '@/hooks/use-document-title'
 import { api } from '@/lib/api-client'
 import { type Member, membersQuery } from '@/lib/members-api'
 import { cn } from '@/lib/utils'
 import {
+  type CustomerRequestAccountDecisionSignal,
+  type CustomerRequestAccountEvent,
+  CustomerRequestAccountEventKind,
   type CustomerRequestAccountProfile,
+  CustomerRequestAccountSignalKind,
+  CustomerRequestAccountSignalSeverity,
+  type CustomerRequestAccountSummary,
   type CustomerRequestCustomerLink,
+  CustomerRequestDecisionPublicSafeState,
+  type CustomerRequestDecisionRecord,
+  type CustomerRequestDecisionScoreFactor,
+  CustomerRequestDecisionScoreFactorKind,
   type CustomerRequestDeliveryArtifact,
   type CustomerRequestDeliveryGraph,
   CustomerRequestDeliveryHealth,
   type CustomerRequestDuplicate,
+  CustomerRequestEvidenceConfidence,
+  type CustomerRequestEvidenceQuality,
+  CustomerRequestEvidenceQualityReason,
   type CustomerRequestFeedbackEvidence,
   CustomerRequestImportance,
   type CustomerRequestIssueLink,
@@ -114,18 +130,25 @@ interface OwnerFilterOption {
   label: string
 }
 
+type TranslateFn = ReturnType<typeof useTranslation>['t']
+
 export function CustomerRequestsPage({
   initialPromoteFeedbackIDs = [],
   initialFeedbackID,
+  initialAccountKey,
   initialRequestID,
   initialMergeTargetID,
+  onAccountKeyInspect,
 }: {
   initialPromoteFeedbackIDs?: string[]
   initialFeedbackID?: string
+  initialAccountKey?: string
   initialRequestID?: string
   initialMergeTargetID?: string
+  onAccountKeyInspect?: (accountKey: string) => void
 } = {}) {
   const { t } = useTranslation()
+  useDocumentTitle(t('customer_requests.title'))
   const permissions = usePermissions()
   const canViewMembers = permissions.can('settings:members:view')
   const canConfigure = permissions.can('customer_request:configure')
@@ -145,6 +168,7 @@ export function CustomerRequestsPage({
   const [filters, setFilters] = useState<CustomerRequestFilters>(() => ({
     ...DEFAULT_FILTERS,
     feedbackId: initialFeedbackID,
+    accountKey: initialAccountKey,
   }))
   const [selectedID, setSelectedID] = useState<string | null>(() => initialRequestID ?? null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -163,19 +187,35 @@ export function CustomerRequestsPage({
     )
   }, [initialFeedbackID])
   useEffect(() => {
+    setFilters((current) =>
+      current.accountKey === initialAccountKey
+        ? current
+        : { ...current, accountKey: initialAccountKey },
+    )
+  }, [initialAccountKey])
+  useEffect(() => {
     setSelectedID(initialRequestID ?? null)
   }, [initialRequestID])
 
   const list = useInfiniteQuery(customerRequestsInfiniteQuery(filters))
+  const accountSummary = useQuery(customerRequestAccountSummaryQuery(filters))
   const items = useMemo(
     () => list.data?.pages.flatMap((page) => page.requests) ?? [],
     [list.data?.pages],
   )
+  const activeAccountKey = filters.accountKey?.trim()
   const ownerOptions = useMemo(
     () => ownerFilterOptions(items, members.data ?? [], filters.ownerMemberId),
     [filters.ownerMemberId, items, members.data],
   )
   const selected = items.find((item) => item.id === selectedID) ?? null
+  const inspectAccountRequests = (accountKey: string) => {
+    const normalized = accountKey.trim()
+    if (!normalized) return
+    setFilters({ ...DEFAULT_FILTERS, accountKey: normalized })
+    setSelectedID(null)
+    onAccountKeyInspect?.(normalized)
+  }
 
   return (
     <div className="space-y-5">
@@ -220,6 +260,16 @@ export function CustomerRequestsPage({
         cohorts={(cohortList.data ?? []).map((c) => ({ id: c.id, name: c.name }))}
         onChange={setFilters}
       />
+
+      {activeAccountKey ? (
+        <AccountSignalOverview
+          accountKey={activeAccountKey}
+          error={accountSummary.error}
+          isPending={accountSummary.isPending}
+          model={accountSummary.data}
+          onOpenRequest={setSelectedID}
+        />
+      ) : null}
 
       {list.isPending ? (
         <CustomerRequestSkeleton />
@@ -279,6 +329,7 @@ export function CustomerRequestsPage({
         initialMergeTargetID={initialMergeTargetID}
         open={selectedID != null}
         onMerged={setSelectedID}
+        onInspectAccount={inspectAccountRequests}
         onOpenChange={(open) => {
           if (!open) setSelectedID(null)
         }}
@@ -351,15 +402,27 @@ function CustomerRequestToolbar({
 }) {
   const { t } = useTranslation()
   return (
-    <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(15rem,1fr)_repeat(6,10rem)]">
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+    <div className="grid min-w-0 gap-3 rounded-md border bg-background p-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="relative min-w-0">
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           aria-label={t('customer_requests.search_placeholder')}
           className="pl-9"
           value={filters.q ?? ''}
           placeholder={t('customer_requests.search_placeholder')}
           onChange={(event) => onChange({ ...filters, q: event.target.value || undefined })}
+        />
+      </div>
+      <div className="relative min-w-0">
+        <Building2 className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          aria-label={t('customer_requests.account_filter')}
+          className="pl-9"
+          value={filters.accountKey ?? ''}
+          placeholder={t('customer_requests.account_filter_placeholder')}
+          onChange={(event) =>
+            onChange({ ...filters, accountKey: event.target.value || undefined })
+          }
         />
       </div>
       <Select
@@ -371,7 +434,7 @@ function CustomerRequestToolbar({
           })
         }
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label={t('customer_requests.status')}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -402,7 +465,7 @@ function CustomerRequestToolbar({
           })
         }
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label={t('customer_requests.priority')}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -451,7 +514,7 @@ function CustomerRequestToolbar({
           onChange({ ...filters, visibility: value as CustomerRequestVisibility })
         }
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label={t('customer_requests.visibility')}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -473,7 +536,7 @@ function CustomerRequestToolbar({
         value={filters.sort ?? CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT}
         onValueChange={(value) => onChange({ ...filters, sort: value as CustomerRequestSort })}
       >
-        <SelectTrigger>
+        <SelectTrigger aria-label={t('customer_requests.sort')}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -521,6 +584,420 @@ function CustomerRequestToolbar({
           </SelectContent>
         </Select>
       )}
+    </div>
+  )
+}
+
+function AccountSignalOverview({
+  accountKey,
+  error,
+  isPending,
+  model,
+  onOpenRequest,
+}: {
+  accountKey: string
+  error: Error | null
+  isPending: boolean
+  model?: CustomerRequestAccountSummary
+  onOpenRequest: (id: string) => void
+}) {
+  const { t } = useTranslation()
+  const scope = model?.accountProfile?.accountDisplay || model?.accountKey || accountKey
+  const decisionSignals = model?.decisionSignals ?? []
+  const events = model?.events ?? []
+  const timeline = model?.timeline ?? []
+  return (
+    <section
+      data-testid="customer-request-account-overview"
+      className="space-y-4 rounded-md border bg-background p-4"
+    >
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Building2 className="size-4" />
+            {t('customer_requests.account_overview_title')}
+          </div>
+          <h2 className="break-words text-xl font-semibold tracking-normal">
+            {t('customer_requests.account_overview_scope', { value: scope })}
+          </h2>
+        </div>
+        {model ? (
+          <div className="flex items-center gap-1 self-start rounded bg-muted px-2 py-1 text-sm font-medium">
+            <DollarSign className="size-4" />
+            {t('customer_requests.account_overview_revenue_metric', {
+              value: formatMoney(model.revenueImpactCents, model.revenueCurrency),
+            })}
+          </div>
+        ) : null}
+      </div>
+
+      {isPending ? <AccountOverviewSkeleton /> : null}
+
+      {!isPending && error ? (
+        <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {t('customer_requests.load_failed')}: {error.message}
+        </div>
+      ) : null}
+
+      {!isPending && !error && model ? (
+        <>
+          {model.accountProfile ? <AccountProfileSummary profile={model.accountProfile} /> : null}
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_request_metric', {
+                count: model.requestCount,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_feedback_metric', {
+                count: model.feedbackCount,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_customer_metric', {
+                count: model.customerCount,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_vote_metric', {
+                count: model.voteCount,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.issue_count', {
+                count: model.issueCount,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_average_score_metric', {
+                count: model.averageDecisionScore,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_top_score_metric', {
+                count: model.topDecisionScore,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_high_priority_metric', {
+                count: model.highPriorityRequestCount,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_shipped_metric', {
+                count: model.shippedRequestCount,
+              })}
+            />
+            <AccountOverviewMetric
+              label={t('customer_requests.account_overview_delivery_risk_metric', {
+                count: model.staleOrFailedIssueCount,
+              })}
+            />
+          </div>
+
+          <div className="rounded-md bg-muted/40 p-3 text-sm">
+            {t('customer_requests.account_overview_delivery_metric', {
+              failed: model.failedIssueCount,
+              manual: model.manualIssueCount,
+              pending: model.pendingIssueCount,
+              stale: model.staleIssueCount,
+              synced: model.syncedIssueCount,
+            })}
+          </div>
+
+          <AccountDecisionSignals currency={model.revenueCurrency} signals={decisionSignals} />
+
+          <AccountEventTimeline events={events} onOpenRequest={onOpenRequest} />
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <ClipboardList className="size-4" />
+              {t('customer_requests.account_overview_timeline')}
+            </div>
+            {timeline.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t('customer_requests.account_overview_empty')}
+              </p>
+            ) : (
+              <div className="divide-y rounded-md border">
+                {timeline.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="grid w-full gap-2 p-3 text-left text-sm transition hover:bg-muted/40 md:grid-cols-[auto_minmax(0,1fr)_auto]"
+                    onClick={() => onOpenRequest(item.id)}
+                  >
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {item.displayId}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{item.title}</div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                        <span>{statusLabel(t, item.status)}</span>
+                        <span>{priorityLabel(t, item.priority)}</span>
+                        <span>
+                          {t('customer_requests.decision_score', { count: item.decisionScore })}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {t('customer_requests.updated', { value: formatDate(item.updatedAt) })}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      ) : null}
+    </section>
+  )
+}
+
+function AccountOverviewMetric({ label }: { label: string }) {
+  return <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm font-medium">{label}</div>
+}
+
+function AccountEventTimeline({
+  events,
+  onOpenRequest,
+}: {
+  events: CustomerRequestAccountEvent[]
+  onOpenRequest: (id: string) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <ClipboardList className="size-4" />
+        {t('customer_requests.account_overview_events')}
+      </div>
+      {events.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          {t('customer_requests.account_events_empty')}
+        </p>
+      ) : (
+        <div className="divide-y rounded-md border">
+          {events.map((event) => (
+            <div
+              key={`${event.kind}:${event.requestId}:${event.occurredAt}:${event.feedbackId}:${event.issueKey}`}
+              className="grid gap-2 p-3 text-sm md:grid-cols-[minmax(0,1fr)_auto]"
+            >
+              <button
+                type="button"
+                className="min-w-0 text-left"
+                onClick={() => onOpenRequest(event.requestId)}
+              >
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="rounded bg-muted px-2 py-0.5 text-xs font-medium">
+                    {accountEventKindLabel(t, event.kind)}
+                  </span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {event.requestDisplayId}
+                  </span>
+                  <span className="font-medium">{event.requestTitle}</span>
+                </div>
+                {event.description ? (
+                  <div className="mt-1 line-clamp-2 text-muted-foreground">{event.description}</div>
+                ) : null}
+                <AccountEventMeta event={event} />
+              </button>
+              <div className="text-xs text-muted-foreground md:text-right">
+                <div>{formatDate(event.occurredAt)}</div>
+                {event.issueUrl ? (
+                  <a
+                    className="mt-1 inline-flex items-center gap-1 text-foreground underline-offset-4 hover:underline"
+                    href={event.issueUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <ExternalLink className="size-3" />
+                    {event.issueKey}
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AccountEventMeta({ event }: { event: CustomerRequestAccountEvent }) {
+  const { t } = useTranslation()
+  const parts = [
+    event.subjectDisplay
+      ? t('customer_requests.account_event_subject', { value: event.subjectDisplay })
+      : '',
+    event.source ? t('customer_requests.account_event_source', { value: event.source }) : '',
+    event.actorId ? t('customer_requests.account_event_actor', { value: event.actorId }) : '',
+    event.feedbackId && event.feedbackId !== '0'
+      ? t('customer_requests.account_event_feedback', { value: event.feedbackId })
+      : '',
+    event.issueKey && !event.issueUrl
+      ? t('customer_requests.account_event_issue', { value: event.issueKey })
+      : '',
+  ].filter(Boolean)
+  if (parts.length === 0) return null
+  return <div className="mt-1 text-xs text-muted-foreground">{parts.join(' · ')}</div>
+}
+
+function accountEventKindLabel(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  kind: CustomerRequestAccountEventKind,
+) {
+  switch (kind) {
+    case CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_REQUEST_CREATED:
+      return t('customer_requests.account_event_request_created')
+    case CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_FEEDBACK_LINKED:
+      return t('customer_requests.account_event_feedback_linked')
+    case CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_CUSTOMER_LINKED:
+      return t('customer_requests.account_event_customer_linked')
+    case CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_VOTE_ADDED:
+      return t('customer_requests.account_event_vote_added')
+    case CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_LINKED:
+      return t('customer_requests.account_event_issue_linked')
+    case CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_SYNCED:
+      return t('customer_requests.account_event_issue_synced')
+    case CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_NOTE_ADDED:
+      return t('customer_requests.account_event_note_added')
+    default:
+      return t('customer_requests.account_event_unknown')
+  }
+}
+
+function AccountDecisionSignals({
+  currency,
+  signals,
+}: {
+  currency: string
+  signals: CustomerRequestAccountDecisionSignal[]
+}) {
+  const { t } = useTranslation()
+  if (signals.length === 0) return null
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <SlidersHorizontal className="size-4" />
+        {t('customer_requests.account_overview_decision_signals')}
+      </div>
+      <div className="grid gap-2 md:grid-cols-2">
+        {signals.map((signal) => (
+          <div
+            key={`${signal.kind}:${signal.count}:${signal.score}:${signal.valueCents}`}
+            className={cn(
+              'rounded-md border px-3 py-2 text-sm',
+              accountSignalSeverityClass(signal.severity),
+            )}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-medium">{accountDecisionSignalLabel(t, signal, currency)}</span>
+              <span className="shrink-0 text-xs font-medium">
+                {accountSignalSeverityLabel(t, signal.severity)}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function accountDecisionSignalLabel(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  signal: CustomerRequestAccountDecisionSignal,
+  currency: string,
+) {
+  switch (signal.kind) {
+    case CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_DELIVERY_RISK:
+      return t('customer_requests.account_signal_delivery_risk', { count: signal.count })
+    case CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_HIGH_PRIORITY_DEMAND:
+      return t('customer_requests.account_signal_high_priority', {
+        count: signal.count,
+        score: signal.score,
+      })
+    case CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_REVENUE_IMPACT:
+      return t('customer_requests.account_signal_revenue', {
+        score: signal.score,
+        value: formatMoney(signal.valueCents, currency),
+      })
+    case CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_BREADTH:
+      return t('customer_requests.account_signal_evidence_breadth', {
+        count: signal.count,
+        score: signal.score,
+      })
+    case CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_GAP:
+      return t('customer_requests.account_signal_evidence_gap', { count: signal.count })
+    case CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_SHIPPED_OUTCOME:
+      return t('customer_requests.account_signal_shipped', { count: signal.count })
+    default:
+      return t('customer_requests.account_signal_unknown')
+  }
+}
+
+function accountSignalSeverityLabel(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  severity: CustomerRequestAccountSignalSeverity,
+) {
+  switch (severity) {
+    case CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL:
+      return t('customer_requests.account_signal_severity_critical')
+    case CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING:
+      return t('customer_requests.account_signal_severity_warning')
+    case CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_POSITIVE:
+      return t('customer_requests.account_signal_severity_positive')
+    default:
+      return t('customer_requests.account_signal_severity_info')
+  }
+}
+
+function accountSignalSeverityClass(severity: CustomerRequestAccountSignalSeverity) {
+  switch (severity) {
+    case CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL:
+      return 'border-destructive/40 bg-destructive/5 text-destructive'
+    case CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING:
+      return 'border-amber-300 bg-amber-50 text-amber-950'
+    case CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_POSITIVE:
+      return 'border-emerald-300 bg-emerald-50 text-emerald-950'
+    default:
+      return 'border-border bg-muted/20 text-foreground'
+  }
+}
+
+function AccountOverviewSkeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <Skeleton className="h-10" />
+        <Skeleton className="h-10" />
+        <Skeleton className="h-10" />
+        <Skeleton className="h-10" />
+      </div>
+      <Skeleton className="h-14" />
+    </div>
+  )
+}
+
+function AccountProfileSummary({ profile }: { profile: CustomerRequestAccountProfile }) {
+  const { t } = useTranslation()
+  const meta = [
+    profile.tier,
+    profile.sizeSegment,
+    profile.lifecycleStatus,
+    profile.crmProvider,
+  ].filter(Boolean)
+  return (
+    <div className="rounded-md border bg-muted/20 p-3 text-sm">
+      <div className="font-medium">{profile.accountDisplay || profile.accountKey}</div>
+      {meta.length > 0 ? (
+        <div className="mt-1 text-xs text-muted-foreground">
+          {t('customer_requests.account_overview_profile_meta', {
+            value: meta.join(' · '),
+          })}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -682,6 +1159,7 @@ function filtersToSavedViewState(filters: CustomerRequestFilters): CustomerReque
     sort: filters.sort ?? CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
     direction: filters.direction ?? SortDirection.SORT_DIRECTION_DESC,
     feedbackId: filters.feedbackId,
+    accountKey: filters.accountKey?.trim() || undefined,
   }
 }
 
@@ -696,6 +1174,7 @@ function savedViewStateToFilters(state?: CustomerRequestSavedViewState): Custome
     sort: state.sort || CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
     direction: state.direction || SortDirection.SORT_DIRECTION_DESC,
     feedbackId: state.feedbackId,
+    accountKey: state.accountKey,
   }
 }
 
@@ -992,6 +1471,7 @@ function CustomerRequestRow({
             })}
           </span>
           <span>{t('customer_requests.decision_score', { count: item.decisionScore })}</span>
+          <EvidenceQualityBadge quality={item.evidenceQuality} />
           <span>
             {t('customer_requests.issue_sync_counts', {
               synced: item.syncedIssueCount,
@@ -1032,6 +1512,7 @@ function CustomerRequestDetailSheet({
   initialMergeTargetID,
   open,
   onMerged,
+  onInspectAccount,
   onOpenChange,
 }: {
   id: string | null
@@ -1040,6 +1521,7 @@ function CustomerRequestDetailSheet({
   initialMergeTargetID?: string
   open: boolean
   onMerged: (targetID: string) => void
+  onInspectAccount: (accountKey: string) => void
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useTranslation()
@@ -1118,6 +1600,15 @@ function CustomerRequestDetailSheet({
                 })}
               />
               <Metric
+                label={t('customer_requests.evidence_quality_score', {
+                  score: detail.data.request?.evidenceQuality?.score ?? 0,
+                  confidence: evidenceConfidenceLabel(
+                    t,
+                    detail.data.request?.evidenceQuality?.confidence,
+                  ),
+                })}
+              />
+              <Metric
                 label={t('customer_requests.delivery_health', {
                   value: deliveryHealthLabel(detail.data.request?.deliveryHealth, t),
                 })}
@@ -1131,11 +1622,8 @@ function CustomerRequestDetailSheet({
                 })}
               />
             </div>
-            {detail.data.request?.decisionScoreExplanation ? (
-              <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                {detail.data.request.decisionScoreExplanation}
-              </div>
-            ) : null}
+            <DecisionScoreBreakdown request={detail.data.request} />
+            <EvidenceQualityPanel quality={detail.data.request?.evidenceQuality} />
             {detail.data.description ? (
               <p className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
                 {detail.data.description}
@@ -1231,7 +1719,11 @@ function CustomerRequestDetailSheet({
               ) : (
                 <div className="space-y-2">
                   {detail.data.accountProfiles.map((item) => (
-                    <AccountProfileRow key={item.accountKey} item={item} />
+                    <AccountProfileRow
+                      key={item.accountKey}
+                      item={item}
+                      onInspect={onInspectAccount}
+                    />
                   ))}
                 </div>
               )}
@@ -1266,6 +1758,10 @@ function CustomerRequestDetailSheet({
                 </div>
               )}
             </DetailSection>
+            <DecisionRecordsSection
+              records={detail.data.decisionRecords ?? []}
+              currency={detail.data.request?.revenueCurrency ?? 'USD'}
+            />
             <DetailSection title={t('customer_requests.audit')}>
               {detail.data.auditEntries.length === 0 ? (
                 <EmptyLine text={t('customer_requests.no_audit')} />
@@ -2150,13 +2646,20 @@ function NoteRow({
   )
 }
 
-function AccountProfileRow({ item }: { item: CustomerRequestAccountProfile }) {
+function AccountProfileRow({
+  item,
+  onInspect,
+}: {
+  item: CustomerRequestAccountProfile
+  onInspect: (accountKey: string) => void
+}) {
   const { t } = useTranslation()
+  const accountLabel = item.accountDisplay || item.accountKey
   return (
     <div className="rounded-md border p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <div className="font-medium">{item.accountDisplay || item.accountKey}</div>
+          <div className="font-medium">{accountLabel}</div>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span>{item.accountKey}</span>
             {item.tier ? <span>{item.tier}</span> : null}
@@ -2174,6 +2677,17 @@ function AccountProfileRow({ item }: { item: CustomerRequestAccountProfile }) {
           {formatMoney(item.revenueCents, item.revenueCurrency)}
         </div>
       </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="mt-3"
+        aria-label={t('customer_requests.account_view_requests_for', { value: accountLabel })}
+        onClick={() => onInspect(item.accountKey)}
+      >
+        <Search className="size-3.5" />
+        {t('customer_requests.account_view_requests')}
+      </Button>
       {item.updatedAt ? (
         <div className="mt-2 text-xs text-muted-foreground">
           {t('customer_requests.updated', { value: formatDate(item.updatedAt) })}
@@ -2539,6 +3053,513 @@ function IssueLinkRow({
       </div>
     </div>
   )
+}
+
+function DecisionRecordsSection({
+  records,
+  currency,
+}: {
+  records: CustomerRequestDecisionRecord[]
+  currency: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <DetailSection title={t('customer_requests.decision_records')}>
+      {records.length === 0 ? (
+        <EmptyLine text={t('customer_requests.no_decision_records')} />
+      ) : (
+        <div className="space-y-2">
+          {records.map((record) => (
+            <DecisionRecordRow key={record.auditId} record={record} currency={currency} />
+          ))}
+        </div>
+      )}
+    </DetailSection>
+  )
+}
+
+function DecisionRecordRow({
+  record,
+  currency,
+}: {
+  record: CustomerRequestDecisionRecord
+  currency: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <article className="space-y-3 rounded-md border p-3 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-medium">
+            {record.summary || decisionRecordActionLabel(t, record)}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {t('customer_requests.decision_record_meta', {
+              actor: record.actorId || record.actorType || t('customer_requests.actor_unknown'),
+              value: formatDate(record.createdAt),
+            })}
+          </div>
+          {record.ownerDisplay || record.ownerMemberId ? (
+            <div className="mt-1 text-xs text-muted-foreground">
+              {t('customer_requests.decision_record_owner', {
+                value: record.ownerDisplay || record.ownerMemberId,
+              })}
+            </div>
+          ) : null}
+        </div>
+        {record.hasDecisionSnapshot ? (
+          <span className="rounded border px-2 py-0.5 font-mono text-xs tabular-nums text-muted-foreground">
+            {t('customer_requests.decision_score', { count: record.decisionScore })}
+          </span>
+        ) : null}
+      </div>
+      <DecisionRecordChanges record={record} />
+      {record.hasDecisionSnapshot ? (
+        <div className="space-y-2">
+          {record.decisionRationale ? (
+            <p className="rounded bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
+              {t('customer_requests.decision_record_rationale', {
+                value: record.decisionRationale,
+              })}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              {t('customer_requests.feedback_count', {
+                count: record.supportingFeedbackCount,
+              })}
+            </span>
+            <span>{t('customer_requests.customer_count', { count: record.customerCount })}</span>
+            <span>{t('customer_requests.account_count', { count: record.accountCount })}</span>
+            <span>{t('customer_requests.vote_count', { count: record.voteCount })}</span>
+            <span>
+              {t('customer_requests.revenue_impact', {
+                value: formatMoney(record.revenueImpactCents, record.revenueCurrency || currency),
+              })}
+            </span>
+            <span>
+              {t('customer_requests.delivery_health', {
+                value: deliveryHealthLabel(record.deliveryHealth, t),
+              })}
+            </span>
+            {record.evidenceBundleRef ? (
+              <span>
+                {t('customer_requests.decision_record_evidence_bundle', {
+                  value: record.evidenceBundleRef,
+                })}
+              </span>
+            ) : null}
+            <span>
+              {t('customer_requests.decision_record_public_safe', {
+                value: decisionPublicSafeStateLabel(t, record.publicSafeState),
+              })}
+            </span>
+          </div>
+          {(record.publicSafeReasons ?? []).length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {(record.publicSafeReasons ?? []).map((reason) => (
+                <span
+                  key={reason}
+                  className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-900"
+                >
+                  {decisionPublicSafeReasonLabel(t, reason)}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div className="flex flex-wrap gap-1.5">
+            {record.decisionScoreFactors
+              .filter((factor) => factor.contributesToScore)
+              .slice(0, 4)
+              .map((factor) => (
+                <span
+                  key={factor.kind}
+                  className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                  {decisionFactorLabel(t, factor.kind)} +{factor.contribution}
+                </span>
+              ))}
+          </div>
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">
+          {t('customer_requests.decision_record_no_snapshot')}
+        </div>
+      )}
+    </article>
+  )
+}
+
+function DecisionRecordChanges({ record }: { record: CustomerRequestDecisionRecord }) {
+  const { t } = useTranslation()
+  const changes = decisionRecordChanges(record, t)
+  if (changes.length === 0) {
+    return null
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {changes.map((change) => (
+        <span key={change} className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+          {change}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function decisionRecordChanges(record: CustomerRequestDecisionRecord, t: TranslateFn): string[] {
+  const changes: string[] = []
+  if (record.statusChanged) {
+    changes.push(
+      t('customer_requests.decision_record_status_changed', {
+        old: statusLabel(t, record.oldStatus),
+        next: statusLabel(t, record.newStatus),
+      }),
+    )
+  }
+  if (record.priorityChanged) {
+    changes.push(
+      t('customer_requests.decision_record_priority_changed', {
+        old: priorityLabel(t, record.oldPriority),
+        next: priorityLabel(t, record.newPriority),
+      }),
+    )
+  }
+  if (record.ownerChanged) changes.push(t('customer_requests.decision_record_owner_changed'))
+  if (record.titleChanged) changes.push(t('customer_requests.decision_record_title_changed'))
+  if (record.descriptionChanged) {
+    changes.push(t('customer_requests.decision_record_description_changed'))
+  }
+  return changes
+}
+
+function decisionRecordActionLabel(t: TranslateFn, record: CustomerRequestDecisionRecord): string {
+  const actionKey = record.action.split('.').pop() ?? record.action
+  return t('customer_requests.decision_record_action', { value: actionKey })
+}
+
+function decisionPublicSafeStateLabel(
+  t: TranslateFn,
+  state?: CustomerRequestDecisionPublicSafeState,
+): string {
+  switch (state) {
+    case CustomerRequestDecisionPublicSafeState.CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_PUBLIC_SAFE:
+      return t('customer_requests.decision_public_safe_states.public_safe')
+    case CustomerRequestDecisionPublicSafeState.CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_NEEDS_REVIEW:
+      return t('customer_requests.decision_public_safe_states.needs_review')
+    case CustomerRequestDecisionPublicSafeState.CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_INTERNAL_ONLY:
+      return t('customer_requests.decision_public_safe_states.internal_only')
+    default:
+      return t('customer_requests.decision_public_safe_states.unknown')
+  }
+}
+
+function decisionPublicSafeReasonLabel(t: TranslateFn, reason: string): string {
+  switch (reason) {
+    case 'hidden_feedback':
+      return t('customer_requests.decision_public_safe_reasons.hidden_feedback')
+    case 'revenue_context':
+      return t('customer_requests.decision_public_safe_reasons.revenue_context')
+    case 'missing_evidence':
+      return t('customer_requests.decision_public_safe_reasons.missing_evidence')
+    case 'failed_delivery_link':
+      return t('customer_requests.decision_public_safe_reasons.failed_delivery_link')
+    default:
+      return t('customer_requests.decision_public_safe_reasons.unknown', { value: reason })
+  }
+}
+
+function EvidenceQualityBadge({ quality }: { quality?: CustomerRequestEvidenceQuality }) {
+  const { t } = useTranslation()
+  if (!quality) {
+    return null
+  }
+  return (
+    <span className={cn('rounded px-2 py-0.5 text-xs', evidenceQualityTone(quality))}>
+      {t('customer_requests.evidence_quality_score', {
+        score: quality.score,
+        confidence: evidenceConfidenceLabel(t, quality.confidence),
+      })}
+    </span>
+  )
+}
+
+function EvidenceQualityPanel({ quality }: { quality?: CustomerRequestEvidenceQuality }) {
+  const { t } = useTranslation()
+  if (!quality) {
+    return null
+  }
+  const latest = quality.latestEvidenceAt
+    ? formatDate(quality.latestEvidenceAt)
+    : t('customer_requests.evidence_quality_no_latest')
+  return (
+    <section className="space-y-3 rounded-md border bg-muted/10 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold">{t('customer_requests.evidence_quality_title')}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t('customer_requests.evidence_quality_summary', {
+              score: quality.score,
+              confidence: evidenceConfidenceLabel(t, quality.confidence),
+              latest,
+            })}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {quality.lowConfidence ? (
+            <span className="rounded bg-rose-100 px-2 py-1 text-xs text-rose-900">
+              {t('customer_requests.evidence_quality_low_confidence')}
+            </span>
+          ) : null}
+          {quality.stale ? (
+            <span className="rounded bg-amber-100 px-2 py-1 text-xs text-amber-900">
+              {t('customer_requests.evidence_quality_stale')}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-4">
+        <Metric
+          label={t('customer_requests.evidence_quality_evidence_count', {
+            count: quality.evidenceCount,
+          })}
+        />
+        <Metric
+          label={t('customer_requests.evidence_quality_source_count', {
+            count: quality.sourceCount,
+          })}
+        />
+        <Metric
+          label={t('customer_requests.evidence_quality_customer_count', {
+            count: quality.customerCount,
+          })}
+        />
+        <Metric
+          label={t('customer_requests.evidence_quality_account_count', {
+            count: quality.accountCount,
+          })}
+        />
+      </div>
+      <EvidenceReasonList
+        title={t('customer_requests.evidence_quality_strengths')}
+        reasons={quality.strengths}
+        empty={t('customer_requests.evidence_quality_no_strengths')}
+      />
+      <EvidenceReasonList
+        title={t('customer_requests.evidence_quality_gaps')}
+        reasons={quality.gapReasons}
+        empty={t('customer_requests.evidence_quality_no_gaps')}
+      />
+    </section>
+  )
+}
+
+function EvidenceReasonList({
+  title,
+  reasons,
+  empty,
+}: {
+  title: string
+  reasons: CustomerRequestEvidenceQualityReason[]
+  empty: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-medium uppercase text-muted-foreground">{title}</div>
+      {reasons.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {reasons.map((reason) => (
+            <span key={reason} className="rounded border bg-background px-2 py-1 text-xs">
+              {evidenceReasonLabel(t, reason)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function evidenceQualityTone(quality: CustomerRequestEvidenceQuality): string {
+  if (
+    quality.lowConfidence ||
+    quality.confidence ===
+      CustomerRequestEvidenceConfidence.CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_LOW
+  ) {
+    return 'bg-rose-100 text-rose-900'
+  }
+  if (
+    quality.stale ||
+    quality.confidence ===
+      CustomerRequestEvidenceConfidence.CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_MEDIUM
+  ) {
+    return 'bg-amber-100 text-amber-900'
+  }
+  return 'bg-emerald-100 text-emerald-900'
+}
+
+function evidenceConfidenceLabel(
+  t: TranslateFn,
+  confidence?: CustomerRequestEvidenceConfidence,
+): string {
+  switch (confidence) {
+    case CustomerRequestEvidenceConfidence.CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_HIGH:
+      return t('customer_requests.evidence_confidence.high')
+    case CustomerRequestEvidenceConfidence.CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_MEDIUM:
+      return t('customer_requests.evidence_confidence.medium')
+    case CustomerRequestEvidenceConfidence.CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_LOW:
+      return t('customer_requests.evidence_confidence.low')
+    default:
+      return t('customer_requests.evidence_confidence.unknown')
+  }
+}
+
+function evidenceReasonLabel(t: TranslateFn, reason: CustomerRequestEvidenceQualityReason): string {
+  switch (reason) {
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_SUPPORTING_FEEDBACK:
+      return t('customer_requests.evidence_reasons.no_supporting_feedback')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_LOW_FEEDBACK_VOLUME:
+      return t('customer_requests.evidence_reasons.low_feedback_volume')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_CUSTOMER:
+      return t('customer_requests.evidence_reasons.single_customer')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_ACCOUNT_CONTEXT:
+      return t('customer_requests.evidence_reasons.no_account_context')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_STALE_EVIDENCE:
+      return t('customer_requests.evidence_reasons.stale_evidence')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_DELIVERY_LINK:
+      return t('customer_requests.evidence_reasons.no_delivery_link')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_HIDDEN_FEEDBACK:
+      return t('customer_requests.evidence_reasons.hidden_feedback')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SUPPORTING_FEEDBACK:
+      return t('customer_requests.evidence_reasons.supporting_feedback')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_CUSTOMER:
+      return t('customer_requests.evidence_reasons.multi_customer')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_ACCOUNT_CONTEXT:
+      return t('customer_requests.evidence_reasons.account_context')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_FRESH_EVIDENCE:
+      return t('customer_requests.evidence_reasons.fresh_evidence')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_DELIVERY_LINKED:
+      return t('customer_requests.evidence_reasons.delivery_linked')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_SOURCE:
+      return t('customer_requests.evidence_reasons.single_source')
+    case CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_SOURCE:
+      return t('customer_requests.evidence_reasons.multi_source')
+    default:
+      return t('customer_requests.evidence_reasons.unknown')
+  }
+}
+
+function DecisionScoreBreakdown({ request }: { request?: CustomerRequestSummary }) {
+  const { t } = useTranslation()
+  const factors = request?.decisionScoreFactors ?? []
+  if (factors.length === 0) {
+    return null
+  }
+  const total = factors
+    .filter((factor) => factor.contributesToScore)
+    .reduce((sum, factor) => sum + factor.contribution, 0)
+  return (
+    <section className="space-y-3 rounded-md border bg-muted/10 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">{t('customer_requests.decision_breakdown')}</h3>
+        <span className="font-mono text-xs text-muted-foreground">
+          {t('customer_requests.decision_breakdown_total', { count: total })}
+        </span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {factors.map((factor) => (
+          <DecisionScoreFactorRow
+            key={factor.kind}
+            factor={factor}
+            currency={request?.revenueCurrency ?? 'USD'}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function DecisionScoreFactorRow({
+  factor,
+  currency,
+}: {
+  factor: CustomerRequestDecisionScoreFactor
+  currency: string
+}) {
+  const { t } = useTranslation()
+  const contribution = factor.contributesToScore
+    ? t('customer_requests.decision_factor_contribution', { count: factor.contribution })
+    : t('customer_requests.decision_factor_context')
+  return (
+    <div className="rounded border bg-background px-3 py-2 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-medium">{decisionFactorLabel(t, factor.kind)}</div>
+          <div className="mt-1 text-xs leading-5 text-muted-foreground">
+            {decisionFactorFormula(t, factor, currency)}
+          </div>
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="font-mono text-sm font-semibold tabular-nums">{contribution}</div>
+          {factor.capped ? (
+            <div className="mt-1 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-900">
+              {t('customer_requests.decision_factor_capped')}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function decisionFactorLabel(t: TranslateFn, kind: CustomerRequestDecisionScoreFactorKind): string {
+  switch (kind) {
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY:
+      return t('customer_requests.decision_factor_priority')
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_FEEDBACK:
+      return t('customer_requests.decision_factor_feedback')
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_CUSTOMERS:
+      return t('customer_requests.decision_factor_customers')
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_ACCOUNTS:
+      return t('customer_requests.decision_factor_accounts')
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_VOTES:
+      return t('customer_requests.decision_factor_votes')
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_REVENUE:
+      return t('customer_requests.decision_factor_revenue')
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH:
+      return t('customer_requests.decision_factor_delivery')
+    default:
+      return t('customer_requests.decision_factor_unknown')
+  }
+}
+
+function decisionFactorFormula(
+  t: TranslateFn,
+  factor: CustomerRequestDecisionScoreFactor,
+  currency: string,
+): string {
+  switch (factor.kind) {
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY:
+      return t('customer_requests.decision_factor_priority_formula', { weight: factor.weight })
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_REVENUE:
+      return t('customer_requests.decision_factor_revenue_formula', {
+        value: formatMoney(factor.rawValueCents, currency),
+        unit: formatMoney(factor.unitCents, currency),
+        cap: factor.cap,
+      })
+    case CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH:
+      return t('customer_requests.decision_factor_delivery_formula', {
+        count: factor.rawCount,
+      })
+    default:
+      return t('customer_requests.decision_factor_count_formula', {
+        count: factor.rawCount,
+        weight: factor.weight,
+        cap: factor.cap,
+      })
+  }
 }
 
 function DetailSection({ title, children }: { title: string; children: ReactNode }) {

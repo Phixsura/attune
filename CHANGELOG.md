@@ -225,13 +225,422 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   binary or pinned Docker fallback, removing the previous local skip when the
   binary was absent.
 
+- Public survey routes now enforce separate hashed client and survey-token rate
+  limit buckets, evict idle anonymous limiter buckets, and redact survey tokens
+  from rate-limit rejection logs.
+
+- Survey email provider events can now be accepted through a sender-scoped
+  signed webhook endpoint with HMAC-SHA256 timestamp verification, hashed client
+  and sender rate-limit buckets, and invalid-signature rejection before provider
+  events can update invitation or contact state.
+
 - Removed `golang.org/x/crypto` from the root dependency graph and raised the
   Go floor to `1.26.5`. Console password hashing plus break-glass token and
   recovery-code hashing now use `github.com/ProtonMail/bcrypt`, which keeps
   bcrypt-compatible stored hashes while dropping the vulnerable `openpgp`
   package from the module graph.
 
+### Changed
+
+- Console production builds now split shared vendor dependencies into stable
+  chunks and run a bundle budget check, turning oversized JS/CSS assets into CI
+  failures instead of non-blocking Vite warnings. The product-readiness
+  contract now also fails CI if the Customer Signal OS scorecard, public survey
+  browser smoke, full Console browser smoke, bundle budget, release-smoke
+  wiring, supplemental Firefox/WebKit browser coverage, or related proposal
+  evidence is removed.
+
+- Console production builds now split the zh-CN locale catalog into its own
+  stable chunk, keeping Control Tower and Reliability copy growth from inflating
+  the main application bundle past the product bundle budget.
+
+- Control Tower now includes a closed-loop recovery scorecard sourced from
+  survey analytics, prioritizes overdue and unhealthy low-score recovery work in
+  the action queue, avoids calling survey administration APIs for operators who
+  cannot read them, shows a first-value activation scorecard for source
+  connection, feedback capture, insight generation, semantic discovery, and
+  closed-loop testing, adds a source health command center for enabled sources,
+  freshness, source-level errors, never-seen sources, disabled sources, and
+  prioritized intake repair, adds a closed-loop recovery command center for
+  overdue SLA work, unassigned recovery, customer contact, evidence debt, owner
+  load, and prioritized next action, and shows a world-class readiness matrix
+  for signal understanding, semantic discovery, closed-loop operations, action
+  accountability, and release verification. It also adds a release verification
+  evidence center that joins runtime blockers with proposal, product contract,
+  unit, browser, bundle-budget, and release-smoke evidence, plus a world-class
+  maturity gap register that exposes the top 100 benchmark gaps by category and
+  current evidence state. The register now includes a world-class execution
+  queue that assigns the highest-priority gaps to owner, acceptance evidence,
+  and verification scope. Browser accessibility checks cover the closed-loop
+  scorecard, source health command center, closed-loop recovery command center,
+  first-value activation scorecard, release verification evidence center,
+  world-class maturity gap register, world-class execution queue, and readiness
+  matrix workflow. The maturity register now treats the durable identity graph
+  foundation as verified evidence and filters verified gaps out of the active
+  execution queue, so the queue keeps pointing at remaining world-class work
+  instead of closed slices. Release smoke now rebuilds the production Console bundle and
+  runs the dedicated desktop/mobile Chromium Control Tower closed-loop browser
+  flow, plus a full desktop/mobile Chromium Console accessibility and reflow
+  browser suite and a supplemental Firefox/WebKit desktop browser suite.
+
+- Customer Request decision records now persist and render the decision
+  rationale, owner identity, evidence bundle reference, public-safe state, and
+  review reasons alongside score snapshots and field transitions, giving request
+  status changes an audit-grade why/owner/evidence trail. The Control Tower
+  maturity register now promotes request decision records as verified evidence
+  and moves the execution queue to the next unverified world-class gap.
+
+- Request Notifications now expose status-level closed-loop evidence for
+  expected, notified, failed, suppressed, and recovery-pending customers through
+  a generated API contract, backend delivery aggregation, Console route preload,
+  visible evidence table, component coverage, browser accessibility coverage,
+  and product-readiness contract checks. Control Tower now promotes
+  `closed_loop_notified_evidence` as verified evidence and moves the execution
+  queue to operator batch actions.
+
+- Classification Quality now includes a classification review learning ledger
+  for accepted, edited, and dismissed AI classification samples, with generated
+  read/write API contracts, PostgreSQL persistence, audit logging, Console
+  review controls, learning-summary metrics, unit coverage, browser
+  accessibility coverage, and product-readiness contract checks. Control Tower
+  now promotes `ai_accept_dismiss_learning` as verified evidence.
+
+- Feedback ingestion now persists a durable `signal_trace_id` anchor from source
+  metadata or runtime trace context, carries the same ID into enrichment jobs,
+  and exposes a generated end-to-end signal trace API that joins source,
+  enrichment, request, notification, and survey evidence. Feedback details show
+  the trace stages, missing stages, terminal status, and event metadata; unit,
+  browser, and product-readiness contract checks keep the Console API, UI,
+  mocks, and Control Tower maturity promotion wired. Control Tower now promotes
+  `reliability_end_to_end_trace` as verified evidence and removes the completed
+  slice from the active world-class execution queue.
+
+- Reliability now renders a replay/backfill drill that maps every product SLO to
+  an operator entry point, replay lens, action, evidence artifact, owner, and
+  escalation path, alongside the downloadable SLO replay worksheet. Browser
+  accessibility coverage now opens the Reliability page with mocked system
+  preflight, recovery, release, GDPR, API-key, MCP, and outbox data. Control
+  Tower now promotes `reliability_backfill_replay` as verified evidence and
+  advances the world-class execution queue to `reliability_error_budget`.
+
+- Reliability now renders an error budget / burn-rate ledger that maps every
+  generated product SLO to its objective, budget allowance, burn query,
+  remaining-budget query, exception policy, incident evidence, runbook, owner,
+  escalation, and current runtime signal. Unit and browser coverage keep the
+  ledger mounted on the Reliability route, and Control Tower now promotes
+  `reliability_error_budget` as verified evidence while advancing the execution
+  queue to `reliability_release_health`.
+
+- Reliability now renders a release health correlation ledger that ties runtime
+  version, lifecycle state, restore-drill result, feedback pressure, and request
+  notification failures to one release decision. The Reliability route preloads
+  feedback stats and notification status evidence, browser smoke verifies the
+  ledger on desktop and mobile, and Control Tower now promotes
+  `reliability_release_health` as verified evidence while advancing the
+  execution queue to `reliability_incident_timeline`.
+
+- Reliability now renders an incident timeline reconstruction that links
+  incident start, readiness detection, customer impact, mitigation pressure,
+  restore-drill recovery, and customer notification evidence into one ordered
+  timeline with owner, action, signal, status, timestamp, and fingerprint. Unit
+  and browser coverage keep the timeline mounted on the Reliability route, and
+  Control Tower now promotes `reliability_incident_timeline` as verified
+  evidence while advancing the execution queue to
+  `reliability_tenant_quota_dashboard`.
+
+- Reliability now renders a tenant quota / saturation dashboard that joins
+  ingest usage quota, API-key per-key RPM coverage, LLM provider error pressure,
+  MCP client rpm/burst coverage, GDPR workload pressure, and outbox dead-letter
+  saturation into one tenant boundary with capacity, consumption, guardrail,
+  owner, action, status, and fingerprint. The Reliability route preloads usage
+  and LLM usage evidence, browser smoke verifies the quota dashboard, and
+  Control Tower now promotes `reliability_tenant_quota_dashboard` as verified
+  evidence while advancing the execution queue to
+  `reliability_backup_restore_drill`.
+
+- Reliability now renders a backup / restore drill evidence center that joins
+  backup freshness, restore execution, migration readiness, runbook ownership,
+  and remediation evidence into one recovery proof with guardrail, owner,
+  action, status, and fingerprint. The Reliability route reuses recovery,
+  release, and preflight evidence for the model, browser smoke verifies the
+  recovery proof, and Control Tower now promotes
+  `reliability_backup_restore_drill` as verified evidence while advancing the
+  execution queue to `reliability_consistency_checks`.
+
+- Reliability now renders a data consistency checks evidence center that joins
+  ingest usage, feedback stats, customer request projections, request
+  notification status evidence, survey analytics, and low-score recovery queues
+  into one auditable data chain with guardrail, owner, action, status, and
+  fingerprint. The Reliability route now preloads customer requests and survey
+  analytics for the model, browser smoke verifies the consistency card, and
+  Control Tower now promotes `reliability_consistency_checks` as verified
+  evidence while advancing the execution queue to `reliability_pipeline_slo`.
+
+- Reliability now renders a pipeline SLO ledger that joins ingest usage, LLM
+  enrichment usage, outbox dead-letter recovery, request sync projection
+  health, preflight evidence, and release lifecycle state into four auditable
+  pipeline lanes with objective, burn signal, release gate, owner, escalation,
+  runbook, action, status, and fingerprint. Browser smoke verifies the pipeline
+  SLO card, Control Tower now promotes `reliability_pipeline_slo` as verified
+  evidence, and the world-class execution queue advances to
+  `governance_sso_scim_rbac`.
+
+- Security now renders a governance / RBAC readiness evidence center that joins
+  auth mode, break-glass token inventory, lockout evidence, member role/source
+  coverage, last-admin continuity, and member audit snapshots into one
+  inspectable control surface. The Security route preloads auth mode, members,
+  and bounded member audit evidence, browser smoke verifies the governance card,
+  Control Tower now promotes `governance_sso_scim_rbac` as verified evidence,
+  and the world-class execution queue advances to
+  `governance_field_level_permissions`.
+
+- Security now renders a field-level permissions ledger that joins the central
+  role permission matrix, public visibility policy, public write and identity
+  modes, moderation/redaction queue state, and public moderation audit snapshots
+  into one inspectable control surface. The Security route preloads public
+  policy, moderation queue, and bounded public moderation audit evidence,
+  browser smoke verifies the field-level ledger, Control Tower now promotes
+  `governance_field_level_permissions` as verified evidence, and the world-class
+  execution queue advances to `governance_public_privacy_preflight`.
+
+- Public Visibility now renders a public privacy preflight evidence center that
+  joins public access mode, enabled public surfaces, search indexing, default
+  moderation gates, submitter identity exposure, public timestamps, portal
+  submission fields, page-URL collection, and review recovery state before
+  content reaches public surfaces. Browser smoke verifies the preflight card,
+  Control Tower now promotes `governance_public_privacy_preflight` as verified
+  evidence, and the world-class execution queue advances to
+  `governance_retention_legal_hold`.
+
+- GDPR now renders a retention / legal hold workflow evidence center that joins
+  tenant retention policy, legal-hold gate, delete grace window, export artifact
+  residue, backup-retention residue, hashed audit residue, and visible GDPR
+  request records before irreversible operations run. Browser smoke verifies
+  the retention workflow, Control Tower now promotes
+  `governance_retention_legal_hold` as verified evidence, and the world-class
+  execution queue advances to `governance_compliance_package`.
+
+- Security now renders a compliance package evidence center that joins auth
+  mode, RBAC and member audit evidence, break-glass continuity, public data-flow
+  inventory, public moderation evidence, audit export readiness, GDPR retention
+  and data-subject request controls, and outbound notification target
+  boundaries into one DPA/SOC2-ready package. Browser smoke verifies the
+  compliance package, the Security route preloads GDPR and notify-target
+  evidence, Control Tower now promotes `governance_compliance_package` as
+  verified evidence, and the world-class execution queue advances to
+  `governance_key_rotation_ui`.
+- Security now renders a key rotation readiness center that joins system
+  preflight Tink/decryptability checks, API key expiry/grace/boundary evidence,
+  inbound webhook source rotation readiness, outbound notify-target and
+  reply-hook secret boundaries, and LLM provider managed credential/test
+  evidence. Browser smoke verifies the key-rotation evidence, the Security route
+  preloads API key, inbound-source, LLM channel, reply-hook health, and runtime
+  preflight evidence, Control Tower now promotes `governance_key_rotation_ui` as
+  verified evidence, and the world-class execution queue advances to
+  `governance_webhook_signature_tooling`.
+- Security now renders a webhook signature tooling center that joins inbound
+  webhook source health, reply-hook URL fingerprints and delivery probes,
+  request notification webhook signature/test evidence, external-sync webhook
+  secret and event signature status, and cross-surface failure diagnostics into
+  one security control surface. Browser smoke verifies the signature tooling,
+  the Security route preloads request-notification and external-sync evidence,
+  Control Tower now promotes `governance_webhook_signature_tooling` as verified
+  evidence, and the world-class execution queue advances to
+  `governance_security_runbook`.
+- Security now renders a security incident runbook evidence center that joins
+  credential compromise response, webhook signature incident handling, access
+  and identity continuity, public privacy incident controls, and customer
+  notification recovery into one rehearsal surface. Browser smoke verifies the
+  runbook, the Security page reuses the existing governance, key, signature,
+  public, GDPR, and notification evidence queries, Control Tower now promotes
+  `governance_security_runbook` as verified evidence, and the world-class
+  execution queue advances to `developer_openapi_sdk_examples`.
+- Developer Platform now renders a developer API adoption kit on the API Keys
+  page, joining generated OpenAPI coverage, scope and preset registry evidence,
+  Node and Go SDK live verification, example apps, deterministic demo
+  bootstrap, service-account automation identity, and webhook replay assets in
+  one adoption surface. Browser smoke verifies the kit, the product readiness
+  contract now checks the underlying OpenAPI/SDK/example/replay artifacts,
+  Control Tower promotes `developer_openapi_sdk_examples` as verified evidence,
+  and the world-class execution queue advances to `developer_sdk_parity`.
+- Developer Platform now verifies Node and Go SDK parity with a repository gate
+  and renders the evidence on the API Keys page, covering shared public
+  management methods, error envelopes, transport errors, retry and
+  idempotency behavior, browser-safe key boundaries, package metadata, packed
+  browser smoke, and live e2e entrypoints. The product readiness contract and
+  local check script now run the parity verifier, Control Tower promotes
+  `developer_sdk_parity` as verified evidence, and the world-class execution
+  queue advances to `developer_connector_sdk`.
+- Integrations now include a connector conformance contract with a manifest,
+  GitHub Issues webhook fixtures, deterministic HMAC signature verification,
+  fixture replay normalization, field mapping checks, and provider error
+  recovery classification. External Sync renders the live connector
+  conformance gate across manifest, replay, signature, mapping, and recovery
+  lanes; the product readiness contract and local check script run the
+  conformance verifier, Control Tower promotes `developer_connector_sdk` as
+  verified evidence, and the world-class execution queue advances to
+  `developer_field_mapping_ui`.
+- External Sync now renders a field mapping workbench for the selected
+  connector mapping, turning JSON-only mapping into a visible schema-diff,
+  required-field coverage, status lifecycle, preview/backfill safety, and
+  rollback recovery evidence surface. The workbench lists Attune-to-provider
+  field rows with saved, suggested, missing, and drifted states; browser smoke
+  verifies the workbench, the product readiness contract checks its model and
+  card, Control Tower promotes `developer_field_mapping_ui` as verified
+  evidence, and the world-class execution queue advances to
+  `developer_api_consistency`.
+- Developer Platform now verifies API consistency with a repository gate and
+  API Keys evidence card covering pagination surfaces, console mirrors, filter
+  wire names, Customer Request sort enums, ErrorResponse parsing,
+  Idempotency-Key handling, SDK pagers, and exact Node/Go query fixtures. The
+  product readiness contract and local check script now run the consistency
+  verifier, Control Tower promotes `developer_api_consistency` as verified
+  evidence, and the world-class execution queue advances to
+  `developer_import_export_ui`.
+- Developer Platform now renders a fixture-backed import/export workbench on
+  the API Keys page, covering CSV and JSON templates, import and export
+  coverage, schema preview, required-field mapping, dry-run create/update/reject
+  diffs, recovery classes, permission scopes, PII redaction, and audit events
+  for dry-run, commit, and export download. The product readiness contract and
+  local check script now run the import/export verifier, Control Tower promotes
+  `developer_import_export_ui` as verified evidence, and the world-class
+  execution queue advances to `developer_integration_catalog`.
+- External Sync now renders a verifier-backed integration catalog covering Jira,
+  GitHub, Intercom, Zendesk, Salesforce, HubSpot, custom webhook, and CSV
+  connector cards with install states, auth modes, setup checks, permission
+  scopes, health badges, sample replay fixtures, audit events, versioned upgrade
+  paths, and rollback evidence. The product readiness contract and local check
+  script now run the catalog verifier, Control Tower promotes
+  `developer_integration_catalog` as verified evidence, and the world-class
+  execution queue advances to `developer_upgrade_diagnostics`.
+- External Sync now renders verifier-backed upgrade diagnostics that combine
+  connector install health, permission boundaries, schema drift, webhook
+  readiness, fixture replay, and version compatibility into one executable
+  diagnosis with recovery actions. A new upgrade-diagnostics manifest and local
+  verifier check required diagnostic lanes, connector compatibility rows,
+  recovery playbooks, and representative GitHub, CSV, and Salesforce fixtures;
+  Control Tower promotes `developer_upgrade_diagnostics` as verified evidence
+  and advances the world-class execution queue to
+  `developer_north_star_metrics`.
+
+- Feedback details now expose normalized identity evidence for `user_id` plus
+  source metadata email, external ID, source contact ID, CRM ID, and support ID
+  signals, giving operators a verifiable first slice of the identity graph
+  before deeper merge and account-model work lands. The same detail view now
+  includes a generated identity-resolution assessment with strength,
+  recommended action, stable-key/source-path counts, missing identity kinds, and
+  risk reasons so merge review starts from inspectable evidence instead of raw
+  source metadata. Feedback now also includes an identity merge review queue
+  that scans a bounded recent window, groups stable identity keys into merge
+  candidates, separates weak evidence that needs stronger keys, and opens the
+  supporting feedback rows from the workbench. Approved merge candidates now
+  persist to a durable signal subject identity graph with subject, identity, and
+  merge-event tables, a generated merge endpoint, transactional
+  `signal_subject.merge` audit logging with hashed identity values, and a
+  Console approve action. The review workbench now also surfaces recent durable
+  merges and provides an audited undo action that revokes the selected identity
+  link, refreshes the subject's primary identity, and writes
+  `signal_subject.split` audit evidence. The same review response now includes
+  an active subject roster with subject, identity, and evidence totals plus top
+  resolved subjects, making the durable graph inspectable from Console instead
+  of leaving it as a hidden database projection. Operators can now open a
+  resolved subject from the roster and inspect its active and revoked identities
+  plus merge/split timeline events with bounded feedback evidence excerpts,
+  turning identity resolution into a reviewable history rather than a single
+  current-state count or a list of opaque feedback IDs.
+
+- Feedback list, detail, and assignment escalation views now expose a generated
+  `FeedbackAccountContext` derived from source metadata account/company keys,
+  and the console feedback list accepts an `account_key` filter across the
+  generated API contract, repository query, HTTP binder, Console filter UI,
+  unit tests, PostgreSQL integration coverage, and browser accessibility smoke.
+
+- Survey low-score recovery queues now expose generated `SurveyAccountContext`
+  from response metadata and invitation recipient snapshots, and the recovery
+  response list accepts an `account_key` filter across the generated contract,
+  repository query, handler binder, Console filter UI, unit tests, PostgreSQL
+  integration coverage, and browser accessibility smoke.
+
+- Feedback now exposes a feedback triage command center above the workbench,
+  grouping urgent open rows, untriaged rows, stalled active work, terminal
+  enrichment failures, and identity evidence debt into owner lanes with SLA
+  hours, overdue and due-soon counts, recommended actions, filter queries, and
+  sample feedback links.
+
+- Feedback details now include durable owner/SLA assignment through a generated
+  assignment API, tenant-member owner validation, persisted assignment notes,
+  changed-field audit entries, PostgreSQL integration coverage, Console detail
+  controls, MSW fixtures, and browser accessibility coverage, turning triage
+  lanes into accountable operator work instead of a read-only queue.
+  Feedback selection now also supports bulk owner/SLA assignment with explicit
+  keep/clear/set semantics, bounded validation, per-row assignment audit
+  entries, partial-failure reporting, Console selection-bar controls, and
+  PostgreSQL plus browser coverage. The same selection workflow now offers
+  feedback assignment recommendations that preview deterministic owner-lane,
+  severity, SLA, rationale, already-satisfied, and partial-failure outcomes
+  before applying audited policy notes and optional owner overrides. Delegated
+  administrators can now manage the tenant feedback assignment policy from
+  Console, tuning rule enablement, owner lanes, SLA hours, and validated default
+  owners. The policy is persisted in system settings, drives recommendation
+  preview and apply paths, uses policy default owners when no override is
+  supplied, keeps bounded version history, supports dry-run impact previews and
+  prior-version restore, and writes `feedback_assignment.policy_update` /
+  `feedback_assignment.policy_restore` audit events in the same database
+  transaction as the settings update. Feedback now also exposes an assignment
+  SLA escalation queue that counts and prioritizes open feedback with overdue
+  deadlines, deadlines inside the 12-hour warning window, missing owners, or
+  missing SLA commitments through a generated API, Console workbench panel,
+  typed mocks, cache refreshes after assignment mutations, PostgreSQL
+  integration coverage, and browser accessibility coverage.
+
+- Feedback selection now includes an operator batch command center that brings
+  link, assign, dismiss, notify, and failed-item recovery paths into one
+  selection-scoped workflow. The Console preserves the latest batch result after
+  selection clears, can refocus failed feedback IDs, batch-dismisses through the
+  workflow transition endpoint, links through Customer Request promotion, and
+  now opens a batch Request Notification dialog that previews audience,
+  publishes multi-request updates, and returns per-request failures without
+  blocking successful requests. Unit, Go handler/service, browser, and
+  product-readiness contract checks now cover the flow. Control Tower now marks
+  `operator_batch_actions` as verified evidence and removes it from the active
+  execution queue.
+
+- Customer Request lists now accept account-key filters through the generated
+  API contract, backend query, Console toolbar, and saved views, with browser
+  accessibility coverage proving account-scoped request review.
+
+- Customer Request detail account profiles now include an account-scoped request
+  review action, and the Customer Request route accepts `account_key` deep links
+  so account context can be shared and verified from the browser.
+
+- Account-scoped Customer Request lists now use a generated backend account
+  summary API to show an authoritative signal overview with demand, feedback,
+  customer, vote, delivery-health, revenue-impact, account decision-score,
+  decision-signal, account evidence-event, profile, and request timeline context
+  for the selected account. Request detail now also exposes structured
+  decision-score factors for priority, feedback, customers, accounts, votes,
+  revenue, and delivery-health context, replacing opaque score debug strings in
+  the Console with an auditable breakdown. Future Customer Request audit writes
+  now also include decision-score snapshots, and request detail renders an
+  auditable decision-record timeline with score factors, evidence counts,
+  delivery health, revenue context, and changed status or priority fields.
+
+- Customer Requests now expose evidence-quality scoring through the generated
+  contract, repository summaries, Console list/detail UI, PostgreSQL
+  integration coverage, browser coverage, and product-readiness contract checks.
+  Each request can show evidence count, source count, customer/account breadth,
+  freshness, stale and low-confidence flags, strengths, and gap reasons; Control
+  Tower now promotes `evidence_quality_score` as covered.
+
 ### Fixed
+
+- Survey email invitations now use the database timestamp for initial retry
+  eligibility, so newly created post-resolution survey invitations are
+  immediately claimable when the app and database clocks differ slightly.
+
+- Full-snapshot cohort sync now reuses one timestamp for membership upserts and
+  stale-member reconciliation, preventing newly received Mixpanel members from
+  being marked departed when app and database clocks differ slightly.
 
 - Fixed the Intercom watermark permanently skipping conversations whose
   search-index entry appeared late: `conversations/search` is eventually
@@ -381,6 +790,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   successful submission, preventing duplicate success text when visitors submit
   feedback from the rendered page.
 
+- Console browser accessibility coverage now scopes modal-only axe scans and
+  waits for dialog teardown before full-page scans, keeping API-key secret
+  reveal, public-visibility moderation, and batch-assignment E2E flows stable
+  across Chromium, Firefox, and WebKit.
+
 - Request notification previews now wrap long JSON fields inside the card,
   preventing horizontal overflow in deployed Console pages on narrow viewports.
 
@@ -433,6 +847,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   console list options, so the reserved request parameters actually affect the
   repo query instead of being dropped after binding.
 
+- Survey workflow and request-resolution campaigns now expose the same
+  `workflow_category` and `request_status` trigger attributes that Console
+  creates by default, so newly created campaigns match real closed/shipped
+  events.
+
+- Console tag pickers now expose a named popover and ARIA-valid empty listbox
+  state, keeping feedback tag assignment accessible in browser axe checks.
+
 ### Added
 
 - **Jira bidirectional issue sync.**
@@ -460,6 +882,91 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   marker-deduped managed request-context comments, run input metadata
   diagnostics, and comment timeline entries without advancing the scheduled
   cursor.
+
+- Added the post-resolution survey foundation for CSAT and CES campaigns,
+  including tenant-scoped campaign configuration, customer-facing hosted survey
+  pages with score preselection, hosted survey links, public survey retrieval
+  and submission APIs, invitation/response persistence,
+  workflow/reply/request resolution triggers, contact-email invitations with a
+  retryable survey email worker with bounded expired-invitation sweeping and
+  expired-invitation revalidation,
+  auto-resolved and recent-activity suppression, score deep links, idempotent
+  public response retries, hosted survey GET rendering that does not mark
+  invitations as opened, hardened public survey page security headers, and a
+  honeypot guard that drops generic form-bot submissions before they can affect
+  response analytics, Console campaign guardrail editing, Console
+  low-score review detail editing, one-click unsubscribe headers plus
+  hosted-page unsubscribe links, low-score review tracking,
+  analytics aggregates with response-status funnel counts, suppression-reason
+  breakdowns, positive-score rates, daily trend buckets, segment diagnostics,
+  operational health insights, low-score recovery command metrics for overdue,
+  unassigned, critical, pending-contact, and oldest-due work, low-score review
+  SLA defaults, per-review recovery playbooks with SLA status, blockers,
+  next-best actions, risk scores, and backlog health, and average response-time
+  metrics, and an admin Console
+  workspace for campaign setup, hosted-link generation, invitation monitoring,
+  backend-filtered and SLA-prioritized low-score follow-up, generated
+  Go/TypeScript contracts, OpenAPI output, and audit-log actions for survey
+  administration. The low-score queue now also supports server-side recovery
+  focus filters for SLA status and blocker reason, so operators can work
+  overdue, unassigned, pending-contact, missing-root-cause, and missing-action
+  queues without client-side result truncation. Survey analytics now exposes
+  recovery queue counts for those same focus slices and raises insights when
+  active low-score recovery work lacks root-cause or action evidence. The
+  low-score queue also supports server-side review-severity and owner-member
+  filters, with Console controls for critical recovery work and owner-specific
+  queues, plus selected-row batch recovery updates for assigning owners,
+  escalating severity, starting reviews, setting due dates, and marking
+  customer contact across a focused queue. Survey analytics and Console now
+  also expose owner recovery workload pressure with open, overdue, due-soon,
+  critical, pending-contact, oldest-due, and workload-score signals plus a
+  suggested next owner for new recovery assignments. Selected low-score queue
+  rows can now also be smart-assigned through a recovery assignment endpoint
+  that balances candidate owner workload, moves reviews into recovery,
+  preserves stricter due dates, and returns per-review decision reasons plus
+  before/after workload scores. Selected rows can also be escalated through a
+  recovery escalation endpoint that promotes reviews to critical in-review
+  work, preserves already stricter due dates, appends escalation evidence to
+  the internal action record, and returns per-review escalation decisions for
+  the Console. The survey worker now also claims eligible low-score recovery
+  automation candidates, auto-escalates overdue, due-missing, critical, or
+  stale unowned recovery work with fenced stale-claim retries, records
+  automation evidence, surfaces automated escalation in Console recovery
+  playbooks, enqueues retryable owner recovery notifications with duplicate
+  suppression and provider failure states, surfaces notification state in
+  Console recovery playbooks, and exposes
+  `attune_survey_recovery_automation_total` plus
+  `attune_survey_recovery_notification_total` for operational visibility.
+  Survey email provider events now record idempotency keys, synchronize
+  accepted, delivered, delayed, opened, bounced, complained, and rejected
+  invitation states through an admin-gated Console API, keep provider-delayed
+  mail out of the resend queue, and suppress shared contacts plus
+  subscriptions after bounce or complaint events; provider-event audit entries
+  now capture only safe delivery-state evidence and presence flags instead of
+  raw provider payloads, message IDs, or event keys. Console operators can now
+  also manually requeue eligible pending or delayed survey email invitations
+  without resending provider-terminal, suppressed, or completed invitations.
+  Survey campaigns now also expose a generated campaign-health endpoint and
+  Console card with pass/warn/fail checks for campaign state, delivery
+  readiness, delivery backlog, response rate, suppression rate, expiry rate,
+  and low-score recovery risk, plus pending, delayed, rejected, delivered,
+  opened, submitted, suppressed, expired, and overdue-recovery funnel counts.
+  Console operators can now also preview recipients for a selected source
+  sample before sending, with server-side trigger, sampling, cooldown,
+  daily-limit, dedupe-conflict, delivery-readiness, and localized suppression
+  and lifecycle reasons, and can send marked test survey emails through the
+  active sender/provider without creating invitations or analytics records;
+  each successful test send records a non-sensitive audit snapshot with
+  provider, sent time, and proof that no invitation was persisted, while failed
+  test sends record only a stable error category and the same safety markers.
+  Survey invitations, responses, low-score reviews, provider events, and
+  recovery notifications are now also included in GDPR export/delete counts,
+  request history, ZIP JSONL bundles, and subject erasure cleanup.
+
+- Public survey browser smoke coverage now exercises hosted survey rendering,
+  score preselection, mobile overflow, axe accessibility, low-score submission,
+  already-submitted reloads, and persisted response/review rows against a real
+  server and PostgreSQL cluster.
 
 - **Close-the-loop request notifications.**
   Added tenant-scoped request notification settings, sender configuration,

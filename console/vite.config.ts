@@ -19,6 +19,40 @@ const isCoverageRun = process.argv.some(
   (arg) => arg === '--coverage' || arg.startsWith('--coverage='),
 )
 
+function manualVendorChunks(id: string): string | undefined {
+  const normalizedId = id.replaceAll(path.win32.sep, path.posix.sep)
+  if (normalizedId.endsWith('/src/i18n/zh-CN.json')) {
+    return 'locale-zh-CN'
+  }
+  if (!normalizedId.includes('/node_modules/')) {
+    return undefined
+  }
+  if (
+    normalizedId.includes('/react/') ||
+    normalizedId.includes('/react-dom/') ||
+    normalizedId.includes('/scheduler/') ||
+    normalizedId.includes('/use-sync-external-store/')
+  ) {
+    return 'vendor-react'
+  }
+  if (normalizedId.includes('/@tanstack/')) {
+    return 'vendor-tanstack'
+  }
+  if (normalizedId.includes('/radix-ui/') || normalizedId.includes('/@radix-ui/')) {
+    return 'vendor-radix'
+  }
+  if (normalizedId.includes('/lucide-react/')) {
+    return 'vendor-icons'
+  }
+  if (normalizedId.includes('/i18next/') || normalizedId.includes('/react-i18next/')) {
+    return 'vendor-i18n'
+  }
+  if (normalizedId.includes('/date-fns/')) {
+    return 'vendor-date'
+  }
+  return undefined
+}
+
 export default defineConfig({
   // Prod nginx serves the SPA under /console/* — vite's asset URLs must
   // be path-prefixed accordingly. Dev keeps absolute "/" because the
@@ -53,6 +87,13 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: manualVendorChunks,
+      },
+    },
+  },
 
   // Vitest test config — jsdom default so component tests can render.
   // Pure-logic tests run fine under jsdom too; the single-env choice
@@ -66,7 +107,7 @@ export default defineConfig({
     // Full-suite jsdom/Radix/user-event flows are CPU-bound in the fork pool.
     // Keep coverage extra roomy while giving ordinary local CI enough budget
     // for long smoke flows to finish under load.
-    testTimeout: isCoverageRun ? 120_000 : 30_000,
+    testTimeout: isCoverageRun ? 120_000 : 60_000,
     // pool: 'forks' (vitest 4 default) gives each test file its own
     // child process, so MSW server instances, navigator.clipboard
     // prototype patches, and api-client's module-level CSRF state

@@ -56,14 +56,15 @@ test.describe('External sync provider installation browser behavior', () => {
     await expect(dialog).toBeHidden()
     const installationCard = page.locator('button').filter({ hasText: zh.installationName })
     await expect(installationCard).toBeVisible()
+    await mouseClick(page, installationCard)
     await expect(page.getByText('acme/attune')).toBeVisible()
 
+    const resourceCheckbox = page.getByRole('checkbox', { name: /attune/ })
+    await expect(resourceCheckbox).toBeChecked()
     await mouseClick(page, page.getByRole('button', { name: zh.qualifyInstallation }))
     await expect(installationCard).toContainText('full_app')
     await expect(installationCard).toContainText('ok')
 
-    const resourceCheckbox = page.getByRole('checkbox', { name: /attune/ })
-    await expect(resourceCheckbox).toBeChecked()
     await resourceCheckbox.click()
     await expect(resourceCheckbox).not.toBeChecked()
     await mouseClick(page, page.getByRole('button', { name: zh.save }).first())
@@ -140,11 +141,9 @@ test.describe('External sync provider installation browser behavior', () => {
   })
 })
 
-async function mouseClick(page: Page, locator: Locator) {
+async function mouseClick(_page: Page, locator: Locator) {
   await expect(locator).toBeVisible()
-  const box = await locator.boundingBox()
-  if (!box) throw new Error('visible locator did not provide a bounding box')
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  await locator.click()
 }
 
 function lastProviderResourceSelection(

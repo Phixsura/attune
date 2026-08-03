@@ -21,6 +21,7 @@ var listFeedbackReservedQuery = map[string]struct{}{
 	"q":                    {},
 	"source":               {},
 	"type":                 {},
+	"account_key":          {},
 	"urgent":               {},
 	"tag":                  {},
 	"workflow_state":       {},
@@ -44,6 +45,7 @@ func BindListRequest(r *http.Request, req *attunev1.ListFeedbackRequest) error {
 	req.Q = queryStr(q, "q")
 	req.Source = queryStr(q, "source")
 	req.Type = queryStr(q, "type")
+	req.AccountKey = queryStr(q, "account_key")
 	req.Urgent = queryBool(q, "urgent")
 	req.TagId = queryStr(q, "tag")
 	req.WorkflowStateId = queryStr(q, "workflow_state")
@@ -188,6 +190,9 @@ func applyListOptionalOpts(req *attunev1.ListFeedbackRequest, opts *feedback.Con
 	}
 	if typ := req.GetType(); typ != "" {
 		opts.Type = ptrext.Of(typ)
+	}
+	if accountKey := strings.TrimSpace(req.GetAccountKey()); accountKey != "" {
+		opts.AccountKey = ptrext.Of(accountKey)
 	}
 	opts.Urgent = req.Urgent
 	opts.TagID = req.TagId

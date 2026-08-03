@@ -14,6 +14,8 @@ Record the command output in the PR description.
 | Repository gate | `make ci-check` | Passes on the final branch state. |
 | Browser accessibility gate | `cd console && pnpm test:e2e:a11y` | Passes the default Chromium desktop and mobile projects. |
 | Adaptive browser modes | Included in `pnpm test:e2e:a11y` | Forced colors, WCAG text spacing, and 200% text sizing keep critical routes axe-clean and free of document overflow where applicable. |
+| Release browser smoke | `make console-browser-smoke` | Rebuilds the production Console bundle and passes the Chromium desktop/mobile browser suite. |
+| Release supplemental browser smoke | `make console-browser-supplemental-smoke` | Rebuilds the production Console bundle and passes Firefox/WebKit desktop projects. |
 | Supplemental desktop engines | `cd console && pnpm test:e2e:a11y:supplemental` | Required when the change claims local browser parity across Edge, Firefox, and WebKit. |
 | Supplemental CI engines | `cd console && pnpm test:e2e:a11y:supplemental:ci` | Runs Firefox and WebKit in the manual/scheduled `Console Accessibility Supplemental` workflow. |
 | Artifact hygiene | `bash scripts/lint-artifacts.sh --strict` | Hard checks pass. |

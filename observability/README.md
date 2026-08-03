@@ -74,6 +74,8 @@ exposition plus the portable assets in this directory.
 | `attune_digest_duration_seconds` | histogram | `tenant` | end-to-end digest aggregation + delivery latency per run (#27) |
 | `attune_digest_clustering_fallback_total` | counter | `tenant`, `reason` | cluster-based theme extraction fallbacks to naive path (#27) |
 | `attune_digest_cluster_count` | histogram | `tenant` | number of clusters found per digest run (#27) |
+| `attune_survey_recovery_automation_total` | counter | `tenant`, `result`, `reason` | low-score survey recovery automation outcomes by tenant and reason (#236) |
+| `attune_survey_recovery_notification_total` | counter | `tenant`, `result`, `reason` | low-score survey recovery owner notification outcomes by tenant and reason (#236) |
 | `attune_external_sync_runs_total` | counter | `provider`, `object_type`, `result` | external sync run outcomes by provider and object type (#214) |
 | `attune_external_sync_records_total` | counter | `provider`, `object_type`, `operation`, `result` | external sync record-level operations and outcomes (#214) |
 | `attune_external_sync_run_duration_seconds` | histogram | `provider`, `object_type`, `result` | external sync run latency by provider, object type, and outcome (#214) |
@@ -172,6 +174,9 @@ Label values:
 - LLM `model` — configured model id; keep private gateway aliases bounded.
 - embed `cluster_type` — `new` · `existing`.
 - embed `error_type` — `embed_api` · `find_similar` · `update_embedding`.
+- survey recovery `result` — `escalated` · `skipped` · `error`.
+- survey recovery `reason` — bounded recovery reasons such as `overdue_sla`,
+  `owner_missing`, `due_missing`, `critical_recovery`, or `not_eligible`.
 - batch `operation` — `tag` · `workflow` · `delete`.
 - batch `status` — `success` · `error` · `rate_limited`.
 - batch `result` — `succeeded` · `skipped` · `failed`.

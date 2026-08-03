@@ -124,7 +124,10 @@ describe('usePermissions', () => {
       expect(result.current.can('settings:notify_targets:edit')).toBe(true)
       expect(result.current.can('settings:audit_log:view')).toBe(true)
       expect(result.current.can('settings:gdpr:view')).toBe(true)
+      expect(result.current.can('settings:members:view')).toBe(true)
       expect(result.current.can('settings:members:invite')).toBe(false)
+      expect(result.current.can('settings:members:edit_role')).toBe(false)
+      expect(result.current.can('settings:members:remove')).toBe(false)
     })
 
     it('member has limited permissions', async () => {
