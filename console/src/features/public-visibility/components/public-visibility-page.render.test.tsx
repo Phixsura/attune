@@ -502,7 +502,7 @@ describe('PublicVisibilityPage', () => {
     expect(screen.getByRole('button', { name: '删除保存视图' })).toBeDisabled()
   })
 
-  it('surfaces policy, profile, moderation, and saved-view mutation failures', async () => {
+  it('surfaces policy, profile, and moderation mutation failures', async () => {
     mockMe('admin')
     server.use(
       http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
@@ -537,15 +537,6 @@ describe('PublicVisibilityPage', () => {
       http.post('/fb/v1/console/public-visibility/moderation/moderation-pending\\:reject', () =>
         HttpResponse.json({ message: 'reject denied' }, { status: 409 }),
       ),
-      http.post('/fb/v1/console/public-visibility/views', () =>
-        HttpResponse.json({ message: 'create denied' }, { status: 500 }),
-      ),
-      http.put('/fb/v1/console/public-visibility/views/:id', () =>
-        HttpResponse.json({ message: 'update denied' }, { status: 500 }),
-      ),
-      http.delete('/fb/v1/console/public-visibility/views/:id', () =>
-        HttpResponse.json({ message: 'delete denied' }, { status: 500 }),
-      ),
     )
 
     const { user } = renderWithProviders(<PublicVisibilityPage />)
@@ -570,7 +561,45 @@ describe('PublicVisibilityPage', () => {
     })
     await user.click(screen.getByRole('button', { name: '提交审核' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('reject denied'))
-    await user.keyboard('{Escape}')
+  }, 60_000)
+
+  it('surfaces saved-view mutation failures', async () => {
+    mockMe('admin')
+    server.use(
+      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
+      http.get('/fb/v1/console/public-visibility/views', () =>
+        HttpResponse.json({
+          views: [
+            {
+              id: 'view-1',
+              name: 'Approved portal requests',
+              state: {
+                queueView: 'approved',
+                surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
+              },
+              createdAt: '2026-07-10T00:00:00Z',
+              updatedAt: '2026-07-10T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.get('/fb/v1/console/public-visibility/moderation', () =>
+        HttpResponse.json({ subjects: moderationSubjects() }),
+      ),
+      http.post('/fb/v1/console/public-visibility/views', () =>
+        HttpResponse.json({ message: 'create denied' }, { status: 500 }),
+      ),
+      http.put('/fb/v1/console/public-visibility/views/:id', () =>
+        HttpResponse.json({ message: 'update denied' }, { status: 500 }),
+      ),
+      http.delete('/fb/v1/console/public-visibility/views/:id', () =>
+        HttpResponse.json({ message: 'delete denied' }, { status: 500 }),
+      ),
+    )
+
+    const { user } = renderWithProviders(<PublicVisibilityPage />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存视图' })).toBeEnabled())
 
     await user.click(screen.getByRole('button', { name: '保存视图' }))
     await user.click(
@@ -606,93 +635,6 @@ describe('PublicVisibilityPage', () => {
     await user.click(screen.getByRole('button', { name: '删除保存视图' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('delete denied'))
   }, 60_000)
-
-  it('keeps similar requests locked until the publication is public', async () => {
-    mockMe('admin')
-    server.use(
-      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
-      http.get('/fb/v1/console/public-visibility/moderation', () =>
-        HttpResponse.json({
-          subjects: moderationSubjects(ModerationState.MODERATION_STATE_PENDING),
-        }),
-      ),
-      http.get('/fb/v1/console/public-visibility/requests/:requestId/profile', () =>
-        HttpResponse.json(publicationFixture(ModerationState.MODERATION_STATE_PENDING)),
-      ),
-      http.get('/fb/v1/portal/:tenantSlug/requests/:publicSlug', () => {
-        throw new Error('portal similarity lookup must stay disabled until publication is public')
-      }),
-    )
-
-    const { user } = renderWithProviders(<PublicVisibilityPage />)
-
-    await waitFor(() => expect(screen.getByText('公开需求资料')).toBeInTheDocument())
-    await user.type(
-      screen.getByPlaceholderText('粘贴 customer request UUID'),
-      ` ${currentRequestID} `,
-    )
-    await user.click(screen.getByRole('button', { name: '载入' }))
-
-    await waitFor(() => {
-      expect(screen.getByText('可能重复')).toBeInTheDocument()
-      expect(screen.getByText('此需求公开后会自动显示相似请求。')).toBeInTheDocument()
-    })
-    expect(screen.queryByText('Pricing dashboard')).not.toBeInTheDocument()
-  })
-
-  it('saves and reapplies moderation views', async () => {
-    mockMe('admin')
-    type SavedViewBody = {
-      name?: string
-      state?: { queueView?: string; surfaces?: string[] }
-    }
-    let savedViewBody: SavedViewBody | null = null
-    let savedViews = { views: [] as Record<string, unknown>[] }
-    server.use(
-      http.get('/fb/v1/console/public-visibility/policy', () => HttpResponse.json(policyFixture())),
-      http.get('/fb/v1/console/public-visibility/views', () => HttpResponse.json(savedViews)),
-      http.get('/fb/v1/console/public-visibility/moderation', () =>
-        HttpResponse.json({ subjects: moderationSubjects() }),
-      ),
-      http.post('/fb/v1/console/public-visibility/views', async ({ request }) => {
-        savedViewBody = (await request.json()) as SavedViewBody
-        const view = {
-          id: 'view-1',
-          name: savedViewBody?.name ?? 'Approved portal requests',
-          state: savedViewBody?.state,
-          createdAt: '2026-07-10T00:00:00Z',
-          updatedAt: '2026-07-10T00:00:00Z',
-        }
-        savedViews = { views: [view] }
-        return HttpResponse.json({ view })
-      }),
-    )
-
-    const { user } = renderWithProviders(<PublicVisibilityPage />)
-
-    await waitFor(() => expect(screen.getByText('保存的视图')).toBeInTheDocument())
-    await user.click(screen.getByRole('button', { name: '门户投稿' }))
-    await user.click(screen.getByRole('button', { name: '已公开 (1)' }))
-    await user.click(screen.getByRole('button', { name: '保存视图' }))
-    await user.clear(screen.getByLabelText('视图名称'))
-    await user.type(screen.getByLabelText('视图名称'), 'Approved portal requests')
-    await user.click(screen.getByRole('button', { name: '保存' }))
-
-    await waitFor(() => {
-      expect(savedViewBody).toMatchObject({
-        name: 'Approved portal requests',
-        state: {
-          queueView: 'approved',
-          surfaces: [PublicSurface.PUBLIC_SURFACE_PORTAL_SUBMISSION],
-        },
-      })
-    })
-
-    await user.click(screen.getByRole('combobox', { name: '保存的视图' }))
-    expect(
-      await screen.findByRole('option', { name: 'Approved portal requests' }),
-    ).toBeInTheDocument()
-  })
 
   it('keeps similar requests locked until the publication is public', async () => {
     mockMe('admin')
