@@ -4,7 +4,7 @@
 
 | Field | Value |
 |---|---|
-| Issue | [#236](https://github.com/Phixsura/attune/issues/236) |
+| Issue | [#235](https://github.com/Phixsura/attune/issues/235) |
 | Status | Implemented |
 | Started | 2026-07-29T23:57:01+08:00 |
 | Related | [#202](https://github.com/Phixsura/attune/issues/202), [#224](https://github.com/Phixsura/attune/issues/224), [#212](https://github.com/Phixsura/attune/issues/212), [Reply Draft Review Send Workflow](./2026-07-03-reply-draft-review-send-workflow.md), [Close the Loop Request Notifications](./2026-07-16-close-the-loop-request-notifications.md), [Feedback Workflow Status](../06/2026-06-14-feedback-workflow-status.md), [Customer Requests](./2026-07-07-customer-requests.md) |
@@ -19,7 +19,7 @@ and notify request subscribers when product work changes state.
 It still cannot measure whether a resolved support or product interaction felt
 good to the customer.
 
-Issue #236 asks Attune to add CSAT and CES campaigns after resolution. This is
+Issue #235 asks Attune to add CSAT and CES campaigns after resolution. This is
 not a simple email template. The feature touches workflow transitions, reply
 send completion, customer request context, public hosted links, email outbound,
 consent, unsubscribe, anti-spam controls, analytics, and low-score inspection.
@@ -1861,7 +1861,7 @@ requires explicit POST submission.
 
 ### Store anonymous responses without invitations
 
-Anonymous hosted surveys are useful for broad research, but #236 requires
+Anonymous hosted surveys are useful for broad research, but #235 requires
 responses to link back to relevant feedback or requests. Invitation tokens are
 the safer anchor.
 

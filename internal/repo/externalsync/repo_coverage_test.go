@@ -402,7 +402,7 @@ func TestExternalSyncRepoCustomerRequestIssueRunSuccessPaths(t *testing.T) {
 	}
 	pullRun, err := r.CreateCustomerRequestIssuePullRun(ctx, CustomerRequestIssuePullRunInput{
 		TenantID: tenantID, RequestID: requestID, ConnectionID: connectionID, MappingID: mappingID,
-		ExternalKey: " Acme/attune#236 ", ActorID: "user-1",
+		ExternalKey: " Acme/attune#235 ", ActorID: "user-1",
 	})
 	if err != nil || pullRun.Mapping.ID != mappingID || pullRun.Run.Direction != DirectionPull {
 		t.Fatalf("CreateCustomerRequestIssuePullRun() = %+v, %v", pullRun, err)
@@ -707,7 +707,7 @@ func fakeAttemptRow(runID uuid.UUID, now time.Time) fakeRow {
 func fakeFailureRow(tenantID string, runID, mappingID uuid.UUID, now time.Time) fakeRow {
 	failureID := uuid.MustParse("bbbbbbbb-2000-4000-8000-000000000030")
 	return fakeRow{values: []any{
-		failureID, tenantID, runID, mappingID, DirectionPull, "request-1", "ISS-236",
+		failureID, tenantID, runID, mappingID, DirectionPull, "request-1", "ISS-235",
 		"validation", "missing title", payloadDigest([]byte("payload")), "manual",
 		[]byte(`{"title":""}`), false, nil, "", now,
 	}}
@@ -716,7 +716,7 @@ func fakeFailureRow(tenantID string, runID, mappingID uuid.UUID, now time.Time) 
 func fakeConflictRow(tenantID string, mappingID uuid.UUID, now time.Time) fakeRow {
 	conflictID := uuid.MustParse("bbbbbbbb-2000-4000-8000-000000000031")
 	return fakeRow{values: []any{
-		conflictID, tenantID, mappingID, "request-1", "ISS-236", "field",
+		conflictID, tenantID, mappingID, "request-1", "ISS-235", "field",
 		"resolved", []byte(`{"status":"open"}`), []byte(`{"status":"closed"}`),
 		"provider", timePtr(now), "user-1", now, now,
 	}}
@@ -724,8 +724,8 @@ func fakeConflictRow(tenantID string, mappingID uuid.UUID, now time.Time) fakeRo
 
 func fakePushCandidateRow(requestID uuid.UUID, now time.Time) fakeRow {
 	return fakeRow{values: []any{
-		requestID.String(), "CR-236", "Sync issue", "Customer cannot qualify provider",
-		"planned", "high", now, "ISS-236", "v1",
+		requestID.String(), "CR-235", "Sync issue", "Customer cannot qualify provider",
+		"planned", "high", now, "ISS-235", "v1",
 	}}
 }
 

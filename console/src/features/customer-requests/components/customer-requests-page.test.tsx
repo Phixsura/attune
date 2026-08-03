@@ -189,7 +189,7 @@ describe('CustomerRequestsPage', () => {
       screen.getByText('对象 Ada Lovelace · 来源 portal · 操作人 operator · 反馈 #42'),
     ).toBeInTheDocument()
     expect(screen.getByText('交付同步')).toBeInTheDocument()
-    expect(screen.getByText('ATT-236')).toBeInTheDocument()
+    expect(screen.getByText('ATT-235')).toBeInTheDocument()
     expect(screen.getByText('内部备注')).toBeInTheDocument()
     expect(screen.getByText('请求时间线')).toBeInTheDocument()
     expect(within(accountOverview).getAllByText('Renewal blocker').length).toBeGreaterThan(0)
@@ -2121,8 +2121,8 @@ function sampleAccountSummary(
         description: 'failed',
         feedbackId: '0',
         issueProvider: 'github',
-        issueKey: 'ATT-236',
-        issueUrl: 'https://github.example/attune/issues/236',
+        issueKey: 'ATT-235',
+        issueUrl: 'https://github.example/attune/issues/235',
         issueSyncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED,
       },
       {

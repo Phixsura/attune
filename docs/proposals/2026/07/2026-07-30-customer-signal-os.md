@@ -7,7 +7,7 @@
 | Issue | [#202](https://github.com/Phixsura/attune/issues/202) (industry gap closure meta issue) |
 | Status | Proposed |
 | Started | 2026-07-30T11:16:19+08:00 |
-| Related | [#236](https://github.com/Phixsura/attune/issues/236), [Post-resolution CSAT and CES Surveys](./2026-07-29-post-resolution-csat-ces-surveys.md), [Customer Requests](./2026-07-07-customer-requests.md), [Customer Request Decision Intelligence](./2026-07-07-customer-request-decision-intelligence.md), [External Sync Framework](./2026-07-08-external-sync-framework.md), [Public Roadmap From Workflow States](./2026-07-14-public-roadmap-from-workflow-states.md), [Close the Loop Request Notifications](./2026-07-16-close-the-loop-request-notifications.md), [Semantic Search Operator Workflow](./2026-07-02-semantic-search-operator-workflow.md), [Platform Maturity Program](./2026-07-05-platform-maturity-program.md) |
+| Related | [#235](https://github.com/Phixsura/attune/issues/235), [Post-resolution CSAT and CES Surveys](./2026-07-29-post-resolution-csat-ces-surveys.md), [Customer Requests](./2026-07-07-customer-requests.md), [Customer Request Decision Intelligence](./2026-07-07-customer-request-decision-intelligence.md), [External Sync Framework](./2026-07-08-external-sync-framework.md), [Public Roadmap From Workflow States](./2026-07-14-public-roadmap-from-workflow-states.md), [Close the Loop Request Notifications](./2026-07-16-close-the-loop-request-notifications.md), [Semantic Search Operator Workflow](./2026-07-02-semantic-search-operator-workflow.md), [Platform Maturity Program](./2026-07-05-platform-maturity-program.md) |
 
 ## Problem
 

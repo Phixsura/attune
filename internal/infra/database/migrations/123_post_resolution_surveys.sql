@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Post-resolution CSAT and CES surveys (#236).
+-- Post-resolution CSAT and CES surveys (#235).
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
