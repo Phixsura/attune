@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Issue | [#236](https://github.com/Phixsura/attune/issues/236) |
+| Issue | [#235](https://github.com/Phixsura/attune/issues/235) |
 | Status | Implemented |
 | Started | 2026-08-03 13:20 +08:00 |
 | Related | Post-merge release-smoke regression hardening for PR #258 |

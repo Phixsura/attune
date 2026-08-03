@@ -88,7 +88,7 @@ func TestCustomerRequestServiceMutationSuccessPaths(t *testing.T) {
 			return service.DeleteNote(ctx, "tenant-1", requestID, linkID, actor)
 		}},
 		{name: "LinkIssue", call: func() (*Detail, error) {
-			return service.LinkIssue(ctx, LinkIssueInput{TenantID: "tenant-1", RequestID: requestID, Provider: "github", ExternalURL: "https://github.com/Phixsura/attune/issues/236", Actor: actor})
+			return service.LinkIssue(ctx, LinkIssueInput{TenantID: "tenant-1", RequestID: requestID, Provider: "github", ExternalURL: "https://github.com/Phixsura/attune/issues/235", Actor: actor})
 		}},
 		{name: "UnlinkIssue", call: func() (*Detail, error) {
 			return service.UnlinkIssue(ctx, "tenant-1", requestID, linkID, actor)
@@ -148,11 +148,11 @@ func TestCustomerRequestServiceGitHubIssueSuccessPaths(t *testing.T) {
 	fakeRepo := newFlowRequestRepo(requestID)
 	store := &recordingIssueCreateRunStore{
 		resolveTarget: &externalsyncrepo.GitHubIssueLinkTarget{
-			MappingID: mappingID, ExternalSyncKey: "Phixsura/attune#236", ExternalKey: "Phixsura/attune#236",
-			ExternalURL: "https://github.com/Phixsura/attune/issues/236", Title: "World class console", Status: "open",
+			MappingID: mappingID, ExternalSyncKey: "Phixsura/attune#235", ExternalKey: "Phixsura/attune#235",
+			ExternalURL: "https://github.com/Phixsura/attune/issues/235", Title: "World class console", Status: "open",
 		},
 		bindResult: &externalsyncrepo.ManagedGitHubIssueLinkBinding{
-			ConnectionID: connectionID, MappingID: mappingID, ExternalKey: "Phixsura/attune#236", ExternalObjectLinkID: objectLinkID,
+			ConnectionID: connectionID, MappingID: mappingID, ExternalKey: "Phixsura/attune#235", ExternalObjectLinkID: objectLinkID,
 		},
 		createResult: &externalsyncrepo.CustomerRequestIssueCreateRunResult{
 			Mapping: externalsyncrepo.Mapping{ID: mappingID, ConnectionID: connectionID},
@@ -163,7 +163,7 @@ func TestCustomerRequestServiceGitHubIssueSuccessPaths(t *testing.T) {
 
 	detail, err := service.LinkIssue(ctx, LinkIssueInput{
 		TenantID: "tenant-1", RequestID: requestID, Provider: "github",
-		ConnectionID: ptrext.Of(connectionID), IssueNumber: "236", Actor: testCustomerRequestActor(),
+		ConnectionID: ptrext.Of(connectionID), IssueNumber: "235", Actor: testCustomerRequestActor(),
 	})
 	if err != nil || detail.Request.Summary.ID != requestID || len(store.pullInputs) != 1 {
 		t.Fatalf("managed LinkIssue() = %+v, pullInputs=%+v, err=%v", detail, store.pullInputs, err)
@@ -274,7 +274,7 @@ func (f *flowRequestRepo) LinkIssueTx(_ context.Context, _ pgx.Tx, in repo.Issue
 }
 
 func (f *flowRequestRepo) UnlinkIssueTx(context.Context, pgx.Tx, string, uuid.UUID, uuid.UUID, string) (*repo.IssueLink, error) {
-	return ptrext.Of(repo.IssueLink{ID: uuid.New(), Provider: "github", ExternalKey: "Phixsura/attune#236", ExternalURL: "https://github.com/Phixsura/attune/issues/236"}), nil
+	return ptrext.Of(repo.IssueLink{ID: uuid.New(), Provider: "github", ExternalKey: "Phixsura/attune#235", ExternalURL: "https://github.com/Phixsura/attune/issues/235"}), nil
 }
 
 func (f *flowRequestRepo) RecordIssueSyncTx(_ context.Context, _ pgx.Tx, in repo.IssueSyncInput) (*repo.IssueLink, error) {
@@ -282,12 +282,12 @@ func (f *flowRequestRepo) RecordIssueSyncTx(_ context.Context, _ pgx.Tx, in repo
 }
 
 func (f *flowRequestRepo) BindIssueExternalObjectLinkTx(_ context.Context, _ pgx.Tx, _ string, _ uuid.UUID, issueLinkID, externalObjectLinkID uuid.UUID) (*repo.IssueLink, error) {
-	return ptrext.Of(repo.IssueLink{ID: issueLinkID, Provider: "github", ExternalKey: "Phixsura/attune#236", ExternalObjectLinkID: ptrext.Of(externalObjectLinkID)}), nil
+	return ptrext.Of(repo.IssueLink{ID: issueLinkID, Provider: "github", ExternalKey: "Phixsura/attune#235", ExternalObjectLinkID: ptrext.Of(externalObjectLinkID)}), nil
 }
 
 func customerRequestFlowSummary(requestID uuid.UUID, status repo.Status) repo.Summary {
 	return repo.Summary{
-		ID: requestID, TenantID: "tenant-1", DisplayID: "CR-236", Title: "World class console",
+		ID: requestID, TenantID: "tenant-1", DisplayID: "CR-235", Title: "World class console",
 		Status: status, Priority: repo.PriorityHigh, RevenueCurrency: "USD",
 		CreatedAt: time.Date(2026, 8, 2, 9, 0, 0, 0, time.UTC),
 		UpdatedAt: time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC),
