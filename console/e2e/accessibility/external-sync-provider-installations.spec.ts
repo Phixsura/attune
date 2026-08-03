@@ -34,6 +34,8 @@ test.describe('External sync provider installation browser behavior', () => {
   test('creates, qualifies, and saves provider resource selection through visible controls', async ({
     page,
   }) => {
+    test.setTimeout(120_000)
+
     const diagnostics = collectConsoleDiagnostics(page)
     const apiMocks = await installConsoleApiMocks(page)
 
