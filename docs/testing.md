@@ -203,6 +203,19 @@ ATTUNE_RUNTIME_SMOKE_IMAGE=ghcr.io/phixsura/attune:tag \
   bash scripts/runtime-smoke.sh
 ```
 
+Local networks that cannot reach Docker Hub can keep the same smoke target and
+point the build at verified mirror or local base images:
+
+```bash
+make runtime-smoke \
+  ATTUNE_RUNTIME_SMOKE_NODE_IMAGE=registry.example.com/library/node:22-alpine \
+  ATTUNE_RUNTIME_SMOKE_GO_IMAGE=registry.example.com/library/golang:1.26.5-alpine
+```
+
+The default Dockerfile bases remain pinned to the official node, golang, and
+distroless digests. Overrides are intended for mirrors or locally tagged images
+whose provenance and digest have already been verified.
+
 ## Full-stack browser acceptance
 
 Detailed runbook and copyable evidence template:

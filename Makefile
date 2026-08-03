@@ -16,6 +16,10 @@ NODE ?= $(NODE_RUNNER) node
 NPX ?= $(NODE_RUNNER) npx
 PNPM ?= $(NODE_RUNNER) corepack pnpm
 FUZZTIME ?= 10s
+ATTUNE_RUNTIME_SMOKE_IMAGE ?= attune:runtime-smoke
+ATTUNE_RUNTIME_SMOKE_NODE_IMAGE ?=
+ATTUNE_RUNTIME_SMOKE_GO_IMAGE ?=
+ATTUNE_RUNTIME_SMOKE_RUNTIME_IMAGE ?=
 
 help: ## List targets.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -157,8 +161,12 @@ console-browser-supplemental-smoke: ## Browser release smoke — production Cons
 	cd console && $(PNPM) --ignore-workspace run test:e2e:a11y:supplemental:ci
 
 runtime-smoke: ## Build the production image and boot it against throwaway pgvector Postgres.
-	docker build -t attune:runtime-smoke .
-	ATTUNE_RUNTIME_SMOKE_IMAGE=attune:runtime-smoke bash scripts/runtime-smoke.sh
+	ATTUNE_RUNTIME_SMOKE_IMAGE="$(ATTUNE_RUNTIME_SMOKE_IMAGE)" \
+	ATTUNE_RUNTIME_SMOKE_NODE_IMAGE="$(ATTUNE_RUNTIME_SMOKE_NODE_IMAGE)" \
+	ATTUNE_RUNTIME_SMOKE_GO_IMAGE="$(ATTUNE_RUNTIME_SMOKE_GO_IMAGE)" \
+	ATTUNE_RUNTIME_SMOKE_RUNTIME_IMAGE="$(ATTUNE_RUNTIME_SMOKE_RUNTIME_IMAGE)" \
+		bash scripts/runtime-smoke-build.sh
+	ATTUNE_RUNTIME_SMOKE_IMAGE="$(ATTUNE_RUNTIME_SMOKE_IMAGE)" bash scripts/runtime-smoke.sh
 
 secret-scan: ## Run TruffleHog secret scan through local binary or Docker fallback.
 	bash scripts/secret-scan.sh
