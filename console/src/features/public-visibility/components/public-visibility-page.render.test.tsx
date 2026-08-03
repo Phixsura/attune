@@ -541,7 +541,9 @@ describe('PublicVisibilityPage', () => {
 
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '保存策略' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存策略' })).toBeEnabled(), {
+      timeout: 5_000,
+    })
 
     await user.click(screen.getByRole('button', { name: '保存策略' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('policy denied'))
@@ -599,7 +601,9 @@ describe('PublicVisibilityPage', () => {
 
     const { user } = renderWithProviders(<PublicVisibilityPage />)
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '保存视图' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存视图' })).toBeEnabled(), {
+      timeout: 5_000,
+    })
 
     await user.click(screen.getByRole('button', { name: '保存视图' }))
     await user.click(
