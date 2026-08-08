@@ -154,3 +154,13 @@ func TestAutomationScopes(t *testing.T) {
 	assert.False(t, HasExplicitScope([]Scope{ScopeNotifyWrite}, ScopeHooksManage),
 		"notify:write must not imply hooks:manage")
 }
+
+func TestAutomationEventVocabulary(t *testing.T) {
+	for _, e := range AutomationEvents {
+		assert.True(t, IsAutomationEvent(e), "%s must be subscribable", e)
+	}
+	assert.False(t, IsAutomationEvent(EventFeedbackEnriched), "legacy event is not subscribable")
+	assert.False(t, IsAutomationEvent("feedback.deleted"))
+	assert.False(t, IsAutomationEvent(""))
+	assert.Len(t, AutomationEvents, 4, "append-only vocabulary — additions must update tests deliberately")
+}
