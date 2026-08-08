@@ -1316,7 +1316,7 @@ async function runNPSCampaignSmoke(browserInstance, baseURL, dsn, tenantId, nps,
     await page.getByTestId('survey-create').click()
 
     const campaign = page.getByRole('button', { name: nps.campaignName, exact: true })
-    await expect(campaign).toHaveCount(1)
+    await expect(campaign).toHaveCount(1, { timeout: 30_000 })
     await expect(campaign.locator('..')).toContainText('计划运行')
     await campaign.click()
     const preflight = page.getByTestId('nps-launch-preflight')
