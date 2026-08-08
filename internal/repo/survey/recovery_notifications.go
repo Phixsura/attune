@@ -23,12 +23,37 @@ const recoveryNotificationColumns = `
 	failure_kind, http_status, last_error, claimed_at, claimed_by,
 	next_retry_at, delivered_at, created_at, updated_at`
 
+type recoveryNotificationRowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 func (r *Repo) RecoveryNotificationContext(
 	ctx context.Context,
 	tenantID string,
 	responseID uuid.UUID,
 ) (RecoveryNotificationContext, error) {
-	row := r.pool.QueryRow(ctx, `
+	return recoveryNotificationContext(ctx, r.pool, tenantID, responseID)
+}
+
+// RecoveryNotificationContextTx reads notification context inside the caller's
+// transaction. NPS uses it to persist the initial owner notification with the
+// response and its low-score review.
+func (r *Repo) RecoveryNotificationContextTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	responseID uuid.UUID,
+) (RecoveryNotificationContext, error) {
+	return recoveryNotificationContext(ctx, tx, tenantID, responseID)
+}
+
+func recoveryNotificationContext(
+	ctx context.Context,
+	db recoveryNotificationRowQuerier,
+	tenantID string,
+	responseID uuid.UUID,
+) (RecoveryNotificationContext, error) {
+	row := db.QueryRow(ctx, `
 		SELECT sr.tenant_id,
 		       sr.id,
 		       sr.campaign_id,
@@ -38,6 +63,7 @@ func (r *Repo) RecoveryNotificationContext(
 		       sr.source_type,
 		       sr.source_id,
 		       sr.score,
+		       sr.follow_up_consent,
 		       sr.comment,
 		       sr.submitted_at,
 		       tm.id,
@@ -77,6 +103,7 @@ func (r *Repo) RecoveryNotificationContext(
 		&item.SourceType,
 		&item.SourceID,
 		&item.Score,
+		&item.FollowUpConsent,
 		&item.Comment,
 		&item.SubmittedAt,
 		&item.Owner.ID,
@@ -120,11 +147,29 @@ func (r *Repo) EnsureRecoveryNotification(
 	ctx context.Context,
 	input RecoveryNotificationInput,
 ) (RecoveryNotification, bool, error) {
+	return ensureRecoveryNotification(ctx, r.pool, input)
+}
+
+// EnsureRecoveryNotificationTx writes a notification into the caller's
+// transaction so the recovery queue cannot lag behind a committed response.
+func (r *Repo) EnsureRecoveryNotificationTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	input RecoveryNotificationInput,
+) (RecoveryNotification, bool, error) {
+	return ensureRecoveryNotification(ctx, tx, input)
+}
+
+func ensureRecoveryNotification(
+	ctx context.Context,
+	db recoveryNotificationRowQuerier,
+	input RecoveryNotificationInput,
+) (RecoveryNotification, bool, error) {
 	payload, err := jsonObject(input.Payload)
 	if err != nil {
 		return RecoveryNotification{}, false, err
 	}
-	row := r.pool.QueryRow(ctx, fmt.Sprintf(`
+	row := db.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO survey_recovery_notifications (
 			tenant_id, response_id, owner_member_id, channel, status, reason,
 			destination_hash, payload, next_retry_at

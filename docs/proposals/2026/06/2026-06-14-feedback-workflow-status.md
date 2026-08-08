@@ -857,7 +857,7 @@ transition table.
 ## References
 
 - ServiceNow State Model: https://docs.servicenow.com/en-US/bundle/utah-it-service-management/page/product/incident-management/concept/c_IncidentManagementStateModel.html
-- Jira Workflows: https://confluence.atlassian.com/adminjiraserver/working-with-workflows-938847362.html
+- Jira Workflows: https://support.atlassian.com/jira-cloud-administration/docs/work-with-issue-workflows/
 - Linear Configuring Workflows: https://linear.app/docs/configuring-workflows
 - Sentry Issue States: https://docs.sentry.io/product/issues/states-triage/
 - Zendesk Custom Ticket Statuses: https://support.zendesk.com/hc/en-us/articles/4412575841306

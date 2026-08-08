@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/survey"
 )
@@ -32,7 +33,7 @@ func (s *Service) normalizeNewCampaign(in CampaignInput) (repo.Campaign, error) 
 		Locale:                        normalizedLocale(ptrext.Indirect(in.Locale), "en"),
 		ContentVersion:                1,
 		SamplingPercent:               numberOr(in.SamplingPercent, 100),
-		MinDaysBetweenContact:         intOr(in.MinDaysBetweenContact, 30),
+		MinDaysBetweenContact:         intOr(in.MinDaysBetweenContact, defaultCampaignContactCooldown(in.SurveyType)),
 		ExpiresAfterDays:              intOr(in.ExpiresAfterDays, 14),
 		MaxDailyInvitations:           intOr(in.MaxDailyInvitations, 0),
 		LowScoreThreshold:             intOr(in.LowScoreThreshold, 3),
@@ -41,6 +42,14 @@ func (s *Service) normalizeNewCampaign(in CampaignInput) (repo.Campaign, error) 
 		SuppressAutoResolved:          boolOr(in.SuppressAutoResolved, true),
 		CreatedBy:                     actorID,
 		UpdatedBy:                     actorID,
+	}
+	if campaign.SurveyType == repo.TypeNPS {
+		settings, err := newNPSCampaignSettings(campaign, in.NPSSettings)
+		if err != nil {
+			return repo.Campaign{}, err
+		}
+		campaign = applyNPSCampaignShape(campaign)
+		campaign.NPSSettings = ptrext.Of(settings)
 	}
 	if err := validateCampaign(campaign); err != nil {
 		return repo.Campaign{}, err
@@ -54,11 +63,14 @@ func (s *Service) applyCampaignUpdate(current repo.Campaign, in CampaignInput) (
 		next.Name = strings.TrimSpace(ptrext.Indirect(in.Name))
 	}
 	applyCampaignEnumUpdate(next, in)
+	if in.Locale != nil {
+		next.Locale = normalizedLocale(ptrext.Indirect(in.Locale), next.Locale)
+	}
 	applyCampaignContentUpdate(next, current, in)
 	applyCampaignLimitUpdate(next, in)
 	applyCampaignFlagUpdate(next, in)
-	if in.Locale != nil {
-		next.Locale = normalizedLocale(ptrext.Indirect(in.Locale), next.Locale)
+	if next.SurveyType == repo.TypeNPS {
+		next = ptrext.Of(applyNPSCampaignShape(ptrext.Indirect(next)))
 	}
 	next.UpdatedBy = strings.TrimSpace(in.ActorID)
 	if next.UpdatedBy == "" {
@@ -90,6 +102,14 @@ func applyCampaignEnumUpdate(next *repo.Campaign, in CampaignInput) {
 }
 
 func applyCampaignContentUpdate(next *repo.Campaign, current repo.Campaign, in CampaignInput) {
+	if next.SurveyType == repo.TypeNPS {
+		revision := npsContentRevisionFor(current.Locale, current.Content)
+		next.Content, _ = npsContentForRevision(next.Locale, revision)
+		if !reflect.DeepEqual(current.Content, next.Content) {
+			next.ContentVersion++
+		}
+		return
+	}
 	if in.TriggerFilterSet {
 		next.TriggerFilter = normalizeObject(in.TriggerFilter)
 	}
@@ -136,6 +156,9 @@ func validateCampaign(c repo.Campaign) error {
 	if !validCampaignIdentity(c) || !validCampaignEnums(c) || !validCampaignLimits(c) {
 		return ErrValidation
 	}
+	if c.SurveyType == repo.TypeNPS && !validNPSCampaignShape(c) {
+		return ErrValidation
+	}
 	return validateLowScoreThreshold(c.SurveyType, c.LowScoreThreshold)
 }
 
@@ -163,12 +186,21 @@ func validCampaignLimits(c repo.Campaign) bool {
 		c.RecentActivityDays <= 3650
 }
 
+func defaultCampaignContactCooldown(surveyType string) int {
+	if normalizeSurveyType(surveyType) == repo.TypeNPS {
+		return defaultNPSContactCooldownDays
+	}
+	return 30
+}
+
 func normalizeSurveyType(raw string) string {
 	switch strings.TrimSpace(strings.ToLower(raw)) {
 	case repo.TypeCSAT:
 		return repo.TypeCSAT
 	case repo.TypeCES:
 		return repo.TypeCES
+	case repo.TypeNPS:
+		return repo.TypeNPS
 	default:
 		return ""
 	}
@@ -202,6 +234,8 @@ func normalizeTriggerEvent(raw string) string {
 		return repo.TriggerManualLink
 	case repo.TriggerRequestResolved:
 		return repo.TriggerRequestResolved
+	case repo.TriggerScheduledRun:
+		return repo.TriggerScheduledRun
 	default:
 		return ""
 	}
@@ -228,13 +262,15 @@ func normalizeDedupePolicy(raw string) string {
 		return repo.DedupeOnePerResolution
 	case repo.DedupeOnePerTrigger:
 		return repo.DedupeOnePerTrigger
+	case repo.DedupeOnePerRun:
+		return repo.DedupeOnePerRun
 	default:
 		return ""
 	}
 }
 
 func validSurveyType(value string) bool {
-	return value == repo.TypeCSAT || value == repo.TypeCES
+	return value == repo.TypeCSAT || value == repo.TypeCES || value == repo.TypeNPS
 }
 
 func validCampaignStatus(value string) bool {
@@ -245,7 +281,8 @@ func validTriggerEvent(value string) bool {
 	return value == repo.TriggerWorkflowTransition ||
 		value == repo.TriggerReplySent ||
 		value == repo.TriggerManualLink ||
-		value == repo.TriggerRequestResolved
+		value == repo.TriggerRequestResolved ||
+		value == repo.TriggerScheduledRun
 }
 
 func validDistributionMode(value string) bool {
@@ -253,5 +290,31 @@ func validDistributionMode(value string) bool {
 }
 
 func validDedupePolicy(value string) bool {
-	return value == repo.DedupeOnePerSource || value == repo.DedupeOnePerResolution || value == repo.DedupeOnePerTrigger
+	return value == repo.DedupeOnePerSource || value == repo.DedupeOnePerResolution || value == repo.DedupeOnePerTrigger || value == repo.DedupeOnePerRun
+}
+
+func applyNPSCampaignShape(campaign repo.Campaign) repo.Campaign {
+	campaign.Locale = domain.CanonicalNPSLocale(campaign.Locale)
+	revision := npsContentRevisionFor(campaign.Locale, campaign.Content)
+	campaign.Content, _ = npsContentForRevision(campaign.Locale, revision)
+	campaign.TriggerEvent = repo.TriggerScheduledRun
+	campaign.DistributionMode = repo.DistributionContactEmail
+	campaign.DedupePolicy = repo.DedupeOnePerRun
+	campaign.MaxDailyInvitations = 0
+	campaign.LowScoreThreshold = 6
+	campaign.RequireRecentCustomerActivity = false
+	campaign.RecentActivityDays = 0
+	campaign.SuppressAutoResolved = false
+	return campaign
+}
+
+func validNPSCampaignShape(campaign repo.Campaign) bool {
+	return campaign.TriggerEvent == repo.TriggerScheduledRun &&
+		campaign.DistributionMode == repo.DistributionContactEmail &&
+		campaign.DedupePolicy == repo.DedupeOnePerRun &&
+		campaign.MaxDailyInvitations == 0 &&
+		campaign.LowScoreThreshold == 6 &&
+		campaign.MinDaysBetweenContact >= minNPSContactCooldownDays &&
+		campaign.MinDaysBetweenContact <= maxNPSContactCooldownDays &&
+		campaign.NPSSettings != nil
 }

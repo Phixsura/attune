@@ -18,7 +18,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/survey"
 )
@@ -31,6 +33,7 @@ var (
 	ErrConflict         = errors.New("survey conflict")
 	ErrDisabled         = errors.New("survey disabled")
 	ErrExpired          = errors.New("survey expired")
+	ErrFingerprinting   = errors.New("survey public fingerprinting unavailable")
 	ErrWebhookSignature = errors.New("survey provider webhook signature failed")
 )
 
@@ -44,6 +47,7 @@ type Service struct {
 	repo              repository
 	secrets           SecretStore
 	deliveryTransport deliveryTransport
+	feedbackWriter    npsFeedbackWriter
 	publicBase        string
 	now               func() time.Time
 }
@@ -53,6 +57,24 @@ type SecretStore interface {
 	Decrypt(ciphertext []byte) ([]byte, error)
 }
 
+type pseudonymizer interface {
+	Pseudonymize(purpose, raw string) (string, error)
+}
+
+// PublicResponseFingerprints are opaque, keyed values safe to persist with a
+// public-survey response. They never contain raw request metadata.
+type PublicResponseFingerprints struct {
+	UserAgentHash string
+	IPHash        string
+	QualityFlags  []string
+}
+
+const (
+	publicSurveyUserAgentFingerprintPurpose = "attune:survey:public-response:user-agent:v1"
+	publicSurveyIPFingerprintPurpose        = "attune:survey:public-response:ip:v1"
+	publicSurveyFingerprintTenantScope      = ":tenant:"
+)
+
 type repository interface {
 	ListCampaigns(ctx context.Context, filter repo.CampaignFilter) ([]repo.Campaign, error)
 	ListActiveCampaignsByTrigger(ctx context.Context, tenantID string, triggerEvent string) ([]repo.Campaign, error)
@@ -61,17 +83,19 @@ type repository interface {
 	UpdateCampaign(ctx context.Context, campaign repo.Campaign) (repo.Campaign, error)
 	ArchiveCampaign(ctx context.Context, tenantID string, id uuid.UUID, actorID string, archivedAt time.Time) (repo.Campaign, error)
 	CreateInvitation(ctx context.Context, invitation repo.Invitation) (repo.Invitation, error)
+	CreateInvitationWithContactCooldown(ctx context.Context, invitation repo.Invitation, cooldownSince *time.Time) (repo.Invitation, string, error)
 	InvitationExistsByDedupeKey(ctx context.Context, tenantID string, campaignID uuid.UUID, dedupeKey string) (bool, error)
 	FeedbackTriggerContext(ctx context.Context, tenantID string, feedbackID int64) (repo.TriggerContext, error)
 	RequestRecipients(ctx context.Context, tenantID string, requestID uuid.UUID) ([]repo.RequestRecipient, error)
-	EmailContact(ctx context.Context, tenantID string, contactID uuid.UUID) (repo.RequestRecipient, error)
 	CountCampaignInvitationsSince(ctx context.Context, tenantID string, campaignID uuid.UUID, since time.Time) (int, error)
 	CountContactInvitationsSince(ctx context.Context, tenantID string, contactID uuid.UUID, since time.Time) (int, error)
 	EmailSender(ctx context.Context, tenantID string, id uuid.UUID) (repo.EmailSender, error)
 	ActiveEmailSender(ctx context.Context, tenantID string) (repo.EmailSender, error)
 	TenantSlug(ctx context.Context, tenantID string) (string, error)
 	CreateTenantUnsubscribeToken(ctx context.Context, tenantID string, contactID uuid.UUID, tokenHash string, expiresAt time.Time) error
+	PersistInvitationUnsubscribeToken(ctx context.Context, tenantID string, invitationID uuid.UUID, expectedDeliverySecret []byte, deliverySecret []byte, contactID uuid.UUID, tokenHash string, expiresAt time.Time) (repo.Invitation, bool, error)
 	ClaimPendingEmailInvitations(ctx context.Context, limit int, owner string) ([]repo.Invitation, error)
+	PrepareInvitationDelivery(ctx context.Context, claimed repo.Invitation, owner string) (repo.Invitation, repo.RequestRecipient, bool, error)
 	MarkInvitationDelivered(ctx context.Context, tenantID string, id uuid.UUID, owner string, provider string, providerMessageID string, httpStatus int) (repo.Invitation, error)
 	MarkInvitationFailed(ctx context.Context, tenantID string, id uuid.UUID, owner string, errMsg string, failureKind string, httpStatus int, delay time.Duration, terminal bool) (repo.Invitation, error)
 	RetryInvitationDelivery(ctx context.Context, tenantID string, id uuid.UUID) (repo.Invitation, error)
@@ -80,6 +104,7 @@ type repository interface {
 	ExpireInvitation(ctx context.Context, tenantID string, id uuid.UUID, reason string) (repo.Invitation, error)
 	ExpireStaleInvitations(ctx context.Context, limit int, now time.Time, reason string) (int, error)
 	GetInvitationByTokenHash(ctx context.Context, tokenHash string) (repo.Invitation, error)
+	MarkInvitationStarted(ctx context.Context, tenantID string, id uuid.UUID) (repo.Invitation, error)
 	GetResponseByInvitation(ctx context.Context, tenantID string, invitationID uuid.UUID) (repo.Response, error)
 	CreateResponse(ctx context.Context, response repo.Response, review *repo.LowScoreReviewSeed) (repo.Response, error)
 	ListInvitations(ctx context.Context, filter repo.InvitationFilter) ([]repo.Invitation, error)
@@ -99,6 +124,42 @@ type repository interface {
 	AnalyticsSegments(ctx context.Context, filter repo.AnalyticsSegmentFilter) ([]repo.AnalyticsSegment, error)
 }
 
+type npsRepository interface {
+	CreateNPSCampaign(ctx context.Context, campaign repo.Campaign, settings repo.NPSCampaignSettings) (repo.Campaign, error)
+	UpdateNPSCampaign(ctx context.Context, campaign repo.Campaign, settings repo.NPSCampaignSettings) (repo.Campaign, error)
+	GetNPSCampaignSettings(ctx context.Context, tenantID string, campaignID uuid.UUID) (repo.NPSCampaignSettings, error)
+	FindNPSCampaignRunByRequestKey(ctx context.Context, tenantID string, campaignID uuid.UUID, clientRequestKey uuid.UUID) (repo.NPSCampaignRun, error)
+	FindNPSCampaignRunByRecurrenceSource(ctx context.Context, tenantID string, campaignID uuid.UUID, sourceRunID uuid.UUID) (repo.NPSCampaignRun, error)
+	GetNPSCampaignRun(ctx context.Context, tenantID string, campaignID uuid.UUID, runID uuid.UUID) (repo.NPSCampaignRun, error)
+	ScheduleNPSCampaignRun(ctx context.Context, run repo.NPSCampaignRun) (repo.NPSCampaignRun, bool, error)
+	CancelNPSCampaignRun(ctx context.Context, tenantID string, campaignID uuid.UUID, runID uuid.UUID, actor string, now time.Time) (repo.NPSCampaignRun, bool, error)
+	ListNPSCampaignRuns(ctx context.Context, tenantID string, campaignID uuid.UUID, limit int) ([]repo.NPSCampaignRun, error)
+	ListNPSCampaignRunPage(ctx context.Context, tenantID string, campaignID uuid.UUID, limit int, beforeSequence int) (repo.NPSCampaignRunPage, error)
+	ClaimDueNPSCampaignRuns(ctx context.Context, limit int, owner string, now time.Time) ([]repo.NPSCampaignRun, error)
+	ClaimNPSCampaignRunsForRecurrence(ctx context.Context, limit int, owner string, now time.Time) ([]repo.NPSCampaignRun, error)
+	MarkNPSCampaignRunRecurrenceProcessed(ctx context.Context, tenantID string, runID uuid.UUID, owner string, now time.Time) error
+	NPSRunAudience(ctx context.Context, run repo.NPSCampaignRun, now time.Time) (repo.NPSAudiencePreview, error)
+	MaterializeNPSCampaignRun(ctx context.Context, run repo.NPSCampaignRun, preview repo.NPSAudiencePreview, invitations []repo.Invitation, owner string, now time.Time) (repo.NPSCampaignRun, error)
+	MarkNPSCampaignRunFailed(ctx context.Context, tenantID string, runID uuid.UUID, owner string, reason string, audience repo.NPSAudiencePreview) error
+	CloseExpiredNPSCampaignRuns(ctx context.Context, limit int, now time.Time) (int, error)
+	WithTx(ctx context.Context, fn func(pgx.Tx) error) error
+	CreateResponseTx(ctx context.Context, tx pgx.Tx, response repo.Response, review *repo.LowScoreReviewSeed) (repo.Response, error)
+	NPSFeedbackSubjectTx(ctx context.Context, tx pgx.Tx, tenantID string, invitationID uuid.UUID) (repo.NPSAudienceCandidate, error)
+	LinkResponseFeedbackTx(ctx context.Context, tx pgx.Tx, tenantID string, responseID uuid.UUID, feedbackID int64) error
+	RecoveryNotificationContextTx(ctx context.Context, tx pgx.Tx, tenantID string, responseID uuid.UUID) (repo.RecoveryNotificationContext, error)
+	EnsureRecoveryNotificationTx(ctx context.Context, tx pgx.Tx, input repo.RecoveryNotificationInput) (repo.RecoveryNotification, bool, error)
+}
+
+type npsFeedbackWriter interface {
+	InsertIdempotentTx(
+		ctx context.Context,
+		tx pgx.Tx,
+		tenantID, userID, subjectKey, subjectDisplay, subjectHash string,
+		in domain.IngestInput,
+		idemHash []byte,
+	) (int64, bool, error)
+}
+
 func New(r *repo.Repo, publicBase string) *Service {
 	return ptrext.Of(Service{
 		repo:       r,
@@ -109,6 +170,48 @@ func New(r *repo.Repo, publicBase string) *Service {
 
 func (s *Service) SetSecretStore(secrets SecretStore) {
 	s.secrets = secrets
+}
+
+// FingerprintPublicResponse returns tenant-scoped, domain-separated pseudonyms
+// for public request metadata. A configured keyed pseudonymizer is required so
+// low-entropy values such as IP addresses cannot be reversed from database
+// contents or correlated across tenants.
+func (s *Service) FingerprintPublicResponse(ctx context.Context, token, userAgent, clientIP string) (PublicResponseFingerprints, error) {
+	store, ok := s.secrets.(pseudonymizer)
+	if !ok || store == nil {
+		return PublicResponseFingerprints{}, ErrFingerprinting
+	}
+	invitation, _, err := s.resolvePublicInvitation(ctx, token)
+	if err != nil {
+		return PublicResponseFingerprints{}, err
+	}
+	tenantID := strings.TrimSpace(invitation.TenantID)
+	if tenantID == "" {
+		return PublicResponseFingerprints{}, ErrFingerprinting
+	}
+	userAgentHash, err := store.Pseudonymize(publicSurveyFingerprintPurpose(publicSurveyUserAgentFingerprintPurpose, tenantID), userAgent)
+	if err != nil {
+		return PublicResponseFingerprints{}, fmt.Errorf("%w: user-agent", ErrFingerprinting)
+	}
+	ipHash, err := store.Pseudonymize(publicSurveyFingerprintPurpose(publicSurveyIPFingerprintPurpose, tenantID), clientIP)
+	if err != nil {
+		return PublicResponseFingerprints{}, fmt.Errorf("%w: client address", ErrFingerprinting)
+	}
+	return PublicResponseFingerprints{
+		UserAgentHash: userAgentHash,
+		IPHash:        ipHash,
+		QualityFlags:  publicResponseQualityFlags(invitation, userAgent, clientIP, s.now().UTC()),
+	}, nil
+}
+
+func publicSurveyFingerprintPurpose(base, tenantID string) string {
+	return base + publicSurveyFingerprintTenantScope + tenantID
+}
+
+// SetFeedbackWriter connects NPS comments to the durable feedback pipeline.
+// It deliberately accepts only the transaction-scoped write operation.
+func (s *Service) SetFeedbackWriter(writer npsFeedbackWriter) {
+	s.feedbackWriter = writer
 }
 
 type CampaignInput struct {
@@ -133,7 +236,24 @@ type CampaignInput struct {
 	RequireRecentCustomerActivity *bool
 	RecentActivityDays            *int
 	SuppressAutoResolved          *bool
+	NPSSettings                   *NPSCampaignSettingsInput
+	NPSSettingsSet                bool
 	ActorID                       string
+}
+
+type NPSCampaignSettingsInput struct {
+	CohortID                                  uuid.UUID
+	DetractorOwnerMemberID                    uuid.UUID
+	CollectionDays                            int
+	MaximumRunRecipients                      int
+	MinimumCompletedResponses                 int
+	MinimumResponseRatePercent                int
+	SamplePlanningConfidencePercent           int
+	SamplePlanningMarginOfErrorPercent        int
+	SamplePlanningExpectedResponseRatePercent int
+	RecurrenceIntervalDays                    *int
+	RecurrenceContactCooldownDays             *int
+	RecurrenceSamplingPercent                 *int
 }
 
 type HostedLinkInput struct {
@@ -180,12 +300,14 @@ type RequestResolvedInput struct {
 }
 
 type PublicSubmitInput struct {
-	Token         string
-	Score         int
-	Comment       string
-	Locale        string
-	UserAgentHash string
-	IPHash        string
+	Token           string
+	Score           int
+	Comment         string
+	Locale          string
+	FollowUpConsent *bool
+	UserAgentHash   string
+	IPHash          string
+	QualityFlags    []string
 }
 
 type ProviderEventInput struct {
@@ -344,6 +466,14 @@ func (s *Service) CreateCampaign(ctx context.Context, in CampaignInput) (repo.Ca
 	if err != nil {
 		return repo.Campaign{}, err
 	}
+	if normalized.SurveyType == repo.TypeNPS {
+		nps, err := s.npsRepo()
+		if err != nil {
+			return repo.Campaign{}, err
+		}
+		item, err := nps.CreateNPSCampaign(ctx, normalized, ptrext.Indirect(normalized.NPSSettings))
+		return item, mapRepoError(err)
+	}
 	item, err := s.repo.CreateCampaign(ctx, normalized)
 	return item, mapRepoError(err)
 }
@@ -360,6 +490,30 @@ func (s *Service) UpdateCampaign(ctx context.Context, in CampaignInput) (repo.Ca
 	updated, err := s.applyCampaignUpdate(current, in)
 	if err != nil {
 		return repo.Campaign{}, err
+	}
+	if updated.SurveyType == repo.TypeNPS {
+		nps, err := s.npsRepo()
+		if err != nil {
+			return repo.Campaign{}, err
+		}
+		settings := current.NPSSettings
+		if settings == nil {
+			stored, err := nps.GetNPSCampaignSettings(ctx, tenantID, in.ID)
+			if err != nil {
+				return repo.Campaign{}, mapRepoError(err)
+			}
+			settings = ptrext.Of(stored)
+		}
+		if in.NPSSettingsSet {
+			updatedSettings, err := updatedNPSCampaignSettings(ptrext.Indirect(settings), in.NPSSettings)
+			if err != nil {
+				return repo.Campaign{}, err
+			}
+			settings = ptrext.Of(updatedSettings)
+		}
+		updated.NPSSettings = settings
+		item, err := nps.UpdateNPSCampaign(ctx, updated, ptrext.Indirect(settings))
+		return item, mapRepoError(err)
 	}
 	item, err := s.repo.UpdateCampaign(ctx, updated)
 	return item, mapRepoError(err)
@@ -438,29 +592,67 @@ func (s *Service) CreateHostedLink(ctx context.Context, in HostedLinkInput) (rep
 }
 
 func (s *Service) GetPublicSurvey(ctx context.Context, token string) (repo.PublicSurvey, error) {
+	invitation, _, err := s.resolvePublicInvitation(ctx, token)
+	if err != nil {
+		return repo.PublicSurvey{}, err
+	}
+	response, responseErr := s.repo.GetResponseByInvitation(ctx, invitation.TenantID, invitation.ID)
+	if responseErr != nil && !errors.Is(mapRepoError(responseErr), ErrNotFound) {
+		return repo.PublicSurvey{}, mapRepoError(responseErr)
+	}
+	if errors.Is(mapRepoError(responseErr), ErrNotFound) {
+		if _, err = s.repo.MarkInvitationStarted(ctx, invitation.TenantID, invitation.ID); err != nil {
+			return repo.PublicSurvey{}, mapRepoError(err)
+		}
+		invitation, _, err = s.resolvePublicInvitation(ctx, token)
+		if err != nil {
+			return repo.PublicSurvey{}, mapRepoError(err)
+		}
+		response, responseErr, err = s.completedPublicResponse(ctx, invitation, response, responseErr)
+		if err != nil {
+			return repo.PublicSurvey{}, err
+		}
+	}
+	unsubscribeURL := ""
+	if invitation.ContactID != nil {
+		unsubscribeURL, _, err = s.invitationUnsubscribeLinks(ctx, invitation)
+		if err != nil {
+			return repo.PublicSurvey{}, err
+		}
+	}
 	invitation, campaign, err := s.resolvePublicInvitation(ctx, token)
 	if err != nil {
 		return repo.PublicSurvey{}, err
 	}
-	response, err := s.repo.GetResponseByInvitation(ctx, invitation.TenantID, invitation.ID)
-	if err != nil && !errors.Is(mapRepoError(err), ErrNotFound) {
-		return repo.PublicSurvey{}, mapRepoError(err)
+	response, responseErr, err = s.completedPublicResponse(ctx, invitation, response, responseErr)
+	if err != nil {
+		return repo.PublicSurvey{}, err
 	}
 	out := repo.PublicSurvey{
-		Campaign:   campaign,
-		Invitation: invitation,
+		Campaign:       campaign,
+		Invitation:     invitation,
+		UnsubscribeURL: unsubscribeURL,
 	}
-	if invitation.ContactID != nil {
-		unsubscribeURL, _, err := s.surveyUnsubscribeLinks(ctx, invitation.TenantID, ptrext.Indirect(invitation.ContactID))
-		if err != nil {
-			return repo.PublicSurvey{}, err
-		}
-		out.UnsubscribeURL = unsubscribeURL
-	}
-	if err == nil {
+	if responseErr == nil {
 		out.Response = ptrext.Of(response)
 	}
 	return out, nil
+}
+
+func (s *Service) completedPublicResponse(
+	ctx context.Context,
+	invitation repo.Invitation,
+	response repo.Response,
+	responseErr error,
+) (repo.Response, error, error) {
+	if invitation.ResponseStatus != repo.ResponseCompleted || responseErr == nil {
+		return response, responseErr, nil
+	}
+	response, err := s.repo.GetResponseByInvitation(ctx, invitation.TenantID, invitation.ID)
+	if err != nil {
+		return repo.Response{}, responseErr, mapRepoError(err)
+	}
+	return response, nil, nil
 }
 
 func (s *Service) SubmitPublicResponse(ctx context.Context, in PublicSubmitInput) (repo.Response, bool, string, error) {
@@ -470,6 +662,17 @@ func (s *Service) SubmitPublicResponse(ctx context.Context, in PublicSubmitInput
 	}
 	if invitation.ResponseStatus == repo.ResponseCompleted {
 		return s.idempotentPublicResponse(ctx, invitation, campaign, nil)
+	}
+	comment, err := normalizedPublicSurveyComment(in.Comment)
+	if err != nil {
+		return repo.Response{}, false, "", err
+	}
+	in.Comment = comment
+	if campaign.SurveyType == repo.TypeNPS {
+		return s.submitNPSPublicResponse(ctx, invitation, campaign, in)
+	}
+	if in.FollowUpConsent != nil {
+		return repo.Response{}, false, "", ErrValidation
 	}
 	if err := validateScore(campaign.SurveyType, in.Score); err != nil {
 		return repo.Response{}, false, "", err
@@ -481,15 +684,16 @@ func (s *Service) SubmitPublicResponse(ctx context.Context, in PublicSubmitInput
 		ID:            uuid.New(),
 		TenantID:      invitation.TenantID,
 		CampaignID:    invitation.CampaignID,
+		SurveyType:    campaign.SurveyType,
 		InvitationID:  invitation.ID,
 		RequestID:     invitation.RequestID,
 		ContactID:     invitation.ContactID,
 		SourceType:    invitation.SourceType,
 		SourceID:      invitation.SourceID,
 		Score:         in.Score,
-		Comment:       boundedString(strings.TrimSpace(in.Comment), 5000),
+		Comment:       in.Comment,
 		Locale:        normalizedLocale(in.Locale, campaign.Locale),
-		Metadata:      map[string]any{},
+		Metadata:      publicResponseQualityMetadata(in.QualityFlags),
 		UserAgentHash: strings.TrimSpace(in.UserAgentHash),
 		IPHash:        strings.TrimSpace(in.IPHash),
 		SubmittedAt:   now,
@@ -502,6 +706,96 @@ func (s *Service) SubmitPublicResponse(ctx context.Context, in PublicSubmitInput
 		return repo.Response{}, false, "", mapped
 	}
 	return response, lowScore, publicText(campaign.Content, "thank_you"), nil
+}
+
+const publicResponseTooFastThreshold = 3 * time.Second
+
+func publicResponseQualityFlags(invitation repo.Invitation, userAgent, clientIP string, now time.Time) []string {
+	flags := make([]string, 0, 4)
+	if isAutomatedSurveyUserAgent(userAgent) {
+		flags = append(flags, "automated_client")
+	}
+	if strings.TrimSpace(userAgent) == "" {
+		flags = append(flags, "missing_user_agent")
+	}
+	if strings.TrimSpace(clientIP) == "" {
+		flags = append(flags, "missing_client_address")
+	}
+	if invitation.ResponseStatus == repo.ResponseNotStarted {
+		flags = append(flags, "submitted_without_page_visit")
+	}
+	if invitation.OpenedAt != nil {
+		elapsed := now.Sub(ptrext.Indirect(invitation.OpenedAt))
+		if elapsed >= 0 && elapsed < publicResponseTooFastThreshold {
+			flags = append(flags, "submitted_too_quickly")
+		}
+	}
+	return normalizePublicResponseQualityFlags(flags)
+}
+
+func isAutomatedSurveyUserAgent(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return false
+	}
+	for _, marker := range []string{
+		"bot", "crawler", "headless", "phantom", "playwright", "puppeteer", "selenium", "spider",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func publicResponseQualityMetadata(flags []string) map[string]any {
+	flags = normalizePublicResponseQualityFlags(flags)
+	status := repo.ResponseQualityStatusObserved
+	if len(flags) > 0 {
+		status = repo.ResponseQualityStatusFlagged
+	}
+	return responseQualityMetadata(status, flags)
+}
+
+func normalizePublicResponseQualityFlags(flags []string) []string {
+	allowed := map[string]struct{}{
+		"automated_client":             {},
+		"missing_user_agent":           {},
+		"missing_client_address":       {},
+		"submitted_without_page_visit": {},
+		"submitted_too_quickly":        {},
+	}
+	seen := make(map[string]struct{}, len(flags))
+	out := make([]string, 0, len(flags))
+	for _, flag := range flags {
+		flag = strings.TrimSpace(flag)
+		if _, ok := allowed[flag]; !ok {
+			continue
+		}
+		if _, ok := seen[flag]; ok {
+			continue
+		}
+		seen[flag] = struct{}{}
+		out = append(out, flag)
+	}
+	return out
+}
+
+func responseQualityMetadata(status string, flags []string) map[string]any {
+	metadata := map[string]any{
+		"response_quality_version": repo.ResponseQualityMetadataVersion,
+		"response_quality_status":  status,
+		"response_quality_reasons": append([]string(nil), flags...),
+	}
+	return metadata
+}
+
+func normalizedPublicSurveyComment(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if len(value) > domain.MaxContentLen {
+		return "", ErrValidation
+	}
+	return value, nil
 }
 
 func (s *Service) idempotentPublicResponse(
@@ -1120,22 +1414,41 @@ func (s *Service) resolvePublicInvitation(ctx context.Context, token string) (re
 	if err != nil {
 		return repo.Invitation{}, repo.Campaign{}, mapRepoError(err)
 	}
+	publicCampaign, err := campaignFromInvitationSnapshot(campaign, invitation)
+	if err != nil {
+		return repo.Invitation{}, repo.Campaign{}, err
+	}
 	if invitation.ResponseStatus == repo.ResponseCompleted {
-		return invitation, campaign, nil
+		return invitation, publicCampaign, nil
 	}
 	if invitation.SuppressionStatus == repo.SuppressionSuppressed {
 		return repo.Invitation{}, repo.Campaign{}, ErrDisabled
 	}
 	if invitation.ExpiresAt != nil && !s.now().Before(ptrext.Indirect(invitation.ExpiresAt)) {
 		if _, err := s.repo.ExpireInvitation(ctx, invitation.TenantID, invitation.ID, "expired"); err != nil {
-			return repo.Invitation{}, repo.Campaign{}, mapRepoError(err)
+			mapped := mapRepoError(err)
+			if !errors.Is(mapped, ErrNotFound) {
+				return repo.Invitation{}, repo.Campaign{}, mapped
+			}
+			completed, readErr := s.repo.GetInvitationByTokenHash(ctx, tokenHash(token))
+			if readErr != nil {
+				return repo.Invitation{}, repo.Campaign{}, mapRepoError(readErr)
+			}
+			if completed.ResponseStatus == repo.ResponseCompleted {
+				publicCampaign, snapshotErr := campaignFromInvitationSnapshot(campaign, completed)
+				if snapshotErr != nil {
+					return repo.Invitation{}, repo.Campaign{}, snapshotErr
+				}
+				return completed, publicCampaign, nil
+			}
+			return repo.Invitation{}, repo.Campaign{}, mapped
 		}
 		return repo.Invitation{}, repo.Campaign{}, ErrExpired
 	}
 	if campaign.Status != repo.StatusActive {
 		return repo.Invitation{}, repo.Campaign{}, ErrDisabled
 	}
-	return invitation, campaign, nil
+	return invitation, publicCampaign, nil
 }
 
 func mapRepoError(err error) error {
@@ -1144,6 +1457,12 @@ func mapRepoError(err error) error {
 		return ErrNotFound
 	case errors.Is(err, repo.ErrInvalidInput):
 		return ErrValidation
+	case errors.Is(err, repo.ErrInvitationExpired):
+		return ErrExpired
+	case errors.Is(err, repo.ErrNPSArtifactExpired):
+		return ErrExpired
+	case errors.Is(err, repo.ErrCampaignNotActive):
+		return ErrDisabled
 	case errors.Is(err, repo.ErrConflict):
 		return ErrConflict
 	default:
@@ -1181,7 +1500,8 @@ func (s *Service) publicSurveyURL(token string) string {
 }
 
 func (s *Service) unsubscribeURL(tenantSlug string, token string) string {
-	path := fmt.Sprintf("/v1/portal/%s/unsubscribe?token=%s",
+	path := fmt.Sprintf(
+		"/v1/portal/%s/unsubscribe?token=%s",
 		url.PathEscape(strings.TrimSpace(tenantSlug)),
 		url.QueryEscape(strings.TrimSpace(token)),
 	)

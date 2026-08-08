@@ -1795,10 +1795,13 @@ func (s *Service) acquireIdempotency(ctx context.Context, tenantID, key, operati
 		return nil, false, ErrIdempotencyConflict
 	}
 	if errors.Is(err, idempotency.ErrExpired) {
-		if deleteErr := s.idempotency.Delete(ctx, tenantID, key); deleteErr != nil {
+		if _, deleteErr := s.idempotency.DeleteExpired(ctx, tenantID, key); deleteErr != nil {
 			return nil, false, deleteErr
 		}
 		record, acquired, err = s.idempotency.Acquire(ctx, tenantID, key, hash, 0)
+		if errors.Is(err, idempotency.ErrHashMismatch) {
+			return nil, false, ErrIdempotencyConflict
+		}
 		if err != nil {
 			return nil, false, err
 		}

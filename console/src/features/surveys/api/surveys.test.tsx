@@ -1,12 +1,31 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  InfiniteQueryObserver,
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+} from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const triggerBlobDownloadMock = vi.hoisted(() => vi.fn())
+vi.mock('@/lib/blob-download', () => ({ triggerBlobDownload: triggerBlobDownloadMock }))
+
 import {
+  activeNpsRunRefreshIntervalMs,
+  downloadNpsCampaignRunEvidenceExport,
+  npsCampaignPreflightQuery,
+  npsCampaignPreflightQueryKey,
+  npsCampaignRunEvidenceExportsQuery,
+  npsCampaignRunEvidenceExportsQueryKey,
+  npsCampaignRunRefreshInterval,
+  npsCampaignRunsInfiniteQuery,
+  npsCampaignRunsQueryKey,
   surveyAnalyticsInsightsQuery,
   surveyAnalyticsInsightsQueryKey,
   surveyAnalyticsQuery,
+  surveyAnalyticsQueryKey,
   surveyAnalyticsSegmentsQuery,
   surveyAnalyticsSegmentsQueryKey,
   surveyAnalyticsTrendQuery,
@@ -22,17 +41,21 @@ import {
   useArchiveSurveyCampaign,
   useAssignSurveyLowScoreReviews,
   useBatchUpdateSurveyLowScoreReviews,
+  useCancelNpsCampaignRun,
+  useCreateNpsCampaignRunEvidenceExport,
   useCreateSurveyCampaign,
   useCreateSurveyHostedLink,
   useEscalateSurveyLowScoreReviews,
   usePreviewSurveyRecipients,
   useRetrySurveyInvitationDelivery,
+  useScheduleNpsCampaignRun,
   useSendSurveyTestEmail,
   useUpdateSurveyCampaign,
   useUpdateSurveyLowScoreReview,
 } from '@/features/surveys/api/surveys'
 import { setCsrfToken } from '@/lib/api-client'
 import {
+  NpsCampaignRunStatus,
   SurveyAnalyticsSegmentDimension,
   SurveyCampaignStatus,
   SurveyDedupePolicy,
@@ -51,6 +74,8 @@ import {
   defaultSurveyAnalyticsSegments,
   defaultSurveyAnalyticsTrend,
   defaultSurveyCampaignHealth,
+  sampleNpsCampaignPreflight,
+  sampleNpsCampaignRun,
   sampleSurveyCampaign,
   sampleSurveyInvitation,
   sampleSurveyLowScoreReview,
@@ -76,7 +101,8 @@ function renderMutation<T>(hook: () => T) {
     [...surveyResponsesQueryKey, '', false, '', '', '', '', '', '', '', 25],
     [],
   )
-  queryClient.setQueryData([...surveyAnalyticsTrendQueryKey, '', '', ''], [])
+  queryClient.setQueryData([...surveyAnalyticsQueryKey, '', '', '', ''], defaultSurveyAnalytics)
+  queryClient.setQueryData([...surveyAnalyticsTrendQueryKey, '', '', '', ''], [])
   queryClient.setQueryData([...surveyAnalyticsSegmentsQueryKey, '', '', '', '', 8], [])
   queryClient.setQueryData([...surveyAnalyticsInsightsQueryKey, '', '', '', 6], [])
   queryClient.setQueryData(
@@ -91,9 +117,112 @@ function renderMutation<T>(hook: () => T) {
 
 beforeEach(() => {
   setCsrfToken(null)
+  triggerBlobDownloadMock.mockReset()
 })
 
 describe('survey API hooks', () => {
+  it('polls NPS run state only while a campaign run is active', () => {
+    const activeRun = {
+      ...sampleNpsCampaignRun,
+      status: NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING,
+    }
+    const terminalRun = {
+      ...sampleNpsCampaignRun,
+      status: NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CLOSED,
+    }
+
+    expect(npsCampaignRunRefreshInterval()).toBe(false)
+    expect(npsCampaignRunRefreshInterval([terminalRun])).toBe(false)
+    expect(npsCampaignRunRefreshInterval([terminalRun, activeRun])).toBe(
+      activeNpsRunRefreshIntervalMs,
+    )
+  })
+
+  it('lists persisted NPS evidence exports within the selected run scope', async () => {
+    server.use(
+      http.get(
+        '/fb/v1/console/surveys/campaigns/campaign-1/nps-runs/run-1/evidence-exports',
+        ({ request }) => {
+          expect(new URL(request.url).searchParams.get('limit')).toBe('20')
+          return HttpResponse.json({
+            exports: [
+              {
+                id: 'export-1',
+                campaignId: 'campaign-1',
+                runId: 'run-1',
+                reportVersion: '1',
+                generatedAt: '2026-08-08T01:02:03Z',
+                artifactSha256: 'sha256:abc',
+                createdByType: 'admin',
+                createdAt: '2026-08-08T01:02:03Z',
+                downloadPath: '/evidence-exports/export-1.csv',
+              },
+            ],
+          })
+        },
+      ),
+    )
+
+    const queryClient = makeQueryClient()
+    const observer = new QueryObserver(
+      queryClient,
+      npsCampaignRunEvidenceExportsQuery('campaign-1', 'run-1'),
+    )
+    const unsubscribe = observer.subscribe(() => undefined)
+    await waitFor(() => expect(observer.getCurrentResult().isSuccess).toBe(true))
+
+    expect(observer.getCurrentResult().data?.[0]?.downloadPath).toBe(
+      '/evidence-exports/export-1.csv',
+    )
+    unsubscribe()
+  })
+
+  it('rebuilds NPS history cursors from a refreshed newest page', async () => {
+    const cursors: Array<string | null> = []
+    let newestSequence = 2
+    const run = (sequence: number) => ({
+      ...sampleNpsCampaignRun,
+      id: `nps-run-${sequence}`,
+      sequence,
+      status: NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CLOSED,
+    })
+    server.use(
+      http.get('/fb/v1/console/surveys/campaigns/nps-campaign-1/nps-runs', ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('before_sequence')
+        cursors.push(cursor)
+        if (cursor === null) {
+          return HttpResponse.json({
+            runs: [run(newestSequence)],
+            nextBeforeSequence: newestSequence,
+          })
+        }
+        if (cursor === String(newestSequence)) {
+          return HttpResponse.json({ runs: [run(newestSequence - 1)] })
+        }
+        return HttpResponse.json({ runs: [] })
+      }),
+    )
+
+    const queryClient = makeQueryClient()
+    const observer = new InfiniteQueryObserver(
+      queryClient,
+      npsCampaignRunsInfiniteQuery('nps-campaign-1', 1),
+    )
+    const unsubscribe = observer.subscribe(() => undefined)
+    await waitFor(() => expect(observer.getCurrentResult().isSuccess).toBe(true))
+    await observer.fetchNextPage()
+
+    newestSequence = 3
+    await observer.refetch()
+
+    expect(observer.getCurrentResult().data?.pages.flatMap((page) => page.runs ?? [])).toEqual([
+      run(3),
+      run(2),
+    ])
+    expect(cursors).toEqual([null, '2', null, '3'])
+    unsubscribe()
+  })
+
   it('serializes list filters for campaigns, invitations, responses, and analytics', async () => {
     const seen = new Set<string>()
     server.use(
@@ -180,6 +309,17 @@ describe('survey API hooks', () => {
         seen.add(`${url.pathname}${url.search}`)
         return HttpResponse.json(defaultSurveyCampaignHealth)
       }),
+      http.get('/fb/v1/console/surveys/campaigns/nps-campaign-1/nps-runs', ({ request }) => {
+        const url = new URL(request.url)
+        seen.add(`${url.pathname}${url.search}`)
+        expect(url.searchParams.get('limit')).toBe('12')
+        return HttpResponse.json({ runs: [sampleNpsCampaignRun] })
+      }),
+      http.get('/fb/v1/console/surveys/campaigns/nps-campaign-1/nps-preflight', ({ request }) => {
+        const url = new URL(request.url)
+        seen.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json(sampleNpsCampaignPreflight)
+      }),
     )
 
     const queryClient = makeQueryClient()
@@ -256,6 +396,12 @@ describe('survey API hooks', () => {
     await expect(
       queryClient.fetchQuery(surveyCampaignHealthQuery('survey-campaign-1')),
     ).resolves.toEqual(defaultSurveyCampaignHealth)
+    await expect(
+      queryClient.fetchInfiniteQuery(npsCampaignRunsInfiniteQuery('nps-campaign-1', 12)),
+    ).resolves.toMatchObject({ pages: [{ runs: [sampleNpsCampaignRun] }] })
+    await expect(
+      queryClient.fetchQuery(npsCampaignPreflightQuery('nps-campaign-1')),
+    ).resolves.toEqual(sampleNpsCampaignPreflight)
     expect(seen).toEqual(
       new Set([
         '/fb/v1/console/surveys/campaigns?limit=12&status=SURVEY_CAMPAIGN_STATUS_ACTIVE',
@@ -266,6 +412,8 @@ describe('survey API hooks', () => {
         '/fb/v1/console/surveys/analytics/segments?campaign_id=survey-campaign-1&from=2026-07-01T00%3A00%3A00Z&to=2026-07-30T00%3A00%3A00Z&dimension=SURVEY_ANALYTICS_SEGMENT_DIMENSION_SOURCE_TYPE&limit=6',
         '/fb/v1/console/surveys/analytics/insights?campaign_id=survey-campaign-1&from=2026-07-01T00%3A00%3A00Z&to=2026-07-30T00%3A00%3A00Z&limit=4',
         '/fb/v1/console/surveys/campaigns/survey-campaign-1/health',
+        '/fb/v1/console/surveys/campaigns/nps-campaign-1/nps-runs?limit=12',
+        '/fb/v1/console/surveys/campaigns/nps-campaign-1/nps-preflight',
       ]),
     )
   })
@@ -373,7 +521,7 @@ describe('survey API hooks', () => {
       true,
     )
     expect(
-      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', ''])?.isInvalidated,
+      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', '', ''])?.isInvalidated,
     ).toBe(true)
     expect(
       queryClient.getQueryState([...surveyAnalyticsSegmentsQueryKey, '', '', '', '', 8])
@@ -567,6 +715,150 @@ describe('survey API hooks', () => {
     ).toBe(true)
   })
 
+  it('schedules an NPS run with CSRF and invalidates run analytics data', async () => {
+    setCsrfToken('csrf-token')
+    server.use(
+      http.post(
+        '/fb/v1/console/surveys/campaigns/nps%20campaign\\:scheduleNpsRun',
+        async ({ request }) => {
+          expect(request.headers.get('x-csrf-token')).toBe('csrf-token')
+          await expect(request.json()).resolves.toEqual({
+            campaignId: 'nps campaign',
+            clientRequestKey: 'client-run-key',
+          })
+          return HttpResponse.json(
+            {
+              ...sampleNpsCampaignRun,
+              campaignId: 'nps campaign',
+              status: NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_SCHEDULED,
+            },
+            { status: 201 },
+          )
+        },
+      ),
+    )
+    const { queryClient, result } = renderMutation(() => useScheduleNpsCampaignRun())
+    queryClient.setQueryData([...npsCampaignRunsQueryKey, 'nps campaign', 20], [])
+    queryClient.setQueryData([...npsCampaignPreflightQueryKey, 'nps campaign'], {})
+
+    result.current.mutate({ campaignId: 'nps campaign', clientRequestKey: 'client-run-key' })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(
+      queryClient.getQueryState([...npsCampaignRunsQueryKey, 'nps campaign', 20])?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState([...surveyAnalyticsQueryKey, '', '', '', ''])?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', '', ''])?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState([...npsCampaignPreflightQueryKey, 'nps campaign'])?.isInvalidated,
+    ).toBe(true)
+  })
+
+  it('cancels an unmaterialized NPS run with CSRF and invalidates run analytics data', async () => {
+    setCsrfToken('csrf-token')
+    server.use(
+      http.post(
+        '/fb/v1/console/surveys/campaigns/nps%20campaign/nps-runs/run%2Fone\\:cancel',
+        async ({ request }) => {
+          expect(request.headers.get('x-csrf-token')).toBe('csrf-token')
+          await expect(request.json()).resolves.toEqual({
+            campaignId: 'nps campaign',
+            runId: 'run/one',
+          })
+          return HttpResponse.json({
+            ...sampleNpsCampaignRun,
+            id: 'run/one',
+            campaignId: 'nps campaign',
+            status: NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CANCELLED,
+            cancelledAt: '2026-08-05T06:00:00Z',
+          })
+        },
+      ),
+    )
+    const { queryClient, result } = renderMutation(() => useCancelNpsCampaignRun())
+    queryClient.setQueryData([...npsCampaignRunsQueryKey, 'nps campaign', 20], [])
+    queryClient.setQueryData([...npsCampaignPreflightQueryKey, 'nps campaign'], {})
+
+    result.current.mutate({ campaignId: 'nps campaign', runId: 'run/one' })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.status).toBe(NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CANCELLED)
+    expect(
+      queryClient.getQueryState([...npsCampaignRunsQueryKey, 'nps campaign', 20])?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState([...surveyAnalyticsQueryKey, '', '', '', ''])?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', '', ''])?.isInvalidated,
+    ).toBe(true)
+    expect(
+      queryClient.getQueryState([...npsCampaignPreflightQueryKey, 'nps campaign'])?.isInvalidated,
+    ).toBe(true)
+  })
+
+  it('creates an idempotent NPS evidence export and downloads its persisted bytes', async () => {
+    setCsrfToken('csrf-token')
+    server.use(
+      http.post(
+        '/fb/v1/console/surveys/campaigns/campaign-1/nps-runs/run-1/evidence-exports',
+        async ({ request }) => {
+          expect(request.headers.get('x-csrf-token')).toBe('csrf-token')
+          await expect(request.json()).resolves.toEqual({
+            campaignId: 'campaign-1',
+            runId: 'run-1',
+            clientRequestKey: 'request-key-1',
+          })
+          return HttpResponse.json(
+            {
+              id: 'export-1',
+              campaignId: 'campaign-1',
+              runId: 'run-1',
+              reportVersion: '1',
+              generatedAt: '2026-08-08T01:02:03Z',
+              artifactSha256: 'sha256:abc',
+              createdByType: 'admin',
+              createdAt: '2026-08-08T01:02:03Z',
+              downloadPath: '/exports/export-1.csv',
+              expiresAt: '2026-09-07T01:02:03Z',
+            },
+            { status: 201 },
+          )
+        },
+      ),
+      http.get(
+        '/exports/export-1.csv',
+        () =>
+          new HttpResponse('report_version\n1\n', {
+            headers: { 'Content-Disposition': 'attachment; filename="evidence.csv"' },
+          }),
+      ),
+    )
+    const { queryClient, result } = renderMutation(() => useCreateNpsCampaignRunEvidenceExport())
+    queryClient.setQueryData([...npsCampaignRunEvidenceExportsQueryKey, 'campaign-1', 'run-1'], [])
+
+    result.current.mutate({
+      campaignId: 'campaign-1',
+      runId: 'run-1',
+      clientRequestKey: 'request-key-1',
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(result.current.data?.expiresAt).toBe('2026-09-07T01:02:03Z')
+    expect(
+      queryClient.getQueryState([...npsCampaignRunEvidenceExportsQueryKey, 'campaign-1', 'run-1'])
+        ?.isInvalidated,
+    ).toBe(true)
+
+    await downloadNpsCampaignRunEvidenceExport('/exports/export-1.csv')
+    expect(triggerBlobDownloadMock).toHaveBeenCalledTimes(1)
+    expect(triggerBlobDownloadMock.mock.calls[0]?.[1]).toBe('evidence.csv')
+  })
+
   it('updates low-score reviews and invalidates response data', async () => {
     setCsrfToken('csrf-token')
     server.use(
@@ -616,7 +908,7 @@ describe('survey API hooks', () => {
       ])?.isInvalidated,
     ).toBe(true)
     expect(
-      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', ''])?.isInvalidated,
+      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', '', ''])?.isInvalidated,
     ).toBe(true)
     expect(
       queryClient.getQueryState([...surveyAnalyticsSegmentsQueryKey, '', '', '', '', 8])
@@ -691,7 +983,7 @@ describe('survey API hooks', () => {
       ])?.isInvalidated,
     ).toBe(true)
     expect(
-      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', ''])?.isInvalidated,
+      queryClient.getQueryState([...surveyAnalyticsTrendQueryKey, '', '', '', ''])?.isInvalidated,
     ).toBe(true)
     expect(
       queryClient.getQueryState([...surveyAnalyticsInsightsQueryKey, '', '', '', 6])?.isInvalidated,

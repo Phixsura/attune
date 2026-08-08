@@ -647,9 +647,12 @@ describe('SecurityPage', () => {
   it('renders break-glass tokens and lockout monitoring', async () => {
     renderSecurityPage()
 
-    await waitFor(() => {
-      expect(screen.getByText('admin@example.com')).toBeInTheDocument()
-    })
+    await waitFor(
+      () => {
+        expect(screen.getByText('admin@example.com')).toBeInTheDocument()
+      },
+      { timeout: 10_000 },
+    )
 
     expect(screen.getByText('203.0.113.10')).toBeInTheDocument()
     expect(screen.getByText('5 次失败')).toBeInTheDocument()

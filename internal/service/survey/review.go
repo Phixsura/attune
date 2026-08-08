@@ -75,6 +75,9 @@ func applyReviewUpdate(current repo.LowScoreReview, in ReviewInput) (repo.LowSco
 		next.ActionTaken = boundedString(strings.TrimSpace(ptrext.Indirect(in.ActionTaken)), 5000)
 	}
 	if in.CustomerContacted != nil {
+		if current.CustomerContacted && !ptrext.Indirect(in.CustomerContacted) {
+			return repo.LowScoreReview{}, ErrValidation
+		}
 		next.CustomerContacted = ptrext.Indirect(in.CustomerContacted)
 	}
 	if in.DueAtSet {

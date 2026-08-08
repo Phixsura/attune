@@ -317,7 +317,7 @@ func (s *Service) enqueueRecoveryNotification(
 		OwnerMemberID:   details.Owner.ID,
 		Reason:          decision.Reason,
 		DestinationHash: repo.DestinationHash(details.Owner.Email),
-		Payload:         s.recoveryNotificationPayload(details, decision),
+		Payload:         s.recoveryNotificationPayload(details, decision, surveyRecoveryEscalationEventType),
 	})
 	if err != nil {
 		recordRecoveryNotification(review.TenantID, "error", "enqueue_failed")
@@ -343,6 +343,7 @@ func usableRecoveryOwnerEmail(email string) bool {
 func (s *Service) recoveryNotificationPayload(
 	details repo.RecoveryNotificationContext,
 	decision EscalationDecision,
+	eventType string,
 ) map[string]any {
 	survey := map[string]any{
 		"kind":          "low_score_recovery",
@@ -362,6 +363,9 @@ func (s *Service) recoveryNotificationPayload(
 	if details.RequestID != nil {
 		survey["request_id"] = ptrext.Indirect(details.RequestID).String()
 	}
+	if details.FollowUpConsent != nil {
+		survey["follow_up_consent"] = ptrext.Indirect(details.FollowUpConsent)
+	}
 	if !decision.DueAt.IsZero() {
 		survey["due_at"] = decision.DueAt.UTC().Format(time.RFC3339)
 	}
@@ -372,7 +376,7 @@ func (s *Service) recoveryNotificationPayload(
 		"version":    "1",
 		"timestamp":  s.now().UTC().Format(time.RFC3339Nano),
 		"event_id":   details.ResponseID.String(),
-		"event_type": surveyRecoveryEscalationEventType,
+		"event_type": eventType,
 		"tenant_id":  details.TenantID,
 		"survey":     survey,
 		"recipient": map[string]any{

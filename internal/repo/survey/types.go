@@ -20,6 +20,7 @@ import (
 const (
 	TypeCSAT = "csat"
 	TypeCES  = "ces"
+	TypeNPS  = "nps"
 
 	StatusDraft    = "draft"
 	StatusActive   = "active"
@@ -29,6 +30,7 @@ const (
 	TriggerReplySent          = "reply_sent"
 	TriggerManualLink         = "manual_link"
 	TriggerRequestResolved    = "request_resolved"
+	TriggerScheduledRun       = "scheduled_run"
 
 	DistributionContactEmail = "contact_email"
 	DistributionSourceLink   = "source_link"
@@ -36,6 +38,25 @@ const (
 	DedupeOnePerSource     = "one_per_source"
 	DedupeOnePerResolution = "one_per_resolution"
 	DedupeOnePerTrigger    = "one_per_trigger"
+	DedupeOnePerRun        = "one_per_run"
+
+	NPSBucketDetractor = "detractor"
+	NPSBucketPassive   = "passive"
+	NPSBucketPromoter  = "promoter"
+
+	NPSRunScheduled  = "scheduled"
+	NPSRunEvaluating = "evaluating"
+	NPSRunCollecting = "collecting"
+	NPSRunClosed     = "closed"
+	NPSRunFailed     = "failed"
+	NPSRunCancelled  = "cancelled"
+
+	NPSMeasurementPending     = "pending"
+	NPSMeasurementPreliminary = "preliminary"
+	NPSMeasurementDirectional = "directional"
+	NPSMeasurementQualified   = "qualified"
+	NPSMeasurementRedacted    = "redacted"
+	NPSMeasurementUnavailable = "unavailable"
 
 	DeliveryPending       = "pending"
 	DeliveryAccepted      = "accepted"
@@ -100,9 +121,15 @@ const (
 )
 
 var (
-	ErrNotFound     = errors.New("survey not found")
-	ErrInvalidInput = errors.New("survey invalid input")
-	ErrConflict     = errors.New("survey conflict")
+	ErrNotFound                   = errors.New("survey not found")
+	ErrInvalidInput               = errors.New("survey invalid input")
+	ErrConflict                   = errors.New("survey conflict")
+	ErrInvitationExpired          = errors.New("survey invitation expired")
+	ErrCampaignNotActive          = errors.New("survey campaign not active")
+	ErrNPSRunCohortUnavailable    = errors.New("NPS campaign run cohort unavailable")
+	ErrNPSRunNoEligibleRecipients = errors.New("NPS campaign run has no eligible recipients")
+	ErrNPSArtifactIntegrity       = errors.New("NPS evidence export artifact integrity failure")
+	ErrNPSArtifactExpired         = errors.New("NPS evidence export artifact expired")
 )
 
 type Repo struct {
@@ -144,6 +171,7 @@ type Campaign struct {
 	CreatedBy                     string
 	UpdatedBy                     string
 	ArchivedAt                    *time.Time
+	NPSSettings                   *NPSCampaignSettings
 	CreatedAt                     time.Time
 	UpdatedAt                     time.Time
 }
@@ -158,6 +186,7 @@ type Invitation struct {
 	ID                     uuid.UUID
 	TenantID               string
 	CampaignID             uuid.UUID
+	RunID                  *uuid.UUID
 	CampaignContentVersion int
 	CampaignSnapshot       map[string]any
 	DedupeKey              string
@@ -213,24 +242,28 @@ type ProviderEventInput struct {
 }
 
 type Response struct {
-	ID            uuid.UUID
-	TenantID      string
-	CampaignID    uuid.UUID
-	InvitationID  uuid.UUID
-	RequestID     *uuid.UUID
-	ContactID     *uuid.UUID
-	SourceType    string
-	SourceID      string
-	Score         int
-	Comment       string
-	Locale        string
-	Metadata      map[string]any
-	UserAgentHash string
-	IPHash        string
-	SubmittedAt   time.Time
-	CreatedAt     time.Time
-	Account       AccountContext
-	Review        *LowScoreReview
+	ID              uuid.UUID
+	TenantID        string
+	CampaignID      uuid.UUID
+	SurveyType      string
+	InvitationID    uuid.UUID
+	RequestID       *uuid.UUID
+	ContactID       *uuid.UUID
+	SourceType      string
+	SourceID        string
+	Score           int
+	NPSBucket       string
+	FollowUpConsent *bool
+	FeedbackID      *int64
+	Comment         string
+	Locale          string
+	Metadata        map[string]any
+	UserAgentHash   string
+	IPHash          string
+	SubmittedAt     time.Time
+	CreatedAt       time.Time
+	Account         AccountContext
+	Review          *LowScoreReview
 }
 
 type AccountContext struct {
@@ -264,6 +297,9 @@ type LowScoreReview struct {
 	ActionTaken                     string
 	CustomerContacted               bool
 	DueAt                           *time.Time
+	InitialDueAt                    *time.Time
+	CustomerContactedAt             *time.Time
+	FirstTerminalAt                 *time.Time
 	ReviewedAt                      *time.Time
 	UpdatedBy                       string
 	CreatedAt                       time.Time
@@ -275,14 +311,16 @@ type LowScoreReview struct {
 }
 
 type LowScoreReviewSeed struct {
-	Severity  string
-	DueAt     *time.Time
-	UpdatedBy string
+	Severity      string
+	OwnerMemberID *uuid.UUID
+	DueAt         *time.Time
+	UpdatedBy     string
 }
 
 type AnalyticsFilter struct {
 	TenantID   string
 	CampaignID *uuid.UUID
+	RunID      *uuid.UUID
 	From       *time.Time
 	To         *time.Time
 }
@@ -303,6 +341,7 @@ type Analytics struct {
 	SuppressedCount                    int
 	NotStartedCount                    int
 	OpenedCount                        int
+	StartedCount                       int
 	ExpiredCount                       int
 	PendingDeliveryCount               int
 	DelayedDeliveryCount               int
@@ -323,11 +362,38 @@ type Analytics struct {
 	MissingActionRecoveryQueueCount    int
 	AverageScore                       float64
 	ResponseRate                       float64
+	StartRate                          float64
+	CompletionRate                     float64
 	PositiveScoreRate                  float64
 	AverageResponseSeconds             float64
 	ScoreDistribution                  []ScoreBucket
 	SuppressionReasons                 []SuppressionReasonBucket
 	OwnerRecoveryLoads                 []RecoveryOwnerLoad
+	RecoveryOutcome                    RecoveryOutcome
+	NPS                                float64
+	NPSAvailable                       bool
+	DetractorCount                     int
+	PassiveCount                       int
+	PromoterCount                      int
+	RedactedResponseCount              int
+	QualityFlaggedResponseCount        int
+}
+
+// RecoveryOutcome reports the explicitly recorded results of low-score
+// recovery work in one analytics scope. It does not infer customer outcomes.
+type RecoveryOutcome struct {
+	ReviewCount                      int
+	ResolvedCount                    int
+	DismissedCount                   int
+	CustomerContactedCount           int
+	RootCauseRecordedCount           int
+	ActionRecordedCount              int
+	ContactedTimelinessEvidenceCount int
+	ContactedOnTimeCount             int
+	ContactedLateCount               int
+	TerminalTimelinessEvidenceCount  int
+	TerminalOnTimeCount              int
+	TerminalLateCount                int
 }
 
 type RecoveryOwnerLoad struct {
@@ -342,18 +408,125 @@ type RecoveryOwnerLoad struct {
 }
 
 type AnalyticsTrendBucket struct {
-	Date               string
-	InvitationCount    int
-	DeliveredCount     int
-	SuppressedCount    int
-	CompletedCount     int
-	LowScoreCount      int
-	PositiveScoreCount int
-	NotStartedCount    int
-	OpenedCount        int
-	ExpiredCount       int
-	AverageScore       float64
-	ResponseRate       float64
+	Date                        string
+	InvitationCount             int
+	DeliveredCount              int
+	SuppressedCount             int
+	CompletedCount              int
+	LowScoreCount               int
+	PositiveScoreCount          int
+	NotStartedCount             int
+	OpenedCount                 int
+	StartedCount                int
+	ExpiredCount                int
+	AverageScore                float64
+	ResponseRate                float64
+	RunID                       *uuid.UUID
+	NPS                         float64
+	NPSAvailable                bool
+	DetractorCount              int
+	PassiveCount                int
+	PromoterCount               int
+	RedactedResponseCount       int
+	QualityFlaggedResponseCount int
+}
+
+type NPSCampaignSettings struct {
+	CampaignID                                uuid.UUID
+	TenantID                                  string
+	CohortID                                  uuid.UUID
+	DetractorOwnerMemberID                    uuid.UUID
+	CollectionDays                            int
+	MaximumRunRecipients                      int
+	MinimumCompletedResponses                 int
+	MinimumResponseRatePercent                int
+	RecurrenceIntervalDays                    int
+	RecurrenceContactCooldownDays             int
+	RecurrenceSamplingPercent                 int
+	SamplePlanningConfidencePercent           int
+	SamplePlanningMarginOfErrorPercent        int
+	SamplePlanningExpectedResponseRatePercent int
+	SampleSeed                                string
+	CreatedAt                                 time.Time
+	UpdatedAt                                 time.Time
+}
+
+type NPSCampaignRun struct {
+	ID                                        uuid.UUID
+	TenantID                                  string
+	CampaignID                                uuid.UUID
+	RecurrenceSourceRunID                     *uuid.UUID
+	ExpectedCampaignUpdatedAt                 time.Time
+	Sequence                                  int
+	ClientRequestKey                          uuid.UUID
+	RequestFingerprint                        string
+	Status                                    string
+	ScheduledAt                               time.Time
+	OpenedAt                                  *time.Time
+	ClosesAt                                  *time.Time
+	DefinitionSnapshot                        map[string]any
+	MeasurementKey                            string
+	CollectionDays                            int
+	MaximumRunRecipients                      int
+	ContactCooldownDays                       int
+	RecurrenceSamplingPercent                 int
+	MinimumCompletedResponses                 int
+	MinimumResponseRatePercent                int
+	SamplePlanningPopulationCount             int
+	SamplePlanningRequiredCompletedResponses  int
+	SamplePlanningInvitationTarget            int
+	SamplePlanningConfidencePercent           int
+	SamplePlanningMarginOfErrorPercent        int
+	SamplePlanningExpectedResponseRatePercent int
+	InvitationCountBelowSamplePlanningTarget  bool
+	EvaluatedCount                            int
+	EligibleCount                             int
+	InvitationCount                           int
+	DeliveredCount                            int
+	StartedCount                              int
+	CompletedCount                            int
+	ResponseRate                              float64
+	HostedVisitRate                           float64
+	CompletedResponseRate                     float64
+	CompletionRate                            float64
+	MeasurementReadiness                      string
+	NPS                                       float64
+	NPSAvailable                              bool
+	DetractorCount                            int
+	PassiveCount                              int
+	PromoterCount                             int
+	RedactedResponseCount                     int
+	FailureReason                             string
+	CancelledAt                               *time.Time
+	CancelledBy                               string
+	ClaimedAt                                 *time.Time
+	ClaimedBy                                 string
+	CreatedBy                                 string
+	CreatedAt                                 time.Time
+	UpdatedAt                                 time.Time
+}
+
+// NPSCampaignRunPage is ordered by descending sequence. NextBeforeSequence is
+// zero when no older run exists.
+type NPSCampaignRunPage struct {
+	Runs               []NPSCampaignRun
+	NextBeforeSequence int
+}
+
+type NPSAudienceCandidate struct {
+	ContactID      uuid.UUID
+	SubjectKey     string
+	SubjectHash    string
+	SubjectDisplay string
+	DisplayName    string
+}
+
+type NPSAudiencePreview struct {
+	EvaluatedCount   int
+	EligibleCount    int
+	ExcludedCount    int
+	ExclusionReasons []SuppressionReasonBucket
+	Candidates       []NPSAudienceCandidate
 }
 
 type AnalyticsSegment struct {
@@ -441,21 +614,22 @@ type RecoveryOwner struct {
 }
 
 type RecoveryNotificationContext struct {
-	TenantID     string
-	ResponseID   uuid.UUID
-	CampaignID   uuid.UUID
-	CampaignName string
-	SurveyType   string
-	RequestID    *uuid.UUID
-	SourceType   string
-	SourceID     string
-	Score        int
-	Comment      string
-	SubmittedAt  time.Time
-	Owner        RecoveryOwner
-	ReviewStatus string
-	Severity     string
-	DueAt        *time.Time
+	TenantID        string
+	ResponseID      uuid.UUID
+	CampaignID      uuid.UUID
+	CampaignName    string
+	SurveyType      string
+	RequestID       *uuid.UUID
+	SourceType      string
+	SourceID        string
+	Score           int
+	Comment         string
+	FollowUpConsent *bool
+	SubmittedAt     time.Time
+	Owner           RecoveryOwner
+	ReviewStatus    string
+	Severity        string
+	DueAt           *time.Time
 }
 
 type RecoveryNotificationInput struct {

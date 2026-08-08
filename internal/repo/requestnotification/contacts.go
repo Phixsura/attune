@@ -120,7 +120,22 @@ func (r *Repo) SuppressContact(ctx context.Context, tenantID string, contactID u
 		), updated_sub AS (
 			UPDATE customer_request_subscriptions
 			 SET status = 'suppressed', updated_at = NOW()
-			 WHERE tenant_id = $1 AND contact_id = $2
+			 WHERE tenant_id = $1
+			   AND contact_id IN (SELECT id FROM updated_contact)
+		), revoked_survey_invitations AS (
+			UPDATE survey_invitations
+			 SET delivery_status = 'not_applicable',
+			     delivery_secret = NULL,
+			     suppression_status = 'suppressed',
+			     suppression_reason = 'contact_suppressed',
+			     claimed_at = NULL,
+			     claimed_by = ''
+			 WHERE tenant_id = $1
+			   AND contact_id IN (SELECT id FROM updated_contact)
+			   AND distribution_mode = 'contact_email'
+			   AND delivery_status IN ('pending', 'delayed')
+			   AND response_status <> 'completed'
+			   AND suppression_status = 'not_suppressed'
 		)
 		SELECT id, display_name, organization, email_payload, consent_state,
 		 'suppressed'::text, ARRAY[]::text[], created_at, NULL::timestamptz
@@ -158,6 +173,24 @@ func (r *Repo) SuppressContactByEmailHash(
 			 SET status = 'suppressed', updated_at = NOW()
 			 WHERE tenant_id = $1
 			   AND contact_id IN (SELECT id FROM updated_contact)
+		), revoked_survey_invitations AS (
+			UPDATE survey_invitations
+			 SET delivery_status = 'not_applicable',
+			     delivery_secret = NULL,
+			     suppression_status = 'suppressed',
+			     suppression_reason = CASE
+			       WHEN $4 = 'bounce' THEN 'contact_bounced'
+			       WHEN $4 = 'complaint' THEN 'contact_complained'
+			       ELSE 'contact_suppressed'
+			     END,
+			     claimed_at = NULL,
+			     claimed_by = ''
+			 WHERE tenant_id = $1
+			   AND contact_id IN (SELECT id FROM updated_contact)
+			   AND distribution_mode = 'contact_email'
+			   AND delivery_status IN ('pending', 'delayed')
+			   AND response_status <> 'completed'
+			   AND suppression_status = 'not_suppressed'
 		)
 		SELECT id, display_name, organization, email_payload, consent_state,
 		 'suppressed'::text, ARRAY[]::text[], created_at, NULL::timestamptz

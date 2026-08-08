@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -47,6 +48,98 @@ func TestTinkStoreRoundTrip(t *testing.T) {
 	}
 	if string(plaintext) != "secret-api-key" {
 		t.Fatalf("plaintext = %q", plaintext)
+	}
+}
+
+func TestTinkStorePseudonymizeUsesDomainSeparatedHMAC(t *testing.T) {
+	t.Parallel()
+
+	raw, err := GenerateAES256GCMKeysetJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTinkStoreFromJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := store.Pseudonymize("attune:survey:public-response:ip:v1", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := store.Pseudonymize("attune:survey:public-response:ip:v1", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPurpose, err := store.Pseudonymize("attune:survey:public-response:user-agent:v1", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherValue, err := store.Pseudonymize("attune:survey:public-response:ip:v1", "203.0.113.16")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.HasPrefix(first, pseudonymPrefix) {
+		t.Fatalf("pseudonym = %q, want %q prefix", first, pseudonymPrefix)
+	}
+	if strings.Contains(first, "203.0.113.15") {
+		t.Fatalf("pseudonym leaked raw value: %q", first)
+	}
+	if first != again {
+		t.Fatalf("pseudonym changed for same input: %q != %q", first, again)
+	}
+	if first == otherPurpose || first == otherValue {
+		t.Fatalf("pseudonym domain separation failed: first=%q purpose=%q value=%q", first, otherPurpose, otherValue)
+	}
+}
+
+func TestTinkStorePseudonymizeStartsNewCorrelationBoundaryAfterPrimaryRotation(t *testing.T) {
+	t.Parallel()
+
+	raw, err := GenerateAES256GCMKeysetJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := NewTinkStoreFromJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := before.Pseudonymize("attune:survey:public-response:ip:v1", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rotatedRaw, _, err := AddAES256GCMKeyToKeysetJSON(raw, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := NewTinkStoreFromJSON(rotatedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := after.Pseudonymize("attune:survey:public-response:ip:v1", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == rotated {
+		t.Fatalf("pseudonym persisted across primary-key rotation: %q", first)
+	}
+}
+
+func TestTinkStorePseudonymizeRejectsMissingPurpose(t *testing.T) {
+	t.Parallel()
+
+	raw, err := GenerateAES256GCMKeysetJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewTinkStoreFromJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Pseudonymize("", "203.0.113.15"); err == nil {
+		t.Fatal("expected missing purpose error")
 	}
 }
 

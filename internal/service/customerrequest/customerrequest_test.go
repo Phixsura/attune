@@ -1158,8 +1158,8 @@ func TestAcquireIdempotencyStates(t *testing.T) {
 
 	store = &fakeIdempotencyStore{acquireErr: idempotency.ErrExpired, reacquire: true}
 	service = New(nil, store, nil)
-	if _, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); err != nil || !acquired || !store.deleted {
-		t.Fatalf("acquireIdempotency(expired) acquired:%v deleted:%v err:%v", acquired, store.deleted, err)
+	if _, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); err != nil || !acquired || !store.expiredDeleted {
+		t.Fatalf("acquireIdempotency(expired) acquired:%v deleted:%v err:%v", acquired, store.expiredDeleted, err)
 	}
 
 	store = &fakeIdempotencyStore{acquireErr: idempotency.ErrExpired, deleteErr: errors.New("delete failed")}
@@ -1370,15 +1370,15 @@ func (s *recordingIssueCreateRunStore) CreateCustomerRequestIssuePullRun(
 }
 
 type fakeIdempotencyStore struct {
-	record      *idempotency.Key
-	acquired    bool
-	acquireErr  error
-	reacquire   bool
-	deleteErr   error
-	completeErr error
-	deleted     bool
-	completed   bool
-	failed      bool
+	record         *idempotency.Key
+	acquired       bool
+	acquireErr     error
+	reacquire      bool
+	deleteErr      error
+	completeErr    error
+	expiredDeleted bool
+	completed      bool
+	failed         bool
 }
 
 func (f *fakeIdempotencyStore) Acquire(_ context.Context, tenantID, key string, requestHash []byte, ttl time.Duration) (*idempotency.Key, bool, error) {
@@ -1390,7 +1390,7 @@ func (f *fakeIdempotencyStore) Acquire(_ context.Context, tenantID, key string, 
 		}
 		return nil, false, err
 	}
-	if f.reacquire && f.deleted {
+	if f.reacquire && f.expiredDeleted {
 		return &idempotency.Key{TenantID: tenantID, Key: key, RequestHash: requestHash, Status: idempotency.StatusPending}, true, nil
 	}
 	return f.record, f.acquired, nil
@@ -1410,9 +1410,9 @@ func (f *fakeIdempotencyStore) Get(_ context.Context, _ string, _ string) (*idem
 	return nil, idempotency.ErrNotFound
 }
 
-func (f *fakeIdempotencyStore) Delete(_ context.Context, _ string, _ string) error {
-	f.deleted = true
-	return f.deleteErr
+func (f *fakeIdempotencyStore) DeleteExpired(_ context.Context, _ string, _ string) (bool, error) {
+	f.expiredDeleted = true
+	return f.deleteErr == nil, f.deleteErr
 }
 
 func (f *fakeIdempotencyStore) CleanupExpired(context.Context) (int64, error) {

@@ -139,6 +139,7 @@ export function CustomerRequestsPage({
   initialRequestID,
   initialMergeTargetID,
   onAccountKeyInspect,
+  onPromoteClose,
 }: {
   initialPromoteFeedbackIDs?: string[]
   initialFeedbackID?: string
@@ -146,6 +147,7 @@ export function CustomerRequestsPage({
   initialRequestID?: string
   initialMergeTargetID?: string
   onAccountKeyInspect?: (accountKey: string) => void
+  onPromoteClose?: () => void
 } = {}) {
   const { t } = useTranslation()
   useDocumentTitle(t('customer_requests.title'))
@@ -177,8 +179,13 @@ export function CustomerRequestsPage({
   const initialPromoteKey = initialPromoteFeedbackIDs.join(',')
 
   useEffect(() => {
-    if (initialPromoteKey) setPromoteOpen(true)
-  }, [initialPromoteKey])
+    if (!initialPromoteKey || permissions.isPending) return
+    if (canEdit) {
+      setPromoteOpen(true)
+      return
+    }
+    onPromoteClose?.()
+  }, [canEdit, initialPromoteKey, onPromoteClose, permissions.isPending])
   useEffect(() => {
     setFilters((current) =>
       current.feedbackId === initialFeedbackID
@@ -345,7 +352,10 @@ export function CustomerRequestsPage({
         mode="promote"
         initialFeedbackIDs={initialPromoteFeedbackIDs}
         ownerOptions={ownerOptions}
-        onOpenChange={setPromoteOpen}
+        onOpenChange={(open) => {
+          setPromoteOpen(open)
+          if (!open) onPromoteClose?.()
+        }}
       />
       {canConfigure ? (
         <ScoringSettingsDialog open={scoringOpen} onOpenChange={setScoringOpen} />

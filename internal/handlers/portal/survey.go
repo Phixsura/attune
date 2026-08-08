@@ -4,11 +4,13 @@ package portal
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
@@ -18,17 +20,32 @@ import (
 	surveysvc "github.com/Phixsura/attune/internal/service/survey"
 )
 
+const publicSurveySubmissionBodyLimitBytes = 64 * 1024
+
+var publicSurveyResponseUnmarshal = protojson.UnmarshalOptions{DiscardUnknown: true}
+
 func BindGetPublicSurvey(r *http.Request, req *attunev1.GetPublicSurveyRequest) error {
 	req.Token = strings.TrimSpace(chi.URLParam(r, "token"))
 	return nil
 }
 
 func BindSubmitPublicSurveyResponse(r *http.Request, req *attunev1.SubmitPublicSurveyResponseRequest) error {
-	if err := dispatcher.JSONBody(r, req); err != nil {
+	if err := decodePublicSurveyResponse(r, req); err != nil {
 		return err
 	}
 	req.Token = strings.TrimSpace(chi.URLParam(r, "token"))
 	return nil
+}
+
+func decodePublicSurveyResponse(r *http.Request, req *attunev1.SubmitPublicSurveyResponseRequest) error {
+	body, err := io.ReadAll(io.LimitReader(r.Body, publicSurveySubmissionBodyLimitBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > publicSurveySubmissionBodyLimitBytes {
+		return dispatcher.ErrBodyTooLarge
+	}
+	return publicSurveyResponseUnmarshal.Unmarshal(body, req)
 }
 
 func setSurveyHeaders(ctx *dispatcher.RequestContext[struct{}]) {
@@ -44,20 +61,21 @@ func publicSurveyToProto(result surveyrepo.PublicSurvey) *attunev1.PublicSurvey 
 		responseStatus = surveyrepo.ResponseCompleted
 	}
 	return ptrext.Of(attunev1.PublicSurvey{
-		CampaignId:     result.Campaign.ID.String(),
-		InvitationId:   result.Invitation.ID.String(),
-		SurveyType:     publicSurveyTypeToProto(result.Campaign.SurveyType),
-		Title:          publicSurveyText(result.Campaign.Content, "title"),
-		Intro:          publicSurveyText(result.Campaign.Content, "intro"),
-		Question:       publicSurveyText(result.Campaign.Content, "question"),
-		CommentPrompt:  publicSurveyText(result.Campaign.Content, "comment_prompt"),
-		ThankYou:       publicSurveyText(result.Campaign.Content, "thank_you"),
-		Locale:         result.Campaign.Locale,
-		MinScore:       int32(minScore),
-		MaxScore:       int32(maxScore),
-		ExpiresAt:      optionalPortalTimeString(result.Invitation.ExpiresAt),
-		ResponseStatus: publicResponseStatusToProto(responseStatus),
-		UnsubscribeUrl: optionalPortalString(result.UnsubscribeURL),
+		CampaignId:              result.Campaign.ID.String(),
+		InvitationId:            result.Invitation.ID.String(),
+		SurveyType:              publicSurveyTypeToProto(result.Campaign.SurveyType),
+		Title:                   publicSurveyText(result.Campaign.Content, "title"),
+		Intro:                   publicSurveyText(result.Campaign.Content, "intro"),
+		Question:                publicSurveyText(result.Campaign.Content, "question"),
+		CommentPrompt:           publicSurveyText(result.Campaign.Content, "comment_prompt"),
+		ThankYou:                publicSurveyText(result.Campaign.Content, "thank_you"),
+		Locale:                  result.Campaign.Locale,
+		MinScore:                int32(minScore),
+		MaxScore:                int32(maxScore),
+		ExpiresAt:               optionalPortalTimeString(result.Invitation.ExpiresAt),
+		ResponseStatus:          publicResponseStatusToProto(responseStatus),
+		UnsubscribeUrl:          optionalPortalString(result.UnsubscribeURL),
+		CollectsFollowUpConsent: result.Campaign.SurveyType == surveyrepo.TypeNPS,
 	})
 }
 
@@ -75,6 +93,8 @@ func publicSurveyTypeToProto(value string) attunev1.SurveyType {
 		return attunev1.SurveyType_SURVEY_TYPE_CSAT
 	case surveyrepo.TypeCES:
 		return attunev1.SurveyType_SURVEY_TYPE_CES
+	case surveyrepo.TypeNPS:
+		return attunev1.SurveyType_SURVEY_TYPE_NPS
 	default:
 		return attunev1.SurveyType_SURVEY_TYPE_UNSPECIFIED
 	}

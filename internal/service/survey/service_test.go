@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/survey"
 )
@@ -50,6 +51,72 @@ func TestCreateCampaignDefaults(t *testing.T) {
 	if got.Content["question"] == "" {
 		t.Fatalf("default content missing question: %#v", got.Content)
 	}
+}
+
+func TestFingerprintPublicResponseRequiresKeyedPseudonymizer(t *testing.T) {
+	t.Parallel()
+
+	service := testService(ptrext.Of(fakeRepo{}))
+	_, err := service.FingerprintPublicResponse(context.Background(), "survey-page-token", "survey-page-test", "203.0.113.15")
+	if !errors.Is(err, ErrFingerprinting) {
+		t.Fatalf("FingerprintPublicResponse() error = %v, want ErrFingerprinting", err)
+	}
+}
+
+func TestFingerprintPublicResponseScopesPseudonymsToInvitationTenant(t *testing.T) {
+	t.Parallel()
+
+	first := fingerprintPublicResponseTestService("tenant-1")
+	second := fingerprintPublicResponseTestService("tenant-2")
+	first.SetSecretStore(testPseudonymizingSecretStore{})
+	second.SetSecretStore(testPseudonymizingSecretStore{})
+
+	got, err := first.FingerprintPublicResponse(context.Background(), "survey-page-token", "survey-page-test", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := first.FingerprintPublicResponse(context.Background(), "survey-page-token", "survey-page-test", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTenant, err := second.FingerprintPublicResponse(context.Background(), "survey-page-token", "survey-page-test", "203.0.113.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.UserAgentHash == "" || got.IPHash == "" {
+		t.Fatalf("fingerprints = %#v, want populated values", got)
+	}
+	if got.UserAgentHash == got.IPHash {
+		t.Fatalf("fingerprints must be purpose-separated: %#v", got)
+	}
+	if got.UserAgentHash != repeated.UserAgentHash || got.IPHash != repeated.IPHash ||
+		len(got.QualityFlags) != len(repeated.QualityFlags) {
+		t.Fatalf("same tenant fingerprints changed: first=%#v repeated=%#v", got, repeated)
+	}
+	if got.UserAgentHash == otherTenant.UserAgentHash || got.IPHash == otherTenant.IPHash {
+		t.Fatalf("cross-tenant fingerprints must not be linkable: first=%#v other=%#v", got, otherTenant)
+	}
+	if !strings.HasPrefix(got.UserAgentHash, "test-hmac:") || !strings.HasPrefix(got.IPHash, "test-hmac:") {
+		t.Fatalf("fingerprints = %#v, want keyed test values", got)
+	}
+}
+
+func fingerprintPublicResponseTestService(tenantID string) *Service {
+	campaignID := uuid.New()
+	return testService(ptrext.Of(fakeRepo{
+		campaign: repo.Campaign{
+			ID:       campaignID,
+			TenantID: tenantID,
+			Status:   repo.StatusActive,
+		},
+		invitation: repo.Invitation{
+			ID:                uuid.New(),
+			TenantID:          tenantID,
+			CampaignID:        campaignID,
+			ResponseStatus:    repo.ResponseNotStarted,
+			SuppressionStatus: repo.SuppressionNotSuppressed,
+		},
+	}))
 }
 
 func TestCreateHostedLinkStoresOnlyTokenHash(t *testing.T) {
@@ -125,18 +192,264 @@ func TestGetPublicSurveyIncludesContactUnsubscribeURL(t *testing.T) {
 		},
 	})
 	service := testService(store)
+	service.SetSecretStore(fakeSecretStore{})
+	deliverySecret, err := service.encryptDeliverySecret("https://example.test/surveys/token-1")
+	if err != nil {
+		t.Fatalf("encrypt delivery secret: %v", err)
+	}
+	store.invitation.DeliverySecret = deliverySecret
 	got, err := service.GetPublicSurvey(context.Background(), "token-1")
 	if err != nil {
 		t.Fatalf("GetPublicSurvey() error = %v", err)
 	}
+	repeated, err := service.GetPublicSurvey(context.Background(), "token-1")
+	if err != nil {
+		t.Fatalf("repeated GetPublicSurvey() error = %v", err)
+	}
 	if !strings.Contains(got.UnsubscribeURL, "https://example.test/v1/portal/acme/unsubscribe?token=") {
 		t.Fatalf("UnsubscribeURL = %q", got.UnsubscribeURL)
 	}
-	if store.unsubscribeContact != contactID || len(store.unsubscribeHash) != 64 || store.unsubscribeExpires.IsZero() {
+	if repeated.UnsubscribeURL != got.UnsubscribeURL {
+		t.Fatalf("repeated UnsubscribeURL = %q, want %q", repeated.UnsubscribeURL, got.UnsubscribeURL)
+	}
+	if store.unsubscribeContact != contactID || len(store.unsubscribeHash) != 64 || store.unsubscribeExpires.IsZero() || store.unsubscribeWrites != 1 {
 		t.Fatalf("unsubscribe token = contact:%s hash:%q expires:%s", store.unsubscribeContact, store.unsubscribeHash, store.unsubscribeExpires)
 	}
-	if got.Invitation.ResponseStatus != repo.ResponseNotStarted {
-		t.Fatalf("public survey GET marked opened: status=%q", got.Invitation.ResponseStatus)
+	if got.Invitation.ResponseStatus != repo.ResponseStarted {
+		t.Fatalf("public survey GET status = %q, want %q", got.Invitation.ResponseStatus, repo.ResponseStarted)
+	}
+	if store.startedID != store.invitation.ID {
+		t.Fatalf("started invitation = %s, want %s", store.startedID, store.invitation.ID)
+	}
+}
+
+func TestGetPublicSurveyRevalidatesLifecycleAfterUnsubscribePersistence(t *testing.T) {
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	campaignID := uuid.New()
+	contactID := uuid.New()
+	baseCampaign := repo.Campaign{
+		ID:         campaignID,
+		TenantID:   "tenant-1",
+		SurveyType: repo.TypeNPS,
+		Status:     repo.StatusActive,
+		Content:    defaultContent(repo.TypeNPS),
+		Locale:     "en",
+	}
+	baseInvitation := repo.Invitation{
+		ID:                uuid.New(),
+		TenantID:          "tenant-1",
+		CampaignID:        campaignID,
+		ContactID:         ptrext.Of(contactID),
+		ResponseStatus:    repo.ResponseNotStarted,
+		SuppressionStatus: repo.SuppressionNotSuppressed,
+		ExpiresAt:         ptrext.Of(now.Add(time.Hour)),
+	}
+	for _, test := range []struct {
+		name        string
+		configure   func(*fakeRepo)
+		wantErr     error
+		wantReceipt bool
+	}{
+		{
+			name: "archived",
+			configure: func(store *fakeRepo) {
+				campaign := store.campaign
+				campaign.Status = repo.StatusArchived
+				store.campaignAfterUnsubscribe = campaign
+			},
+			wantErr: ErrDisabled,
+		},
+		{
+			name: "suppressed",
+			configure: func(store *fakeRepo) {
+				invitation := store.invitationAfterUnsubscribe
+				invitation.ResponseStatus = repo.ResponseStarted
+				invitation.SuppressionStatus = repo.SuppressionSuppressed
+				store.invitationAfterUnsubscribe = invitation
+			},
+			wantErr: ErrDisabled,
+		},
+		{
+			name: "completed",
+			configure: func(store *fakeRepo) {
+				invitation := store.invitationAfterUnsubscribe
+				invitation.ResponseStatus = repo.ResponseCompleted
+				store.invitationAfterUnsubscribe = invitation
+				store.responseAfterUnsubscribe = repo.Response{ID: uuid.New(), TenantID: invitation.TenantID, InvitationID: invitation.ID}
+			},
+			wantReceipt: true,
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			store := ptrext.Of(fakeRepo{campaign: baseCampaign, invitation: baseInvitation})
+			service := testService(store)
+			service.SetSecretStore(fakeSecretStore{})
+			deliverySecret, err := service.encryptDeliverySecret("https://example.test/surveys/token-1")
+			if err != nil {
+				t.Fatalf("encrypt delivery secret: %v", err)
+			}
+			store.invitation.DeliverySecret = deliverySecret
+			store.invitationAfterUnsubscribe = store.invitation
+			test.configure(store)
+
+			public, err := service.GetPublicSurvey(context.Background(), "token-1")
+			if test.wantErr != nil {
+				if !errors.Is(err, test.wantErr) {
+					t.Fatalf("GetPublicSurvey() error = %v, want %v", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetPublicSurvey() error = %v", err)
+			}
+			if !test.wantReceipt || public.Response == nil || public.Response.ID != store.responseAfterUnsubscribe.ID {
+				t.Fatalf("public response = %#v", public.Response)
+			}
+			if store.unsubscribeWrites != 1 {
+				t.Fatalf("unsubscribe writes = %d, want 1", store.unsubscribeWrites)
+			}
+		})
+	}
+}
+
+func TestInvitationUnsubscribeLinksRotatesExpiredURL(t *testing.T) {
+	restoreRandom := stubRandom()
+	defer restoreRandom()
+
+	contactID := uuid.New()
+	store := ptrext.Of(fakeRepo{})
+	service := testService(store)
+	service.SetSecretStore(fakeSecretStore{})
+	expiredAt := service.now().Add(-time.Minute)
+	deliverySecret, err := service.encryptSurveyDeliverySecret(surveyDeliverySecret{
+		PublicURL:            "https://example.test/surveys/token-1",
+		UnsubscribeURL:       "https://example.test/v1/portal/acme/unsubscribe?token=expired",
+		UnsubscribeExpiresAt: ptrext.Of(expiredAt),
+	})
+	if err != nil {
+		t.Fatalf("encrypt delivery secret: %v", err)
+	}
+	invitation := repo.Invitation{
+		ID:             uuid.New(),
+		TenantID:       "tenant-1",
+		ContactID:      ptrext.Of(contactID),
+		DeliverySecret: deliverySecret,
+	}
+	store.invitation = invitation
+
+	url, _, err := service.invitationUnsubscribeLinks(context.Background(), invitation)
+	if err != nil {
+		t.Fatalf("invitationUnsubscribeLinks() error = %v", err)
+	}
+	if url == "" || strings.Contains(url, "token=expired") {
+		t.Fatalf("rotated URL = %q", url)
+	}
+	if store.unsubscribeWrites != 1 {
+		t.Fatalf("unsubscribe writes = %d, want 1", store.unsubscribeWrites)
+	}
+	stored, err := service.deliverySecret(store.invitation.DeliverySecret)
+	if err != nil {
+		t.Fatalf("deliverySecret() error = %v", err)
+	}
+	if stored.UnsubscribeURL != url || stored.UnsubscribeExpiresAt == nil || !stored.UnsubscribeExpiresAt.After(service.now()) {
+		t.Fatalf("stored delivery secret = %#v", stored)
+	}
+}
+
+func TestPublicSurveyPinsResponseDefinitionToInvitationSnapshot(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	sent := repo.Campaign{
+		ID:                campaignID,
+		TenantID:          "tenant-1",
+		SurveyType:        repo.TypeCSAT,
+		Status:            repo.StatusActive,
+		Content:           map[string]any{"title": "Original title", "question": "Original question", "thank_you": "Original thanks"},
+		Locale:            "en-GB",
+		ContentVersion:    3,
+		LowScoreThreshold: 4,
+	}
+	current := sent
+	current.Content = map[string]any{"title": "Edited title", "question": "Edited question", "thank_you": "Edited thanks"}
+	current.Locale = "fr"
+	current.ContentVersion = 4
+	current.LowScoreThreshold = 2
+	store := ptrext.Of(fakeRepo{
+		campaign: current,
+		invitation: repo.Invitation{
+			ID:                     uuid.New(),
+			TenantID:               "tenant-1",
+			CampaignID:             campaignID,
+			CampaignContentVersion: sent.ContentVersion,
+			CampaignSnapshot:       campaignSnapshot(sent),
+			ResponseStatus:         repo.ResponseOpened,
+			SuppressionStatus:      repo.SuppressionNotSuppressed,
+			ExpiresAt:              ptrext.Of(time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)),
+		},
+	})
+	service := testService(store)
+
+	public, err := service.GetPublicSurvey(context.Background(), "token-1")
+	if err != nil {
+		t.Fatalf("GetPublicSurvey() error = %v", err)
+	}
+	if got := public.Campaign.Content["question"]; got != "Original question" {
+		t.Fatalf("public question = %q, want invitation snapshot", got)
+	}
+	if public.Campaign.Locale != "en-GB" || public.Campaign.ContentVersion != 3 {
+		t.Fatalf("public campaign = %#v, want invitation snapshot locale and version", public.Campaign)
+	}
+
+	response, lowScore, thankYou, err := service.SubmitPublicResponse(context.Background(), PublicSubmitInput{
+		Token: "token-1",
+		Score: 4,
+	})
+	if err != nil {
+		t.Fatalf("SubmitPublicResponse() error = %v", err)
+	}
+	if !lowScore || store.reviewSeed == nil {
+		t.Fatal("snapshot low-score threshold did not create a review")
+	}
+	if response.Locale != "en-GB" || thankYou != "Original thanks" {
+		t.Fatalf("response locale/thank_you = %q/%q, want invitation snapshot", response.Locale, thankYou)
+	}
+}
+
+func TestPublicSurveyHonorsCurrentCampaignStatusDespiteInvitationSnapshot(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	sent := repo.Campaign{
+		ID:                campaignID,
+		TenantID:          "tenant-1",
+		SurveyType:        repo.TypeCSAT,
+		Status:            repo.StatusActive,
+		Content:           defaultContent(repo.TypeCSAT),
+		Locale:            "en",
+		ContentVersion:    1,
+		LowScoreThreshold: 3,
+	}
+	current := sent
+	current.Status = repo.StatusDraft
+	store := ptrext.Of(fakeRepo{
+		campaign: current,
+		invitation: repo.Invitation{
+			ID:                     uuid.New(),
+			TenantID:               "tenant-1",
+			CampaignID:             campaignID,
+			CampaignContentVersion: sent.ContentVersion,
+			CampaignSnapshot:       campaignSnapshot(sent),
+			ResponseStatus:         repo.ResponseOpened,
+			SuppressionStatus:      repo.SuppressionNotSuppressed,
+			ExpiresAt:              ptrext.Of(time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)),
+		},
+	})
+
+	_, err := testService(store).GetPublicSurvey(context.Background(), "token-1")
+	if !errors.Is(err, ErrDisabled) {
+		t.Fatalf("GetPublicSurvey() error = %v, want ErrDisabled", err)
 	}
 }
 
@@ -170,6 +483,136 @@ func TestGetPublicSurveyExpiresStaleInvitation(t *testing.T) {
 	}
 	if store.expiredID != invitationID || store.expiredReason != "expired" {
 		t.Fatalf("expired = %s/%q", store.expiredID, store.expiredReason)
+	}
+}
+
+func TestGetPublicSurveyRevalidatesLifecycleAfterStart(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	campaignID := uuid.New()
+	baseCampaign := repo.Campaign{
+		ID:         campaignID,
+		TenantID:   "tenant-1",
+		SurveyType: repo.TypeNPS,
+		Status:     repo.StatusActive,
+		Content:    defaultContent(repo.TypeNPS),
+		Locale:     "en",
+	}
+	baseInvitation := repo.Invitation{
+		ID:                uuid.New(),
+		TenantID:          "tenant-1",
+		CampaignID:        campaignID,
+		ResponseStatus:    repo.ResponseOpened,
+		SuppressionStatus: repo.SuppressionNotSuppressed,
+		ExpiresAt:         ptrext.Of(now.Add(time.Hour)),
+	}
+	for _, test := range []struct {
+		name                 string
+		invitationAfterStart repo.Invitation
+		campaignAfterStart   repo.Campaign
+		wantErr              error
+	}{
+		{
+			name:                 "expired",
+			invitationAfterStart: repo.Invitation{ID: baseInvitation.ID, TenantID: baseInvitation.TenantID, CampaignID: campaignID, ResponseStatus: repo.ResponseStarted, SuppressionStatus: repo.SuppressionNotSuppressed, ExpiresAt: ptrext.Of(now.Add(-time.Minute))},
+			wantErr:              ErrExpired,
+		},
+		{
+			name:                 "suppressed",
+			invitationAfterStart: repo.Invitation{ID: baseInvitation.ID, TenantID: baseInvitation.TenantID, CampaignID: campaignID, ResponseStatus: repo.ResponseStarted, SuppressionStatus: repo.SuppressionSuppressed, ExpiresAt: baseInvitation.ExpiresAt},
+			wantErr:              ErrDisabled,
+		},
+		{
+			name:                 "archived",
+			invitationAfterStart: repo.Invitation{ID: baseInvitation.ID, TenantID: baseInvitation.TenantID, CampaignID: campaignID, ResponseStatus: repo.ResponseStarted, SuppressionStatus: repo.SuppressionNotSuppressed, ExpiresAt: baseInvitation.ExpiresAt},
+			campaignAfterStart:   repo.Campaign{ID: campaignID, TenantID: "tenant-1", SurveyType: repo.TypeNPS, Status: repo.StatusArchived, Content: defaultContent(repo.TypeNPS), Locale: "en"},
+			wantErr:              ErrDisabled,
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			store := ptrext.Of(fakeRepo{
+				campaign:             baseCampaign,
+				invitation:           baseInvitation,
+				invitationAfterStart: test.invitationAfterStart,
+				campaignAfterStart:   test.campaignAfterStart,
+			})
+			service := testService(store)
+
+			_, err := service.GetPublicSurvey(context.Background(), "token-1")
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("GetPublicSurvey() error = %v, want %v", err, test.wantErr)
+			}
+			if store.startedID != baseInvitation.ID {
+				t.Fatalf("started invitation = %s, want %s", store.startedID, baseInvitation.ID)
+			}
+		})
+	}
+}
+
+func TestNPSPublicSurveyKeepsReceiptWhenExpirationRacesCompletion(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	campaignID := uuid.New()
+	invitationID := uuid.New()
+	campaign := repo.Campaign{
+		ID:                campaignID,
+		TenantID:          "tenant-1",
+		SurveyType:        repo.TypeNPS,
+		Status:            repo.StatusActive,
+		Content:           defaultContent(repo.TypeNPS),
+		Locale:            "en",
+		ContentVersion:    1,
+		LowScoreThreshold: 6,
+	}
+	pending := repo.Invitation{
+		ID:                     invitationID,
+		TenantID:               "tenant-1",
+		CampaignID:             campaignID,
+		CampaignContentVersion: campaign.ContentVersion,
+		CampaignSnapshot:       campaignSnapshot(campaign),
+		ResponseStatus:         repo.ResponseOpened,
+		SuppressionStatus:      repo.SuppressionNotSuppressed,
+		ExpiresAt:              ptrext.Of(now),
+	}
+	completed := pending
+	completed.ResponseStatus = repo.ResponseCompleted
+	responseID := uuid.New()
+	store := ptrext.Of(fakeRepo{
+		campaign:                  campaign,
+		invitation:                pending,
+		invitationAfterExpiration: completed,
+		expireInvitationErr:       repo.ErrNotFound,
+		response: repo.Response{
+			ID:           responseID,
+			TenantID:     "tenant-1",
+			CampaignID:   campaignID,
+			SurveyType:   repo.TypeNPS,
+			InvitationID: invitationID,
+			Score:        4,
+			NPSBucket:    repo.NPSBucketDetractor,
+		},
+	})
+	service := testService(store)
+
+	public, err := service.GetPublicSurvey(context.Background(), "token-1")
+	if err != nil {
+		t.Fatalf("GetPublicSurvey() error = %v", err)
+	}
+	if public.Response == nil || public.Response.ID != responseID || public.Invitation.ResponseStatus != repo.ResponseCompleted {
+		t.Fatalf("public receipt = %#v", public)
+	}
+
+	response, lowScore, _, err := service.SubmitPublicResponse(context.Background(), PublicSubmitInput{
+		Token: "token-1", Score: 4,
+	})
+	if err != nil {
+		t.Fatalf("SubmitPublicResponse() error = %v", err)
+	}
+	if response.ID != responseID || !lowScore {
+		t.Fatalf("response receipt = %#v, lowScore=%t", response, lowScore)
 	}
 }
 
@@ -367,6 +810,78 @@ func TestSubmitPublicResponseRejectsOutOfRangeScore(t *testing.T) {
 	}
 	if store.createdResponse.ID != uuid.Nil {
 		t.Fatalf("CreateResponse was called for invalid score")
+	}
+}
+
+func TestSubmitPublicResponseRejectsFollowUpConsentForNonNPS(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	store := ptrext.Of(fakeRepo{
+		campaign: repo.Campaign{
+			ID:                campaignID,
+			TenantID:          "tenant-1",
+			SurveyType:        repo.TypeCSAT,
+			Status:            repo.StatusActive,
+			Content:           defaultContent(repo.TypeCSAT),
+			LowScoreThreshold: 3,
+		},
+		invitation: repo.Invitation{
+			ID:                uuid.New(),
+			TenantID:          "tenant-1",
+			CampaignID:        campaignID,
+			ResponseStatus:    repo.ResponseOpened,
+			SuppressionStatus: repo.SuppressionNotSuppressed,
+			ExpiresAt:         ptrext.Of(time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)),
+		},
+	})
+	service := testService(store)
+	_, _, _, err := service.SubmitPublicResponse(context.Background(), PublicSubmitInput{
+		Token:           "token-1",
+		Score:           4,
+		FollowUpConsent: ptrext.Of(false),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("SubmitPublicResponse() error = %v, want ErrValidation", err)
+	}
+	if store.createdResponse.ID != uuid.Nil {
+		t.Fatalf("CreateResponse was called for non-NPS follow-up consent")
+	}
+}
+
+func TestSubmitPublicResponseRejectsOverlongCommentWithoutPersisting(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	store := ptrext.Of(fakeRepo{
+		campaign: repo.Campaign{
+			ID:                campaignID,
+			TenantID:          "tenant-1",
+			SurveyType:        repo.TypeCSAT,
+			Status:            repo.StatusActive,
+			Content:           defaultContent(repo.TypeCSAT),
+			Locale:            "en",
+			LowScoreThreshold: 3,
+		},
+		invitation: repo.Invitation{
+			ID:                uuid.New(),
+			TenantID:          "tenant-1",
+			CampaignID:        campaignID,
+			ResponseStatus:    repo.ResponseOpened,
+			SuppressionStatus: repo.SuppressionNotSuppressed,
+			ExpiresAt:         ptrext.Of(time.Date(2026, 7, 30, 13, 0, 0, 0, time.UTC)),
+		},
+	})
+	service := testService(store)
+
+	_, _, _, err := service.SubmitPublicResponse(context.Background(), PublicSubmitInput{
+		Token: "token-1", Score: 3, Comment: strings.Repeat("x", domain.MaxContentLen+1),
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("SubmitPublicResponse() error = %v, want ErrValidation", err)
+	}
+	if store.createdResponse.ID != uuid.Nil {
+		t.Fatalf("CreateResponse() persisted overlong comment: %#v", store.createdResponse)
 	}
 }
 
@@ -571,8 +1086,11 @@ func TestCampaignHealthReportsBlockedDeliveryConfiguration(t *testing.T) {
 			InvitationCount:      8,
 			PendingDeliveryCount: 2,
 			DelayedDeliveryCount: 1,
+			StartedCount:         3,
 			CompletedCount:       1,
 			ResponseRate:         0.125,
+			StartRate:            0.375,
+			CompletionRate:       1.0 / 3.0,
 		},
 	})
 	service := testService(store)
@@ -592,10 +1110,22 @@ func TestCampaignHealthReportsBlockedDeliveryConfiguration(t *testing.T) {
 		!strings.Contains(delivery.Evidence, "delivery_secret_store_not_configured") {
 		t.Fatalf("delivery check = %#v", delivery)
 	}
-	funnel := got.Funnel
-	if funnel.InvitationCount != 8 || funnel.PendingCount != 2 || funnel.DelayedCount != 1 ||
-		funnel.CompletedCount != 1 || funnel.ResponseRate != 0.125 {
-		t.Fatalf("health funnel = %#v", funnel)
+	requireBlockedDeliveryHealthFunnel(t, got.Funnel)
+}
+
+func requireBlockedDeliveryHealthFunnel(t *testing.T, funnel CampaignHealthFunnel) {
+	t.Helper()
+	if funnel.InvitationCount != 8 {
+		t.Fatalf("InvitationCount = %d, want 8", funnel.InvitationCount)
+	}
+	if funnel.PendingCount != 2 || funnel.DelayedCount != 1 {
+		t.Fatalf("delivery funnel = %#v", funnel)
+	}
+	if funnel.StartedCount != 3 || funnel.CompletedCount != 1 {
+		t.Fatalf("response funnel counts = %#v", funnel)
+	}
+	if funnel.StartRate != 0.375 || funnel.CompletionRate != 1.0/3.0 || funnel.ResponseRate != 0.125 {
+		t.Fatalf("response funnel rates = %#v", funnel)
 	}
 }
 
@@ -1011,11 +1541,15 @@ func TestSurveyServiceHelperBranches(t *testing.T) {
 	if firstNonEmpty(" ", "ok") != "ok" || boolInt(true) != 1 || boolInt(false) != 0 {
 		t.Fatal("simple survey helpers returned unexpected values")
 	}
+	if !errors.Is(mapRepoError(repo.ErrCampaignNotActive), ErrDisabled) {
+		t.Fatal("mapRepoError did not map an inactive campaign to disabled")
+	}
 }
 
 func TestProviderEventHelperBranches(t *testing.T) {
 	t.Parallel()
 
+	invitationID := uuid.New()
 	for raw, want := range map[string]string{
 		"accept":            repo.ProviderEventAccepted,
 		"delivery":          repo.ProviderEventDelivered,
@@ -1029,14 +1563,18 @@ func TestProviderEventHelperBranches(t *testing.T) {
 			t.Fatalf("normalizeProviderEventType(%q) = %q, want %q", raw, got, want)
 		}
 	}
-	if got := providerEventKey("", repo.ProviderEventOpened, map[string]any{"webhookId": " wh-1 "}); got != "id:wh-1" {
+	if got := providerEventKey("", repo.ProviderEventOpened, map[string]any{"webhookId": " wh-1 "}, ptrext.Of(invitationID), "message-1"); got != "id:wh-1" {
 		t.Fatalf("providerEventKey(event id) = %q", got)
 	}
-	if got := providerPayloadHashKey(repo.ProviderEventOpened, map[string]any{"bad": make(chan int)}); got != "" {
+	if got := providerPayloadHashKey(repo.ProviderEventOpened, map[string]any{"bad": make(chan int)}, ptrext.Of(invitationID), "message-1"); got != "" {
 		t.Fatalf("providerPayloadHashKey(unmarshalable) = %q, want empty", got)
 	}
-	if got := providerPayloadHashKey(repo.ProviderEventOpened, map[string]any{"event": "opened"}); !strings.HasPrefix(got, "payload_sha256:") {
+	if got := providerPayloadHashKey(repo.ProviderEventOpened, map[string]any{"event": "opened"}, ptrext.Of(invitationID), "message-1"); !strings.HasPrefix(got, "payload_sha256:") {
 		t.Fatalf("providerPayloadHashKey() = %q", got)
+	}
+	if providerPayloadHashKey(repo.ProviderEventOpened, map[string]any{"event": "opened"}, ptrext.Of(invitationID), "message-1") ==
+		providerPayloadHashKey(repo.ProviderEventOpened, map[string]any{"event": "opened"}, ptrext.Of(uuid.New()), "message-2") {
+		t.Fatal("providerPayloadHashKey() omitted the event locator")
 	}
 }
 
@@ -1477,6 +2015,38 @@ func TestBatchUpdateLowScoreReviewsRejectsEmptyPatch(t *testing.T) {
 	}
 }
 
+func TestUpdateLowScoreReviewRejectsRemovingRecordedCustomerContact(t *testing.T) {
+	t.Parallel()
+
+	responseID := uuid.New()
+	store := ptrext.Of(fakeRepo{
+		reviews: map[uuid.UUID]repo.LowScoreReview{
+			responseID: {
+				ResponseID:          responseID,
+				TenantID:            "tenant-1",
+				CampaignID:          uuid.New(),
+				Status:              repo.ReviewInReview,
+				Severity:            repo.SeverityHigh,
+				CustomerContacted:   true,
+				CustomerContactedAt: ptrext.Of(time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)),
+			},
+		},
+	})
+
+	_, err := testService(store).UpdateLowScoreReview(context.Background(), ReviewInput{
+		TenantID:          "tenant-1",
+		ResponseID:        responseID,
+		CustomerContacted: ptrext.Of(false),
+		ActorID:           "operator-1",
+	})
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpdateLowScoreReview() error = %v, want ErrValidation", err)
+	}
+	if len(store.updatedReviews) != 0 {
+		t.Fatalf("UpdateLowScoreReview() wrote %d review(s), want none", len(store.updatedReviews))
+	}
+}
+
 func TestAssignLowScoreReviewsBalancesCandidateOwnerLoad(t *testing.T) {
 	t.Parallel()
 
@@ -1914,6 +2484,16 @@ func testService(store *fakeRepo) *Service {
 	})
 }
 
+type testPseudonymizingSecretStore struct{ fakeSecretStore }
+
+func (testPseudonymizingSecretStore) Pseudonymize(purpose, raw string) (string, error) {
+	mac := hmac.New(sha256.New, []byte("survey-unit-test-pseudonymization-key"))
+	_, _ = mac.Write([]byte(purpose))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(raw))
+	return "test-hmac:" + hex.EncodeToString(mac.Sum(nil)), nil
+}
+
 func stubRandom() func() {
 	original := randomRead
 	randomRead = func(b []byte) (int, error) {
@@ -1970,61 +2550,75 @@ func workflowSurveyCampaign(id uuid.UUID, suppressAutoResolved bool) repo.Campai
 }
 
 type fakeRepo struct {
-	campaign           repo.Campaign
-	campaigns          []repo.Campaign
-	invitation         repo.Invitation
-	response           repo.Response
-	triggerContext     repo.TriggerContext
-	recipients         []repo.RequestRecipient
-	emailContact       repo.RequestRecipient
-	emailSender        repo.EmailSender
-	tenantSlug         string
-	claimed            []repo.Invitation
-	createdCampaign    repo.Campaign
-	createdInvitation  repo.Invitation
-	createdInvites     []repo.Invitation
-	createdResponse    repo.Response
-	createResponseErr  error
-	unsubscribeContact uuid.UUID
-	unsubscribeHash    string
-	unsubscribeExpires time.Time
-	deliveredID        uuid.UUID
-	failedID           uuid.UUID
-	retryTenantID      string
-	retryInvitationID  uuid.UUID
-	providerEventInput repo.ProviderEventInput
-	suppressedID       uuid.UUID
-	suppressedReason   string
-	expiredID          uuid.UUID
-	expiredReason      string
-	contactCount       int
-	campaignCount      int
-	lowScore           bool
-	reviewSeed         *repo.LowScoreReviewSeed
-	analytics          repo.Analytics
-	analyticsFilter    repo.AnalyticsFilter
-	analyticsSegments  []repo.AnalyticsSegment
-	trendFilter        repo.AnalyticsFilter
-	segmentFilter      repo.AnalyticsSegmentFilter
-	reviews            map[uuid.UUID]repo.LowScoreReview
-	updatedReviews     []repo.LowScoreReview
-	claimedReviews     []repo.LowScoreReview
-	recoveryContext    repo.RecoveryNotificationContext
-	recoveryOwner      repo.RecoveryOwner
-	recoveryDuplicate  bool
-	recoveryInputs     []repo.RecoveryNotificationInput
-	claimedRecovery    []repo.RecoveryNotification
-	recoveryDelivered  uuid.UUID
-	recoveryFailed     uuid.UUID
-	recoveryDead       bool
-	recoverySuppressed uuid.UUID
-	recoveryReason     string
-	dedupeExists       bool
-	dedupeKey          string
-	staleExpiredCount  int
-	expireStaleLimit   int
-	expireStaleAt      time.Time
-	expireStaleReason  string
+	campaign                    repo.Campaign
+	campaigns                   []repo.Campaign
+	invitation                  repo.Invitation
+	invitationAfterStart        repo.Invitation
+	campaignAfterStart          repo.Campaign
+	invitationAfterUnsubscribe  repo.Invitation
+	campaignAfterUnsubscribe    repo.Campaign
+	responseAfterUnsubscribe    repo.Response
+	response                    repo.Response
+	triggerContext              repo.TriggerContext
+	recipients                  []repo.RequestRecipient
+	emailContact                repo.RequestRecipient
+	emailSender                 repo.EmailSender
+	tenantSlug                  string
+	claimed                     []repo.Invitation
+	createdCampaign             repo.Campaign
+	createdInvitation           repo.Invitation
+	createdInvites              []repo.Invitation
+	createdResponse             repo.Response
+	createResponseErr           error
+	unsubscribeContact          uuid.UUID
+	unsubscribeHash             string
+	unsubscribeExpires          time.Time
+	unsubscribeWrites           int
+	prepareCalls                int
+	prepareRejectOnCall         int
+	prepareErr                  error
+	deliveredID                 uuid.UUID
+	failedID                    uuid.UUID
+	startedID                   uuid.UUID
+	retryTenantID               string
+	retryInvitationID           uuid.UUID
+	providerEventInput          repo.ProviderEventInput
+	suppressedID                uuid.UUID
+	suppressedReason            string
+	expiredID                   uuid.UUID
+	expiredReason               string
+	expireInvitationErr         error
+	invitationAfterExpiration   repo.Invitation
+	contactCount                int
+	contactCooldownActive       bool
+	contactInvitationSkipReason string
+	campaignCount               int
+	lowScore                    bool
+	reviewSeed                  *repo.LowScoreReviewSeed
+	analytics                   repo.Analytics
+	analyticsFilter             repo.AnalyticsFilter
+	analyticsSegments           []repo.AnalyticsSegment
+	trendFilter                 repo.AnalyticsFilter
+	segmentFilter               repo.AnalyticsSegmentFilter
+	reviews                     map[uuid.UUID]repo.LowScoreReview
+	updatedReviews              []repo.LowScoreReview
+	claimedReviews              []repo.LowScoreReview
+	recoveryContext             repo.RecoveryNotificationContext
+	recoveryOwner               repo.RecoveryOwner
+	recoveryDuplicate           bool
+	recoveryInputs              []repo.RecoveryNotificationInput
+	claimedRecovery             []repo.RecoveryNotification
+	recoveryDelivered           uuid.UUID
+	recoveryFailed              uuid.UUID
+	recoveryDead                bool
+	recoverySuppressed          uuid.UUID
+	recoveryReason              string
+	dedupeExists                bool
+	dedupeKey                   string
+	staleExpiredCount           int
+	expireStaleLimit            int
+	expireStaleAt               time.Time
+	expireStaleReason           string
 }
 
 func (f *fakeRepo) ListCampaigns(context.Context, repo.CampaignFilter) ([]repo.Campaign, error) {
@@ -2071,6 +2665,18 @@ func (f *fakeRepo) CreateInvitation(_ context.Context, invitation repo.Invitatio
 	f.createdInvitation = invitation
 	f.createdInvites = append(f.createdInvites, invitation)
 	return invitation, nil
+}
+
+func (f *fakeRepo) CreateInvitationWithContactCooldown(_ context.Context, invitation repo.Invitation, _ *time.Time) (repo.Invitation, string, error) {
+	if f.contactInvitationSkipReason != "" {
+		return repo.Invitation{}, f.contactInvitationSkipReason, nil
+	}
+	if f.contactCooldownActive {
+		return repo.Invitation{}, "contact_cooldown", nil
+	}
+	f.createdInvitation = invitation
+	f.createdInvites = append(f.createdInvites, invitation)
+	return invitation, "", nil
 }
 
 func (f *fakeRepo) ExpireStaleInvitations(_ context.Context, limit int, at time.Time, reason string) (int, error) {
@@ -2130,14 +2736,93 @@ func (f *fakeRepo) TenantSlug(context.Context, string) (string, error) {
 }
 
 func (f *fakeRepo) CreateTenantUnsubscribeToken(_ context.Context, _ string, contactID uuid.UUID, tokenHash string, expiresAt time.Time) error {
+	f.recordUnsubscribeToken(contactID, tokenHash, expiresAt)
+	return nil
+}
+
+func (f *fakeRepo) PersistInvitationUnsubscribeToken(
+	_ context.Context,
+	_ string,
+	id uuid.UUID,
+	expectedDeliverySecret []byte,
+	deliverySecret []byte,
+	contactID uuid.UUID,
+	tokenHash string,
+	expiresAt time.Time,
+) (repo.Invitation, bool, error) {
+	if f.invitation.ID == id {
+		if string(f.invitation.DeliverySecret) != string(expectedDeliverySecret) {
+			return f.invitation, false, nil
+		}
+		f.invitation.DeliverySecret = deliverySecret
+		f.recordUnsubscribeToken(contactID, tokenHash, expiresAt)
+		f.applyUnsubscribeLifecycleChange()
+		return f.invitation, true, nil
+	}
+	for idx := range f.claimed {
+		if f.claimed[idx].ID != id {
+			continue
+		}
+		if string(f.claimed[idx].DeliverySecret) != string(expectedDeliverySecret) {
+			return f.claimed[idx], false, nil
+		}
+		f.claimed[idx].DeliverySecret = deliverySecret
+		f.recordUnsubscribeToken(contactID, tokenHash, expiresAt)
+		return f.claimed[idx], true, nil
+	}
+	return repo.Invitation{}, false, repo.ErrNotFound
+}
+
+func (f *fakeRepo) applyUnsubscribeLifecycleChange() {
+	if f.invitationAfterUnsubscribe.ID != uuid.Nil {
+		f.invitation = f.invitationAfterUnsubscribe
+	}
+	if f.campaignAfterUnsubscribe.ID != uuid.Nil {
+		f.campaign = f.campaignAfterUnsubscribe
+	}
+	if f.responseAfterUnsubscribe.ID != uuid.Nil {
+		f.response = f.responseAfterUnsubscribe
+	}
+}
+
+func (f *fakeRepo) recordUnsubscribeToken(contactID uuid.UUID, tokenHash string, expiresAt time.Time) {
 	f.unsubscribeContact = contactID
 	f.unsubscribeHash = tokenHash
 	f.unsubscribeExpires = expiresAt
-	return nil
+	f.unsubscribeWrites++
 }
 
 func (f *fakeRepo) ClaimPendingEmailInvitations(context.Context, int, string) ([]repo.Invitation, error) {
 	return f.claimed, nil
+}
+
+func (f *fakeRepo) PrepareInvitationDelivery(
+	_ context.Context,
+	invitation repo.Invitation,
+	_ string,
+) (repo.Invitation, repo.RequestRecipient, bool, error) {
+	f.prepareCalls++
+	if f.prepareErr != nil {
+		return repo.Invitation{}, repo.RequestRecipient{}, false, f.prepareErr
+	}
+	if f.prepareRejectOnCall > 0 && f.prepareCalls >= f.prepareRejectOnCall {
+		return repo.Invitation{}, repo.RequestRecipient{}, false, nil
+	}
+	if invitation.ContactID == nil {
+		_, _ = f.SuppressInvitation(context.Background(), invitation.TenantID, invitation.ID, "missing_contact")
+		return repo.Invitation{}, repo.RequestRecipient{}, false, nil
+	}
+	if f.emailContact.ContactID == uuid.Nil {
+		_, _ = f.SuppressInvitation(context.Background(), invitation.TenantID, invitation.ID, "contact_not_eligible")
+		return repo.Invitation{}, repo.RequestRecipient{}, false, nil
+	}
+	for _, current := range f.claimed {
+		if current.ID == invitation.ID {
+			invitation = current
+			break
+		}
+	}
+	return invitation, f.emailContact, true, nil
 }
 
 func (f *fakeRepo) MarkInvitationDelivered(_ context.Context, _ string, id uuid.UUID, _ string, _ string, _ string, _ int) (repo.Invitation, error) {
@@ -2187,10 +2872,29 @@ func (f *fakeRepo) SuppressInvitation(_ context.Context, _ string, id uuid.UUID,
 func (f *fakeRepo) ExpireInvitation(_ context.Context, _ string, id uuid.UUID, reason string) (repo.Invitation, error) {
 	f.expiredID = id
 	f.expiredReason = reason
+	if f.expireInvitationErr != nil {
+		f.invitation = f.invitationAfterExpiration
+		return repo.Invitation{}, f.expireInvitationErr
+	}
 	return repo.Invitation{ID: id, ResponseStatus: repo.ResponseExpired, SuppressionReason: reason}, nil
 }
 
 func (f *fakeRepo) GetInvitationByTokenHash(context.Context, string) (repo.Invitation, error) {
+	return f.invitation, nil
+}
+
+func (f *fakeRepo) MarkInvitationStarted(_ context.Context, _ string, id uuid.UUID) (repo.Invitation, error) {
+	f.startedID = id
+	if f.invitationAfterStart.ID != uuid.Nil {
+		f.invitation = f.invitationAfterStart
+	} else {
+		item := f.invitation
+		item.ResponseStatus = repo.ResponseStarted
+		f.invitation = item
+	}
+	if f.campaignAfterStart.ID != uuid.Nil {
+		f.campaign = f.campaignAfterStart
+	}
 	return f.invitation, nil
 }
 

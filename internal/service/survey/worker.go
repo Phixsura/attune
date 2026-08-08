@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Phixsura/attune/internal/infra/metrics"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
@@ -24,6 +25,7 @@ const (
 	defaultSurveyBatchSize            = 10
 	defaultSurveyMaxAttempts          = 5
 	surveyInvitationEventType         = "survey.invitation"
+	surveyRecoveryOpenedEventType     = "survey.recovery_opened"
 	surveyRecoveryEscalationEventType = "survey.recovery_escalation"
 )
 
@@ -85,10 +87,45 @@ func (w *Worker) ProcessOnce(ctx context.Context) {
 	if w.service == nil {
 		return
 	}
+	w.processNPSCampaignRuns(ctx)
+	w.processExpiredNPSEvidenceExports(ctx)
 	w.processExpiredInvitations(ctx)
 	w.processRecoveryAutomation(ctx)
 	w.processRecoveryNotifications(ctx)
 	w.processInvitations(ctx)
+}
+
+func (w *Worker) processExpiredNPSEvidenceExports(ctx context.Context) {
+	const where = "service.survey.Worker.processExpiredNPSEvidenceExports"
+	counts, err := w.service.PurgeExpiredNPSCampaignRunEvidenceExports(ctx, time.Now().UTC(), w.batchSize)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] failed,err:%+v", where, err.Error())
+		return
+	}
+	for tenantID, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		metrics.SurveyNPSEvidenceExportPurgeTotal.WithLabelValues(tenantID, "expired").Add(float64(count))
+		logext.Infof(ctx, "[%s] OK,tenant:%s,expired:%d", where, tenantID, count)
+	}
+}
+
+func (w *Worker) processNPSCampaignRuns(ctx context.Context) {
+	const where = "service.survey.Worker.processNPSCampaignRuns"
+	result, err := w.service.ProcessNPSCampaignRuns(ctx, w.batchSize, w.owner)
+	if errors.Is(err, ErrDisabled) {
+		return
+	}
+	if err != nil {
+		logext.Errorf(ctx, "[%s] failed,err:%+v", where, err.Error())
+		return
+	}
+	if result.Closed > 0 || result.Claimed > 0 || result.Failed > 0 || result.Retrying > 0 || result.RecurrenceClaimed > 0 {
+		logext.Infof(ctx, "[%s] OK,closed:%d,claimed:%d,materialized:%d,failed:%d,retrying:%d,recurrence_claimed:%d,recurrence_scheduled:%d,recurrence_skipped:%d,recurrence_retrying:%d",
+			where, result.Closed, result.Claimed, result.Materialized, result.Failed, result.Retrying,
+			result.RecurrenceClaimed, result.RecurrenceScheduled, result.RecurrenceSkipped, result.RecurrenceRetrying)
+	}
 }
 
 func (w *Worker) processExpiredInvitations(ctx context.Context) {
@@ -281,7 +318,7 @@ func recoveryNotificationEnvelope(notification repo.RecoveryNotification) (outbo
 	if env.TenantID == "" {
 		env.TenantID = notification.TenantID
 	}
-	if env.EventType != surveyRecoveryEscalationEventType {
+	if env.EventType != surveyRecoveryOpenedEventType && env.EventType != surveyRecoveryEscalationEventType {
 		return outbound.NotificationEnvelope{}, fmt.Errorf("%w: invalid recovery notification event type", notify.ErrTerminal)
 	}
 	return env, nil
@@ -316,7 +353,7 @@ func (w *Worker) sendInvitation(ctx context.Context, invitation repo.Invitation)
 	if w.transport == nil {
 		return "", fmt.Errorf("%w: survey invitation transport not configured", notify.ErrTerminal)
 	}
-	contact, ok, err := w.emailContact(ctx, invitation)
+	invitation, _, ok, err := w.prepareInvitationDelivery(ctx, invitation)
 	if err != nil {
 		return "", err
 	}
@@ -330,11 +367,18 @@ func (w *Worker) sendInvitation(ctx context.Context, invitation repo.Invitation)
 	if !ok {
 		return "", errInvitationSuppressed
 	}
-	delivery, err := w.service.deliverySecret(invitation.DeliverySecret)
+	unsubscribeURL, listUnsubscribeURL, err := w.service.invitationUnsubscribeLinks(ctx, invitation)
 	if err != nil {
 		return "", err
 	}
-	unsubscribeURL, listUnsubscribeURL, err := w.service.surveyUnsubscribeLinks(ctx, invitation.TenantID, contact.ContactID)
+	invitation, contact, ok, err := w.prepareInvitationDelivery(ctx, invitation)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", errInvitationSuppressed
+	}
+	delivery, err := w.service.deliverySecret(invitation.DeliverySecret)
 	if err != nil {
 		return "", err
 	}
@@ -354,15 +398,12 @@ func (w *Worker) sendInvitation(ctx context.Context, invitation repo.Invitation)
 	return strings.TrimSpace(sender.Provider), w.transport.Send(ctx, label, rendered.Build, wrapSurveyNotificationCheck(rendered.Check))
 }
 
-func (w *Worker) emailContact(ctx context.Context, invitation repo.Invitation) (repo.RequestRecipient, bool, error) {
-	if invitation.ContactID == nil {
-		return repo.RequestRecipient{}, false, w.suppressInvitation(ctx, invitation, "missing_contact")
-	}
-	contact, err := w.service.repo.EmailContact(ctx, invitation.TenantID, ptrext.Indirect(invitation.ContactID))
-	if errors.Is(mapRepoError(err), ErrNotFound) {
-		return repo.RequestRecipient{}, false, w.suppressInvitation(ctx, invitation, "contact_not_eligible")
-	}
-	return contact, err == nil, mapRepoError(err)
+func (w *Worker) prepareInvitationDelivery(
+	ctx context.Context,
+	invitation repo.Invitation,
+) (repo.Invitation, repo.RequestRecipient, bool, error) {
+	prepared, contact, deliverable, err := w.service.repo.PrepareInvitationDelivery(ctx, invitation, w.owner)
+	return prepared, contact, deliverable, mapRepoError(err)
 }
 
 func (w *Worker) emailSender(ctx context.Context, invitation repo.Invitation) (repo.EmailSender, bool, error) {
@@ -391,7 +432,9 @@ func invitationExpired(invitation repo.Invitation, now time.Time) bool {
 }
 
 type surveyDeliverySecret struct {
-	PublicURL string `json:"public_url"`
+	PublicURL            string     `json:"public_url"`
+	UnsubscribeURL       string     `json:"unsubscribe_url,omitempty"`
+	UnsubscribeExpiresAt *time.Time `json:"unsubscribe_expires_at,omitempty"`
 }
 
 func (s *Service) deliverySecret(ciphertext []byte) (surveyDeliverySecret, error) {
@@ -410,6 +453,11 @@ func (s *Service) deliverySecret(ciphertext []byte) (surveyDeliverySecret, error
 		return surveyDeliverySecret{}, fmt.Errorf("%w: missing survey public url", notify.ErrTerminal)
 	}
 	secret.PublicURL = strings.TrimSpace(secret.PublicURL)
+	secret.UnsubscribeURL = strings.TrimSpace(secret.UnsubscribeURL)
+	if secret.UnsubscribeExpiresAt != nil {
+		expiresAt := ptrext.Indirect(secret.UnsubscribeExpiresAt).UTC()
+		secret.UnsubscribeExpiresAt = ptrext.Of(expiresAt)
+	}
 	return secret, nil
 }
 
@@ -531,6 +579,65 @@ func (s *Service) surveyUnsubscribeLinks(ctx context.Context, tenantID string, c
 	}
 	unsubscribeURL := s.unsubscribeURL(tenantSlug, token)
 	return unsubscribeURL, unsubscribeURL, nil
+}
+
+func (s *Service) invitationUnsubscribeLinks(ctx context.Context, invitation repo.Invitation) (string, string, error) {
+	if invitation.ContactID == nil || ptrext.Indirect(invitation.ContactID) == uuid.Nil {
+		return "", "", ErrValidation
+	}
+	if len(invitation.DeliverySecret) == 0 {
+		return s.surveyUnsubscribeLinks(ctx, invitation.TenantID, ptrext.Indirect(invitation.ContactID))
+	}
+	current := invitation
+	for range 2 {
+		delivery, err := s.deliverySecret(current.DeliverySecret)
+		if err != nil {
+			return "", "", err
+		}
+		if surveyUnsubscribeURLUsable(delivery, s.now()) {
+			return delivery.UnsubscribeURL, delivery.UnsubscribeURL, nil
+		}
+		tenantSlug, err := s.repo.TenantSlug(ctx, current.TenantID)
+		if err != nil {
+			return "", "", mapRepoError(err)
+		}
+		token, err := newToken()
+		if err != nil {
+			return "", "", err
+		}
+		expiresAt := s.now().UTC().Add(90 * 24 * time.Hour)
+		delivery.UnsubscribeURL = s.unsubscribeURL(tenantSlug, token)
+		delivery.UnsubscribeExpiresAt = ptrext.Of(expiresAt)
+		updatedSecret, err := s.encryptSurveyDeliverySecret(delivery)
+		if err != nil {
+			return "", "", err
+		}
+		updatedInvitation, persisted, err := s.repo.PersistInvitationUnsubscribeToken(
+			ctx,
+			current.TenantID,
+			current.ID,
+			current.DeliverySecret,
+			updatedSecret,
+			ptrext.Indirect(current.ContactID),
+			tokenHash(token),
+			expiresAt,
+		)
+		if err != nil {
+			return "", "", mapRepoError(err)
+		}
+		if persisted {
+			return delivery.UnsubscribeURL, delivery.UnsubscribeURL, nil
+		}
+		current = updatedInvitation
+	}
+	return "", "", fmt.Errorf("persist invitation unsubscribe URL: %w", ErrConflict)
+}
+
+func surveyUnsubscribeURLUsable(secret surveyDeliverySecret, now time.Time) bool {
+	if secret.UnsubscribeURL == "" {
+		return false
+	}
+	return secret.UnsubscribeExpiresAt == nil || now.Before(ptrext.Indirect(secret.UnsubscribeExpiresAt))
 }
 
 func surveyPayload(invitation repo.Invitation, publicURL string) map[string]any {

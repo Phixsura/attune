@@ -8,6 +8,7 @@ export type { Permission, Role } from '@/lib/permissions'
 export interface Permissions {
   role: Role
   userId: string | undefined
+  isPending: boolean
 
   isAdmin: boolean
   isDelegatedAdmin: boolean
@@ -25,7 +26,7 @@ export interface Permissions {
 }
 
 export function usePermissions(): Permissions {
-  const { data: me } = useQuery(meQuery())
+  const { data: me, isPending } = useQuery(meQuery())
 
   const role = (me?.user?.role as Role) ?? 'viewer'
   const userId = me?.user?.openId
@@ -34,6 +35,7 @@ export function usePermissions(): Permissions {
     () => ({
       role,
       userId,
+      isPending,
 
       isAdmin: role === 'admin',
       isDelegatedAdmin: role === 'delegated_admin',
@@ -53,6 +55,6 @@ export function usePermissions(): Permissions {
         return false
       },
     }),
-    [role, userId],
+    [isPending, role, userId],
   )
 }

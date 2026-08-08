@@ -32,6 +32,18 @@ function CustomerRequestsRoutePage() {
     () => parseRequestID(search.merge_target_id ?? ''),
     [search.merge_target_id],
   )
+  const handlePromoteClose = useCallback(() => {
+    void navigate({
+      to: '/feedback/customer-requests',
+      search: {
+        request_id: requestID,
+        merge_target_id: mergeTargetID,
+        promote_feedback_ids: undefined,
+        feedback_id: feedbackID,
+        account_key: accountKey,
+      },
+    })
+  }, [accountKey, feedbackID, mergeTargetID, navigate, requestID])
   const handleAccountKeyInspect = useCallback(
     (accountKey: string) => {
       void navigate({
@@ -55,6 +67,7 @@ function CustomerRequestsRoutePage() {
       initialRequestID={requestID}
       initialMergeTargetID={mergeTargetID}
       onAccountKeyInspect={handleAccountKeyInspect}
+      onPromoteClose={handlePromoteClose}
     />
   )
 }

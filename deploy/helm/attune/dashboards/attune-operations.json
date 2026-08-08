@@ -955,6 +955,21 @@
           "expr": "(sum by (result, reason) (rate(attune_survey_recovery_notification_total{tenant=~\"$tenant\"}[$__rate_interval]))) or vector(0)",
           "legendFormat": "survey recovery notify / {{result}} / {{reason}}",
           "refId": "R"
+        },
+        {
+          "expr": "(sum by (result, reason) (rate(attune_survey_nps_run_materialization_total{tenant=~\"$tenant\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "NPS materialization / {{result}} / {{reason}}",
+          "refId": "S"
+        },
+        {
+          "expr": "(sum by (result, reason) (rate(attune_survey_nps_recurrence_total{tenant=~\"$tenant\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "NPS recurrence / {{result}} / {{reason}}",
+          "refId": "T"
+        },
+        {
+          "expr": "(sum by (result) (rate(attune_survey_nps_evidence_export_purge_total{tenant=~\"$tenant\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "NPS evidence purge / {{result}}",
+          "refId": "U"
         }
       ],
       "fieldConfig": {

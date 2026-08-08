@@ -48,6 +48,7 @@ var coreSources = map[string]string{
 	"mcp":    "MCP",
 	"other":  "Other",
 	"portal": "Portal",
+	"survey": "Survey",
 }
 
 // CoreSources returns a copy of the reserved core source→label map for the

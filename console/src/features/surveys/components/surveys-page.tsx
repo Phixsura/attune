@@ -1,12 +1,14 @@
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import {
   Archive,
   ArrowRight,
+  CalendarClock,
   CheckCircle2,
   CircleAlert,
   Clipboard,
   ClipboardCheck,
+  Download,
   Gauge,
   Loader2,
   MailCheck,
@@ -25,6 +27,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -36,6 +46,11 @@ import {
 } from '@/components/ui/select'
 import { usePermissions } from '@/features/session/hooks/use-permissions'
 import {
+  downloadNpsCampaignRunEvidenceExport,
+  npsCampaignPreflightQuery,
+  npsCampaignRunEvidenceExportsQuery,
+  npsCampaignRunRefreshInterval,
+  npsCampaignRunsInfiniteQuery,
   type SurveyResponseFilters,
   surveyAnalyticsInsightsQuery,
   surveyAnalyticsQuery,
@@ -48,21 +63,31 @@ import {
   useArchiveSurveyCampaign,
   useAssignSurveyLowScoreReviews,
   useBatchUpdateSurveyLowScoreReviews,
+  useCancelNpsCampaignRun,
+  useCreateNpsCampaignRunEvidenceExport,
   useCreateSurveyCampaign,
   useCreateSurveyHostedLink,
   useEscalateSurveyLowScoreReviews,
   usePreviewSurveyRecipients,
   useRetrySurveyInvitationDelivery,
+  useScheduleNpsCampaignRun,
   useSendSurveyTestEmail,
   useUpdateSurveyCampaign,
   useUpdateSurveyLowScoreReview,
 } from '@/features/surveys/api/surveys'
 import { recoveryReadinessScore } from '@/features/surveys/lib/recovery-readiness'
 import { useDocumentTitle } from '@/hooks/use-document-title'
+import { api } from '@/lib/api-client'
 import { type Member, membersQuery } from '@/lib/members-api'
 import { cn } from '@/lib/utils'
 import {
   type BatchUpdateSurveyLowScoreReviewsRequest,
+  NpsBucket,
+  type NpsCampaignPreflight,
+  type NpsCampaignRun,
+  type NpsCampaignRunEvidenceExport,
+  NpsCampaignRunStatus,
+  NpsMeasurementReadiness,
   type PreviewSurveyRecipientsResponse,
   type SurveyAnalytics,
   type SurveyAnalyticsInsight,
@@ -83,6 +108,7 @@ import {
   SurveyLowScoreSeverity,
   type SurveyRecipientPreview,
   SurveyRecoveryNotificationStatus,
+  type SurveyRecoveryOutcome,
   type SurveyRecoveryOwnerLoad,
   SurveyRecoverySlaStatus,
   type SurveyResponse,
@@ -98,12 +124,46 @@ const workflowTrigger = SurveyTriggerEvent.SURVEY_TRIGGER_EVENT_WORKFLOW_TRANSIT
 const replySentTrigger = SurveyTriggerEvent.SURVEY_TRIGGER_EVENT_REPLY_SENT
 const manualLinkTrigger = SurveyTriggerEvent.SURVEY_TRIGGER_EVENT_MANUAL_LINK
 const requestResolvedTrigger = SurveyTriggerEvent.SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED
+const scheduledRunTrigger = SurveyTriggerEvent.SURVEY_TRIGGER_EVENT_SCHEDULED_RUN
+const npsType = SurveyType.SURVEY_TYPE_NPS
+const npsBucketUnspecified = NpsBucket.NPS_BUCKET_UNSPECIFIED
+const npsQuestionText = 'How likely are you to recommend us to a colleague?'
+const defaultNPSMeasurementValue = 'default-nps-measurement'
+const npsRecurrenceOptions = (t: TFunction): [string, string][] => [
+  ['0', t('surveys.nps_recurrence.manual')],
+  ['30', t('surveys.nps_recurrence.monthly')],
+  ['90', t('surveys.nps_recurrence.quarterly')],
+  ['180', t('surveys.nps_recurrence.semiannual')],
+  ['365', t('surveys.nps_recurrence.annual')],
+]
+const npsRecurrenceContactCooldownOptions = (t: TFunction): [string, string][] => [
+  ['90', t('surveys.nps_recurrence_contact_cooldown.quarterly')],
+  ['180', t('surveys.nps_recurrence_contact_cooldown.semiannual')],
+  ['365', t('surveys.nps_recurrence_contact_cooldown.annual')],
+  ['730', t('surveys.nps_recurrence_contact_cooldown.biannual')],
+]
+const npsRecurrenceSamplingOptions = (t: TFunction): [string, string][] => [
+  ['10', t('surveys.nps_recurrence_sampling.ten')],
+  ['25', t('surveys.nps_recurrence_sampling.quarter')],
+  ['50', t('surveys.nps_recurrence_sampling.half')],
+  ['100', t('surveys.nps_recurrence_sampling.all')],
+]
 const onePerSourceDedupe = SurveyDedupePolicy.SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE
 const onePerResolutionDedupe = SurveyDedupePolicy.SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION
 const onePerTriggerDedupe = SurveyDedupePolicy.SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER
+const onePerRunDedupe = SurveyDedupePolicy.SURVEY_DEDUPE_POLICY_ONE_PER_RUN
 const defaultLowScoreReviewStatus = SurveyLowScoreReviewStatus.SURVEY_LOW_SCORE_REVIEW_STATUS_OPEN
 const defaultLowScoreSeverity = SurveyLowScoreSeverity.SURVEY_LOW_SCORE_SEVERITY_MEDIUM
 const resolvedReviewStatus = SurveyLowScoreReviewStatus.SURVEY_LOW_SCORE_REVIEW_STATUS_RESOLVED
+
+type NPSAudienceCohort = {
+  id: string
+  name: string
+  enabled: boolean
+}
+// This query retains the API response envelope, unlike the cohort-management
+// query whose cached value is the already-unwrapped cohort array.
+const npsAudienceCohortsQueryKey = ['surveys', 'nps', 'audience-cohorts'] as const
 const dismissedReviewStatus = SurveyLowScoreReviewStatus.SURVEY_LOW_SCORE_REVIEW_STATUS_DISMISSED
 const unassignedOwnerValue = 'unassigned'
 const batchNoChangeValue = 'no-change'
@@ -184,6 +244,7 @@ export function SurveysPage() {
   useDocumentTitle(t('surveys.title'))
 
   const [selectedCampaignID, setSelectedCampaignID] = useState('')
+  const [selectedNPSRunID, setSelectedNPSRunID] = useState('')
   const [lowScoreFocus, setLowScoreFocus] = useState<LowScoreFocus>('all')
   const [lowScoreOwnerID, setLowScoreOwnerID] = useState(allLowScoreOwnersValue)
   const [lowScoreAccountKey, setLowScoreAccountKey] = useState('')
@@ -192,38 +253,72 @@ export function SurveysPage() {
   const segmentsRef = useRef<HTMLDivElement>(null)
   const settingsRef = useRef<HTMLDivElement>(null)
   const campaignsQuery = useQuery(surveyCampaignsQuery(undefined, 50))
+  const selectedCampaignSnapshot = (campaignsQuery.data ?? []).find(
+    (campaign) => campaign.id === selectedCampaignID,
+  )
+  const selectedCampaignIsNPS = selectedCampaignSnapshot?.surveyType === npsType
   const membersResult = useQuery({
     ...membersQuery(),
     enabled: permissions.can('settings:members:view'),
   })
-  const analyticsQuery = useQuery(
-    surveyAnalyticsQuery(selectedCampaignID ? { campaignId: selectedCampaignID } : {}),
-  )
-  const insightsQuery = useQuery(
-    surveyAnalyticsInsightsQuery({
+  const selectedNPSCampaignID = selectedCampaignIsNPS ? selectedCampaignID : undefined
+  const npsRunsQuery = useInfiniteQuery(npsCampaignRunsInfiniteQuery(selectedNPSCampaignID))
+  const npsRuns = npsRunsQuery.data?.pages.flatMap((page) => page.runs ?? []) ?? []
+  const npsRunRefreshInterval = npsCampaignRunRefreshInterval(npsRuns)
+  const npsMeasurementRun = npsAnalyticsRun(npsRuns, selectedNPSRunID)
+  const npsAnalyticsRunID = selectedCampaignIsNPS
+    ? selectedNPSRunID || npsMeasurementRun?.id
+    : undefined
+  const analyticsQuery = useQuery({
+    ...surveyAnalyticsQuery(
+      selectedCampaignID ? { campaignId: selectedCampaignID, runId: npsAnalyticsRunID } : {},
+    ),
+    enabled: !selectedCampaignIsNPS || npsRunsQuery.isSuccess,
+    refetchInterval: selectedCampaignIsNPS ? npsRunRefreshInterval : false,
+  })
+  const recoveryAnalyticsQuery = useQuery({
+    ...surveyAnalyticsQuery(selectedCampaignID ? { campaignId: selectedCampaignID } : {}),
+    enabled: selectedCampaignIsNPS,
+    refetchInterval: npsRunRefreshInterval,
+  })
+  const insightsQuery = useQuery({
+    ...surveyAnalyticsInsightsQuery({
       campaignId: selectedCampaignID || undefined,
       limit: 6,
     }),
-  )
+    enabled: !selectedCampaignIsNPS,
+  })
   const healthQuery = useQuery(surveyCampaignHealthQuery(selectedCampaignID || undefined))
-  const trendQuery = useQuery(
-    surveyAnalyticsTrendQuery(selectedCampaignID ? { campaignId: selectedCampaignID } : {}),
-  )
-  const segmentsQuery = useQuery(
-    surveyAnalyticsSegmentsQuery({
+  const trendQuery = useQuery({
+    ...surveyAnalyticsTrendQuery(
+      selectedCampaignID ? { campaignId: selectedCampaignID, runId: npsAnalyticsRunID } : {},
+    ),
+    enabled: !selectedCampaignIsNPS,
+  })
+  const segmentsQuery = useQuery({
+    ...surveyAnalyticsSegmentsQuery({
       campaignId: selectedCampaignID || undefined,
       dimension: sourceTypeSegmentDimension,
       limit: 8,
     }),
-  )
-  const invitationsQuery = useQuery(
-    surveyInvitationsQuery({
+    enabled: !selectedCampaignIsNPS,
+  })
+  const invitationsQuery = useQuery({
+    ...surveyInvitationsQuery({
       campaignId: selectedCampaignID || undefined,
       limit: 25,
     }),
-  )
-  const responsesQuery = useQuery(
-    surveyResponsesQuery({
+    refetchInterval: selectedCampaignIsNPS ? npsRunRefreshInterval : false,
+  })
+  const selectedActiveNPSCampaignID = (campaignsQuery.data ?? []).find(
+    (campaign) =>
+      campaign.id === selectedCampaignID &&
+      campaign.surveyType === npsType &&
+      campaign.status === activeCampaignStatus,
+  )?.id
+  const npsPreflightQuery = useQuery(npsCampaignPreflightQuery(selectedActiveNPSCampaignID))
+  const responsesQuery = useQuery({
+    ...surveyResponsesQuery({
       campaignId: selectedCampaignID || undefined,
       limit: 25,
       lowScoreOnly: true,
@@ -231,18 +326,24 @@ export function SurveysPage() {
       ownerMemberId: lowScoreOwnerID === allLowScoreOwnersValue ? undefined : lowScoreOwnerID,
       ...lowScoreFocusFilters(lowScoreFocus),
     }),
-  )
+    refetchInterval: selectedCampaignIsNPS ? npsRunRefreshInterval : false,
+  })
 
   const campaigns = campaignsQuery.data ?? []
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === activeCampaignStatus)
+  const eventTriggeredCampaigns = campaigns.filter((campaign) => campaign.surveyType !== npsType)
+  const hostedLinkCampaigns = activeCampaigns.filter(
+    (campaign) => campaign.distributionMode === sourceLinkMode,
+  )
   const members = membersResult.data ?? []
-  const selectedCampaign = campaigns.find((campaign) => campaign.id === selectedCampaignID)
+  const selectedCampaign = selectedCampaignSnapshot
   const analytics = analyticsQuery.data
   const insights = insightsQuery.data ?? []
   const campaignHealth = healthQuery.data
   const trend = trendQuery.data ?? []
   const segments = segmentsQuery.data ?? []
   const invitations = invitationsQuery.data ?? []
+  const npsPreflight = npsPreflightQuery.data
   const responses = responsesQuery.data ?? []
   const lowScoreResponses = prioritizeLowScoreResponses(
     responses.filter((response) => response.lowScore),
@@ -257,6 +358,10 @@ export function SurveysPage() {
     if (next !== allLowScoreOwnersValue && lowScoreFocus === 'unassigned') {
       setLowScoreFocus('all')
     }
+  }
+  const selectCampaign = (campaignID: string) => {
+    setSelectedCampaignID(campaignID)
+    setSelectedNPSRunID('')
   }
   const activateInsightTarget = (target: InsightActionTarget) => {
     const targets = {
@@ -277,18 +382,20 @@ export function SurveysPage() {
   const loading =
     campaignsQuery.isPending ||
     analyticsQuery.isPending ||
+    (selectedCampaignIsNPS && npsRunsQuery.isPending) ||
     insightsQuery.isPending ||
     (healthQuery.isPending && Boolean(selectedCampaignID)) ||
-    trendQuery.isPending ||
+    (!selectedCampaignIsNPS && trendQuery.isPending) ||
     segmentsQuery.isPending ||
     invitationsQuery.isPending ||
     responsesQuery.isPending
   const loadError =
     campaignsQuery.error ??
     analyticsQuery.error ??
+    (selectedCampaignIsNPS ? npsRunsQuery.error : null) ??
     insightsQuery.error ??
     healthQuery.error ??
-    trendQuery.error ??
+    (!selectedCampaignIsNPS ? trendQuery.error : null) ??
     segmentsQuery.error ??
     invitationsQuery.error ??
     responsesQuery.error
@@ -356,7 +463,7 @@ export function SurveysPage() {
           <CampaignsCard
             campaigns={campaigns}
             selectedCampaignID={selectedCampaignID}
-            onSelect={setSelectedCampaignID}
+            onSelect={selectCampaign}
           />
           <InvitationsCard invitations={invitations} />
         </div>
@@ -366,27 +473,63 @@ export function SurveysPage() {
             campaigns={campaigns}
             selectedCampaignID={selectedCampaignID}
             selectedCampaign={selectedCampaign}
-            onSelect={setSelectedCampaignID}
+            onSelect={selectCampaign}
           />
           <CampaignHealthCard health={campaignHealth} isLoading={healthQuery.isFetching} />
+          <NpsRunCard
+            campaign={selectedCampaign}
+            deliveryBlocked={hasFailingDeliveryReadiness(campaignHealth)}
+            hasMoreRuns={npsRunsQuery.hasNextPage}
+            loadingMoreRuns={npsRunsQuery.isFetchingNextPage}
+            onLoadMoreRuns={() => void npsRunsQuery.fetchNextPage()}
+            preflight={npsPreflight}
+            preflightLoading={npsPreflightQuery.isPending}
+            runs={npsRuns}
+            selectedRunID={selectedNPSRunID}
+            onRunSelect={setSelectedNPSRunID}
+          />
           <div ref={settingsRef}>
-            <CampaignSettingsCard campaign={selectedCampaign} />
+            <CampaignSettingsCard
+              key={selectedCampaign?.id ?? 'empty'}
+              campaign={selectedCampaign}
+            />
           </div>
-          <RecipientPreviewCard campaigns={campaigns} selectedCampaignID={selectedCampaignID} />
+          {eventTriggeredCampaigns.length > 0 ? (
+            <RecipientPreviewCard
+              campaigns={eventTriggeredCampaigns}
+              selectedCampaignID={selectedCampaignID}
+            />
+          ) : null}
           <SurveyTestEmailCard campaigns={campaigns} selectedCampaignID={selectedCampaignID} />
-          <AnalyticsInsightsCard insights={insights} onActivate={activateInsightTarget} />
+          {!selectedCampaignIsNPS ? (
+            <AnalyticsInsightsCard insights={insights} onActivate={activateInsightTarget} />
+          ) : null}
           <div ref={analyticsRef}>
-            <AnalyticsCard analytics={analytics} />
-          </div>
-          <AnalyticsTrendCard buckets={trend} />
-          <div ref={segmentsRef}>
-            <AnalyticsSegmentsCard segments={segments} />
-          </div>
-          <HostedLinkCard campaigns={activeCampaigns} selectedCampaignID={selectedCampaignID} />
-          <div ref={lowScoresRef} className="space-y-6">
-            <LowScoreCommandCard analytics={analytics} members={members} />
-            <LowScoreCard
+            <AnalyticsCard
               analytics={analytics}
+              isNPS={selectedCampaignIsNPS}
+              npsMeasurementRun={npsMeasurementRun}
+            />
+          </div>
+          {!selectedCampaignIsNPS ? <AnalyticsTrendCard buckets={trend} /> : null}
+          {!selectedCampaignIsNPS ? (
+            <div ref={segmentsRef}>
+              <AnalyticsSegmentsCard segments={segments} />
+            </div>
+          ) : null}
+          {hostedLinkCampaigns.length > 0 ? (
+            <HostedLinkCard
+              campaigns={hostedLinkCampaigns}
+              selectedCampaignID={selectedCampaignID}
+            />
+          ) : null}
+          <div ref={lowScoresRef} className="space-y-6">
+            <LowScoreCommandCard
+              analytics={selectedCampaignIsNPS ? recoveryAnalyticsQuery.data : analytics}
+              members={members}
+            />
+            <LowScoreCard
+              analytics={selectedCampaignIsNPS ? recoveryAnalyticsQuery.data : analytics}
               focus={lowScoreFocus}
               accountKey={lowScoreAccountKey}
               members={members}
@@ -415,38 +558,76 @@ function CampaignCreateCard() {
     dedupePolicy: onePerResolutionDedupe,
     locale: 'zh-CN',
     samplingPercent: '100',
-    minDaysBetweenContact: '14',
+    minDaysBetweenContact: '90',
     expiresAfterDays: '14',
     maxDailyInvitations: '500',
     lowScoreThreshold: '3',
     requireRecentCustomerActivity: false,
     recentActivityDays: '30',
     suppressAutoResolved: true,
+    cohortId: '',
+    detractorOwnerMemberId: '',
+    collectionDays: '14',
+    maximumRunRecipients: '500',
+    minimumCompletedResponses: '30',
+    minimumResponseRatePercent: '10',
+    samplePlanningConfidencePercent: '95',
+    samplePlanningMarginOfErrorPercent: '10',
+    samplePlanningExpectedResponseRatePercent: '20',
+    recurrenceIntervalDays: '0',
+    recurrenceContactCooldownDays: '365',
+    recurrenceSamplingPercent: '25',
   })
+  const isNPS = form.surveyType === npsType
+  const npsAudience = useNPSAudienceOptions(isNPS)
+  const npsMeasurementConfigurationInvalid =
+    isNPS &&
+    npsMinimumResponsesExceedRecipientCap(form.maximumRunRecipients, form.minimumCompletedResponses)
 
   const update = (patch: Partial<typeof form>) => setForm((current) => ({ ...current, ...patch }))
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (npsMeasurementConfigurationInvalid) return
     createCampaign.mutate(
       {
         name: form.name.trim(),
         surveyType: form.surveyType,
         status: form.status,
-        triggerEvent: form.triggerEvent,
-        distributionMode: form.distributionMode,
-        dedupePolicy: form.dedupePolicy,
-        triggerFilter: defaultTriggerFilter(form.triggerEvent),
-        content: defaultSurveyContent(form.surveyType),
+        triggerEvent: isNPS ? scheduledRunTrigger : form.triggerEvent,
+        distributionMode: isNPS ? contactEmailMode : form.distributionMode,
+        dedupePolicy: isNPS ? onePerRunDedupe : form.dedupePolicy,
+        triggerFilter: isNPS ? {} : defaultTriggerFilter(form.triggerEvent),
+        content: defaultSurveyContent(form.surveyType, form.locale, t),
         locale: form.locale.trim() || 'zh-CN',
         samplingPercent: numberOrUndefined(form.samplingPercent),
         minDaysBetweenContact: integerOrUndefined(form.minDaysBetweenContact),
         expiresAfterDays: integerOrUndefined(form.expiresAfterDays),
-        maxDailyInvitations: integerOrUndefined(form.maxDailyInvitations),
-        lowScoreThreshold: integerOrUndefined(form.lowScoreThreshold),
+        maxDailyInvitations: isNPS ? 0 : integerOrUndefined(form.maxDailyInvitations),
+        lowScoreThreshold: isNPS ? 6 : integerOrUndefined(form.lowScoreThreshold),
         requireRecentCustomerActivity: form.requireRecentCustomerActivity,
         recentActivityDays: integerOrUndefined(form.recentActivityDays),
         suppressAutoResolved: form.suppressAutoResolved,
+        npsSettings: isNPS
+          ? {
+              cohortId: form.cohortId.trim(),
+              detractorOwnerMemberId: form.detractorOwnerMemberId.trim(),
+              collectionDays: integerOrUndefined(form.collectionDays) ?? 0,
+              maximumRunRecipients: integerOrUndefined(form.maximumRunRecipients) ?? 0,
+              minimumCompletedResponses: integerOrUndefined(form.minimumCompletedResponses) ?? 0,
+              minimumResponseRatePercent: integerOrUndefined(form.minimumResponseRatePercent) ?? 0,
+              samplePlanningConfidencePercent:
+                integerOrUndefined(form.samplePlanningConfidencePercent) ?? 95,
+              samplePlanningMarginOfErrorPercent:
+                integerOrUndefined(form.samplePlanningMarginOfErrorPercent) ?? 10,
+              samplePlanningExpectedResponseRatePercent:
+                integerOrUndefined(form.samplePlanningExpectedResponseRatePercent) ?? 20,
+              recurrenceIntervalDays: integerOrUndefined(form.recurrenceIntervalDays) ?? 0,
+              recurrenceContactCooldownDays:
+                integerOrUndefined(form.recurrenceContactCooldownDays) ?? 365,
+              recurrenceSamplingPercent: integerOrUndefined(form.recurrenceSamplingPercent) ?? 25,
+            }
+          : undefined,
       },
       {
         onSuccess: () => {
@@ -483,6 +664,7 @@ function CampaignCreateCard() {
             options={[
               [SurveyType.SURVEY_TYPE_CSAT, t('surveys.type.csat')],
               [SurveyType.SURVEY_TYPE_CES, t('surveys.type.ces')],
+              [npsType, t('surveys.type.nps')],
             ]}
           />
           <SelectField
@@ -495,105 +677,270 @@ function CampaignCreateCard() {
               [draftCampaignStatus, t('surveys.status.draft')],
             ]}
           />
-          <SelectField
-            id="survey-trigger"
-            label={t('surveys.fields.trigger')}
-            value={form.triggerEvent}
-            onValueChange={(value) => update({ triggerEvent: value as SurveyTriggerEvent })}
-            options={[
-              [workflowTrigger, t('surveys.trigger.workflow_transition')],
-              [replySentTrigger, t('surveys.trigger.reply_sent')],
-              [requestResolvedTrigger, t('surveys.trigger.request_resolved')],
-              [manualLinkTrigger, t('surveys.trigger.manual_link')],
-            ]}
-          />
-          <SelectField
-            id="survey-distribution"
-            label={t('surveys.fields.distribution')}
-            value={form.distributionMode}
-            onValueChange={(value) => update({ distributionMode: value as SurveyDistributionMode })}
-            options={[
-              [contactEmailMode, t('surveys.distribution.contact_email')],
-              [sourceLinkMode, t('surveys.distribution.source_link')],
-            ]}
-          />
-          <SelectField
-            id="survey-dedupe"
-            label={t('surveys.fields.dedupe')}
-            value={form.dedupePolicy}
-            onValueChange={(value) => update({ dedupePolicy: value as SurveyDedupePolicy })}
-            options={[
-              [onePerResolutionDedupe, t('surveys.dedupe.one_per_resolution')],
-              [onePerSourceDedupe, t('surveys.dedupe.one_per_source')],
-              [onePerTriggerDedupe, t('surveys.dedupe.one_per_trigger')],
-            ]}
-          />
+          {form.surveyType === npsType ? (
+            <>
+              <FixedTextField
+                id="survey-nps-question"
+                label={t('surveys.fields.nps_question')}
+                value={npsContentForLocale(form.locale, t).question}
+              />
+              <FixedTextField
+                id="survey-nps-distribution"
+                label={t('surveys.fields.distribution')}
+                value={t('surveys.distribution.contact_email')}
+              />
+              <SelectField
+                id="survey-nps-cohort"
+                label={t('surveys.fields.nps_cohort')}
+                value={form.cohortId}
+                onValueChange={(value) => update({ cohortId: value })}
+                options={npsCohortOptions(npsAudience.cohorts, form.cohortId)}
+                placeholder={t(
+                  npsAudience.canSelectCohort
+                    ? 'surveys.fields.nps_cohort_select'
+                    : 'surveys.fields.nps_cohort_empty',
+                )}
+                disabled={!npsAudience.canSelectCohort}
+              />
+              <SelectField
+                id="survey-nps-owner"
+                label={t('surveys.fields.nps_detractor_owner')}
+                value={form.detractorOwnerMemberId}
+                onValueChange={(value) => update({ detractorOwnerMemberId: value })}
+                options={npsDetractorOwnerOptions(npsAudience.members, form.detractorOwnerMemberId)}
+                placeholder={t(
+                  npsAudience.canSelectOwner
+                    ? 'surveys.fields.nps_detractor_owner_select'
+                    : 'surveys.fields.nps_detractor_owner_empty',
+                )}
+                disabled={!npsAudience.canSelectOwner}
+              />
+              <TextField
+                id="survey-nps-collection-days"
+                label={t('surveys.fields.nps_collection_days')}
+                value={form.collectionDays}
+                onChange={(value) => update({ collectionDays: value })}
+                type="number"
+              />
+              <SelectField
+                id="survey-nps-recurrence"
+                label={t('surveys.fields.nps_recurrence')}
+                value={form.recurrenceIntervalDays}
+                onValueChange={(value) => update({ recurrenceIntervalDays: value })}
+                options={npsRecurrenceOptions(t)}
+              />
+              <SelectField
+                id="survey-nps-recurrence-contact-cooldown"
+                label={t('surveys.fields.nps_recurrence_contact_cooldown')}
+                value={form.recurrenceContactCooldownDays}
+                onValueChange={(value) => update({ recurrenceContactCooldownDays: value })}
+                options={npsRecurrenceContactCooldownOptions(t)}
+              />
+              <SelectField
+                id="survey-nps-recurrence-sampling"
+                label={t('surveys.fields.nps_recurrence_sampling')}
+                value={form.recurrenceSamplingPercent}
+                onValueChange={(value) => update({ recurrenceSamplingPercent: value })}
+                options={npsRecurrenceSamplingOptions(t)}
+              />
+              <TextField
+                id="survey-nps-recipient-cap"
+                label={t('surveys.fields.nps_recipient_cap')}
+                value={form.maximumRunRecipients}
+                onChange={(value) => update({ maximumRunRecipients: value })}
+                type="number"
+                min={1}
+                invalid={npsMeasurementConfigurationInvalid}
+                describedBy={
+                  npsMeasurementConfigurationInvalid
+                    ? 'survey-nps-measurement-validation'
+                    : undefined
+                }
+              />
+              <TextField
+                id="survey-nps-minimum-completed-responses"
+                label={t('surveys.fields.nps_minimum_completed_responses')}
+                value={form.minimumCompletedResponses}
+                onChange={(value) => update({ minimumCompletedResponses: value })}
+                type="number"
+                min={1}
+                max={integerOrUndefined(form.maximumRunRecipients)}
+                invalid={npsMeasurementConfigurationInvalid}
+                describedBy={
+                  npsMeasurementConfigurationInvalid
+                    ? 'survey-nps-measurement-validation'
+                    : undefined
+                }
+              />
+              {npsMeasurementConfigurationInvalid ? (
+                <p
+                  id="survey-nps-measurement-validation"
+                  className="text-sm text-destructive md:col-span-2"
+                  role="alert"
+                  data-testid="survey-nps-measurement-validation"
+                >
+                  {t('surveys.validation.nps_minimum_completed_exceeds_recipient_cap')}
+                </p>
+              ) : null}
+              <TextField
+                id="survey-nps-minimum-response-rate"
+                label={t('surveys.fields.nps_minimum_response_rate')}
+                value={form.minimumResponseRatePercent}
+                onChange={(value) => update({ minimumResponseRatePercent: value })}
+                type="number"
+              />
+              <SelectField
+                id="survey-nps-sample-planning-confidence"
+                label={t('surveys.fields.nps_sample_planning_confidence')}
+                value={form.samplePlanningConfidencePercent}
+                onValueChange={(value) => update({ samplePlanningConfidencePercent: value })}
+                options={[
+                  ['90', t('surveys.nps_sample_planning.confidence_90')],
+                  ['95', t('surveys.nps_sample_planning.confidence_95')],
+                  ['99', t('surveys.nps_sample_planning.confidence_99')],
+                ]}
+              />
+              <TextField
+                id="survey-nps-sample-planning-margin-of-error"
+                label={t('surveys.fields.nps_sample_planning_margin_of_error')}
+                value={form.samplePlanningMarginOfErrorPercent}
+                onChange={(value) => update({ samplePlanningMarginOfErrorPercent: value })}
+                type="number"
+                min={1}
+                max={25}
+              />
+              <TextField
+                id="survey-nps-sample-planning-response-rate"
+                label={t('surveys.fields.nps_sample_planning_expected_response_rate')}
+                value={form.samplePlanningExpectedResponseRatePercent}
+                onChange={(value) => update({ samplePlanningExpectedResponseRatePercent: value })}
+                type="number"
+                min={1}
+                max={100}
+              />
+              <TextField
+                id="survey-nps-contact-cooldown"
+                label={t('surveys.fields.nps_contact_cooldown')}
+                value={form.minDaysBetweenContact}
+                onChange={(value) => update({ minDaysBetweenContact: value })}
+                type="number"
+              />
+            </>
+          ) : (
+            <>
+              <SelectField
+                id="survey-trigger"
+                label={t('surveys.fields.trigger')}
+                value={form.triggerEvent}
+                onValueChange={(value) => update({ triggerEvent: value as SurveyTriggerEvent })}
+                options={[
+                  [workflowTrigger, t('surveys.trigger.workflow_transition')],
+                  [replySentTrigger, t('surveys.trigger.reply_sent')],
+                  [requestResolvedTrigger, t('surveys.trigger.request_resolved')],
+                  [manualLinkTrigger, t('surveys.trigger.manual_link')],
+                ]}
+              />
+              <SelectField
+                id="survey-distribution"
+                label={t('surveys.fields.distribution')}
+                value={form.distributionMode}
+                onValueChange={(value) =>
+                  update({ distributionMode: value as SurveyDistributionMode })
+                }
+                options={[
+                  [contactEmailMode, t('surveys.distribution.contact_email')],
+                  [sourceLinkMode, t('surveys.distribution.source_link')],
+                ]}
+              />
+              <SelectField
+                id="survey-dedupe"
+                label={t('surveys.fields.dedupe')}
+                value={form.dedupePolicy}
+                onValueChange={(value) => update({ dedupePolicy: value as SurveyDedupePolicy })}
+                options={[
+                  [onePerResolutionDedupe, t('surveys.dedupe.one_per_resolution')],
+                  [onePerSourceDedupe, t('surveys.dedupe.one_per_source')],
+                  [onePerTriggerDedupe, t('surveys.dedupe.one_per_trigger')],
+                ]}
+              />
+            </>
+          )}
           <TextField
             id="survey-locale"
             label={t('surveys.fields.locale')}
             value={form.locale}
             onChange={(value) => update({ locale: value })}
           />
-          <TextField
-            id="survey-sampling"
-            label={t('surveys.fields.sampling')}
-            value={form.samplingPercent}
-            onChange={(value) => update({ samplingPercent: value })}
-            type="number"
-          />
-          <TextField
-            id="survey-cooldown"
-            label={t('surveys.fields.cooldown')}
-            value={form.minDaysBetweenContact}
-            onChange={(value) => update({ minDaysBetweenContact: value })}
-            type="number"
-          />
-          <TextField
-            id="survey-expiry"
-            label={t('surveys.fields.expiry')}
-            value={form.expiresAfterDays}
-            onChange={(value) => update({ expiresAfterDays: value })}
-            type="number"
-          />
-          <TextField
-            id="survey-daily-limit"
-            label={t('surveys.fields.daily_limit')}
-            value={form.maxDailyInvitations}
-            onChange={(value) => update({ maxDailyInvitations: value })}
-            type="number"
-          />
-          <TextField
-            id="survey-low-score"
-            label={t('surveys.fields.low_score')}
-            value={form.lowScoreThreshold}
-            onChange={(value) => update({ lowScoreThreshold: value })}
-            type="number"
-          />
-          <TextField
-            id="survey-recent-days"
-            label={t('surveys.fields.recent_days')}
-            value={form.recentActivityDays}
-            onChange={(value) => update({ recentActivityDays: value })}
-            type="number"
-          />
-          <div className="flex flex-col gap-3 md:col-span-2">
-            <CheckboxRow
-              id="survey-recent-required"
-              checked={form.requireRecentCustomerActivity}
-              label={t('surveys.fields.require_recent')}
-              onCheckedChange={(checked) => update({ requireRecentCustomerActivity: checked })}
-            />
-            <CheckboxRow
-              id="survey-suppress-auto"
-              checked={form.suppressAutoResolved}
-              label={t('surveys.fields.suppress_auto')}
-              onCheckedChange={(checked) => update({ suppressAutoResolved: checked })}
-            />
-          </div>
+          {form.surveyType !== npsType ? (
+            <>
+              <TextField
+                id="survey-sampling"
+                label={t('surveys.fields.sampling')}
+                value={form.samplingPercent}
+                onChange={(value) => update({ samplingPercent: value })}
+                type="number"
+              />
+              <TextField
+                id="survey-cooldown"
+                label={t('surveys.fields.cooldown')}
+                value={form.minDaysBetweenContact}
+                onChange={(value) => update({ minDaysBetweenContact: value })}
+                type="number"
+              />
+              <TextField
+                id="survey-expiry"
+                label={t('surveys.fields.expiry')}
+                value={form.expiresAfterDays}
+                onChange={(value) => update({ expiresAfterDays: value })}
+                type="number"
+              />
+              <TextField
+                id="survey-daily-limit"
+                label={t('surveys.fields.daily_limit')}
+                value={form.maxDailyInvitations}
+                onChange={(value) => update({ maxDailyInvitations: value })}
+                type="number"
+              />
+              <TextField
+                id="survey-low-score"
+                label={t('surveys.fields.low_score')}
+                value={form.lowScoreThreshold}
+                onChange={(value) => update({ lowScoreThreshold: value })}
+                type="number"
+              />
+              <TextField
+                id="survey-recent-days"
+                label={t('surveys.fields.recent_days')}
+                value={form.recentActivityDays}
+                onChange={(value) => update({ recentActivityDays: value })}
+                type="number"
+              />
+              <div className="flex flex-col gap-3 md:col-span-2">
+                <CheckboxRow
+                  id="survey-recent-required"
+                  checked={form.requireRecentCustomerActivity}
+                  label={t('surveys.fields.require_recent')}
+                  onCheckedChange={(checked) => update({ requireRecentCustomerActivity: checked })}
+                />
+                <CheckboxRow
+                  id="survey-suppress-auto"
+                  checked={form.suppressAutoResolved}
+                  label={t('surveys.fields.suppress_auto')}
+                  onCheckedChange={(checked) => update({ suppressAutoResolved: checked })}
+                />
+              </div>
+            </>
+          ) : null}
           <div className="flex justify-end md:col-span-2">
             <Button
               type="submit"
-              disabled={!form.name.trim() || createCampaign.isPending}
+              disabled={
+                !form.name.trim() ||
+                createCampaign.isPending ||
+                npsMeasurementConfigurationInvalid ||
+                (form.surveyType === npsType &&
+                  (!form.cohortId.trim() || !form.detractorOwnerMemberId.trim()))
+              }
               data-testid="survey-create"
             >
               {createCampaign.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -749,6 +1096,11 @@ function CampaignSettingsCard({ campaign }: { campaign?: SurveyCampaign }) {
   const { t } = useTranslation()
   const updateCampaign = useUpdateSurveyCampaign()
   const [form, setForm] = useState(() => campaignSettingsForm(campaign))
+  const isNPS = campaign?.surveyType === npsType
+  const npsAudience = useNPSAudienceOptions(isNPS)
+  const npsMeasurementConfigurationInvalid =
+    isNPS &&
+    npsMinimumResponsesExceedRecipientCap(form.maximumRunRecipients, form.minimumCompletedResponses)
 
   useEffect(() => {
     setForm(campaignSettingsForm(campaign))
@@ -760,27 +1112,48 @@ function CampaignSettingsCard({ campaign }: { campaign?: SurveyCampaign }) {
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!campaign) return
+    if (npsMeasurementConfigurationInvalid) return
     updateCampaign.mutate(
       {
         id: campaign.id,
         name: form.name.trim(),
         status: form.status,
-        triggerEvent: form.triggerEvent,
-        distributionMode: form.distributionMode,
-        dedupePolicy: form.dedupePolicy,
+        triggerEvent: isNPS ? scheduledRunTrigger : form.triggerEvent,
+        distributionMode: isNPS ? contactEmailMode : form.distributionMode,
+        dedupePolicy: isNPS ? onePerRunDedupe : form.dedupePolicy,
         triggerFilter:
-          campaign.triggerEvent === form.triggerEvent
+          !isNPS && campaign.triggerEvent === form.triggerEvent
             ? campaign.triggerFilter
             : defaultTriggerFilter(form.triggerEvent),
         locale: form.locale.trim() || campaign.locale || 'zh-CN',
-        samplingPercent: numberOrUndefined(form.samplingPercent),
+        samplingPercent: isNPS ? 100 : numberOrUndefined(form.samplingPercent),
         minDaysBetweenContact: integerOrUndefined(form.minDaysBetweenContact),
-        expiresAfterDays: integerOrUndefined(form.expiresAfterDays),
-        maxDailyInvitations: integerOrUndefined(form.maxDailyInvitations),
-        lowScoreThreshold: integerOrUndefined(form.lowScoreThreshold),
-        requireRecentCustomerActivity: form.requireRecentCustomerActivity,
-        recentActivityDays: integerOrUndefined(form.recentActivityDays),
-        suppressAutoResolved: form.suppressAutoResolved,
+        expiresAfterDays: isNPS ? 14 : integerOrUndefined(form.expiresAfterDays),
+        maxDailyInvitations: isNPS ? 0 : integerOrUndefined(form.maxDailyInvitations),
+        lowScoreThreshold: isNPS ? 6 : integerOrUndefined(form.lowScoreThreshold),
+        requireRecentCustomerActivity: isNPS ? false : form.requireRecentCustomerActivity,
+        recentActivityDays: isNPS ? 0 : integerOrUndefined(form.recentActivityDays),
+        suppressAutoResolved: isNPS ? false : form.suppressAutoResolved,
+        npsSettings: isNPS
+          ? {
+              cohortId: form.cohortId.trim(),
+              detractorOwnerMemberId: form.detractorOwnerMemberId.trim(),
+              collectionDays: integerOrUndefined(form.collectionDays) ?? 0,
+              maximumRunRecipients: integerOrUndefined(form.maximumRunRecipients) ?? 0,
+              minimumCompletedResponses: integerOrUndefined(form.minimumCompletedResponses) ?? 0,
+              minimumResponseRatePercent: integerOrUndefined(form.minimumResponseRatePercent) ?? 0,
+              samplePlanningConfidencePercent:
+                integerOrUndefined(form.samplePlanningConfidencePercent) ?? 95,
+              samplePlanningMarginOfErrorPercent:
+                integerOrUndefined(form.samplePlanningMarginOfErrorPercent) ?? 10,
+              samplePlanningExpectedResponseRatePercent:
+                integerOrUndefined(form.samplePlanningExpectedResponseRatePercent) ?? 20,
+              recurrenceIntervalDays: integerOrUndefined(form.recurrenceIntervalDays) ?? 0,
+              recurrenceContactCooldownDays:
+                integerOrUndefined(form.recurrenceContactCooldownDays) ?? 365,
+              recurrenceSamplingPercent: integerOrUndefined(form.recurrenceSamplingPercent) ?? 25,
+            }
+          : undefined,
       },
       {
         onSuccess: () => toast.success(t('surveys.toasts.campaign_updated')),
@@ -815,6 +1188,170 @@ function CampaignSettingsCard({ campaign }: { campaign?: SurveyCampaign }) {
                 disabled={disabled}
               />
             </div>
+            {campaign.surveyType === npsType ? (
+              <>
+                <FixedTextField
+                  id="survey-settings-nps-question"
+                  label={t('surveys.fields.nps_question')}
+                  value={npsQuestion(campaign.content, campaign.locale, t)}
+                />
+                <FixedTextField
+                  id="survey-settings-nps-distribution"
+                  label={t('surveys.fields.distribution')}
+                  value={t('surveys.distribution.contact_email')}
+                />
+                <SelectField
+                  id="survey-settings-nps-cohort"
+                  label={t('surveys.fields.nps_cohort')}
+                  value={form.cohortId}
+                  onValueChange={(value) => update({ cohortId: value })}
+                  options={npsCohortOptions(npsAudience.cohorts, form.cohortId)}
+                  placeholder={t(
+                    npsAudience.canSelectCohort
+                      ? 'surveys.fields.nps_cohort_select'
+                      : 'surveys.fields.nps_cohort_empty',
+                  )}
+                  disabled={disabled || !npsAudience.canSelectCohort}
+                />
+                <SelectField
+                  id="survey-settings-nps-owner"
+                  label={t('surveys.fields.nps_detractor_owner')}
+                  value={form.detractorOwnerMemberId}
+                  onValueChange={(value) => update({ detractorOwnerMemberId: value })}
+                  options={npsDetractorOwnerOptions(
+                    npsAudience.members,
+                    form.detractorOwnerMemberId,
+                  )}
+                  placeholder={t(
+                    npsAudience.canSelectOwner
+                      ? 'surveys.fields.nps_detractor_owner_select'
+                      : 'surveys.fields.nps_detractor_owner_empty',
+                  )}
+                  disabled={disabled || !npsAudience.canSelectOwner}
+                />
+                <TextField
+                  id="survey-settings-nps-collection-days"
+                  label={t('surveys.fields.nps_collection_days')}
+                  value={form.collectionDays}
+                  onChange={(value) => update({ collectionDays: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <SelectField
+                  id="survey-settings-nps-recurrence"
+                  label={t('surveys.fields.nps_recurrence')}
+                  value={form.recurrenceIntervalDays}
+                  onValueChange={(value) => update({ recurrenceIntervalDays: value })}
+                  options={npsRecurrenceOptions(t)}
+                  disabled={disabled}
+                />
+                <SelectField
+                  id="survey-settings-nps-recurrence-contact-cooldown"
+                  label={t('surveys.fields.nps_recurrence_contact_cooldown')}
+                  value={form.recurrenceContactCooldownDays}
+                  onValueChange={(value) => update({ recurrenceContactCooldownDays: value })}
+                  options={npsRecurrenceContactCooldownOptions(t)}
+                  disabled={disabled}
+                />
+                <SelectField
+                  id="survey-settings-nps-recurrence-sampling"
+                  label={t('surveys.fields.nps_recurrence_sampling')}
+                  value={form.recurrenceSamplingPercent}
+                  onValueChange={(value) => update({ recurrenceSamplingPercent: value })}
+                  options={npsRecurrenceSamplingOptions(t)}
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-nps-recipient-cap"
+                  label={t('surveys.fields.nps_recipient_cap')}
+                  value={form.maximumRunRecipients}
+                  onChange={(value) => update({ maximumRunRecipients: value })}
+                  type="number"
+                  min={1}
+                  invalid={npsMeasurementConfigurationInvalid}
+                  describedBy={
+                    npsMeasurementConfigurationInvalid
+                      ? 'survey-settings-nps-measurement-validation'
+                      : undefined
+                  }
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-nps-minimum-completed-responses"
+                  label={t('surveys.fields.nps_minimum_completed_responses')}
+                  value={form.minimumCompletedResponses}
+                  onChange={(value) => update({ minimumCompletedResponses: value })}
+                  type="number"
+                  min={1}
+                  max={integerOrUndefined(form.maximumRunRecipients)}
+                  invalid={npsMeasurementConfigurationInvalid}
+                  describedBy={
+                    npsMeasurementConfigurationInvalid
+                      ? 'survey-settings-nps-measurement-validation'
+                      : undefined
+                  }
+                  disabled={disabled}
+                />
+                {npsMeasurementConfigurationInvalid ? (
+                  <p
+                    id="survey-settings-nps-measurement-validation"
+                    className="text-sm text-destructive sm:col-span-2"
+                    role="alert"
+                    data-testid="survey-settings-nps-measurement-validation"
+                  >
+                    {t('surveys.validation.nps_minimum_completed_exceeds_recipient_cap')}
+                  </p>
+                ) : null}
+                <TextField
+                  id="survey-settings-nps-minimum-response-rate"
+                  label={t('surveys.fields.nps_minimum_response_rate')}
+                  value={form.minimumResponseRatePercent}
+                  onChange={(value) => update({ minimumResponseRatePercent: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <SelectField
+                  id="survey-settings-nps-sample-planning-confidence"
+                  label={t('surveys.fields.nps_sample_planning_confidence')}
+                  value={form.samplePlanningConfidencePercent}
+                  onValueChange={(value) => update({ samplePlanningConfidencePercent: value })}
+                  options={[
+                    ['90', t('surveys.nps_sample_planning.confidence_90')],
+                    ['95', t('surveys.nps_sample_planning.confidence_95')],
+                    ['99', t('surveys.nps_sample_planning.confidence_99')],
+                  ]}
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-nps-sample-planning-margin-of-error"
+                  label={t('surveys.fields.nps_sample_planning_margin_of_error')}
+                  value={form.samplePlanningMarginOfErrorPercent}
+                  onChange={(value) => update({ samplePlanningMarginOfErrorPercent: value })}
+                  type="number"
+                  min={1}
+                  max={25}
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-nps-sample-planning-response-rate"
+                  label={t('surveys.fields.nps_sample_planning_expected_response_rate')}
+                  value={form.samplePlanningExpectedResponseRatePercent}
+                  onChange={(value) => update({ samplePlanningExpectedResponseRatePercent: value })}
+                  type="number"
+                  min={1}
+                  max={100}
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-nps-contact-cooldown"
+                  label={t('surveys.fields.nps_contact_cooldown')}
+                  value={form.minDaysBetweenContact}
+                  onChange={(value) => update({ minDaysBetweenContact: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+              </>
+            ) : null}
             <SelectField
               id="survey-settings-status"
               label={t('surveys.fields.status')}
@@ -826,44 +1363,48 @@ function CampaignSettingsCard({ campaign }: { campaign?: SurveyCampaign }) {
               ]}
               disabled={disabled}
             />
-            <SelectField
-              id="survey-settings-trigger"
-              label={t('surveys.fields.trigger')}
-              value={form.triggerEvent}
-              onValueChange={(value) => update({ triggerEvent: value as SurveyTriggerEvent })}
-              options={[
-                [workflowTrigger, t('surveys.trigger.workflow_transition')],
-                [replySentTrigger, t('surveys.trigger.reply_sent')],
-                [requestResolvedTrigger, t('surveys.trigger.request_resolved')],
-                [manualLinkTrigger, t('surveys.trigger.manual_link')],
-              ]}
-              disabled={disabled}
-            />
-            <SelectField
-              id="survey-settings-distribution"
-              label={t('surveys.fields.distribution')}
-              value={form.distributionMode}
-              onValueChange={(value) =>
-                update({ distributionMode: value as SurveyDistributionMode })
-              }
-              options={[
-                [contactEmailMode, t('surveys.distribution.contact_email')],
-                [sourceLinkMode, t('surveys.distribution.source_link')],
-              ]}
-              disabled={disabled}
-            />
-            <SelectField
-              id="survey-settings-dedupe"
-              label={t('surveys.fields.dedupe')}
-              value={form.dedupePolicy}
-              onValueChange={(value) => update({ dedupePolicy: value as SurveyDedupePolicy })}
-              options={[
-                [onePerResolutionDedupe, t('surveys.dedupe.one_per_resolution')],
-                [onePerSourceDedupe, t('surveys.dedupe.one_per_source')],
-                [onePerTriggerDedupe, t('surveys.dedupe.one_per_trigger')],
-              ]}
-              disabled={disabled}
-            />
+            {!isNPS ? (
+              <>
+                <SelectField
+                  id="survey-settings-trigger"
+                  label={t('surveys.fields.trigger')}
+                  value={form.triggerEvent}
+                  onValueChange={(value) => update({ triggerEvent: value as SurveyTriggerEvent })}
+                  options={[
+                    [workflowTrigger, t('surveys.trigger.workflow_transition')],
+                    [replySentTrigger, t('surveys.trigger.reply_sent')],
+                    [requestResolvedTrigger, t('surveys.trigger.request_resolved')],
+                    [manualLinkTrigger, t('surveys.trigger.manual_link')],
+                  ]}
+                  disabled={disabled}
+                />
+                <SelectField
+                  id="survey-settings-distribution"
+                  label={t('surveys.fields.distribution')}
+                  value={form.distributionMode}
+                  onValueChange={(value) =>
+                    update({ distributionMode: value as SurveyDistributionMode })
+                  }
+                  options={[
+                    [contactEmailMode, t('surveys.distribution.contact_email')],
+                    [sourceLinkMode, t('surveys.distribution.source_link')],
+                  ]}
+                  disabled={disabled}
+                />
+                <SelectField
+                  id="survey-settings-dedupe"
+                  label={t('surveys.fields.dedupe')}
+                  value={form.dedupePolicy}
+                  onValueChange={(value) => update({ dedupePolicy: value as SurveyDedupePolicy })}
+                  options={[
+                    [onePerResolutionDedupe, t('surveys.dedupe.one_per_resolution')],
+                    [onePerSourceDedupe, t('surveys.dedupe.one_per_source')],
+                    [onePerTriggerDedupe, t('surveys.dedupe.one_per_trigger')],
+                  ]}
+                  disabled={disabled}
+                />
+              </>
+            ) : null}
             <TextField
               id="survey-settings-locale"
               label={t('surveys.fields.locale')}
@@ -871,74 +1412,80 @@ function CampaignSettingsCard({ campaign }: { campaign?: SurveyCampaign }) {
               onChange={(value) => update({ locale: value })}
               disabled={disabled}
             />
-            <TextField
-              id="survey-settings-sampling"
-              label={t('surveys.fields.sampling')}
-              value={form.samplingPercent}
-              onChange={(value) => update({ samplingPercent: value })}
-              type="number"
-              disabled={disabled}
-            />
-            <TextField
-              id="survey-settings-cooldown"
-              label={t('surveys.fields.cooldown')}
-              value={form.minDaysBetweenContact}
-              onChange={(value) => update({ minDaysBetweenContact: value })}
-              type="number"
-              disabled={disabled}
-            />
-            <TextField
-              id="survey-settings-expiry"
-              label={t('surveys.fields.expiry')}
-              value={form.expiresAfterDays}
-              onChange={(value) => update({ expiresAfterDays: value })}
-              type="number"
-              disabled={disabled}
-            />
-            <TextField
-              id="survey-settings-daily-limit"
-              label={t('surveys.fields.daily_limit')}
-              value={form.maxDailyInvitations}
-              onChange={(value) => update({ maxDailyInvitations: value })}
-              type="number"
-              disabled={disabled}
-            />
-            <TextField
-              id="survey-settings-low-score"
-              label={t('surveys.fields.low_score')}
-              value={form.lowScoreThreshold}
-              onChange={(value) => update({ lowScoreThreshold: value })}
-              type="number"
-              disabled={disabled}
-            />
-            <TextField
-              id="survey-settings-recent-days"
-              label={t('surveys.fields.recent_days')}
-              value={form.recentActivityDays}
-              onChange={(value) => update({ recentActivityDays: value })}
-              type="number"
-              disabled={disabled}
-            />
-            <div className="flex flex-col gap-3 sm:col-span-2">
-              <CheckboxRow
-                id="survey-settings-recent-required"
-                checked={form.requireRecentCustomerActivity}
-                label={t('surveys.fields.require_recent')}
-                onCheckedChange={(checked) => update({ requireRecentCustomerActivity: checked })}
-                disabled={disabled}
-              />
-              <CheckboxRow
-                id="survey-settings-suppress-auto"
-                checked={form.suppressAutoResolved}
-                label={t('surveys.fields.suppress_auto')}
-                onCheckedChange={(checked) => update({ suppressAutoResolved: checked })}
-                disabled={disabled}
-              />
-            </div>
+            {!isNPS ? (
+              <>
+                <TextField
+                  id="survey-settings-sampling"
+                  label={t('surveys.fields.sampling')}
+                  value={form.samplingPercent}
+                  onChange={(value) => update({ samplingPercent: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-cooldown"
+                  label={t('surveys.fields.cooldown')}
+                  value={form.minDaysBetweenContact}
+                  onChange={(value) => update({ minDaysBetweenContact: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-expiry"
+                  label={t('surveys.fields.expiry')}
+                  value={form.expiresAfterDays}
+                  onChange={(value) => update({ expiresAfterDays: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-daily-limit"
+                  label={t('surveys.fields.daily_limit')}
+                  value={form.maxDailyInvitations}
+                  onChange={(value) => update({ maxDailyInvitations: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-low-score"
+                  label={t('surveys.fields.low_score')}
+                  value={form.lowScoreThreshold}
+                  onChange={(value) => update({ lowScoreThreshold: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <TextField
+                  id="survey-settings-recent-days"
+                  label={t('surveys.fields.recent_days')}
+                  value={form.recentActivityDays}
+                  onChange={(value) => update({ recentActivityDays: value })}
+                  type="number"
+                  disabled={disabled}
+                />
+                <div className="flex flex-col gap-3 sm:col-span-2">
+                  <CheckboxRow
+                    id="survey-settings-recent-required"
+                    checked={form.requireRecentCustomerActivity}
+                    label={t('surveys.fields.require_recent')}
+                    onCheckedChange={(checked) =>
+                      update({ requireRecentCustomerActivity: checked })
+                    }
+                    disabled={disabled}
+                  />
+                  <CheckboxRow
+                    id="survey-settings-suppress-auto"
+                    checked={form.suppressAutoResolved}
+                    label={t('surveys.fields.suppress_auto')}
+                    onCheckedChange={(checked) => update({ suppressAutoResolved: checked })}
+                    disabled={disabled}
+                  />
+                </div>
+              </>
+            ) : null}
             <div className="flex justify-end sm:col-span-2">
               <Button
                 type="submit"
-                disabled={disabled || !form.name.trim()}
+                disabled={disabled || !form.name.trim() || npsMeasurementConfigurationInvalid}
                 data-testid="survey-settings-save"
               >
                 {updateCampaign.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -1307,6 +1854,16 @@ function CampaignHealthCard({
                 value={formatPercent(funnel?.deliveryRate)}
               />
               <MetricBox
+                label={t('surveys.health.page_visit_rate')}
+                testId="survey-campaign-health-visit-rate"
+                value={formatPercent(funnel?.startRate)}
+              />
+              <MetricBox
+                label={t('surveys.health.page_visit_completion_rate')}
+                testId="survey-campaign-health-completion-rate"
+                value={formatPercent(funnel?.completionRate)}
+              />
+              <MetricBox
                 label={t('surveys.health.response_rate')}
                 value={formatPercent(funnel?.responseRate)}
               />
@@ -1360,6 +1917,1061 @@ function CampaignHealthCard({
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function NpsRunCard({
+  campaign,
+  deliveryBlocked,
+  hasMoreRuns,
+  loadingMoreRuns,
+  onLoadMoreRuns,
+  onRunSelect,
+  preflight,
+  preflightLoading,
+  runs,
+  selectedRunID,
+}: {
+  campaign?: SurveyCampaign
+  deliveryBlocked: boolean
+  hasMoreRuns: boolean
+  loadingMoreRuns: boolean
+  onLoadMoreRuns: () => void
+  onRunSelect: (runID: string) => void
+  preflight?: NpsCampaignPreflight
+  preflightLoading: boolean
+  runs: NpsCampaignRun[]
+  selectedRunID: string
+}) {
+  const { t, i18n } = useTranslation()
+  const cancelRun = useCancelNpsCampaignRun()
+  const scheduleRun = useScheduleNpsCampaignRun()
+  const createEvidenceExport = useCreateNpsCampaignRunEvidenceExport()
+  const [runToCancel, setRunToCancel] = useState<NpsCampaignRun>()
+  const [scheduledAt, setScheduledAt] = useState('')
+  const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  const scheduledAtUTC = scheduledAt ? dateTimeLocalToRFC3339(scheduledAt) : ''
+  const hasOpenRun = runs.some(
+    (run) =>
+      run.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_SCHEDULED ||
+      run.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_EVALUATING ||
+      run.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING,
+  )
+  const schedulingDisabled =
+    campaign?.status !== activeCampaignStatus ||
+    deliveryBlocked ||
+    preflightLoading ||
+    !preflight?.deliveryReady ||
+    hasOpenRun ||
+    scheduleRun.isPending
+  const evidenceRun = npsAnalyticsRun(runs, selectedRunID)
+  const evidenceExportsQuery = useQuery(
+    npsCampaignRunEvidenceExportsQuery(campaign?.id, evidenceRun?.id),
+  )
+
+  if (campaign?.surveyType !== npsType) return null
+
+  const schedule = () => {
+    scheduleRun.mutate(
+      {
+        campaignId: campaign.id,
+        clientRequestKey: crypto.randomUUID(),
+        scheduledAt: scheduledAt ? dateTimeLocalToRFC3339(scheduledAt) : undefined,
+      },
+      {
+        onSuccess: (run) => {
+          onRunSelect(run.id)
+          toast.success(t('surveys.nps_runs.scheduled'))
+        },
+        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+      },
+    )
+  }
+
+  const cancel = () => {
+    if (!campaign || !runToCancel) return
+    cancelRun.mutate(
+      { campaignId: campaign.id, runId: runToCancel.id },
+      {
+        onSuccess: (run) => {
+          setRunToCancel(undefined)
+          onRunSelect(run.id)
+          toast.success(t('surveys.nps_runs.cancelled'))
+        },
+        onError: (err) => toast.error(err instanceof Error ? err.message : t('common.error')),
+      },
+    )
+  }
+
+  const exportEvidence = async () => {
+    if (!campaign || !evidenceRun || createEvidenceExport.isPending) return
+    try {
+      const item = await createEvidenceExport.mutateAsync({
+        campaignId: campaign.id,
+        runId: evidenceRun.id,
+        clientRequestKey: crypto.randomUUID(),
+      })
+      await downloadNpsCampaignRunEvidenceExport(item.downloadPath)
+      toast.success(t('surveys.nps_runs.exported'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.error'))
+    }
+  }
+
+  return (
+    <Card className="border-border/60 shadow-none" data-testid="nps-campaign-runs">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CalendarClock className="h-4 w-4" />
+              {t('surveys.nps_runs.title')}
+            </CardTitle>
+            <CardDescription>{t('surveys.nps_runs.description')}</CardDescription>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            onClick={schedule}
+            disabled={schedulingDisabled}
+            data-testid="nps-schedule-run"
+          >
+            {scheduleRun.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CalendarClock />
+            )}
+            {t('surveys.nps_runs.schedule')}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <NpsLaunchPreflight preflight={preflight} loading={preflightLoading} />
+        <div className="space-y-1">
+          <TextField
+            describedBy="nps-schedule-time-zone"
+            id="nps-schedule-at"
+            label={t('surveys.nps_runs.schedule_at')}
+            value={scheduledAt}
+            onChange={setScheduledAt}
+            type="datetime-local"
+            disabled={schedulingDisabled}
+          />
+          <p
+            id="nps-schedule-time-zone"
+            className="text-xs text-muted-foreground"
+            data-testid="nps-schedule-time-zone"
+          >
+            {t('surveys.nps_runs.time_zone_notice', { timeZone: browserTimeZone })}
+          </p>
+          {scheduledAtUTC.endsWith('Z') ? (
+            <p className="text-xs text-muted-foreground" data-testid="nps-schedule-utc-preview">
+              {t('surveys.nps_runs.schedule_utc_preview', { time: scheduledAtUTC })}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={selectedRunID || defaultNPSMeasurementValue}
+            onValueChange={(value) =>
+              onRunSelect(value === defaultNPSMeasurementValue ? '' : value)
+            }
+          >
+            <SelectTrigger aria-label={t('surveys.nps_runs.filter_label')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={defaultNPSMeasurementValue}>
+                {npsMeasurementScopeLabel(t, npsAnalyticsRun(runs, ''))}
+              </SelectItem>
+              {runs.map((run) => (
+                <SelectItem key={run.id} value={run.id}>
+                  {t('surveys.nps_runs.run', { sequence: run.sequence })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {campaign && evidenceRun ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-testid="nps-export-evidence"
+              onClick={exportEvidence}
+              disabled={createEvidenceExport.isPending}
+            >
+              {createEvidenceExport.isPending ? <Loader2 className="animate-spin" /> : <Download />}
+              {t('surveys.nps_runs.export_evidence')}
+            </Button>
+          ) : null}
+        </div>
+        {evidenceRun ? (
+          <NpsEvidenceExportHistory exports={evidenceExportsQuery.data ?? []} />
+        ) : null}
+        {runs.length === 0 ? (
+          <EmptyState>{t('surveys.nps_runs.empty')}</EmptyState>
+        ) : (
+          <>
+            <NpsRunMeasurementTrend runs={runs} />
+            <ul className="space-y-2" aria-label={t('surveys.nps_runs.title')}>
+              {runs.map((run) => (
+                <li key={run.id} className="rounded-md border border-border/60 px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-medium">
+                      {t('surveys.nps_runs.run', { sequence: run.sequence })}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <StatusBadge>{npsRunStatusLabel(t, run.status)}</StatusBadge>
+                      {canCancelNpsRun(run.status) ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setRunToCancel(run)}
+                          disabled={cancelRun.isPending}
+                          data-testid={`nps-cancel-run-${run.id}`}
+                        >
+                          <XCircle />
+                          {t('surveys.nps_runs.cancel')}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatTimestamp(run.scheduledAt, i18n.language, { year: 'numeric' })}
+                  </p>
+                  {run.cancelledAt ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t('surveys.nps_runs.cancelled_at', {
+                        time: formatTimestamp(run.cancelledAt, i18n.language, { year: 'numeric' }),
+                      })}
+                    </p>
+                  ) : null}
+                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <MetricBox label={t('surveys.nps_runs.evaluated')} value={run.evaluatedCount} />
+                    <MetricBox label={t('surveys.nps_runs.eligible')} value={run.eligibleCount} />
+                    <MetricBox
+                      label={t('surveys.nps_runs.invitations')}
+                      value={run.invitationCount}
+                    />
+                    <MetricBox
+                      label={t('surveys.analytics.delivered')}
+                      value={run.deliveredCount}
+                    />
+                    <MetricBox label={t('surveys.nps_runs.started')} value={run.startedCount} />
+                    <MetricBox
+                      label={t('surveys.analytics.completed')}
+                      value={run.completedCount}
+                    />
+                    <MetricBox
+                      label={t('surveys.nps_runs.hosted_visit_rate')}
+                      value={formatPercent(run.hostedVisitRate)}
+                    />
+                    <MetricBox
+                      label={t('surveys.nps_runs.completion_rate')}
+                      value={formatPercent(run.completionRate)}
+                    />
+                    <MetricBox
+                      label={t('surveys.nps_runs.submitted_response_rate')}
+                      value={formatPercent(run.completedResponseRate)}
+                    />
+                  </div>
+                  {run.npsAvailable ? (
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <MetricBox label={t('surveys.analytics.nps')} value={Math.round(run.nps)} />
+                      <MetricBox
+                        label={t('surveys.analytics.promoters')}
+                        value={run.promoterCount}
+                      />
+                      <MetricBox
+                        label={t('surveys.analytics.detractors')}
+                        value={run.detractorCount}
+                      />
+                    </div>
+                  ) : null}
+                  <NpsMeasurementQualification run={run} surface="run" />
+                  {run.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING &&
+                  run.npsAvailable ? (
+                    <p
+                      className="mt-2 text-xs text-amber-700"
+                      data-testid={`nps-run-preliminary-${run.id}`}
+                    >
+                      {t('surveys.nps_runs.preliminary')}
+                    </p>
+                  ) : null}
+                  {run.redactedResponseCount > 0 ? (
+                    <p
+                      className="mt-2 text-xs text-muted-foreground"
+                      data-testid={`nps-run-redacted-${run.id}`}
+                    >
+                      {t('surveys.nps_runs.measurement_trend.redacted', {
+                        count: run.redactedResponseCount,
+                      })}
+                    </p>
+                  ) : null}
+                  {run.failureReason ? (
+                    <p className="mt-2 text-xs text-destructive">
+                      {npsRunFailureReason(t, run.failureReason)}
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            {hasMoreRuns ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={onLoadMoreRuns}
+                disabled={loadingMoreRuns}
+                data-testid="nps-load-more-runs"
+              >
+                {loadingMoreRuns ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+                {t('surveys.nps_runs.load_more')}
+              </Button>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+      <Dialog
+        open={Boolean(runToCancel)}
+        onOpenChange={(open) => {
+          if (!open && !cancelRun.isPending) setRunToCancel(undefined)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('surveys.nps_runs.cancel_dialog.title')}</DialogTitle>
+            <DialogDescription>{t('surveys.nps_runs.cancel_dialog.description')}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setRunToCancel(undefined)}
+              disabled={cancelRun.isPending}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={cancel}
+              disabled={cancelRun.isPending}
+              data-testid="nps-cancel-run-confirm"
+            >
+              {cancelRun.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle />}
+              {t('surveys.nps_runs.cancel_dialog.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Card>
+  )
+}
+
+function NpsEvidenceExportHistory({ exports }: { exports: NpsCampaignRunEvidenceExport[] }) {
+  const { t, i18n } = useTranslation()
+  return (
+    <section
+      aria-label={t('surveys.nps_runs.export_history.title')}
+      className="border-y border-border/60 py-3"
+      data-testid="nps-evidence-export-history"
+    >
+      <p className="text-sm font-medium">{t('surveys.nps_runs.export_history.title')}</p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t('surveys.nps_runs.export_history.description')}
+      </p>
+      {exports.length === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {t('surveys.nps_runs.export_history.empty')}
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {exports.map((item) => (
+            <li
+              key={item.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/60 px-3 py-2"
+            >
+              <div className="min-w-0 text-xs">
+                <p className="font-medium">
+                  {t('surveys.nps_runs.export_history.generated_at', {
+                    time: formatTimestamp(item.generatedAt, i18n.language),
+                  })}
+                </p>
+                <p className="mt-1 break-all font-mono text-muted-foreground">
+                  {item.artifactSha256}
+                </p>
+                {item.expiresAt ? (
+                  <p className="mt-1 text-muted-foreground">
+                    {t('surveys.nps_runs.export_history.expires_at', {
+                      time: formatTimestamp(item.expiresAt, i18n.language),
+                    })}
+                  </p>
+                ) : null}
+              </div>
+              {item.expiresAt && Date.parse(item.expiresAt) <= Date.now() ? (
+                <span className="text-xs text-muted-foreground">
+                  {t('surveys.nps_runs.export_history.expired')}
+                </span>
+              ) : (
+                <Button asChild type="button" size="sm" variant="outline">
+                  <a href={item.downloadPath} download>
+                    <Download />
+                    {t('surveys.nps_runs.export_history.download')}
+                  </a>
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+function NpsRunMeasurementTrend({ runs }: { runs: NpsCampaignRun[] }) {
+  const { t } = useTranslation()
+  const measuredRuns = [...runs]
+    .filter(
+      (run) =>
+        run.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CLOSED && run.npsAvailable,
+    )
+    .sort((left, right) => left.sequence - right.sequence)
+  const liveRun = [...runs]
+    .filter(
+      (run) =>
+        run.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING && run.npsAvailable,
+    )
+    .sort((left, right) => right.sequence - left.sequence)[0]
+  const measurementSegments = npsMeasurementSegments(measuredRuns)
+  const latest = measuredRuns[measuredRuns.length - 1]
+  const width = trendChartWidth
+  const height = trendChartHeight
+  const chartWidth = width - trendChartPad * 2
+  const chartHeight = height - trendChartPad * 2
+  const points = measuredRuns.map((run, index) => ({
+    run,
+    x: trendChartPad + (chartWidth * index) / Math.max(measuredRuns.length - 1, 1),
+    y: height - trendChartPad - ((run.nps + 100) / 200) * chartHeight,
+  }))
+  const pointByRunID = new Map(points.map((point) => [point.run.id, point]))
+  const zeroY = height - trendChartPad - (100 / 200) * chartHeight
+
+  return (
+    <section
+      aria-label={t('surveys.nps_runs.measurement_trend.title')}
+      className="border-y border-border/60 py-4"
+      data-testid="nps-run-measurement-trend"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{t('surveys.nps_runs.measurement_trend.title')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t('surveys.nps_runs.measurement_trend.description')}
+          </p>
+        </div>
+        {latest ? (
+          <div className="shrink-0 text-right text-xs">
+            <p className="font-medium tabular-nums">
+              {t('surveys.analytics.nps')} {Math.round(latest.nps)}
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {t('surveys.nps_runs.measurement_trend.sample', {
+                completed: latest.completedCount,
+                invitations: latest.invitationCount,
+              })}
+            </p>
+            <p className="mt-1 text-muted-foreground">
+              {npsMeasurementReadinessLabel(t, latest.measurementReadiness)}
+            </p>
+            {latest.redactedResponseCount > 0 ? (
+              <p className="mt-1 text-muted-foreground">
+                {t('surveys.nps_runs.measurement_trend.redacted', {
+                  count: latest.redactedResponseCount,
+                })}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {measuredRuns.length === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {t('surveys.nps_runs.measurement_trend.empty')}
+        </p>
+      ) : (
+        <>
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="mt-3 h-24 w-full"
+            role="img"
+            aria-label={t('surveys.nps_runs.measurement_trend.title')}
+          >
+            <line
+              x1={trendChartPad}
+              x2={width - trendChartPad}
+              y1={zeroY}
+              y2={zeroY}
+              className="stroke-border"
+              strokeWidth={1}
+            />
+            {measurementSegments.map((segment, index) => (
+              <polyline
+                key={segment[0]?.id ?? `segment-${index}`}
+                data-testid={`nps-measurement-segment-${index}`}
+                points={segment
+                  .map((run) => pointByRunID.get(run.id))
+                  .filter((point): point is (typeof points)[number] => point !== undefined)
+                  .map((point) => `${point.x},${point.y}`)
+                  .join(' ')}
+                fill="none"
+                className="stroke-emerald-600"
+                strokeWidth={3}
+              />
+            ))}
+            {points.map(({ run, x, y }, index) => (
+              <circle
+                key={run.id}
+                cx={x}
+                cy={y}
+                r={index === points.length - 1 ? 4 : 2.5}
+                className="fill-background stroke-emerald-700"
+                strokeWidth={2}
+              >
+                <title>
+                  {[
+                    t('surveys.nps_runs.measurement_trend.point', {
+                      sequence: run.sequence,
+                      nps: Math.round(run.nps),
+                      completed: run.completedCount,
+                      invitations: run.invitationCount,
+                      hostedVisitRate: formatPercent(run.hostedVisitRate),
+                      completionRate: formatPercent(run.completionRate),
+                    }),
+                    npsMeasurementReadinessLabel(t, run.measurementReadiness),
+                    run.redactedResponseCount > 0
+                      ? t('surveys.nps_runs.measurement_trend.redacted', {
+                          count: run.redactedResponseCount,
+                        })
+                      : '',
+                  ]
+                    .filter(Boolean)
+                    .join('，')}
+                </title>
+              </circle>
+            ))}
+          </svg>
+          <ul
+            className="mt-2 space-y-1"
+            aria-label={t('surveys.nps_runs.measurement_trend.points')}
+          >
+            {measuredRuns.map((run) => (
+              <li
+                key={run.id}
+                className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs"
+                data-testid={`nps-measurement-point-${run.id}`}
+              >
+                {startsNewNpsMeasurementBaseline(measuredRuns, run) ? (
+                  <span className="basis-full font-medium text-amber-700">
+                    {t('surveys.nps_runs.measurement_trend.new_baseline', {
+                      sequence: run.sequence,
+                    })}
+                  </span>
+                ) : null}
+                <span className="font-medium">
+                  {t('surveys.nps_runs.run', { sequence: run.sequence })}
+                </span>
+                <span className="tabular-nums">
+                  {t('surveys.analytics.nps')} {Math.round(run.nps)}
+                </span>
+                <span className="text-muted-foreground">
+                  {t('surveys.nps_runs.measurement_trend.sample', {
+                    completed: run.completedCount,
+                    invitations: run.invitationCount,
+                  })}
+                </span>
+                {run.redactedResponseCount > 0 ? (
+                  <span className="text-muted-foreground">
+                    {t('surveys.nps_runs.measurement_trend.redacted', {
+                      count: run.redactedResponseCount,
+                    })}
+                  </span>
+                ) : null}
+                <span className="text-muted-foreground">
+                  {t('surveys.nps_runs.measurement_trend.rates', {
+                    hostedVisitRate: formatPercent(run.hostedVisitRate),
+                    completionRate: formatPercent(run.completionRate),
+                  })}
+                </span>
+                <span className="text-muted-foreground">
+                  {npsMeasurementReadinessLabel(t, run.measurementReadiness)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {measurementSegments.length > 1 ? (
+        <p className="mt-3 text-xs text-amber-700" data-testid="nps-measurement-change-notice">
+          {t('surveys.nps_runs.measurement_trend.comparison_boundary')}
+        </p>
+      ) : null}
+      {liveRun ? (
+        <p className="mt-3 text-xs text-amber-700" data-testid="nps-measurement-live-notice">
+          {t('surveys.nps_runs.measurement_trend.live_preview', { sequence: liveRun.sequence })}
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
+function npsAnalyticsRun(runs: NpsCampaignRun[], selectedRunID: string) {
+  if (selectedRunID) return runs.find((run) => run.id === selectedRunID)
+  const newest = (status: NpsCampaignRunStatus) =>
+    [...runs]
+      .filter((run) => run.status === status)
+      .sort((left, right) => right.sequence - left.sequence)[0]
+  return (
+    newest(NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CLOSED) ??
+    newest(NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING)
+  )
+}
+
+function npsMeasurementScopeLabel(t: TFunction, run?: NpsCampaignRun) {
+  if (!run) return t('surveys.nps_runs.no_measurement_scope')
+  if (run.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CLOSED) {
+    return t('surveys.nps_runs.latest_finalized_measurement', { sequence: run.sequence })
+  }
+  return t('surveys.nps_runs.current_measurement_preview', { sequence: run.sequence })
+}
+
+function NpsMeasurementQualification({
+  run,
+  surface,
+}: {
+  run: NpsCampaignRun
+  surface: 'analytics' | 'run'
+}) {
+  const { t } = useTranslation()
+  const readiness = npsMeasurementReadinessLabel(t, run.measurementReadiness)
+
+  return (
+    <div
+      className="mt-3 border-t border-border/60 pt-3"
+      data-testid={`nps-${surface}-measurement-qualification-${run.id}`}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium">
+          {t('surveys.nps_runs.measurement_qualification.title')}
+        </p>
+        <StatusBadge>{readiness}</StatusBadge>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+        <div>
+          <dt className="text-muted-foreground">
+            {t('surveys.nps_runs.measurement_qualification.submitted_evidence')}
+          </dt>
+          <dd className="mt-1 font-medium tabular-nums">
+            {t('surveys.nps_runs.measurement_qualification.submitted_evidence_value', {
+              actual: run.completedCount,
+              minimum: run.minimumCompletedResponses || '-',
+            })}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">
+            {t('surveys.nps_runs.measurement_qualification.response_rate_evidence')}
+          </dt>
+          <dd className="mt-1 font-medium tabular-nums">
+            {t('surveys.nps_runs.measurement_qualification.response_rate_evidence_value', {
+              actual: formatPercent(run.completedResponseRate),
+              minimum:
+                run.minimumResponseRatePercent > 0
+                  ? formatPercent(run.minimumResponseRatePercent / 100)
+                  : '-',
+            })}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {npsMeasurementReadinessNotice(t, run.measurementReadiness)}
+      </p>
+    </div>
+  )
+}
+
+function NpsMeasurementRecoveryOutcome({ outcome }: { outcome?: SurveyRecoveryOutcome }) {
+  const { t } = useTranslation()
+  const reviewCount = outcome?.reviewCount ?? 0
+  const contactedTimelinessEvidenceCount = outcome?.contactedTimelinessEvidenceCount ?? 0
+  const terminalTimelinessEvidenceCount = outcome?.terminalTimelinessEvidenceCount ?? 0
+  const outcomeValue = (value?: number) =>
+    t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.value', {
+      actual: value ?? 0,
+      total: reviewCount,
+    })
+  const timelinessValue = (value: number, total: number) =>
+    t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.timeliness_value', {
+      actual: value,
+      total,
+    })
+
+  return (
+    <div
+      className="mt-4 border-t border-border/60 pt-3"
+      data-testid="survey-analytics-nps-recovery-outcomes"
+    >
+      <p className="text-sm font-medium">
+        {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.title')}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.description')}
+      </p>
+      {reviewCount === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.empty')}
+        </p>
+      ) : (
+        <>
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-3">
+            <div>
+              <dt className="text-muted-foreground">
+                {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.resolved')}
+              </dt>
+              <dd className="mt-1 font-medium tabular-nums">
+                {outcomeValue(outcome?.resolvedCount)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">
+                {t(
+                  'surveys.analytics.nps_measurement_evidence.recovery_outcomes.customer_contacted',
+                )}
+              </dt>
+              <dd className="mt-1 font-medium tabular-nums">
+                {outcomeValue(outcome?.customerContactedCount)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">
+                {t(
+                  'surveys.analytics.nps_measurement_evidence.recovery_outcomes.root_cause_recorded',
+                )}
+              </dt>
+              <dd className="mt-1 font-medium tabular-nums">
+                {outcomeValue(outcome?.rootCauseRecordedCount)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">
+                {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.action_recorded')}
+              </dt>
+              <dd className="mt-1 font-medium tabular-nums">
+                {outcomeValue(outcome?.actionRecordedCount)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">
+                {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.dismissed')}
+              </dt>
+              <dd className="mt-1 font-medium tabular-nums">{outcome?.dismissedCount ?? 0}</dd>
+            </div>
+          </dl>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.notice')}
+          </p>
+          <div
+            className="mt-4 border-t border-border/60 pt-3"
+            data-testid="survey-analytics-nps-recovery-timeliness"
+          >
+            <p className="text-sm font-medium">
+              {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.timeliness_title')}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t(
+                'surveys.analytics.nps_measurement_evidence.recovery_outcomes.timeliness_description',
+              )}
+            </p>
+            {contactedTimelinessEvidenceCount === 0 && terminalTimelinessEvidenceCount === 0 ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {t('surveys.analytics.nps_measurement_evidence.recovery_outcomes.timeliness_empty')}
+              </p>
+            ) : (
+              <>
+                <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-4">
+                  <div>
+                    <dt className="text-muted-foreground">
+                      {t(
+                        'surveys.analytics.nps_measurement_evidence.recovery_outcomes.contacted_on_time',
+                      )}
+                    </dt>
+                    <dd className="mt-1 font-medium tabular-nums">
+                      {timelinessValue(
+                        outcome?.contactedOnTimeCount ?? 0,
+                        contactedTimelinessEvidenceCount,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">
+                      {t(
+                        'surveys.analytics.nps_measurement_evidence.recovery_outcomes.contacted_late',
+                      )}
+                    </dt>
+                    <dd className="mt-1 font-medium tabular-nums">
+                      {timelinessValue(
+                        outcome?.contactedLateCount ?? 0,
+                        contactedTimelinessEvidenceCount,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">
+                      {t(
+                        'surveys.analytics.nps_measurement_evidence.recovery_outcomes.terminal_on_time',
+                      )}
+                    </dt>
+                    <dd className="mt-1 font-medium tabular-nums">
+                      {timelinessValue(
+                        outcome?.terminalOnTimeCount ?? 0,
+                        terminalTimelinessEvidenceCount,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-muted-foreground">
+                      {t(
+                        'surveys.analytics.nps_measurement_evidence.recovery_outcomes.terminal_late',
+                      )}
+                    </dt>
+                    <dd className="mt-1 font-medium tabular-nums">
+                      {timelinessValue(
+                        outcome?.terminalLateCount ?? 0,
+                        terminalTimelinessEvidenceCount,
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {t(
+                    'surveys.analytics.nps_measurement_evidence.recovery_outcomes.timeliness_notice',
+                  )}
+                </p>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function npsMeasurementReadinessLabel(t: TFunction, readiness: NpsMeasurementReadiness) {
+  switch (readiness) {
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_PENDING:
+      return t('surveys.nps_runs.measurement_qualification.status.pending')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_PRELIMINARY:
+      return t('surveys.nps_runs.measurement_qualification.status.preliminary')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_DIRECTIONAL:
+      return t('surveys.nps_runs.measurement_qualification.status.directional')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_QUALIFIED:
+      return t('surveys.nps_runs.measurement_qualification.status.qualified')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_REDACTED:
+      return t('surveys.nps_runs.measurement_qualification.status.redacted')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_UNAVAILABLE:
+      return t('surveys.nps_runs.measurement_qualification.status.unavailable')
+    default:
+      return t('surveys.nps_runs.measurement_qualification.status.unknown')
+  }
+}
+
+function npsMeasurementReadinessNotice(t: TFunction, readiness: NpsMeasurementReadiness) {
+  switch (readiness) {
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_PENDING:
+      return t('surveys.nps_runs.measurement_qualification.notice.pending')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_PRELIMINARY:
+      return t('surveys.nps_runs.measurement_qualification.notice.preliminary')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_DIRECTIONAL:
+      return t('surveys.nps_runs.measurement_qualification.notice.directional')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_QUALIFIED:
+      return t('surveys.nps_runs.measurement_qualification.notice.qualified')
+    case NpsMeasurementReadiness.NPS_MEASUREMENT_READINESS_REDACTED:
+      return t('surveys.nps_runs.measurement_qualification.notice.redacted')
+    default:
+      return t('surveys.nps_runs.measurement_qualification.notice.unavailable')
+  }
+}
+
+function npsMeasurementSegments(runs: NpsCampaignRun[]) {
+  const segments: NpsCampaignRun[][] = []
+  for (const run of runs) {
+    const current = segments[segments.length - 1]
+    if (current && sharesNpsMeasurementDefinition(current[current.length - 1], run)) {
+      current.push(run)
+      continue
+    }
+    segments.push([run])
+  }
+  return segments
+}
+
+function startsNewNpsMeasurementBaseline(runs: NpsCampaignRun[], run: NpsCampaignRun) {
+  const index = runs.findIndex((item) => item.id === run.id)
+  return index > 0 && !sharesNpsMeasurementDefinition(runs[index - 1], run)
+}
+
+function sharesNpsMeasurementDefinition(left: NpsCampaignRun, right: NpsCampaignRun) {
+  return Boolean(left.measurementKey) && left.measurementKey === right.measurementKey
+}
+
+function NpsLaunchPreflight({
+  loading,
+  preflight,
+}: {
+  loading: boolean
+  preflight?: NpsCampaignPreflight
+}) {
+  const { t } = useTranslation()
+  const exclusionReasons = preflight?.exclusionReasonDistribution ?? []
+
+  return (
+    <section
+      aria-label={t('surveys.nps_preflight.title')}
+      className="border-y border-border/60 py-4"
+      data-testid="nps-launch-preflight"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{t('surveys.nps_preflight.title')}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t('surveys.nps_preflight.description')}
+          </p>
+        </div>
+        {preflight ? (
+          <StatusBadge>
+            {preflight.deliveryReady
+              ? t('surveys.nps_preflight.delivery_ready')
+              : t('surveys.nps_preflight.delivery_blocked')}
+          </StatusBadge>
+        ) : null}
+      </div>
+      {loading ? (
+        <p className="mt-3 text-xs text-muted-foreground">{t('app.loading')}</p>
+      ) : preflight ? (
+        <>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <MetricBox
+              label={t('surveys.nps_preflight.evaluated')}
+              value={preflight.evaluatedCount}
+            />
+            <MetricBox
+              label={t('surveys.nps_preflight.eligible')}
+              value={preflight.eligibleCount}
+            />
+            <MetricBox
+              label={t('surveys.nps_preflight.excluded')}
+              value={preflight.excludedCount}
+            />
+            <MetricBox
+              label={t('surveys.nps_preflight.planned')}
+              value={preflight.plannedInvitationCount}
+            />
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            {t('surveys.nps_preflight.cap', { count: preflight.maximumRunRecipients })}
+          </p>
+          {preflight.recurrenceSamplingPercent > 0 ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('surveys.nps_preflight.recurrence_sampling', {
+                percent: preflight.recurrenceSamplingPercent,
+              })}
+            </p>
+          ) : null}
+          {preflight.samplePlanningInvitationTarget > 0 ? (
+            <p
+              className="mt-3 text-xs text-muted-foreground"
+              data-testid="nps-preflight-sample-plan"
+            >
+              {t('surveys.nps_preflight.sample_planning', {
+                population: preflight.samplePlanningPopulationCount,
+                required: preflight.samplePlanningRequiredCompletedResponses,
+                target: preflight.samplePlanningInvitationTarget,
+                confidence: preflight.samplePlanningConfidencePercent,
+                margin: preflight.samplePlanningMarginOfErrorPercent,
+                responseRate: preflight.samplePlanningExpectedResponseRatePercent,
+              })}
+            </p>
+          ) : null}
+          {preflight.plannedInvitationCountBelowSamplePlanningTarget ? (
+            <p
+              className="mt-3 text-xs text-amber-700"
+              data-testid="nps-preflight-sample-plan-warning"
+              role="status"
+            >
+              {t('surveys.nps_preflight.sample_planning_warning', {
+                planned: preflight.plannedInvitationCount,
+                target: preflight.samplePlanningInvitationTarget,
+              })}
+            </p>
+          ) : null}
+          {preflight.samplePlanningTargetExceedsRecipientCap ? (
+            <p
+              className="mt-3 text-xs text-amber-700"
+              data-testid="nps-preflight-sample-plan-cap-warning"
+              role="status"
+            >
+              {t('surveys.nps_preflight.sample_planning_cap_warning', {
+                target: preflight.samplePlanningInvitationTarget,
+                cap: preflight.maximumRunRecipients,
+              })}
+            </p>
+          ) : null}
+          {preflight.plannedInvitationCountBelowMinimumCompletedResponses ? (
+            <p
+              className="mt-3 text-xs text-amber-700"
+              data-testid="nps-preflight-measurement-warning"
+              role="status"
+            >
+              {t('surveys.nps_preflight.measurement_warning', {
+                minimum: preflight.minimumCompletedResponses,
+                planned: preflight.plannedInvitationCount,
+              })}
+            </p>
+          ) : null}
+          {exclusionReasons.length > 0 ? (
+            <div
+              className="mt-3 border-t border-border/60 pt-3"
+              data-testid="nps-preflight-exclusion-reasons"
+            >
+              <p className="text-xs font-medium text-foreground">
+                {t('surveys.nps_preflight.exclusion_reasons')}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {exclusionReasons.map((bucket) => (
+                  <span
+                    key={bucket.reason}
+                    data-testid={`nps-preflight-exclusion-${bucket.reason}`}
+                  >
+                    <StatusBadge>
+                      {surveyReasonLabel(t, bucket.reason)} · {bucket.count}
+                    </StatusBadge>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          {!preflight.deliveryReady && preflight.deliveryBlocker ? (
+            <p className="mt-1 text-xs text-destructive">
+              {t('surveys.nps_preflight.blocker', {
+                reason: surveyReasonLabel(t, preflight.deliveryBlocker),
+              })}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-3 text-xs text-destructive">{t('surveys.nps_preflight.unavailable')}</p>
+      )}
+    </section>
   )
 }
 
@@ -1447,18 +3059,230 @@ function AnalyticsInsightsCard({
   )
 }
 
-function AnalyticsCard({ analytics }: { analytics?: SurveyAnalytics }) {
+function AnalyticsCard({
+  analytics,
+  isNPS,
+  npsMeasurementRun,
+}: {
+  analytics?: SurveyAnalytics
+  isNPS: boolean
+  npsMeasurementRun?: NpsCampaignRun
+}) {
   const { t } = useTranslation()
-  const buckets = analytics?.scoreDistribution ?? []
+  const currentNPSResponseCount =
+    (analytics?.detractorCount ?? 0) +
+    (analytics?.passiveCount ?? 0) +
+    (analytics?.promoterCount ?? 0)
+  const redactedResponseCount = analytics?.redactedResponseCount ?? 0
+  const buckets = npsScoreDistribution(
+    analytics?.scoreDistribution ?? [],
+    isNPS && currentNPSResponseCount > 0,
+  )
   const suppressionReasons = analytics?.suppressionReasonDistribution ?? []
   const maxCount = Math.max(1, ...buckets.map((bucket) => bucket.count))
+  const hasNPSEvidence = isNPS && (analytics?.npsAvailable || redactedResponseCount > 0)
+  const npsRecipientCoverage = npsMeasurementRun
+    ? formatRatioPercent(npsMeasurementRun.invitationCount, npsMeasurementRun.eligibleCount)
+    : '-'
+  const npsSubmissionCoverage = npsMeasurementRun
+    ? formatPercent(npsMeasurementRun.completedResponseRate)
+    : '-'
   return (
-    <Card className="border-border/60 shadow-none">
+    <Card className="border-border/60 shadow-none" data-testid="survey-analytics-funnel">
       <CardHeader>
         <CardTitle className="text-base">{t('surveys.analytics.title')}</CardTitle>
-        <CardDescription>{t('surveys.analytics.description')}</CardDescription>
+        <CardDescription>
+          {isNPS
+            ? t('surveys.analytics.nps_measurement_description', {
+                scope: npsMeasurementScopeLabel(t, npsMeasurementRun),
+              })
+            : t('surveys.analytics.description')}
+        </CardDescription>
+        {isNPS &&
+        npsMeasurementRun?.status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING ? (
+          <p className="text-xs text-amber-700" data-testid="survey-analytics-nps-preliminary">
+            {t('surveys.nps_runs.preliminary')}
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-4">
+        {isNPS && npsMeasurementRun ? (
+          <section
+            aria-label={t('surveys.analytics.nps_measurement_evidence.title')}
+            className="border-y border-border/60 py-3"
+            data-testid="survey-analytics-nps-measurement-evidence"
+          >
+            <p className="text-sm font-medium">
+              {t('surveys.analytics.nps_measurement_evidence.title')}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t('surveys.analytics.nps_measurement_evidence.description')}
+            </p>
+            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-5">
+              <div>
+                <dt className="text-muted-foreground">
+                  {t('surveys.analytics.nps_measurement_evidence.eligible')}
+                </dt>
+                <dd className="mt-1 font-medium tabular-nums">{npsMeasurementRun.eligibleCount}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">
+                  {t('surveys.analytics.nps_measurement_evidence.invited')}
+                </dt>
+                <dd className="mt-1 font-medium tabular-nums">
+                  {npsMeasurementRun.invitationCount}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">
+                  {t('surveys.analytics.nps_measurement_evidence.submitted')}
+                </dt>
+                <dd className="mt-1 font-medium tabular-nums">
+                  {npsMeasurementRun.completedCount}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">
+                  {t('surveys.analytics.nps_measurement_evidence.recipient_coverage')}
+                </dt>
+                <dd className="mt-1 font-medium tabular-nums">{npsRecipientCoverage}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">
+                  {t('surveys.analytics.nps_measurement_evidence.submission_coverage')}
+                </dt>
+                <dd className="mt-1 font-medium tabular-nums">{npsSubmissionCoverage}</dd>
+              </div>
+            </dl>
+            <div className="mt-4 border-t border-border/60 pt-3">
+              <p className="text-sm font-medium">
+                {t('surveys.analytics.nps_measurement_evidence.definition')}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t('surveys.analytics.nps_measurement_evidence.definition_description')}
+              </p>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs sm:grid-cols-3">
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.collection_window')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.collectionDays > 0
+                      ? t('surveys.analytics.nps_measurement_evidence.days', {
+                          count: npsMeasurementRun.collectionDays,
+                        })
+                      : '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.recipient_cap')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.maximumRunRecipients || '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.contact_cooldown')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.contactCooldownDays > 0
+                      ? t('surveys.analytics.nps_measurement_evidence.days', {
+                          count: npsMeasurementRun.contactCooldownDays,
+                        })
+                      : '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.recurrence_sampling')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.recurrenceSamplingPercent > 0
+                      ? formatPercent(npsMeasurementRun.recurrenceSamplingPercent / 100)
+                      : '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.minimum_submitted')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.minimumCompletedResponses || '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.minimum_response_rate')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.minimumResponseRatePercent > 0
+                      ? formatPercent(npsMeasurementRun.minimumResponseRatePercent / 100)
+                      : '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.sample_population')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.samplePlanningPopulationCount || '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.sample_required')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.samplePlanningRequiredCompletedResponses || '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.sample_invitation_target')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.samplePlanningInvitationTarget || '-'}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-muted-foreground">
+                    {t('surveys.analytics.nps_measurement_evidence.sample_invitation_actual')}
+                  </dt>
+                  <dd className="mt-1 font-medium tabular-nums">
+                    {npsMeasurementRun.samplePlanningInvitationTarget > 0
+                      ? `${npsMeasurementRun.invitationCount} / ${npsMeasurementRun.samplePlanningInvitationTarget}`
+                      : '-'}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {npsMeasurementRun.samplePlanningConfidencePercent > 0
+                  ? t('surveys.analytics.nps_measurement_evidence.sample_planning_note', {
+                      confidence: npsMeasurementRun.samplePlanningConfidencePercent,
+                      margin: npsMeasurementRun.samplePlanningMarginOfErrorPercent,
+                      responseRate: npsMeasurementRun.samplePlanningExpectedResponseRatePercent,
+                    })
+                  : null}
+              </p>
+              {npsMeasurementRun.invitationCountBelowSamplePlanningTarget ? (
+                <p
+                  className="mt-2 text-xs text-amber-700"
+                  data-testid="nps-analytics-sample-plan-shortfall"
+                  role="status"
+                >
+                  {t('surveys.analytics.nps_measurement_evidence.sample_planning_shortfall', {
+                    actual: npsMeasurementRun.invitationCount,
+                    target: npsMeasurementRun.samplePlanningInvitationTarget,
+                  })}
+                </p>
+              ) : null}
+              <NpsMeasurementQualification run={npsMeasurementRun} surface="analytics" />
+              <NpsMeasurementRecoveryOutcome outcome={analytics?.recoveryOutcome} />
+            </div>
+          </section>
+        ) : null}
         <div className="grid grid-cols-2 gap-3">
           <MetricBox
             label={t('surveys.analytics.invitations')}
@@ -1466,11 +3290,39 @@ function AnalyticsCard({ analytics }: { analytics?: SurveyAnalytics }) {
           />
           <MetricBox label={t('surveys.analytics.delivered')} value={analytics?.deliveredCount} />
           <MetricBox
+            label={t('surveys.analytics.response_rate')}
+            value={formatPercent(analytics?.responseRate)}
+          />
+          <MetricBox
+            label={t('surveys.analytics.start_rate')}
+            testId="survey-analytics-visit-rate"
+            value={formatPercent(analytics?.startRate)}
+          />
+          <MetricBox
             label={t('surveys.analytics.not_started')}
             value={analytics?.notStartedCount}
           />
-          <MetricBox label={t('surveys.analytics.opened')} value={analytics?.openedCount} />
+          <MetricBox
+            label={t('surveys.analytics.opened')}
+            testId="survey-analytics-opened"
+            value={analytics?.openedCount}
+          />
+          <MetricBox
+            label={t('surveys.analytics.started')}
+            testId="survey-analytics-started"
+            value={analytics?.startedCount}
+          />
           <MetricBox label={t('surveys.analytics.completed')} value={analytics?.completedCount} />
+          <MetricBox
+            label={t('surveys.analytics.quality_flagged')}
+            testId="survey-analytics-quality-flagged"
+            value={analytics?.qualityFlaggedResponseCount}
+          />
+          <MetricBox
+            label={t('surveys.analytics.completion_rate')}
+            testId="survey-analytics-completion-rate"
+            value={formatPercent(analytics?.completionRate)}
+          />
           <MetricBox label={t('surveys.analytics.expired')} value={analytics?.expiredCount} />
           <MetricBox
             label={t('surveys.analytics.average_response_time')}
@@ -1490,6 +3342,40 @@ function AnalyticsCard({ analytics }: { analytics?: SurveyAnalytics }) {
           />
           <MetricBox label={t('surveys.analytics.suppressed')} value={analytics?.suppressedCount} />
         </div>
+        {(analytics?.qualityFlaggedResponseCount ?? 0) > 0 ? (
+          <p
+            className="text-xs text-amber-700"
+            data-testid="survey-analytics-quality-notice"
+            role="status"
+          >
+            {t('surveys.analytics.quality_notice')}
+          </p>
+        ) : null}
+        {hasNPSEvidence ? (
+          <div className="grid grid-cols-2 gap-3">
+            {analytics?.npsAvailable ? (
+              <MetricBox
+                label={t('surveys.analytics.nps')}
+                testId="survey-analytics-nps"
+                value={analytics?.nps ?? 0}
+              />
+            ) : (
+              <p
+                className="col-span-2 text-xs text-muted-foreground"
+                data-testid="survey-analytics-nps-unavailable"
+              >
+                {t('surveys.analytics.nps_unavailable_after_redaction')}
+              </p>
+            )}
+            <MetricBox label={t('surveys.analytics.promoters')} value={analytics?.promoterCount} />
+            <MetricBox label={t('surveys.analytics.passives')} value={analytics?.passiveCount} />
+            <MetricBox
+              label={t('surveys.analytics.detractors')}
+              value={analytics?.detractorCount}
+            />
+            <MetricBox label={t('surveys.analytics.redacted')} value={redactedResponseCount} />
+          </div>
+        ) : null}
         {buckets.length === 0 ? (
           <EmptyState>{t('surveys.analytics.empty')}</EmptyState>
         ) : (
@@ -1499,11 +3385,17 @@ function AnalyticsCard({ analytics }: { analytics?: SurveyAnalytics }) {
                 <span className="text-sm tabular-nums text-muted-foreground">{bucket.score}</span>
                 <div className="h-2 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full rounded-full bg-emerald-600"
-                    style={{ width: `${Math.max(8, (bucket.count / maxCount) * 100)}%` }}
+                    className={cn(
+                      'h-full rounded-full',
+                      isNPS ? npsScoreBarClass(bucket.score) : 'bg-emerald-600',
+                    )}
+                    style={{ width: scoreDistributionBarWidth(bucket.count, maxCount) }}
                   />
                 </div>
                 <span className="text-right text-sm tabular-nums">{bucket.count}</span>
+                {isNPS ? (
+                  <span className="sr-only">{npsScoreGroupLabel(t, bucket.score)}</span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -1628,15 +3520,18 @@ function TrendSparkline({
   label: string
   selectValue: (bucket: SurveyAnalyticsTrendBucket) => number
 }) {
-  const values = buckets.map((bucket) => Math.max(0, selectValue(bucket)))
-  const max = Math.max(1, ...values)
+  const values = buckets.map(selectValue)
+  const min = Math.min(0, ...values)
+  const max = Math.max(0, ...values)
+  const valueRange = Math.max(1, max - min)
   const width = trendChartWidth
   const height = trendChartHeight
   const chartWidth = width - trendChartPad * 2
   const chartHeight = height - trendChartPad * 2
+  const zeroY = height - trendChartPad - ((0 - min) / valueRange) * chartHeight
   const points = values.map((value, index) => {
     const x = trendChartPad + (chartWidth * index) / Math.max(buckets.length - 1, 1)
-    const y = height - trendChartPad - (value / max) * chartHeight
+    const y = height - trendChartPad - ((value - min) / valueRange) * chartHeight
     return { value, x, y }
   })
   const path = points.map((point) => `${point.x},${point.y}`).join(' ')
@@ -1651,8 +3546,8 @@ function TrendSparkline({
         <line
           x1={trendChartPad}
           x2={width - trendChartPad}
-          y1={height - trendChartPad}
-          y2={height - trendChartPad}
+          y1={zeroY}
+          y2={zeroY}
           className="stroke-border"
           strokeWidth={1}
         />
@@ -1792,7 +3687,9 @@ function HostedLinkCard({
 }) {
   const { t } = useTranslation()
   const createHostedLink = useCreateSurveyHostedLink()
-  const defaultCampaignID = selectedCampaignID || campaigns[0]?.id || ''
+  const defaultCampaignID = campaigns.some((campaign) => campaign.id === selectedCampaignID)
+    ? selectedCampaignID
+    : campaigns[0]?.id || ''
   const [form, setForm] = useState({
     campaignId: defaultCampaignID,
     sourceType: 'feedback',
@@ -2530,10 +4427,22 @@ function LowScoreCard({
                             {recoverySLAStatusLabel(t, response.lowScoreReview.slaStatus)}
                           </StatusBadge>
                         ) : null}
+                        <NPSFollowUpConsentBadge response={response} />
+                        {response.qualityStatus === 'flagged' ? (
+                          <StatusBadge>{t('surveys.low_scores.quality_flagged')}</StatusBadge>
+                        ) : null}
                       </div>
                     </div>
                   </div>
                   <div className="flex shrink-0 gap-2">
+                    {response.feedbackId ? (
+                      <Button asChild type="button" size="sm" variant="outline">
+                        <a href={feedbackSignalHref(response.feedbackId)}>
+                          {t('surveys.low_scores.view_feedback_signal')}
+                          <ArrowRight className="h-4 w-4" />
+                        </a>
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       size="sm"
@@ -2620,7 +4529,7 @@ type LowScoreReviewDraft = ReturnType<typeof lowScoreReviewDraft>
 type LowScoreBatchDraft = ReturnType<typeof lowScoreBatchDraft>
 
 function LowScoreRecoveryPlaybook({ review }: { review?: SurveyResponse['lowScoreReview'] }) {
-  const { t } = useTranslation()
+  const { i18n, t } = useTranslation()
   if (!review) return null
   const urgent = review.slaStatus === recoverySLAOverdue || review.riskScore >= 70
   const automated = recoveryAutomated(review)
@@ -2656,9 +4565,46 @@ function LowScoreRecoveryPlaybook({ review }: { review?: SurveyResponse['lowScor
             value: recoveryActionLabel(t, review.nextBestAction),
           })}
         </p>
+        {review.initialDueAt ? (
+          <p className="text-xs text-muted-foreground">
+            {t('surveys.low_scores.playbook.initial_target_at', {
+              value: formatTimestamp(review.initialDueAt, i18n.language),
+            })}
+          </p>
+        ) : null}
+        {review.customerContactedAt ? (
+          <p className="text-xs text-muted-foreground">
+            {t('surveys.low_scores.playbook.first_contacted_at', {
+              value: formatTimestamp(review.customerContactedAt, i18n.language),
+            })}
+          </p>
+        ) : null}
+        {review.firstTerminalAt ? (
+          <p className="text-xs text-muted-foreground">
+            {t('surveys.low_scores.playbook.first_terminal_at', {
+              value: formatTimestamp(review.firstTerminalAt, i18n.language),
+            })}
+          </p>
+        ) : null}
       </div>
     </div>
   )
+}
+
+function NPSFollowUpConsentBadge({ response }: { response: SurveyResponse }) {
+  const { t } = useTranslation()
+  if (response.npsBucket === npsBucketUnspecified) return null
+  const key =
+    response.followUpConsent === undefined
+      ? 'surveys.low_scores.follow_up_consent_not_recorded'
+      : response.followUpConsent
+        ? 'surveys.low_scores.follow_up_consent_granted'
+        : 'surveys.low_scores.follow_up_consent_not_granted'
+  return <StatusBadge>{t(key)}</StatusBadge>
+}
+
+function feedbackSignalHref(feedbackID: string) {
+  return `${import.meta.env.BASE_URL}feedback?ids=${encodeURIComponent(feedbackID)}`
 }
 
 function recoveryAutomated(review: SurveyResponse['lowScoreReview']) {
@@ -2751,7 +4697,7 @@ function LowScoreReviewEditor({
           label={t('surveys.low_scores.customer_contacted')}
           checked={form.customerContacted}
           onCheckedChange={(checked) => update({ customerContacted: checked })}
-          disabled={disabled}
+          disabled={disabled || form.customerContacted}
         />
         <Button
           type="submit"
@@ -2768,10 +4714,12 @@ function LowScoreReviewEditor({
 
 function MetricBox({
   label,
+  testId,
   tone = 'default',
   value,
 }: {
   label: string
+  testId?: string
   tone?: 'default' | 'urgent'
   value?: number | string
 }) {
@@ -2781,6 +4729,7 @@ function MetricBox({
         'rounded-md border px-3 py-2',
         tone === 'urgent' ? 'border-amber-300 bg-amber-50/60' : 'border-border/60',
       )}
+      data-testid={testId}
     >
       <div className="text-xs text-muted-foreground">{label}</div>
       <div
@@ -2801,12 +4750,14 @@ function SelectField({
   label,
   onValueChange,
   options,
+  placeholder,
   value,
 }: {
   id: string
   label: string
   onValueChange: (value: string) => void
   options: [string, string][]
+  placeholder?: string
   value: string
   disabled?: boolean
 }) {
@@ -2815,7 +4766,7 @@ function SelectField({
       <Label htmlFor={id}>{label}</Label>
       <Select value={value} onValueChange={onValueChange} disabled={disabled}>
         <SelectTrigger id={id} data-testid={id} className="min-w-0 max-w-full">
-          <SelectValue />
+          <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>
           {options.map(([optionValue, optionLabel]) => (
@@ -2830,16 +4781,24 @@ function SelectField({
 }
 
 function TextField({
+  describedBy,
   disabled = false,
   id,
+  invalid = false,
   label,
+  max,
+  min,
   onChange,
   placeholder,
   type = 'text',
   value,
 }: {
+  describedBy?: string
   id: string
+  invalid?: boolean
   label: string
+  max?: number
+  min?: number
   onChange: (value: string) => void
   placeholder?: string
   type?: 'datetime-local' | 'email' | 'number' | 'text'
@@ -2854,6 +4813,10 @@ function TextField({
         type={type}
         className="min-w-0"
         value={value}
+        aria-describedby={describedBy}
+        aria-invalid={invalid || undefined}
+        max={max}
+        min={min}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         data-testid={id}
@@ -2886,6 +4849,21 @@ function TextAreaField({
         data-testid={id}
         disabled={disabled}
         className="min-h-20 w-full min-w-0 rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-offset-background placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+      />
+    </div>
+  )
+}
+
+function FixedTextField({ id, label, value }: { id: string; label: string; value: string }) {
+  return (
+    <div className="min-w-0 space-y-2 sm:col-span-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input
+        id={id}
+        value={value}
+        readOnly
+        data-testid={id}
+        className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm"
       />
     </div>
   )
@@ -3000,7 +4978,10 @@ function defaultTriggerFilter(triggerEvent: SurveyTriggerEvent) {
   return {}
 }
 
-function defaultSurveyContent(surveyType: SurveyType) {
+function defaultSurveyContent(surveyType: SurveyType, locale: string, t: TFunction) {
+  if (surveyType === npsType) {
+    return npsContentForLocale(locale, t)
+  }
   if (surveyType === SurveyType.SURVEY_TYPE_CES) {
     return {
       title: 'Effort check',
@@ -3019,6 +5000,37 @@ function defaultSurveyContent(surveyType: SurveyType) {
   }
 }
 
+function npsQuestion(content: Record<string, unknown> | undefined, locale: string, t: TFunction) {
+  const question = content?.question
+  return typeof question === 'string' && question.trim()
+    ? question
+    : npsContentForLocale(locale, t).question
+}
+
+function npsContentForLocale(locale: string, t: TFunction) {
+  if (isChineseLocale(locale)) {
+    return {
+      title: t('surveys.nps_template.title'),
+      intro: t('surveys.nps_template.intro'),
+      question: t('surveys.nps_template.question'),
+      comment_prompt: t('surveys.nps_template.comment_prompt'),
+      thank_you: t('surveys.nps_template.thank_you'),
+    }
+  }
+  return {
+    title: 'Product feedback',
+    intro: 'Your feedback helps us improve.',
+    question: npsQuestionText,
+    comment_prompt: 'What is the main reason for your score?',
+    thank_you: 'Thanks for your feedback.',
+  }
+}
+
+function isChineseLocale(locale: string) {
+  const normalized = locale.trim().toLowerCase()
+  return normalized === 'zh' || normalized.startsWith('zh-')
+}
+
 function campaignSettingsForm(campaign?: SurveyCampaign) {
   return {
     name: campaign?.name ?? '',
@@ -3028,13 +5040,35 @@ function campaignSettingsForm(campaign?: SurveyCampaign) {
     dedupePolicy: campaign?.dedupePolicy ?? onePerResolutionDedupe,
     locale: campaign?.locale ?? 'zh-CN',
     samplingPercent: String(campaign?.samplingPercent ?? 100),
-    minDaysBetweenContact: String(campaign?.minDaysBetweenContact ?? 14),
+    minDaysBetweenContact: String(
+      campaign?.minDaysBetweenContact ?? (campaign?.surveyType === npsType ? 90 : 14),
+    ),
     expiresAfterDays: String(campaign?.expiresAfterDays ?? 14),
     maxDailyInvitations: String(campaign?.maxDailyInvitations ?? 500),
     lowScoreThreshold: String(campaign?.lowScoreThreshold ?? 3),
     requireRecentCustomerActivity: campaign?.requireRecentCustomerActivity ?? false,
     recentActivityDays: String(campaign?.recentActivityDays ?? 30),
     suppressAutoResolved: campaign?.suppressAutoResolved ?? true,
+    cohortId: campaign?.npsSettings?.cohortId ?? '',
+    detractorOwnerMemberId: campaign?.npsSettings?.detractorOwnerMemberId ?? '',
+    collectionDays: String(campaign?.npsSettings?.collectionDays ?? 14),
+    maximumRunRecipients: String(campaign?.npsSettings?.maximumRunRecipients ?? 500),
+    minimumCompletedResponses: String(campaign?.npsSettings?.minimumCompletedResponses ?? 30),
+    minimumResponseRatePercent: String(campaign?.npsSettings?.minimumResponseRatePercent ?? 10),
+    samplePlanningConfidencePercent: String(
+      campaign?.npsSettings?.samplePlanningConfidencePercent ?? 95,
+    ),
+    samplePlanningMarginOfErrorPercent: String(
+      campaign?.npsSettings?.samplePlanningMarginOfErrorPercent ?? 10,
+    ),
+    samplePlanningExpectedResponseRatePercent: String(
+      campaign?.npsSettings?.samplePlanningExpectedResponseRatePercent ?? 20,
+    ),
+    recurrenceIntervalDays: String(campaign?.npsSettings?.recurrenceIntervalDays ?? 0),
+    recurrenceContactCooldownDays: String(
+      campaign?.npsSettings?.recurrenceContactCooldownDays ?? 365,
+    ),
+    recurrenceSamplingPercent: String(campaign?.npsSettings?.recurrenceSamplingPercent ?? 25),
   }
 }
 
@@ -3111,6 +5145,15 @@ function integerOrUndefined(raw: string) {
   return Number.isInteger(value) ? value : undefined
 }
 
+function npsMinimumResponsesExceedRecipientCap(
+  maximumRunRecipients: string,
+  minimumCompletedResponses: string,
+) {
+  const maximum = integerOrUndefined(maximumRunRecipients)
+  const minimum = integerOrUndefined(minimumCompletedResponses)
+  return maximum !== undefined && minimum !== undefined && minimum > maximum
+}
+
 function numberOrUndefined(raw: string) {
   const value = Number(raw)
   return Number.isFinite(value) ? value : undefined
@@ -3132,6 +5175,14 @@ function healthCheckRank(value: SurveyCampaignHealthCheckStatus) {
   if (value === healthCheckFail) return 3
   if (value === healthCheckWarn) return 2
   return 1
+}
+
+function hasFailingDeliveryReadiness(health?: SurveyCampaignHealth) {
+  return (
+    health?.checks.some(
+      (check) => check.id === 'delivery-readiness' && check.status === healthCheckFail,
+    ) ?? false
+  )
 }
 
 function healthCheckBorder(value: SurveyCampaignHealthCheckStatus) {
@@ -3337,9 +5388,40 @@ function formatPercent(value?: number) {
   return `${Math.round((value ?? 0) * 100)}%`
 }
 
+function formatRatioPercent(numerator: number, denominator: number) {
+  if (denominator <= 0) return '-'
+  return formatPercent(numerator / denominator)
+}
+
 function formatScore(analytics?: SurveyAnalytics) {
   if (!analytics || analytics.completedCount === 0) return '0'
   return analytics.averageScore.toFixed(1)
+}
+
+function npsScoreDistribution(
+  buckets: SurveyAnalytics['scoreDistribution'],
+  includeEmptyBuckets: boolean,
+) {
+  if (!includeEmptyBuckets) return buckets
+  const counts = new Map(buckets.map((bucket) => [bucket.score, bucket.count]))
+  return Array.from({ length: 11 }, (_, score) => ({ score, count: counts.get(score) ?? 0 }))
+}
+
+function scoreDistributionBarWidth(count: number, maxCount: number) {
+  if (count <= 0) return '0%'
+  return `${Math.max(8, (count / maxCount) * 100)}%`
+}
+
+function npsScoreBarClass(score: number) {
+  if (score <= 6) return 'bg-rose-600'
+  if (score <= 8) return 'bg-amber-500'
+  return 'bg-emerald-600'
+}
+
+function npsScoreGroupLabel(t: TFunction, score: number) {
+  if (score <= 6) return t('surveys.analytics.detractors')
+  if (score <= 8) return t('surveys.analytics.passives')
+  return t('surveys.analytics.promoters')
 }
 
 function formatDuration(seconds?: number) {
@@ -3397,7 +5479,7 @@ function surveyEnumKey(value?: string) {
     .toLowerCase()
 }
 
-function formatTimestamp(value: string, locale: string) {
+function formatTimestamp(value: string, locale: string, options: Intl.DateTimeFormatOptions = {}) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat(locale || 'zh-CN', {
@@ -3405,6 +5487,7 @@ function formatTimestamp(value: string, locale: string) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    ...options,
   }).format(date)
 }
 
@@ -3687,6 +5770,8 @@ function recoveryNotificationReasonLabel(t: TFunction, value?: string) {
       return t('surveys.low_scores.notification_reason.critical_recovery')
     case 'high_risk_recovery':
       return t('surveys.low_scores.notification_reason.high_risk_recovery')
+    case 'nps_detractor_response':
+      return t('surveys.low_scores.notification_reason.nps_detractor_response')
     case 'owner_unavailable':
       return t('surveys.low_scores.notification_reason.owner_unavailable')
     case 'owner_email_missing':
@@ -3805,13 +5890,105 @@ function lowScoreOwnerOptions(
   })
 }
 
+function useNPSAudienceOptions(enabled: boolean) {
+  const permissions = usePermissions()
+  const canViewCohorts = permissions.can('settings:cohort_sync:view')
+  const canViewMembers = permissions.can('settings:members:view')
+  const cohorts = useQuery({
+    queryKey: npsAudienceCohortsQueryKey,
+    queryFn: ({ signal }) =>
+      api<{ cohorts?: NPSAudienceCohort[] }>('/fb/v1/console/cohort-sync/cohorts', { signal }).then(
+        (response) => response.cohorts ?? [],
+      ),
+    enabled: enabled && canViewCohorts,
+    staleTime: 30_000,
+  })
+  const members = useQuery({
+    ...membersQuery(),
+    enabled: enabled && canViewMembers,
+  })
+  return {
+    canSelectCohort:
+      canViewCohorts &&
+      cohorts.isSuccess &&
+      cohorts.data?.some((cohort) => cohort.enabled) === true,
+    canSelectOwner: canViewMembers && members.isSuccess && (members.data?.length ?? 0) > 0,
+    cohorts: cohorts.data ?? [],
+    members: members.data ?? [],
+  }
+}
+
+function npsCohortOptions(cohorts: NPSAudienceCohort[], selectedID: string): [string, string][] {
+  const options = new Map<string, string>()
+  for (const cohort of cohorts) {
+    if (cohort.id && cohort.enabled) options.set(cohort.id, cohort.name || cohort.id)
+  }
+  if (selectedID && !options.has(selectedID)) options.set(selectedID, selectedID)
+  return Array.from(options.entries()).sort((left, right) => left[1].localeCompare(right[1]))
+}
+
+function npsDetractorOwnerOptions(members: Member[], selectedID: string): [string, string][] {
+  const options = new Map<string, string>()
+  for (const member of members) {
+    if (member.memberType !== 'invite' && member.id) options.set(member.id, memberLabel(member))
+  }
+  if (selectedID && !options.has(selectedID)) options.set(selectedID, selectedID)
+  return Array.from(options.entries()).sort((left, right) => left[1].localeCompare(right[1]))
+}
+
 function memberLabel(member: Member) {
   return member.email || member.userId || member.id
 }
 
 function surveyTypeLabel(t: TFunction, value: SurveyType) {
+  if (value === npsType) return t('surveys.type.nps')
   if (value === SurveyType.SURVEY_TYPE_CES) return t('surveys.type.ces')
   return t('surveys.type.csat')
+}
+
+function npsRunStatusLabel(t: TFunction, value: NpsCampaignRunStatus) {
+  switch (value) {
+    case NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_SCHEDULED:
+      return t('surveys.nps_runs.status.scheduled')
+    case NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_EVALUATING:
+      return t('surveys.nps_runs.status.evaluating')
+    case NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING:
+      return t('surveys.nps_runs.status.collecting')
+    case NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CLOSED:
+      return t('surveys.nps_runs.status.closed')
+    case NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_FAILED:
+      return t('surveys.nps_runs.status.failed')
+    case NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_CANCELLED:
+      return t('surveys.nps_runs.status.cancelled')
+    default:
+      return t('surveys.nps_runs.status.unknown')
+  }
+}
+
+function canCancelNpsRun(status: NpsCampaignRunStatus) {
+  return (
+    status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_SCHEDULED ||
+    status === NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_EVALUATING
+  )
+}
+
+function npsRunFailureReason(t: TFunction, value: string) {
+  if (value.includes('campaign_not_active')) {
+    return t('surveys.nps_runs.failure.campaign_not_active')
+  }
+  if (value.includes('cohort_unavailable')) {
+    return t('surveys.nps_runs.failure.cohort_unavailable')
+  }
+  if (value.includes('no_eligible_recipients')) {
+    return t('surveys.nps_runs.failure.no_eligible_recipients')
+  }
+  if (value.includes('email_sender_not_configured')) {
+    return t('surveys.nps_runs.failure.email_sender_not_configured')
+  }
+  if (value.includes('delivery_secret_store_not_configured')) {
+    return t('surveys.nps_runs.failure.delivery_secret_store_not_configured')
+  }
+  return t('surveys.nps_runs.failure.generic')
 }
 
 function campaignStatusLabel(t: TFunction, value: SurveyCampaignStatus) {
@@ -3821,6 +5998,7 @@ function campaignStatusLabel(t: TFunction, value: SurveyCampaignStatus) {
 }
 
 function triggerLabel(t: TFunction, value: SurveyTriggerEvent) {
+  if (value === scheduledRunTrigger) return t('surveys.trigger.scheduled_run')
   if (value === replySentTrigger) return t('surveys.trigger.reply_sent')
   if (value === requestResolvedTrigger) return t('surveys.trigger.request_resolved')
   if (value === manualLinkTrigger) return t('surveys.trigger.manual_link')

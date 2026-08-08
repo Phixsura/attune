@@ -41,6 +41,7 @@ type CampaignHealthFunnel struct {
 	DelayedCount               int
 	DeliveredCount             int
 	OpenedCount                int
+	StartedCount               int
 	CompletedCount             int
 	SuppressedCount            int
 	ExpiredCount               int
@@ -50,6 +51,8 @@ type CampaignHealthFunnel struct {
 	OverdueLowScoreReviewCount int
 	DeliveryRate               float64
 	OpenRate                   float64
+	StartRate                  float64
+	CompletionRate             float64
 	ResponseRate               float64
 	SuppressionRate            float64
 	ExpiredRate                float64
@@ -300,6 +303,7 @@ func campaignHealthFunnel(analytics repo.Analytics) CampaignHealthFunnel {
 		DelayedCount:               analytics.DelayedDeliveryCount,
 		DeliveredCount:             analytics.DeliveredCount,
 		OpenedCount:                analytics.OpenedCount,
+		StartedCount:               analytics.StartedCount,
 		CompletedCount:             analytics.CompletedCount,
 		SuppressedCount:            analytics.SuppressedCount,
 		ExpiredCount:               analytics.ExpiredCount,
@@ -309,6 +313,8 @@ func campaignHealthFunnel(analytics repo.Analytics) CampaignHealthFunnel {
 		OverdueLowScoreReviewCount: analytics.OverdueLowScoreReviewCount,
 		DeliveryRate:               ratio(analytics.DeliveredCount, analytics.InvitationCount),
 		OpenRate:                   ratio(analytics.OpenedCount, analytics.DeliveredCount),
+		StartRate:                  analytics.StartRate,
+		CompletionRate:             analytics.CompletionRate,
 		ResponseRate:               analytics.ResponseRate,
 		SuppressionRate:            ratio(analytics.SuppressedCount, analytics.InvitationCount),
 		ExpiredRate:                ratio(analytics.ExpiredCount, analytics.InvitationCount),

@@ -115,7 +115,7 @@ func acquireAPIKeyIdempotency(
 	if !errors.Is(err, idempotency.ErrExpired) {
 		return keyState, acquired, err
 	}
-	if delErr := store.Delete(r.Context(), tenantID, key); delErr != nil {
+	if _, delErr := store.DeleteExpired(r.Context(), tenantID, key); delErr != nil {
 		return nil, false, delErr
 	}
 	return store.Acquire(r.Context(), tenantID, key, requestHash, 0)

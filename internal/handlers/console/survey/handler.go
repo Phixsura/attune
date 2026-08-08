@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package survey serves console endpoints for post-resolution CSAT and CES
-// surveys.
+// Package survey serves Console endpoints for post-resolution CSAT, CES, and
+// NPS surveys.
 package survey
 
 import (
@@ -34,6 +34,15 @@ type service interface {
 	ListCampaigns(ctx context.Context, tenantID string, status string, limit int) ([]repo.Campaign, error)
 	CreateCampaign(ctx context.Context, in svc.CampaignInput) (repo.Campaign, error)
 	UpdateCampaign(ctx context.Context, in svc.CampaignInput) (repo.Campaign, error)
+	ScheduleNPSCampaignRun(ctx context.Context, input svc.ScheduleNPSCampaignRunInput) (repo.NPSCampaignRun, bool, error)
+	CancelNPSCampaignRun(ctx context.Context, input svc.CancelNPSCampaignRunInput) (repo.NPSCampaignRun, bool, error)
+	ListNPSCampaignRunPage(ctx context.Context, tenantID string, campaignID uuid.UUID, limit int, beforeSequence int) (repo.NPSCampaignRunPage, error)
+	NPSCampaignRunEvidence(ctx context.Context, tenantID string, campaignID uuid.UUID, runID uuid.UUID) (svc.NPSCampaignRunEvidence, error)
+	CreateNPSCampaignRunEvidenceExport(ctx context.Context, tenantID string, campaignID uuid.UUID, runID uuid.UUID, createdByType string, createdBy string) (repo.NPSCampaignRunEvidenceExport, error)
+	CreateNPSCampaignRunEvidenceExportWithRequestKey(ctx context.Context, tenantID string, campaignID uuid.UUID, runID uuid.UUID, clientRequestKey uuid.UUID, createdByType string, createdBy string) (repo.NPSCampaignRunEvidenceExport, bool, error)
+	ListNPSCampaignRunEvidenceExports(ctx context.Context, tenantID string, campaignID uuid.UUID, runID uuid.UUID, limit int) ([]repo.NPSCampaignRunEvidenceExportSummary, error)
+	DownloadNPSCampaignRunEvidenceExport(ctx context.Context, tenantID string, campaignID uuid.UUID, runID uuid.UUID, exportID uuid.UUID) (repo.NPSCampaignRunEvidenceExport, error)
+	NPSCampaignPreflight(ctx context.Context, tenantID string, campaignID uuid.UUID) (svc.NPSCampaignPreflight, error)
 	ArchiveCampaign(ctx context.Context, tenantID string, id uuid.UUID, actorID string) (repo.Campaign, error)
 	CreateHostedLink(ctx context.Context, in svc.HostedLinkInput) (repo.Invitation, error)
 	PreviewRecipients(ctx context.Context, in svc.RecipientPreviewInput) (svc.RecipientPreviewResult, error)
@@ -75,6 +84,22 @@ func BindListSurveyCampaigns(r *http.Request, req *attunev1.ListSurveyCampaignsR
 		req.Status = status
 	}
 	return bindLimit(q.Get("limit"), func(limit int32) { req.Limit = limit })
+}
+
+func BindListNPSCampaignRuns(r *http.Request, req *attunev1.ListNpsCampaignRunsRequest) error {
+	q := r.URL.Query()
+	if raw := strings.TrimSpace(q.Get("before_sequence")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || value < 1 {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid NPS campaign run cursor")
+		}
+		req.BeforeSequence = ptrext.Of(int32(value))
+	}
+	return bindLimit(q.Get("limit"), func(limit int32) { req.Limit = limit })
+}
+
+func BindListNPSCampaignRunEvidenceExports(r *http.Request, req *attunev1.ListNpsCampaignRunEvidenceExportsRequest) error {
+	return bindLimit(r.URL.Query().Get("limit"), func(limit int32) { req.Limit = limit })
 }
 
 func BindListSurveyInvitations(r *http.Request, req *attunev1.ListSurveyInvitationsRequest) error {
@@ -158,6 +183,9 @@ func BindSurveyAnalytics(r *http.Request, req *attunev1.GetSurveyAnalyticsReques
 	if raw := strings.TrimSpace(q.Get("to")); raw != "" {
 		req.To = ptrext.Of(raw)
 	}
+	if raw := strings.TrimSpace(q.Get("run_id")); raw != "" {
+		req.RunId = ptrext.Of(raw)
+	}
 	return nil
 }
 
@@ -171,6 +199,9 @@ func BindSurveyAnalyticsTrend(r *http.Request, req *attunev1.GetSurveyAnalyticsT
 	}
 	if raw := strings.TrimSpace(q.Get("to")); raw != "" {
 		req.To = ptrext.Of(raw)
+	}
+	if raw := strings.TrimSpace(q.Get("run_id")); raw != "" {
+		req.RunId = ptrext.Of(raw)
 	}
 	return nil
 }
@@ -231,6 +262,10 @@ func (h *Handler) CreateCampaign(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
 	req *attunev1.CreateSurveyCampaignRequest,
 ) (dispatcher.Result[*attunev1.SurveyCampaign], error) {
+	npsSettings, err := npsCampaignSettingsInput(req.GetNpsSettings())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.SurveyCampaign](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid NPS campaign settings")
+	}
 	item, err := h.service.CreateCampaign(ctx, svc.CampaignInput{
 		TenantID:                      ctx.Auth.TenantID,
 		Name:                          ptrext.Of(req.GetName()),
@@ -250,6 +285,8 @@ func (h *Handler) CreateCampaign(
 		RequireRecentCustomerActivity: req.RequireRecentCustomerActivity,
 		RecentActivityDays:            int32PtrToInt(req.RecentActivityDays),
 		SuppressAutoResolved:          req.SuppressAutoResolved,
+		NPSSettings:                   npsSettings,
+		NPSSettingsSet:                req.NpsSettings != nil,
 		ActorID:                       ctx.Auth.UserID,
 	})
 	if err != nil {
@@ -266,6 +303,10 @@ func (h *Handler) UpdateCampaign(
 	id, err := parseUUID(req.GetId())
 	if err != nil {
 		return dispatcher.Fail[*attunev1.SurveyCampaign](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid survey campaign id")
+	}
+	npsSettings, err := npsCampaignSettingsInput(req.GetNpsSettings())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.SurveyCampaign](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid NPS campaign settings")
 	}
 	item, err := h.service.UpdateCampaign(ctx, svc.CampaignInput{
 		TenantID:                      ctx.Auth.TenantID,
@@ -288,6 +329,8 @@ func (h *Handler) UpdateCampaign(
 		RequireRecentCustomerActivity: req.RequireRecentCustomerActivity,
 		RecentActivityDays:            int32PtrToInt(req.RecentActivityDays),
 		SuppressAutoResolved:          req.SuppressAutoResolved,
+		NPSSettings:                   npsSettings,
+		NPSSettingsSet:                req.NpsSettings != nil,
 		ActorID:                       ctx.Auth.UserID,
 	})
 	if err != nil {
@@ -295,6 +338,109 @@ func (h *Handler) UpdateCampaign(
 	}
 	_ = h.record(ctx, "survey.campaign_update", "survey_campaign", item.ID.String(), "Updated survey campaign")
 	return dispatcher.OK(campaignToProto(item))
+}
+
+func (h *Handler) ScheduleNPSCampaignRun(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.ScheduleNpsCampaignRunRequest,
+) (dispatcher.Result[*attunev1.NpsCampaignRun], error) {
+	campaignID, err := parseUUID(req.GetCampaignId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.NpsCampaignRun](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid survey campaign id")
+	}
+	clientRequestKey, err := parseUUID(req.GetClientRequestKey())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.NpsCampaignRun](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid client request key")
+	}
+	scheduledAt, err := optionalTime(req.GetScheduledAt())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.NpsCampaignRun](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid scheduled_at")
+	}
+	item, created, err := h.service.ScheduleNPSCampaignRun(ctx, svc.ScheduleNPSCampaignRunInput{
+		TenantID:         ctx.Auth.TenantID,
+		CampaignID:       campaignID,
+		ClientRequestKey: clientRequestKey,
+		ScheduledAt:      scheduledAt,
+		ActorID:          ctx.Auth.UserID,
+	})
+	if err != nil {
+		return consoleError[*attunev1.NpsCampaignRun](err, "NPS campaign run failed")
+	}
+	if !created {
+		return dispatcher.OK(npsCampaignRunToProto(item))
+	}
+	_ = h.record(ctx, "survey.nps_run_schedule", "survey_campaign_run", item.ID.String(), "Scheduled NPS campaign run")
+	return dispatcher.Created(npsCampaignRunToProto(item))
+}
+
+func (h *Handler) CancelNPSCampaignRun(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.CancelNpsCampaignRunRequest,
+) (dispatcher.Result[*attunev1.NpsCampaignRun], error) {
+	campaignID, err := parseUUID(req.GetCampaignId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.NpsCampaignRun](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid survey campaign id")
+	}
+	runID, err := parseUUID(req.GetRunId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.NpsCampaignRun](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid NPS campaign run id")
+	}
+	item, changed, err := h.service.CancelNPSCampaignRun(ctx, svc.CancelNPSCampaignRunInput{
+		TenantID:   ctx.Auth.TenantID,
+		CampaignID: campaignID,
+		RunID:      runID,
+		ActorID:    ctx.Auth.UserID,
+	})
+	if err != nil {
+		return consoleError[*attunev1.NpsCampaignRun](err, "NPS campaign run cancellation failed")
+	}
+	if changed {
+		_ = h.record(ctx, "survey.nps_run_cancel", "survey_campaign_run", item.ID.String(), "Cancelled NPS campaign run")
+	}
+	return dispatcher.OK(npsCampaignRunToProto(item))
+}
+
+func (h *Handler) ListNPSCampaignRuns(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.ListNpsCampaignRunsRequest,
+) (dispatcher.Result[*attunev1.ListNpsCampaignRunsResponse], error) {
+	campaignID, err := parseUUID(req.GetCampaignId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.ListNpsCampaignRunsResponse](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid survey campaign id")
+	}
+	page, err := h.service.ListNPSCampaignRunPage(
+		ctx,
+		ctx.Auth.TenantID,
+		campaignID,
+		int(req.GetLimit()),
+		int(req.GetBeforeSequence()),
+	)
+	if err != nil {
+		return consoleError[*attunev1.ListNpsCampaignRunsResponse](err, "NPS campaign runs failed")
+	}
+	out := ptrext.Of(attunev1.ListNpsCampaignRunsResponse{Runs: make([]*attunev1.NpsCampaignRun, 0, len(page.Runs))})
+	if page.NextBeforeSequence > 0 {
+		out.NextBeforeSequence = ptrext.Of(int32(page.NextBeforeSequence))
+	}
+	for _, item := range page.Runs {
+		out.Runs = append(out.Runs, npsCampaignRunToProto(item))
+	}
+	return dispatcher.OK(out)
+}
+
+func (h *Handler) NPSCampaignPreflight(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.GetNpsCampaignPreflightRequest,
+) (dispatcher.Result[*attunev1.NpsCampaignPreflight], error) {
+	campaignID, err := parseUUID(req.GetCampaignId())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.NpsCampaignPreflight](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid survey campaign id")
+	}
+	item, err := h.service.NPSCampaignPreflight(ctx, ctx.Auth.TenantID, campaignID)
+	if err != nil {
+		return consoleError[*attunev1.NpsCampaignPreflight](err, "NPS campaign preflight failed")
+	}
+	return dispatcher.OK(npsCampaignPreflightToProto(item))
 }
 
 func (h *Handler) ArchiveCampaign(
@@ -846,9 +992,14 @@ func analyticsFilter(tenantID string, req *attunev1.GetSurveyAnalyticsRequest) (
 	if err != nil {
 		return repo.AnalyticsFilter{}, err
 	}
+	runID, err := optionalUUID(req.GetRunId())
+	if err != nil {
+		return repo.AnalyticsFilter{}, err
+	}
 	return repo.AnalyticsFilter{
 		TenantID:   tenantID,
 		CampaignID: campaignID,
+		RunID:      runID,
 		From:       from,
 		To:         to,
 	}, nil
@@ -867,9 +1018,14 @@ func analyticsTrendFilter(tenantID string, req *attunev1.GetSurveyAnalyticsTrend
 	if err != nil {
 		return repo.AnalyticsFilter{}, err
 	}
+	runID, err := optionalUUID(req.GetRunId())
+	if err != nil {
+		return repo.AnalyticsFilter{}, err
+	}
 	return repo.AnalyticsFilter{
 		TenantID:   tenantID,
 		CampaignID: campaignID,
+		RunID:      runID,
 		From:       from,
 		To:         to,
 	}, nil
@@ -1036,6 +1192,34 @@ func optionalUUID(raw string) (*uuid.UUID, error) {
 		return nil, err
 	}
 	return ptrext.Of(id), nil
+}
+
+func npsCampaignSettingsInput(value *attunev1.NpsCampaignSettings) (*svc.NPSCampaignSettingsInput, error) {
+	if value == nil {
+		return nil, nil
+	}
+	cohortID, err := parseUUID(value.GetCohortId())
+	if err != nil {
+		return nil, err
+	}
+	ownerID, err := parseUUID(value.GetDetractorOwnerMemberId())
+	if err != nil {
+		return nil, err
+	}
+	return ptrext.Of(svc.NPSCampaignSettingsInput{
+		CohortID:                                  cohortID,
+		DetractorOwnerMemberID:                    ownerID,
+		CollectionDays:                            int(value.GetCollectionDays()),
+		MaximumRunRecipients:                      int(value.GetMaximumRunRecipients()),
+		MinimumCompletedResponses:                 int(value.GetMinimumCompletedResponses()),
+		MinimumResponseRatePercent:                int(value.GetMinimumResponseRatePercent()),
+		SamplePlanningConfidencePercent:           int(value.GetSamplePlanningConfidencePercent()),
+		SamplePlanningMarginOfErrorPercent:        int(value.GetSamplePlanningMarginOfErrorPercent()),
+		SamplePlanningExpectedResponseRatePercent: int(value.GetSamplePlanningExpectedResponseRatePercent()),
+		RecurrenceIntervalDays:                    int32PtrToInt(value.RecurrenceIntervalDays),
+		RecurrenceContactCooldownDays:             int32PtrToInt(value.RecurrenceContactCooldownDays),
+		RecurrenceSamplingPercent:                 int32PtrToInt(value.RecurrenceSamplingPercent),
+	}), nil
 }
 
 func optionalTime(raw string) (*time.Time, error) {

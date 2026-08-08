@@ -220,6 +220,9 @@ func unsubscribeTenantSubscriptions(ctx context.Context, tx pgx.Tx, token Unsubs
 	if err := validateUnsubscribeTokenShape(UnsubscribeScopeTenant, token.RequestID); err != nil {
 		return Subscription{}, err
 	}
+	if err := lockTenantUnsubscribeContact(ctx, tx, token.TenantID, token.ContactID); err != nil {
+		return Subscription{}, err
+	}
 	row := tx.QueryRow(ctx, `
 		INSERT INTO customer_request_subscriptions (
 			tenant_id, request_id, contact_id, scope, source, status,
@@ -237,7 +240,54 @@ func unsubscribeTenantSubscriptions(ctx context.Context, tx pgx.Tx, token Unsubs
 		RETURNING id, tenant_id, request_id, contact_id, scope, source, status,
 		 unsubscribed_at, created_at, updated_at`,
 		token.TenantID, token.ContactID)
-	return scanSubscription(row)
+	sub, err := scanSubscription(row)
+	if err != nil {
+		return Subscription{}, err
+	}
+	if err := revokePendingSurveyInvitations(ctx, tx, token.TenantID, token.ContactID); err != nil {
+		return Subscription{}, err
+	}
+	return sub, nil
+}
+
+func lockTenantUnsubscribeContact(ctx context.Context, tx pgx.Tx, tenantID string, contactID uuid.UUID) error {
+	var lockedContactID uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id
+		FROM customer_notification_contacts
+		WHERE tenant_id = $1 AND id = $2
+		FOR UPDATE`, tenantID, contactID).Scan(&lockedContactID) // ptrext:allow scan-target
+	if err != nil {
+		return mapNotFound(err)
+	}
+	return nil
+}
+
+// revokePendingSurveyInvitations clears queued and claimed customer emails in
+// the same transaction as a tenant-wide unsubscribe. A worker that already
+// holds the old lease cannot subsequently mark such an invitation delivered.
+func revokePendingSurveyInvitations(ctx context.Context, tx pgx.Tx, tenantID string, contactID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE survey_invitations
+		SET delivery_status = 'not_applicable',
+		    delivery_secret = NULL,
+		    suppression_status = 'suppressed',
+		    suppression_reason = 'tenant_unsubscribe',
+		    claimed_at = NULL,
+		    claimed_by = ''
+		WHERE tenant_id = $1
+		  AND contact_id = $2
+		  AND distribution_mode = 'contact_email'
+		  AND delivery_status IN ('pending', 'delayed')
+		  AND response_status <> 'completed'
+		  AND suppression_status = 'not_suppressed'`,
+		tenantID,
+		contactID,
+	)
+	if err != nil {
+		return fmt.Errorf("revoke pending survey invitations: %w", err)
+	}
+	return nil
 }
 
 func normalizeUnsubscribeScope(scope string) string {

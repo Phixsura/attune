@@ -1,10 +1,18 @@
-import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api-client'
+import {
+  infiniteQueryOptions,
+  queryOptions,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { api, getCsrfToken } from '@/lib/api-client'
+import { triggerBlobDownload } from '@/lib/blob-download'
 import type {
   AssignSurveyLowScoreReviewsRequest,
   AssignSurveyLowScoreReviewsResponse,
   BatchUpdateSurveyLowScoreReviewsRequest,
   BatchUpdateSurveyLowScoreReviewsResponse,
+  CancelNpsCampaignRunRequest,
+  CreateNpsCampaignRunEvidenceExportRequest,
   CreateSurveyCampaignRequest,
   CreateSurveyHostedLinkRequest,
   EscalateSurveyLowScoreReviewsRequest,
@@ -12,11 +20,17 @@ import type {
   GetSurveyAnalyticsInsightsResponse,
   GetSurveyAnalyticsSegmentsResponse,
   GetSurveyAnalyticsTrendResponse,
+  ListNpsCampaignRunEvidenceExportsResponse,
+  ListNpsCampaignRunsResponse,
   ListSurveyCampaignsResponse,
   ListSurveyInvitationsResponse,
   ListSurveyResponsesResponse,
+  NpsCampaignPreflight,
+  NpsCampaignRun,
+  NpsCampaignRunEvidenceExport,
   PreviewSurveyRecipientsRequest,
   PreviewSurveyRecipientsResponse,
+  ScheduleNpsCampaignRunRequest,
   SendSurveyTestEmailRequest,
   SendSurveyTestEmailResponse,
   SurveyAnalytics,
@@ -37,6 +51,7 @@ import type {
   UpdateSurveyCampaignRequest,
   UpdateSurveyLowScoreReviewRequest,
 } from '@/proto/attune/v1/survey'
+import { NpsCampaignRunStatus } from '@/proto/attune/v1/survey'
 
 const endpoint = '/fb/v1/console/surveys'
 
@@ -48,6 +63,21 @@ export const surveyAnalyticsTrendQueryKey = ['console', 'surveys', 'analytics-tr
 export const surveyAnalyticsSegmentsQueryKey = ['console', 'surveys', 'analytics-segments'] as const
 export const surveyAnalyticsInsightsQueryKey = ['console', 'surveys', 'analytics-insights'] as const
 export const surveyCampaignHealthQueryKey = ['console', 'surveys', 'campaign-health'] as const
+export const npsCampaignRunsQueryKey = ['console', 'surveys', 'nps-runs'] as const
+export const npsCampaignRunEvidenceExportsQueryKey = [
+  'console',
+  'surveys',
+  'nps-run-evidence-exports',
+] as const
+export const npsCampaignPreflightQueryKey = ['console', 'surveys', 'nps-preflight'] as const
+
+const activeNpsRunStatuses = new Set([
+  NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_SCHEDULED,
+  NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_EVALUATING,
+  NpsCampaignRunStatus.NPS_CAMPAIGN_RUN_STATUS_COLLECTING,
+])
+
+export const activeNpsRunRefreshIntervalMs = 5_000
 
 export interface SurveyInvitationFilters {
   campaignId?: string
@@ -72,6 +102,7 @@ export interface SurveyResponseFilters {
 export interface SurveyAnalyticsFilters {
   campaignId?: string
   from?: string
+  runId?: string
   to?: string
 }
 
@@ -167,12 +198,14 @@ export function surveyAnalyticsQuery(filters: SurveyAnalyticsFilters = {}) {
       ...surveyAnalyticsQueryKey,
       filters.campaignId ?? '',
       filters.from ?? '',
+      filters.runId ?? '',
       filters.to ?? '',
     ],
     queryFn: ({ signal }) => {
       const params = surveyParams({
         campaign_id: filters.campaignId,
         from: filters.from,
+        run_id: filters.runId,
         to: filters.to,
       })
       const suffix = params.size > 0 ? `?${params.toString()}` : ''
@@ -187,12 +220,14 @@ export function surveyAnalyticsTrendQuery(filters: SurveyAnalyticsFilters = {}) 
       ...surveyAnalyticsTrendQueryKey,
       filters.campaignId ?? '',
       filters.from ?? '',
+      filters.runId ?? '',
       filters.to ?? '',
     ],
     queryFn: async ({ signal }) => {
       const params = surveyParams({
         campaign_id: filters.campaignId,
         from: filters.from,
+        run_id: filters.runId,
         to: filters.to,
       })
       const suffix = params.size > 0 ? `?${params.toString()}` : ''
@@ -271,6 +306,94 @@ export function surveyCampaignHealthQuery(campaignId?: string) {
   })
 }
 
+export const npsCampaignRunPageSize = 20
+
+export function npsCampaignRunsInfiniteQuery(
+  campaignId?: string,
+  pageSize = npsCampaignRunPageSize,
+) {
+  return infiniteQueryOptions({
+    enabled: Boolean(campaignId),
+    initialPageParam: undefined as number | undefined,
+    queryKey: [...npsCampaignRunsQueryKey, campaignId ?? '', pageSize],
+    queryFn: async ({ pageParam, signal }) => {
+      const params = new URLSearchParams({ limit: String(pageSize) })
+      if (pageParam !== undefined) params.set('before_sequence', String(pageParam))
+      const res = await api<ListNpsCampaignRunsResponse>(
+        `${endpoint}/campaigns/${encodeURIComponent(campaignId ?? '')}/nps-runs?${params}`,
+        { signal },
+      )
+      return res
+    },
+    getNextPageParam: (lastPage) => lastPage.nextBeforeSequence,
+    refetchInterval: (query) =>
+      npsCampaignRunRefreshInterval(query.state.data?.pages.flatMap((page) => page.runs ?? [])),
+  })
+}
+
+export function npsCampaignRunRefreshInterval(runs?: NpsCampaignRun[]) {
+  return runs?.some((run) => activeNpsRunStatuses.has(run.status))
+    ? activeNpsRunRefreshIntervalMs
+    : false
+}
+
+export function npsCampaignRunEvidenceExportsQuery(campaignId?: string, runId?: string) {
+  return queryOptions({
+    enabled: Boolean(campaignId && runId),
+    queryKey: [...npsCampaignRunEvidenceExportsQueryKey, campaignId ?? '', runId ?? ''],
+    queryFn: async ({ signal }) => {
+      const res = await api<ListNpsCampaignRunEvidenceExportsResponse>(
+        `${endpoint}/campaigns/${encodeURIComponent(campaignId ?? '')}/nps-runs/${encodeURIComponent(runId ?? '')}/evidence-exports?limit=20`,
+        { signal },
+      )
+      return res.exports ?? []
+    },
+  })
+}
+
+export function useCreateNpsCampaignRunEvidenceExport() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateNpsCampaignRunEvidenceExportRequest) =>
+      api<NpsCampaignRunEvidenceExport>(
+        `${endpoint}/campaigns/${encodeURIComponent(body.campaignId)}/nps-runs/${encodeURIComponent(body.runId)}/evidence-exports`,
+        { method: 'POST', body },
+      ),
+    onSettled: (_data, _error, body) => {
+      qc.invalidateQueries({
+        queryKey: [...npsCampaignRunEvidenceExportsQueryKey, body.campaignId, body.runId],
+      })
+    },
+  })
+}
+
+export async function downloadNpsCampaignRunEvidenceExport(
+  downloadPath: string,
+  filename?: string,
+) {
+  const headers: Record<string, string> = { Accept: 'text/csv' }
+  const csrfToken = getCsrfToken()
+  if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+  const res = await fetch(downloadPath, { headers, credentials: 'include' })
+  if (!res.ok) throw new Error(await readErrorMessage(res))
+  const blob = await res.blob()
+  const disposition = res.headers.get('Content-Disposition')
+  const match = disposition?.match(/filename="([^"]+)"/)
+  triggerBlobDownload(blob, match?.[1] ?? filename ?? 'nps-run-evidence.csv')
+}
+
+export function npsCampaignPreflightQuery(campaignId?: string) {
+  return queryOptions({
+    enabled: Boolean(campaignId),
+    queryKey: [...npsCampaignPreflightQueryKey, campaignId ?? ''],
+    queryFn: ({ signal }) =>
+      api<NpsCampaignPreflight>(
+        `${endpoint}/campaigns/${encodeURIComponent(campaignId ?? '')}/nps-preflight`,
+        { signal },
+      ),
+  })
+}
+
 export function useCreateSurveyCampaign() {
   const qc = useQueryClient()
   return useMutation({
@@ -286,6 +409,7 @@ export function useCreateSurveyCampaign() {
       qc.invalidateQueries({ queryKey: surveyAnalyticsSegmentsQueryKey })
       qc.invalidateQueries({ queryKey: surveyAnalyticsInsightsQueryKey })
       qc.invalidateQueries({ queryKey: surveyCampaignHealthQueryKey })
+      qc.invalidateQueries({ queryKey: npsCampaignPreflightQueryKey })
     },
   })
 }
@@ -305,6 +429,7 @@ export function useUpdateSurveyCampaign() {
       qc.invalidateQueries({ queryKey: surveyAnalyticsSegmentsQueryKey })
       qc.invalidateQueries({ queryKey: surveyAnalyticsInsightsQueryKey })
       qc.invalidateQueries({ queryKey: surveyCampaignHealthQueryKey })
+      qc.invalidateQueries({ queryKey: npsCampaignPreflightQueryKey })
     },
   })
 }
@@ -325,6 +450,43 @@ export function useArchiveSurveyCampaign() {
       qc.invalidateQueries({ queryKey: surveyAnalyticsInsightsQueryKey })
       qc.invalidateQueries({ queryKey: surveyInvitationsQueryKey })
       qc.invalidateQueries({ queryKey: surveyCampaignHealthQueryKey })
+      qc.invalidateQueries({ queryKey: npsCampaignPreflightQueryKey })
+    },
+  })
+}
+
+export function useScheduleNpsCampaignRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ScheduleNpsCampaignRunRequest) =>
+      api<NpsCampaignRun>(
+        `${endpoint}/campaigns/${encodeURIComponent(body.campaignId)}:scheduleNpsRun`,
+        { method: 'POST', body },
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: npsCampaignRunsQueryKey })
+      qc.invalidateQueries({ queryKey: surveyInvitationsQueryKey })
+      qc.invalidateQueries({ queryKey: surveyAnalyticsQueryKey })
+      qc.invalidateQueries({ queryKey: surveyAnalyticsTrendQueryKey })
+      qc.invalidateQueries({ queryKey: npsCampaignPreflightQueryKey })
+    },
+  })
+}
+
+export function useCancelNpsCampaignRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CancelNpsCampaignRunRequest) =>
+      api<NpsCampaignRun>(
+        `${endpoint}/campaigns/${encodeURIComponent(body.campaignId)}/nps-runs/${encodeURIComponent(body.runId)}:cancel`,
+        { method: 'POST', body },
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: npsCampaignRunsQueryKey })
+      qc.invalidateQueries({ queryKey: surveyInvitationsQueryKey })
+      qc.invalidateQueries({ queryKey: surveyAnalyticsQueryKey })
+      qc.invalidateQueries({ queryKey: surveyAnalyticsTrendQueryKey })
+      qc.invalidateQueries({ queryKey: npsCampaignPreflightQueryKey })
     },
   })
 }
@@ -489,7 +651,21 @@ function surveyParams(values: Record<string, string | undefined>) {
   return params
 }
 
+async function readErrorMessage(res: Response) {
+  const fallback = `HTTP ${res.status}`
+  const text = await res.text()
+  if (!text) return fallback
+  try {
+    const parsed = JSON.parse(text) as { message?: string }
+    return parsed.message || fallback
+  } catch {
+    return fallback
+  }
+}
+
 export type {
+  NpsCampaignPreflight,
+  NpsCampaignRun,
   PreviewSurveyRecipientsResponse,
   SendSurveyTestEmailResponse,
   SurveyAnalytics,

@@ -2060,7 +2060,7 @@ Contracts and gates:
 - [Intercom conversation ratings](https://www.intercom.com/help/en/articles/7872853-measure-customer-satisfaction-with-conversation-ratings)
 - [Freshdesk CSAT module](https://support.freshdesk.com/support/solutions/articles/50000009790-the-new-csat-module-how-to-set-up-send-out-and-collect-responses)
 - [Help Scout satisfaction ratings](https://docs.helpscout.com/article/386-gather-feedback-with-satisfaction-ratings)
-- [Jira Service Management CSAT](https://support.atlassian.com/jira-service-management-cloud/docs/what-are-customer-satisfaction-surveys-csats/)
+- [Jira Service Management CSAT](https://support.atlassian.com/jira%2Dservice%2Dmanagement%2Dcloud/docs/what-are-customer-satisfaction-surveys-csats/)
 - [Qualtrics Workflows](https://www.qualtrics.com/support/survey-platform/actions-module/setting-up-actions/)
 - [Qualtrics email opt-out](https://www.qualtrics.com/support/survey-platform/distributions-module/email-distribution/emails-overview/)
 - [Medallia closed-loop feedback framework](https://www.medallia.com/blog/closed-loop-feedback-program-try-this-framework/)

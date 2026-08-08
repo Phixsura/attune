@@ -203,6 +203,7 @@ func TestCounterVecLabels(t *testing.T) {
 	DigestClusteringFallbackTotal.WithLabelValues("t", "zero_clusters")
 	SurveyRecoveryAutomationTotal.WithLabelValues("t", "escalated", "overdue_sla")
 	SurveyRecoveryNotificationTotal.WithLabelValues("t", "sent", "overdue_sla")
+	SurveyNPSRunMaterializationTotal.WithLabelValues("t", "materialized", "ok")
 	WorkflowTransitionsTotal.WithLabelValues("t", "success")
 	BatchJobsClaimed.WithLabelValues("t")
 	BatchJobsCompleted.WithLabelValues("t", "completed")

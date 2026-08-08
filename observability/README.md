@@ -76,6 +76,8 @@ exposition plus the portable assets in this directory.
 | `attune_digest_cluster_count` | histogram | `tenant` | number of clusters found per digest run (#27) |
 | `attune_survey_recovery_automation_total` | counter | `tenant`, `result`, `reason` | low-score survey recovery automation outcomes by tenant and reason (#235) |
 | `attune_survey_recovery_notification_total` | counter | `tenant`, `result`, `reason` | low-score survey recovery owner notification outcomes by tenant and reason (#235) |
+| `attune_survey_nps_run_materialization_total` | counter | `tenant`, `result`, `reason` | NPS run materialization outcomes by stable lifecycle or failure reason (#236) |
+| `attune_survey_nps_evidence_export_purge_total` | counter | `tenant`, `result` | Expired NPS evidence artifacts removed by the bounded lifecycle worker (#236) |
 | `attune_external_sync_runs_total` | counter | `provider`, `object_type`, `result` | external sync run outcomes by provider and object type (#214) |
 | `attune_external_sync_records_total` | counter | `provider`, `object_type`, `operation`, `result` | external sync record-level operations and outcomes (#214) |
 | `attune_external_sync_run_duration_seconds` | histogram | `provider`, `object_type`, `result` | external sync run latency by provider, object type, and outcome (#214) |
@@ -177,6 +179,15 @@ Label values:
 - survey recovery `result` — `escalated` · `skipped` · `error`.
 - survey recovery `reason` — bounded recovery reasons such as `overdue_sla`,
   `owner_missing`, `due_missing`, `critical_recovery`, or `not_eligible`.
+- NPS materialization `result` — `materialized` · `failed` · `retrying` ·
+  `superseded` · `error`; `reason` — `ok` · `campaign_not_active` ·
+  `no_eligible_recipients` · `delivery_not_ready` · `not_found` · `validation` ·
+  `transient` · `conflict` · `failure_persist_error`.
+- `attune_survey_nps_recurrence_total` NPS recurrence `result` — `scheduled` · `skipped` · `retrying` · `error`; `reason` —
+  `created` · `existing_successor` · `campaign_not_found` · `campaign_not_active` ·
+  `non_nps_campaign` · `recurrence_disabled` · `delivery_not_ready` · `not_found` ·
+  `validation` · `transient` · `conflict`.
+- `attune_survey_nps_evidence_export_purge_total` purge `result` — `expired`.
 - batch `operation` — `tag` · `workflow` · `delete`.
 - batch `status` — `success` · `error` · `rate_limited`.
 - batch `result` — `succeeded` · `skipped` · `failed`.

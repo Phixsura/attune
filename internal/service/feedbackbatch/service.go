@@ -196,14 +196,15 @@ func (s *service) handleIdempotency(ctx context.Context, req *BatchRequest) (*Ba
 	}
 
 	key, acquired, err := s.idempotencyRepo.Acquire(ctx, req.TenantID, req.IdempotencyKey, requestHash, 0)
+	if errors.Is(err, idempotency.ErrExpired) {
+		if _, deleteErr := s.idempotencyRepo.DeleteExpired(ctx, req.TenantID, req.IdempotencyKey); deleteErr != nil {
+			return nil, false, fmt.Errorf("delete expired idempotency key: %w", deleteErr)
+		}
+		key, acquired, err = s.idempotencyRepo.Acquire(ctx, req.TenantID, req.IdempotencyKey, requestHash, 0)
+	}
 	if errors.Is(err, idempotency.ErrHashMismatch) {
 		metrics.IdempotencyKeyUsage.WithLabelValues(req.TenantID, "conflict").Inc()
 		return nil, false, ErrIdempotencyConflict
-	}
-	if errors.Is(err, idempotency.ErrExpired) {
-		// Treat expired as if not found - allow new request.
-		metrics.IdempotencyKeyUsage.WithLabelValues(req.TenantID, "new").Inc()
-		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("idempotency acquire: %w", err)

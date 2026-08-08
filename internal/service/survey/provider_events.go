@@ -7,8 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 
 	repo "github.com/Phixsura/attune/internal/repo/survey"
 )
@@ -31,7 +32,7 @@ func (s *Service) normalizeProviderEventInput(in ProviderEventInput) (repo.Provi
 		Provider:          boundedString(strings.TrimSpace(in.Provider), 120),
 		ProviderEventType: eventType,
 		ProviderMessageID: boundedString(strings.TrimSpace(in.ProviderMessageID), 512),
-		ProviderEventKey:  providerEventKey(in.ProviderEventKey, eventType, payload),
+		ProviderEventKey:  providerEventKey(in.ProviderEventKey, eventType, payload, in.InvitationID, in.ProviderMessageID),
 		Payload:           payload,
 		OccurredAt:        in.OccurredAt,
 	}
@@ -71,14 +72,20 @@ func normalizeProviderEventType(raw string) string {
 	}
 }
 
-func providerEventKey(raw string, eventType string, payload map[string]any) string {
+func providerEventKey(
+	raw string,
+	eventType string,
+	payload map[string]any,
+	invitationID *uuid.UUID,
+	providerMessageID string,
+) string {
 	if key := boundedString(strings.TrimSpace(raw), 512); key != "" {
 		return key
 	}
 	if key := providerPayloadEventID(payload); key != "" {
 		return boundedString("id:"+key, 512)
 	}
-	return providerPayloadHashKey(eventType, payload)
+	return providerPayloadHashKey(eventType, payload, invitationID, providerMessageID)
 }
 
 func providerPayloadEventID(payload map[string]any) string {
@@ -92,14 +99,33 @@ func providerPayloadEventID(payload map[string]any) string {
 	return ""
 }
 
-func providerPayloadHashKey(eventType string, payload map[string]any) string {
+func providerPayloadHashKey(
+	eventType string,
+	payload map[string]any,
+	invitationID *uuid.UUID,
+	providerMessageID string,
+) string {
 	if len(payload) == 0 {
 		return ""
 	}
-	raw, err := json.Marshal(payload)
+	invitationIDValue := ""
+	if invitationID != nil {
+		invitationIDValue = invitationID.String()
+	}
+	raw, err := json.Marshal(struct {
+		EventType         string         `json:"event_type"`
+		InvitationID      string         `json:"invitation_id"`
+		ProviderMessageID string         `json:"provider_message_id"`
+		Payload           map[string]any `json:"payload"`
+	}{
+		EventType:         eventType,
+		InvitationID:      invitationIDValue,
+		ProviderMessageID: strings.TrimSpace(providerMessageID),
+		Payload:           payload,
+	})
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s:%s", eventType, raw)))
+	sum := sha256.Sum256(raw)
 	return "payload_sha256:" + hex.EncodeToString(sum[:])
 }

@@ -1380,6 +1380,102 @@ func TestPGCustomerRequestPromoteFeedbackWritesAuditAndIdempotency(t *testing.T)
 	}
 }
 
+func TestPGCustomerRequestPromoteFeedbackReclaimsExpiredIdempotencyKey(t *testing.T) {
+	e := setup(t)
+	feedbackID := e.seedFeedback(t, e.tenantID, "expired-promote-user", "expired-promote-subject")
+	idempotencyKey := "promote_expired_key_1"
+	idempotencyRepo := idempotencyrepo.New(e.pool)
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, idempotencyRepo, auditlogsvc.New(auditRepo))
+	input := crsvc.PromoteInput{
+		TenantID:       e.tenantID,
+		FeedbackIDs:    []int64{feedbackID},
+		Title:          "Expired promotion request",
+		Description:    "Reclaimed after expiration",
+		Status:         crrepo.StatusOpen,
+		Priority:       crrepo.PriorityMedium,
+		IdempotencyKey: idempotencyKey,
+		Actor:          auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	}
+
+	_, acquired, err := idempotencyRepo.Acquire(e.ctx, e.tenantID, idempotencyKey, []byte("expired"), time.Minute)
+	if err != nil || !acquired {
+		t.Fatalf("Acquire expired key acquired:%v err:%v", acquired, err)
+	}
+	if _, err := e.pool.Exec(e.ctx, `
+		UPDATE idempotency_keys
+		SET expires_at = NOW() - INTERVAL '1 minute'
+		WHERE tenant_id = $1 AND key = $2`, e.tenantID, idempotencyKey); err != nil {
+		t.Fatalf("expire idempotency key: %v", err)
+	}
+
+	detail, err := service.PromoteFeedback(e.ctx, input)
+	if err != nil {
+		t.Fatalf("PromoteFeedback after expiration: %v", err)
+	}
+	if detail.Request.Summary.Title != input.Title {
+		t.Fatalf("promoted title = %q, want %q", detail.Request.Summary.Title, input.Title)
+	}
+	assertRequestCount(t, e, 1)
+	assertPromoteAuditEntry(t, detail, auditRepo, e.tenantID, feedbackID)
+
+	stored, err := idempotencyRepo.Get(e.ctx, e.tenantID, idempotencyKey)
+	if err != nil {
+		t.Fatalf("Get reclaimed idempotency key: %v", err)
+	}
+	if stored.Status != idempotencyrepo.StatusCompleted || stored.ResponseCode != 200 || len(stored.ResponseBody) == 0 {
+		t.Fatalf("reclaimed idempotency key = status:%s code:%d body:%d, want completed/200/body",
+			stored.Status, stored.ResponseCode, len(stored.ResponseBody))
+	}
+}
+
+func TestPGCustomerRequestPromoteFeedbackRejectsForeignEvidenceAtomically(t *testing.T) {
+	e := setup(t)
+	foreignTenant := e.createTenant(t, "customer-request-promote-foreign")
+	foreignFeedbackID := e.seedFeedback(t, foreignTenant, "foreign-user", "foreign-subject")
+	idempotencyKey := "promote_foreign_feedback_1"
+	idempotencyRepo := idempotencyrepo.New(e.pool)
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, idempotencyRepo, auditlogsvc.New(auditRepo))
+	input := crsvc.PromoteInput{
+		TenantID:       e.tenantID,
+		FeedbackIDs:    []int64{foreignFeedbackID},
+		Title:          "Foreign evidence request",
+		Description:    "Must not be created",
+		Status:         crrepo.StatusOpen,
+		Priority:       crrepo.PriorityNone,
+		IdempotencyKey: idempotencyKey,
+		Actor:          auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		_, err := service.PromoteFeedback(e.ctx, input)
+		if !errors.Is(err, crrepo.ErrFeedbackNotFound) {
+			t.Fatalf("PromoteFeedback foreign evidence attempt %d error = %v, want ErrFeedbackNotFound", attempt+1, err)
+		}
+	}
+
+	assertRequestCount(t, e, 0)
+	auditEntries, err := auditRepo.List(e.ctx, auditlogrepo.ListFilter{
+		TenantID:  e.tenantID,
+		Actions:   []string{"customer_request.promote_feedback"},
+		Unbounded: true,
+	})
+	if err != nil {
+		t.Fatalf("List promote audit rows: %v", err)
+	}
+	if len(auditEntries.Items) != 0 {
+		t.Fatalf("foreign promotion audit rows = %d, want 0", len(auditEntries.Items))
+	}
+	key, err := idempotencyRepo.Get(e.ctx, e.tenantID, idempotencyKey)
+	if err != nil {
+		t.Fatalf("Get failed idempotency key: %v", err)
+	}
+	if key.Status != idempotencyrepo.StatusFailed {
+		t.Fatalf("foreign promotion idempotency status = %s, want failed", key.Status)
+	}
+}
+
 func TestPGCustomerRequestMergePreservesBacklinks(t *testing.T) {
 	e := setup(t)
 	target := e.createRequest(t, e.tenantID, "Target request")

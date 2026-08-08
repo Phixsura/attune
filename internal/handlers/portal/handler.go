@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
@@ -73,6 +74,7 @@ func (h *Handler) SetNotificationService(service notificationService) {
 
 type surveyService interface {
 	GetPublicSurvey(ctx context.Context, token string) (surveyrepo.PublicSurvey, error)
+	FingerprintPublicResponse(ctx context.Context, token, userAgent, clientIP string) (surveysvc.PublicResponseFingerprints, error)
 	SubmitPublicResponse(ctx context.Context, in surveysvc.PublicSubmitInput) (surveyrepo.Response, bool, string, error)
 }
 
@@ -110,13 +112,24 @@ func (h *Handler) SubmitPublicSurveyResponse(
 	if h.surveys == nil {
 		return dispatcher.Fail[*attunev1.PublicSurveyResponseReceipt](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "surveys not configured")
 	}
+	fingerprints, err := h.surveys.FingerprintPublicResponse(
+		ctx,
+		req.GetToken(),
+		userAgentFromRequest(ctx.Request()),
+		nethardening.ClientIPDefault(ctx.Request()),
+	)
+	if err != nil {
+		return portalSurveyError[*attunev1.PublicSurveyResponseReceipt](err)
+	}
 	response, lowScore, thankYou, err := h.surveys.SubmitPublicResponse(ctx, surveysvc.PublicSubmitInput{
-		Token:         req.GetToken(),
-		Score:         int(req.GetScore()),
-		Comment:       req.GetComment(),
-		Locale:        req.GetLocale(),
-		UserAgentHash: surveysvc.HashValue(userAgentFromRequest(ctx.Request())),
-		IPHash:        surveysvc.HashValue(ctx.Request().RemoteAddr),
+		Token:           req.GetToken(),
+		Score:           int(req.GetScore()),
+		Comment:         req.GetComment(),
+		Locale:          req.GetLocale(),
+		FollowUpConsent: req.FollowUpConsent,
+		UserAgentHash:   fingerprints.UserAgentHash,
+		IPHash:          fingerprints.IPHash,
+		QualityFlags:    fingerprints.QualityFlags,
 	})
 	if err != nil {
 		return portalSurveyError[*attunev1.PublicSurveyResponseReceipt](err)

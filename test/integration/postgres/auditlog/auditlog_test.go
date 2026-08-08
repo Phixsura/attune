@@ -94,6 +94,8 @@ func TestPG_AuditLogAcceptsNewlyRegisteredActions(t *testing.T) {
 		{action: "service_account.create", targetType: "service_account", targetID: "sa-1"},
 		{action: "service_account.update", targetType: "service_account", targetID: "sa-1"},
 		{action: "service_account.delete", targetType: "service_account", targetID: "sa-1"},
+		{action: "survey.nps_run_schedule", targetType: "survey_campaign_run", targetID: "run-1"},
+		{action: "survey.nps_run_evidence_export", targetType: "survey_nps_campaign_run", targetID: "run-1"},
 	} {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO audit_log (

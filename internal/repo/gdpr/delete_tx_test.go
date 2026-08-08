@@ -22,6 +22,7 @@ type gdprTx struct {
 	queryErrs []error
 	queryIdx  int
 	execTags  []pgconn.CommandTag
+	execSQL   []string
 	execErrAt int // 1-based index of the Exec call to fail; 0 = never
 	execIdx   int
 	commitErr error
@@ -39,7 +40,8 @@ func (tx *gdprTx) Prepare(context.Context, string, string) (*pgconn.StatementDes
 	return nil, nil
 }
 
-func (tx *gdprTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
+func (tx *gdprTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	tx.execSQL = append(tx.execSQL, sql)
 	tx.execIdx++
 	if tx.execErrAt > 0 && tx.execIdx == tx.execErrAt {
 		return pgconn.CommandTag{}, errors.New("exec boom")
@@ -116,10 +118,11 @@ func TestDelete_FullErasureFlow(t *testing.T) {
 	tx := &gdprTx{
 		queries: []pgx.Rows{subjectRows()},
 		rows:    []fakeRow{{values: countsRowValues()}},
-		// Exec order: cohort memberships, survey-linked rows,
+		// Exec order: cohort memberships, NPS aggregate redactions, survey-linked rows,
 		// feedback-linked rows, then per-table dedup+anonymize.
 		execTags: []pgconn.CommandTag{
 			pgconn.NewCommandTag("DELETE 0"), // cohort_memberships
+			pgconn.NewCommandTag("UPDATE 1"), // NPS run redactions
 			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 1"),
 			pgconn.NewCommandTag("DELETE 1"), pgconn.NewCommandTag("DELETE 1"),
 			pgconn.NewCommandTag("DELETE 1"),
@@ -144,6 +147,9 @@ func TestDelete_FullErasureFlow(t *testing.T) {
 	if res.Counts.TagAssignmentCount != 2 || res.Counts.OutboxCount != 5 {
 		t.Errorf("counts = %+v", res.Counts)
 	}
+	if len(tx.execSQL) < 2 || !strings.Contains(tx.execSQL[1], "SELECT si.id, si.run_id") {
+		t.Fatalf("NPS redaction query must select run_id: %q", tx.execSQL)
+	}
 }
 
 func TestDelete_ErrorLegs(t *testing.T) {
@@ -165,19 +171,20 @@ func TestDelete_ErrorLegs(t *testing.T) {
 	// silently-skipped DELETE would leave PII behind.
 	for failAt, wantMsg := range map[int]string{
 		1:  "cohort memberships",
-		2:  "survey_recovery_notifications",
-		3:  "survey_low_score_reviews",
-		4:  "survey_provider_events",
-		5:  "survey_responses",
-		6:  "survey_invitations",
-		7:  "reply_delivery_attempts",
-		8:  "llm_audit",
-		9:  "notify_outbox",
-		10: "user_feedback",
-		11: "dedup customer_request_customer_links",
-		12: "anonymize customer_request_customer_links",
-		13: "dedup customer_request_votes",
-		14: "anonymize customer_request_votes",
+		2:  "record survey campaign run redactions",
+		3:  "survey_recovery_notifications",
+		4:  "survey_low_score_reviews",
+		5:  "survey_provider_events",
+		6:  "survey_responses",
+		7:  "survey_invitations",
+		8:  "reply_delivery_attempts",
+		9:  "llm_audit",
+		10: "notify_outbox",
+		11: "user_feedback",
+		12: "dedup customer_request_customer_links",
+		13: "anonymize customer_request_customer_links",
+		14: "dedup customer_request_votes",
+		15: "anonymize customer_request_votes",
 	} {
 		t.Run(wantMsg, func(t *testing.T) {
 			tx := &gdprTx{
@@ -204,6 +211,20 @@ func TestDelete_ErrorLegs(t *testing.T) {
 			t.Error("expected commit error")
 		}
 	})
+}
+
+func TestDelete_FailsWhenSubjectSurveyInvitationLockCannotBeAcquired(t *testing.T) {
+	t.Parallel()
+
+	tx := &gdprTx{
+		queries:   []pgx.Rows{subjectRows()},
+		queryErrs: []error{nil, errors.New("lock boom")},
+	}
+	r := &Repo{pool: &gdprPool{tx: tx}}
+	_, err := r.Delete(context.Background(), "tenant-1", "alice@customer.example")
+	if err == nil || !strings.Contains(err.Error(), "lock survey invitations") {
+		t.Fatalf("Delete() error = %v, want invitation-lock failure", err)
+	}
 }
 
 func TestExecuteDeleteRequest_Flow(t *testing.T) {

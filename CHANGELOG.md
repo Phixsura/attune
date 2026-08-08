@@ -7,7 +7,400 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Changed
+
+- Add a privacy-safe, explainable response-quality observation layer for public
+  survey submissions. Automated-client, missing-request-context,
+  submitted-without-page-visit, and unusually-fast submissions are marked as
+  evidence only; they remain in score denominators, while Console analytics,
+  trends, response records, and NPS evidence exports expose the flagged count
+  and status without storing raw request metadata (#236).
+
+- Make NPS measurement availability explicit across run, analytics, trend, and
+  aggregate evidence contracts, so no-response and privacy-redacted states are
+  never consumed as numeric NPS zero; version 2 evidence exports remain able to
+  replay version 1 artifacts (#236).
+
+- Add conservative NPS sample-planning evidence. Operators can set planning
+  confidence, margin of error, and expected submitted-response rate; preflight
+  reports required completes and an invitation target over the current
+  serviceable population, while each materialized run freezes the assumptions
+  and shows the actual-invitation-versus-target shortfall in run evidence. This
+  is explicitly capacity planning, not a statistical significance or
+  representativeness claim; preflight distinguishes a cap-constrained target
+  from a small eligible population (#236).
+
+- Add an optional durable relationship-NPS pulse program. Operators can keep a
+  campaign manual or select a 30-day, quarterly, semiannual, or annual cadence;
+  closed runs enqueue one auditable successor through a lease-claimed,
+  crash-recoverable scheduler, with a unique source-run link preventing
+  duplicate measurements (#236). Recurrence decisions expose bounded outcome
+  metrics and an Operations dashboard series for created, skipped, and retryable
+  pulses. Recurring runs separately freeze a per-contact cooldown, defaulting to
+  365 days, so program cadence does not force quarterly repeat invitations.
+
+- Add a frozen recurring-pulse allocation target. New relationship-NPS programs
+  cover 25% of currently serviceable contacts per pulse by default, with 1-100%
+  Console options; the deterministic selector uses the available population as
+  its planning base, then applies cooldown and transaction-time eligibility
+  fences. Preflight and run evidence expose the target separately from the
+  actual invitation ledger (#236).
+
+- Include the immutable NPS canonical-content revision and recurring allocation
+  policy in the version-4 run measurement fingerprint. A future wording
+  revision now starts a new trend
+  baseline, while legacy definitions without a revision are never silently
+  compared with current runs (#236).
+
+- Normalize every relationship-NPS campaign, hosted page, and stored response
+  to the language of its immutable shipped content. Only generic, region, and
+  script tags for Simplified Chinese select that translation; Traditional-Chinese
+  and other unsupported tags now use English rather than mislabeling text or
+  being injected through a public response submission. Legacy or malformed
+  invitation snapshots are rebuilt to their immutable canonical-content
+  revision before public HTML or API rendering. An unknown revision disables
+  the link rather than silently replacing its NPS question (#236).
+
+- Make the NPS scheduling time contract explicit in the Console: browser-local
+  date/time input and full-year run timestamps carry the active IANA time zone,
+  while a populated schedule also shows its exact UTC execution value (#236).
+
+- Render the complete 0-10 NPS response scale in the Console, including
+  zero-response buckets and the detractor, passive, and promoter group colors,
+  so sparse measurements remain legible without changing their denominator
+  (#236).
+
+- Add a concurrent NPS audience lookup index so large cohort-to-contact resolutions remain bounded by tenant and subject identity.
+
+- Let the NPS Console browse complete run history through stable keyset pages,
+  while limiting run-metric aggregation to the displayed page (#236).
+
+- Distinguish NPS hosted-page visit telemetry from submitted response outcomes.
+  The legacy `response_rate` remains a deprecated compatibility alias for the
+  new explicit `hosted_visit_rate`, because email security scanners and link
+  prefetchers can load a hosted survey without a verified human response (#236).
+
 ### Added
+
+- Add an auditable, aggregate-only CSV export for one immutable NPS run. The
+  report includes the run definition fingerprint, denominator chain, delivery
+  and submission rates, qualification thresholds, sample-planning evidence, and
+  the complete 0-10 distribution, while excluding comments, emails, contacts,
+  and respondent identifiers. Each export is persisted as a versioned,
+  immutable artifact with creator, timestamp, and SHA-256 history; operators
+  can list and re-download the exact same bytes without recomputing a live
+  ledger. Creation and download each record a tenant-scoped audit event, and
+  the response exposes a standard body digest plus a matching strong ETag for
+  independent verification (#236).
+
+- Enforce NPS evidence export content-addressing in PostgreSQL and on
+  repository reads so a tampered artifact fails closed instead of being served
+  with a misleading audit digest (#236).
+
+- Make NPS evidence creation an explicit, idempotent POST contract with a
+  client request key. Retries replay the original artifact and return `200 OK`
+  without a duplicate creation audit event; new artifacts return `201 Created`.
+  Persisted exports now carry a 30-day retention deadline, expose it in the
+  Console history, reject expired downloads with `410 Gone`, and are removed in
+  bounded background cleanup batches after expiry while their audit events stay
+  available for governance review (#236).
+
+- Immutable initial-target, first-contact, and first-terminal timestamps for
+  low-score recovery, with run-scoped NPS evidence for on-time versus late
+  customer contact and terminal disposition. Historical records without a
+  trustworthy timestamp are excluded from the timeliness denominator and cannot
+  gain inferred evidence through later edits or reopening (#236).
+
+- Run-scoped NPS recovery-outcome evidence beside each selected measurement,
+  showing review, resolution, dismissal, customer-contact, root-cause, and
+  action-record counts without treating dismissed work as a resolved customer
+  recovery (#236).
+
+- NPS low-score recovery cards now link a comment's durable feedback signal to
+  its exact, ID-scoped Feedback workbench view, preserving the existing human
+  customer-request promotion flow (#236).
+
+- Hosted NPS responses can record an optional, response-specific follow-up
+  permission. The result is carried through the public contract, durable
+  recovery notification, and Console low-score workflow while remaining
+  distinct from the contact's subscription state. The recovery queue also
+  distinguishes an explicit refusal from historical replies where this answer
+  was never recorded (#236).
+
+- NPS campaigns now define frozen operating-evidence thresholds for submitted
+  responses and submitted-response rate. Each run reports whether its current
+  result is preliminary, directional, qualified for that campaign's threshold,
+  incomplete after redaction, or unavailable without claiming statistical
+  significance (#236).
+
+- Canonical English and Simplified-Chinese NPS respondent content and hosted
+  response-page controls. Changing an NPS campaign locale now creates a new
+  content version, while previously delivered links retain their original
+  localized snapshot (#236).
+
+- Operators can cancel a scheduled or evaluating NPS run before its invitation
+  ledger materializes. Cancellation is idempotent, records the acting operator,
+  and is fenced against concurrent workers so it never reports success after
+  invitations are committed (#236).
+
+- NPS campaign runs with selectable cohort-backed, consented email recipients,
+  immediate or future scheduling, hosted score and comment collection,
+  profile-linked feedback signals, and Console distribution and trend analytics
+  (#236).
+
+- Privacy-safe NPS launch preflight with current aggregate cohort, eligible,
+  excluded, and capped invitation counts plus delivery-readiness evidence;
+  recipients remain undisclosed and are still frozen by the worker at run time
+  (#236).
+
+- NPS launch preflight now warns when its current capped invitation estimate
+  cannot reach the campaign's frozen minimum submitted-response threshold, even
+  with perfect completion. The advisory remains non-blocking because the worker
+  re-evaluates the audience at scheduling time (#236).
+
+- Run-level NPS measurement history with per-run delivery, completion,
+  response-rate, promoter, passive, and detractor evidence, so response timing
+  within a collection window cannot be mistaken for a change in NPS (#236).
+
+- Explicit run-level NPS hosted-page visit (`started / invitations`) and
+  page-visit conversion (`completed / started`) metrics, with hosted-survey
+  visits and completed responses retained in the started audience so the
+  collection funnel remains auditable after a respondent submits (#236).
+
+- Per-tenant NPS run-materialization telemetry with bounded lifecycle and
+  failure reasons, surfaced in the Operations dashboard for worker triage
+  without exposing raw provider or database errors (#236).
+
+- NPS measurement evidence beside each selected score, including the immutable
+  run's eligible audience, invitations, submitted responses, recipient coverage,
+  and submission coverage without implying population-level statistical
+  significance (#236).
+
+### Fixed
+
+- Prevent the shared Console page hero from reserving a 260px vertical gap on
+  narrow screens. Its content basis now applies only once the responsive layout
+  becomes horizontal, keeping NPS and other operations pages compact on mobile
+  (#236). The production NPS browser smoke now enforces the compact mobile hero
+  geometry and horizontal containment.
+
+- Serialize failed and expired idempotency-key recovery with conditional state
+  transitions, so one concurrent customer-request promotion, feedback-batch,
+  or API-key retry executes while other callers observe the new key as in
+  progress (#236).
+
+- Clear the one-time NPS feedback-promotion route parameter after the dialog
+  closes, preventing a browser refresh from reopening an already-submitted
+  customer-request form. View-only operators now clear a direct promotion link
+  without being shown a form they cannot submit (#236).
+
+- Make survey provider-event processing replay-safe: an exact webhook replay
+  does not reapply side effects after a newer delivery fact, and fallback
+  idempotency keys bind the event payload to its invitation or provider-message
+  locator. No later provider event, including a conflicting terminal outcome,
+  can overwrite a terminal invitation's suppression, timestamps, or operational
+  evidence (#236).
+
+- Normalize public-survey network fingerprints through the configured
+  trusted-proxy model before hashing. JSON and hosted-form submissions now
+  exclude ephemeral transport ports and ignore untrusted forwarding headers
+  (#236).
+
+- Replace raw public-survey SHA-256 metadata hashes with versioned,
+  tenant-scoped, domain-separated HMAC pseudonyms derived from the managed Tink
+  keyset. A primary-key rotation starts a new correlation boundary without
+  storing raw client addresses or user agents, and identical values cannot be
+  correlated across tenant boundaries (#236).
+
+- Preserve the feedback signal linked to an NPS response when it is reloaded
+  by invitation, so hosted-response retries retain a complete feedback-trace
+  read model (#236).
+
+- Prevent NPS worker batch claims from expiring before later runs begin
+  materialization by claiming each run immediately before processing it (#236).
+
+- Allow GDPR export and deletion for a contact-linked NPS response with no
+  comment, including its survey invitation, response, and run redaction
+  evidence (#236).
+
+- Prevent a stale NPS audience snapshot from recreating a survey invitation
+  after GDPR erasure removes the respondent's cohort membership (#236).
+
+- Preserve GDPR export and deletion for legacy feedback records whose subject
+  identity columns have not been backfilled (#236).
+
+- Corrected the NPS campaign list's launch label. Scheduled-run campaigns now
+  render as planned runs instead of incorrectly inheriting the workflow-close
+  label in the Console (#236).
+
+- Kept active NPS campaign runs live in the Console: run state, delivery
+  funnel, recovery queue, and selected measurement now refresh until the run
+  reaches a terminal state (#236).
+
+- Prevented NPS campaign settings from requiring more completed responses than
+  a run can invite. The Console now flags the incompatible threshold and
+  recipient cap before submission, while PostgreSQL enforces the same invariant
+  for every write (#236).
+
+- Made NPS launch preflight identify the current aggregate exclusion cause as
+  missing contact, unavailable contact, or contact cooldown. The exclusive,
+  no-PII counts sum to the excluded audience while scheduled workers remain the
+  authoritative recipient boundary (#236).
+
+- NPS Console analytics now defaults to one finalized measurement run instead
+  of aggregating incompatible historical runs, and clearly separates live
+  collection previews from the finalized trend (#236).
+
+- Prevented the NPS Console from drawing a continuous trend across runs with
+  different immutable questions, cohorts, sample caps or seeds, or collection
+  windows. Each break now starts a visible measurement baseline instead of
+  implying an invalid comparison (#236).
+
+- Prevented the NPS Console from comparing runs across a changed frozen contact
+  cooldown, and exposed each run's immutable collection window, recipient cap,
+  and contact interval alongside its score (#236).
+
+- Made NPS cohort and cohort-source enablement an explicit send boundary. New
+  campaign setup omits disabled cohorts, while scheduling and materialization
+  lock and recheck the selected cohort/source so a committed disablement creates
+  no invitation and records an actionable run failure (#236).
+
+- Updated the Survey Console overview and creation guidance to include NPS,
+  so operators can discover the relationship-campaign path without first
+  changing the survey-type selector (#236).
+
+- Preserved the `SURVEY_TYPE_NPS` enum in hosted-survey API responses, so
+  trusted API clients can render the correct 0-10 NPS scale (#236).
+
+- Made hosted-survey HTML and JSON submissions reject oversized requests and
+  comments consistently, rather than silently truncating API feedback (#236).
+
+- Prevented NPS analytics from presenting a false score of `0` after GDPR
+  deletion removes every current response; the Console now preserves separate
+  redaction evidence and marks the score unavailable (#236).
+
+- Made NPS schedule request-key replays return the original run without a
+  second `survey.nps_run_schedule` audit event; only the initial scheduling
+  request returns `201 Created`, while a compatible replay returns `200 OK`
+  (#236).
+
+- Preserved exact NPS scheduling replays after later campaign archival, and
+  fenced new run snapshots to the Campaign revision locked at persistence so an
+  overlapping campaign update cannot combine two configuration versions (#236).
+
+- Enforced hosted-survey response deadlines inside the invitation transaction
+  using the database clock, so a submission that crosses its cutoff cannot
+  alter an NPS run's distribution or trend after its collection window closes
+  (#236).
+
+- Preserved a completed NPS response receipt when completion wins the
+  invitation lock against a simultaneous expiry write, rather than surfacing a
+  spurious missing-link result at the collection boundary (#236).
+
+- Rechecked invitation suppression under the response transaction lock, so a
+  concurrent complaint or delivery suppression cannot admit a stale NPS link
+  after the recipient is revoked (#236).
+
+- Revalidated NPS public-link lifecycle after recording a hosted survey start
+  and again after invitation-level customer-control persistence, so an
+  overlapping archive, expiry, or suppression cannot leave a respondent on a
+  now-unavailable response page (#236).
+
+- Bound each contact-email survey invitation to one encrypted tenant-unsubscribe
+  URL. Public-page refreshes and delivery retries reuse that URL, while an
+  expired 90-day token rotates atomically with its replacement (#236).
+
+- Protect relationship-NPS respondents with a configurable 30-365 day contact
+  cooldown (90 days by default), frozen into each scheduled run so a later
+  campaign edit cannot expand that run's audience. Recipient-ledger writes now
+  serialize and revalidate this tenant-wide guard against concurrent NPS and
+  contact-addressed survey activity rather than trusting a stale audience read
+  (#236).
+
+- Revalidated a contact-email survey recipient's consent, suppression, bounce,
+  complaint, and tenant-update unsubscribe state under the same lock used for
+  invitation materialization. A recipient who opts out after audience resolution
+  can no longer receive an NPS invitation; triggered surveys record the precise
+  `contact_not_eligible` suppression reason instead (#236).
+
+- Made tenant-wide unsubscribe revoke queued and already-claimed contact-email
+  survey invitations in the same transaction, clearing their delivery secrets
+  and leases. The delivery worker now rechecks the locked recipient immediately
+  before external handoff, so a stale claim cannot send or become delivered
+  after the customer withdraws (#236).
+
+- Applied contact-first lease revocation to manual contact suppression and
+  bounce or complaint signals from both notification and survey providers. A
+  suppression event now stops every outstanding contact-email survey invitation
+  for that recipient rather than waiting for each worker to discover it
+  independently (#236).
+
+- Preserve each recipient's versioned survey definition after later campaign
+  edits, while retaining current campaign status as the immediate response-link
+  revocation control and rechecking it under the response-write transaction
+  lock (#236).
+
+- Show accurate selection prompts for populated NPS cohort and detractor-owner
+  controls instead of implying that no options are available (#236).
+
+- Scoped NPS privacy-redaction evidence to the selected run measurement window,
+  so date-filtered analytics cannot combine one run's responses with another
+  run's erased-response count (#236).
+
+- Serialize GDPR erasure with in-flight NPS responses at the invitation ledger,
+  ensuring an erased response is counted exactly once in the run's privacy
+  redaction evidence (#236).
+
+- Fence NPS invitation materialization against concurrent campaign archival,
+  so an archived campaign cannot create a recipient ledger after an operator
+  disables it; the run records an actionable terminal reason instead (#236).
+
+- Terminate an NPS run when its scheduled cohort resolves to zero eligible
+  recipients, persist the evaluated and eligible audience evidence, and free
+  the campaign for a corrected re-run instead of holding an empty collection
+  window open (#236).
+
+- Prevented a final contact-cooldown race from leaving an NPS run in
+  `collecting` with zero invitations. The run now records a terminal
+  `no_eligible_recipients` outcome with its aggregate audience evidence (#236).
+
+- Rechecked NPS email delivery readiness at the scheduled materialization
+  boundary. Configuration drift now fails the run before it creates recipient
+  invitations, while transient materialization failures retain their lease for
+  an observable automatic retry (#236).
+
+- Preserved provider email-open telemetry after a hosted-page visit, and
+  exposed separate page-visit and page-visit conversion funnel metrics for
+  generic survey analytics and campaign health (#236).
+
+- Isolated the NPS cohort query cache from cohort-management data so the
+  Console preserves the correct response shape after operators visit both
+  surfaces (#236).
+
+- Prevented the Console from offering a second NPS campaign run while an
+  existing run is scheduled, evaluating, or collecting (#236).
+
+- Kept cohort-based NPS campaigns out of generic source-link and event-recipient
+  controls, and made their fixed contact-email delivery channel explicit in the
+  Console (#236).
+
+- Prevented an NPS run from being scheduled when its email delivery path is not
+  ready, and enforced that each run-linked invitation belongs to that run's
+  campaign (#236).
+
+- Recovered NPS runs whose worker claim expires after a crash, while fencing
+  stale workers from changing the reclaimed run (#236).
+
+- Required an explicit score selection on hosted NPS surveys, preserved the
+  valid `score=0` preselection, and fixed campaign-plus-run trend filtering
+  (#236).
+
+- Recorded scheduled NPS runs in the database audit allow-list and restored
+  tooltip context for populated cohort synchronization tables (#236).
+
+- Persist NPS detractor owner notifications with the submitted response and
+  low-score review, so owners are alerted before the recovery SLA expires
+  (#236).
 
 - Runtime smoke base-image overrides so local release sweeps can use verified
   mirror or locally tagged Docker bases while CI keeps the official pinned
