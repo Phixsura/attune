@@ -3,6 +3,7 @@ package customerrequest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -194,5 +195,44 @@ func TestAutomationSink_PromoteEmitsRequestCreated(t *testing.T) {
 	}
 	if env["event_type"] != domain.EventRequestCreated {
 		t.Errorf("event_type: %v", env["event_type"])
+	}
+}
+
+type sinkErrLister struct{ err error }
+
+func (f *sinkErrLister) ListActiveByTenantEventTx(_ context.Context, _ pgx.Tx, _, _ string) ([]webhooksub.Subscription, error) {
+	return nil, f.err
+}
+
+func TestAutomationSink_ListerErrorAbortsCreate(t *testing.T) {
+	created := ptrext.Of(repo.Summary{
+		ID: uuid.MustParse("dddddddd-0000-0000-0000-000000000009"), TenantID: "t1", Status: repo.StatusOpen,
+	})
+	f := ptrext.Of(sinkFakeRepo{fakeRequestRepo: fakeRequestRepo{tx: ptrext.Of(attrTx{}), created: created}})
+	svc := ptrext.Of(Service{repo: f})
+	svc.SetAutomationSink(ptrext.Of(sinkErrLister{err: errors.New("db down")}), ptrext.Of(sinkFakeOutbox{}))
+
+	if _, err := svc.Create(context.Background(), CreateInput{
+		TenantID: "t1", Title: "T", IdempotencyKey: "sink-err-1", Actor: auditlogsvc.Actor{ID: "a1"},
+	}); err == nil {
+		t.Fatal("lister failure inside the tx must abort Create")
+	}
+}
+
+func TestAutomationSink_OutboxInsertErrorAbortsCreate(t *testing.T) {
+	created := ptrext.Of(repo.Summary{
+		ID: uuid.MustParse("dddddddd-0000-0000-0000-00000000000a"), TenantID: "t1", Status: repo.StatusOpen,
+	})
+	f := ptrext.Of(sinkFakeRepo{fakeRequestRepo: fakeRequestRepo{tx: ptrext.Of(attrTx{}), created: created}})
+	subs := ptrext.Of(sinkFakeSubLister{byEvent: map[string][]webhooksub.Subscription{
+		domain.EventRequestCreated: {sinkSubscription(domain.EventRequestCreated)},
+	}})
+	svc := ptrext.Of(Service{repo: f})
+	svc.SetAutomationSink(subs, ptrext.Of(sinkFakeOutbox{err: errors.New("insert boom")}))
+
+	if _, err := svc.Create(context.Background(), CreateInput{
+		TenantID: "t1", Title: "T", IdempotencyKey: "sink-err-2", Actor: auditlogsvc.Actor{ID: "a1"},
+	}); err == nil {
+		t.Fatal("outbox insert failure inside the tx must abort Create")
 	}
 }

@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -209,4 +210,54 @@ func TestSubscriptionRow500RetriesWithoutDisable(t *testing.T) {
 	require.Len(t, outboxStore.failed, 1)
 	require.Equal(t, 30*time.Second, outboxStore.failed[0].nextDelay)
 	require.Empty(t, outboxStore.dead)
+}
+
+func TestSubscriptionRowNilStoreDead(t *testing.T) {
+	outboxStore := ptrext.Of(workerFakeOutboxStore{})
+	w := testWorker(outboxStore, ptrext.Of(workerFakeTargetStore{}), notify.NewTransport(http.DefaultClient, notify.NoRetry()))
+	// SetSubscriptionStore never called — subscription rows must go dead,
+	// not panic (deployments that don't wire the automation surface).
+	w.SetSubscriptionStore(nil)
+
+	w.processRow(context.Background(), subscriptionOutboxRow(306, uuid.NewString()))
+
+	require.Len(t, outboxStore.dead, 1)
+	require.Contains(t, outboxStore.dead[0].reason, "not configured")
+}
+
+func TestSubscriptionRowInvalidIDDead(t *testing.T) {
+	outboxStore := ptrext.Of(workerFakeOutboxStore{})
+	subs := ptrext.Of(fakeSubscriptionStore{})
+	w := testWorkerWithSubs(outboxStore, subs, notify.NewTransport(http.DefaultClient, notify.NoRetry()))
+
+	w.processRow(context.Background(), subscriptionOutboxRow(307, "not-a-uuid"))
+
+	require.Len(t, outboxStore.dead, 1)
+	require.Contains(t, outboxStore.dead[0].reason, "invalid subscription id")
+}
+
+func TestSubscriptionRowLookupErrorRetries(t *testing.T) {
+	outboxStore := ptrext.Of(workerFakeOutboxStore{})
+	subs := ptrext.Of(fakeSubscriptionStore{err: errors.New("db down")})
+	w := testWorkerWithSubs(outboxStore, subs, notify.NewTransport(http.DefaultClient, notify.NoRetry()))
+
+	w.processRow(context.Background(), subscriptionOutboxRow(308, uuid.NewString()))
+
+	// transient lookup failure → retry path, not dead
+	require.Len(t, outboxStore.failed, 1)
+	require.Empty(t, outboxStore.dead)
+}
+
+func TestSubscriptionRowBadPayloadDead(t *testing.T) {
+	registerRawWebhookStub(t)
+	outboxStore := ptrext.Of(workerFakeOutboxStore{})
+	subs := ptrext.Of(fakeSubscriptionStore{sub: activeSubscription("https://example.test/hook")})
+	w := testWorkerWithSubs(outboxStore, subs, notify.NewTransport(http.DefaultClient, notify.NoRetry()))
+
+	row := subscriptionOutboxRow(309, subs.sub.ID.String())
+	row.Payload = []byte("{not-json")
+	w.processRow(context.Background(), row)
+
+	require.Len(t, outboxStore.dead, 1)
+	require.Empty(t, outboxStore.failed)
 }
