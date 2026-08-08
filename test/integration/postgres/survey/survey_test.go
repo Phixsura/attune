@@ -128,11 +128,11 @@ func TestPGSurveyWorkflowEmailSubmitEndToEnd(t *testing.T) {
 	require.Equal(t, attunev1.SurveyResponseStatus_SURVEY_RESPONSE_STATUS_STARTED, publicSurvey.GetResponseStatus())
 	require.Contains(t, publicSurvey.GetUnsubscribeUrl(), "https://public.example.test/v1/portal/survey-e2e/unsubscribe?token=")
 	started := requireSurveyInvitationStatus(t, ctx, surveyRepo, tenantID, invitation.ID, surveyrepo.ResponseStarted)
-	require.Nil(t, started.OpenedAt)
+	require.NotNil(t, started.OpenedAt)
 
 	submitSurveyHoneypotOverHTTP(t, router, token)
 	started = requireSurveyInvitationStatus(t, ctx, surveyRepo, tenantID, invitation.ID, surveyrepo.ResponseStarted)
-	require.Nil(t, started.OpenedAt)
+	require.NotNil(t, started.OpenedAt)
 
 	receipt := submitSurveyOverHTTP(t, router, token)
 	requireSurveyResponseCompleted(t, ctx, surveyRepo, tenantID, invitation.ID, receipt)
@@ -5022,7 +5022,7 @@ func requireSurveyResponseCompleted(
 	completed, err := surveyRepo.GetInvitation(ctx, tenantID, invitationID)
 	require.NoError(t, err)
 	require.Equal(t, surveyrepo.ResponseCompleted, completed.ResponseStatus)
-	require.Nil(t, completed.OpenedAt)
+	require.NotNil(t, completed.OpenedAt)
 	require.NotNil(t, completed.RespondedAt)
 
 	review, err := surveyRepo.GetLowScoreReview(ctx, tenantID, responseID)
@@ -5120,7 +5120,7 @@ func requireSurveyAnalyticsBreaksDownSuppression(
 	require.Equal(t, 6, analytics.InvitationCount)
 	require.Equal(t, 1, analytics.SuppressedCount)
 	require.Equal(t, 1, analytics.NotStartedCount)
-	require.Equal(t, 1, analytics.OpenedCount)
+	require.Equal(t, 2, analytics.OpenedCount)
 	require.Equal(t, 4, analytics.StartedCount)
 	require.Equal(t, 1, analytics.ExpiredCount)
 	require.Equal(t, 2, analytics.CompletedCount)
