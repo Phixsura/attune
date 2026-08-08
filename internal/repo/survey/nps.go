@@ -1458,21 +1458,29 @@ type npsMeasurementDefinition struct {
 	RecurrenceSamplingPercent string `json:"recurrence_sampling_percent"`
 }
 
+func parseNPSInt(raw string) (int, error) {
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return int(value), nil
+}
+
 func npsRunFrozenMeasurementSettings(definition map[string]any) (int, int, int, int, int, int) {
 	campaign, _ := definition["campaign"].(map[string]any)
-	collectionDays, _ := strconv.Atoi(snapshotString(definition, "collection_days"))
-	maximumRecipients, _ := strconv.Atoi(snapshotString(definition, "maximum_run_recipients"))
+	collectionDays, _ := parseNPSInt(snapshotString(definition, "collection_days"))
+	maximumRecipients, _ := parseNPSInt(snapshotString(definition, "maximum_run_recipients"))
 	contactCooldownDays := npsRunContactCooldownDays(definition, campaign)
-	recurrenceSamplingPercent, _ := strconv.Atoi(npsRunMeasurementSamplingPercent(definition))
-	minimumCompletedResponses, _ := strconv.Atoi(snapshotString(definition, "minimum_completed_responses"))
-	minimumResponseRatePercent, _ := strconv.Atoi(snapshotString(definition, "minimum_response_rate_percent"))
+	recurrenceSamplingPercent, _ := parseNPSInt(npsRunMeasurementSamplingPercent(definition))
+	minimumCompletedResponses, _ := parseNPSInt(snapshotString(definition, "minimum_completed_responses"))
+	minimumResponseRatePercent, _ := parseNPSInt(snapshotString(definition, "minimum_response_rate_percent"))
 	return collectionDays, maximumRecipients, contactCooldownDays, recurrenceSamplingPercent, minimumCompletedResponses, minimumResponseRatePercent
 }
 
 func npsRunFrozenSamplePlanningSettings(definition map[string]any) (int, int, int) {
-	confidence, confidenceErr := strconv.Atoi(snapshotString(definition, "sample_planning_confidence_percent"))
-	marginOfError, marginErr := strconv.Atoi(snapshotString(definition, "sample_planning_margin_of_error_percent"))
-	expectedResponseRate, responseRateErr := strconv.Atoi(snapshotString(definition, "sample_planning_expected_response_rate_percent"))
+	confidence, confidenceErr := parseNPSInt(snapshotString(definition, "sample_planning_confidence_percent"))
+	marginOfError, marginErr := parseNPSInt(snapshotString(definition, "sample_planning_margin_of_error_percent"))
+	expectedResponseRate, responseRateErr := parseNPSInt(snapshotString(definition, "sample_planning_expected_response_rate_percent"))
 	if confidenceErr != nil || marginErr != nil || responseRateErr != nil {
 		return 0, 0, 0
 	}
@@ -1483,7 +1491,7 @@ func npsRunFrozenSamplePlanningSettings(definition map[string]any) (int, int, in
 }
 
 func npsRunContactCooldownDays(definition map[string]any, campaign map[string]any) int {
-	contactCooldownDays, _ := strconv.Atoi(snapshotString(campaign, "min_days_between_contact"))
+	contactCooldownDays, _ := parseNPSInt(snapshotString(campaign, "min_days_between_contact"))
 	if recurringCooldown, ok := npsRunContactCooldownDefinition(definition, campaign); ok {
 		return recurringCooldown
 	}
@@ -1523,7 +1531,7 @@ func npsRunAudienceSamplingPercent(definition map[string]any) (int, bool) {
 	if recurrenceIntervalRaw == "" {
 		return 100, true
 	}
-	recurrenceIntervalDays, err := strconv.Atoi(recurrenceIntervalRaw)
+	recurrenceIntervalDays, err := parseNPSInt(recurrenceIntervalRaw)
 	if err != nil || recurrenceIntervalDays < 0 || recurrenceIntervalDays > 365 {
 		return 0, false
 	}
@@ -1534,7 +1542,7 @@ func npsRunAudienceSamplingPercent(definition map[string]any) (int, bool) {
 	if raw == "" {
 		return 100, true
 	}
-	percent, err := strconv.Atoi(raw)
+	percent, err := parseNPSInt(raw)
 	return percent, err == nil && percent >= 1 && percent <= 100
 }
 
@@ -1573,7 +1581,7 @@ func npsRunCohortID(definition map[string]any) (uuid.UUID, bool) {
 }
 
 func npsRunMaximumRecipients(definition map[string]any) (int, bool) {
-	maximumRecipients, err := strconv.Atoi(snapshotString(definition, "maximum_run_recipients"))
+	maximumRecipients, err := parseNPSInt(snapshotString(definition, "maximum_run_recipients"))
 	return maximumRecipients, err == nil && maximumRecipients >= 1 && maximumRecipients <= 100000
 }
 
@@ -1583,7 +1591,7 @@ func npsRunSampleSeed(definition map[string]any) (string, bool) {
 }
 
 func npsRunContactCooldownDefinition(definition map[string]any, campaign map[string]any) (int, bool) {
-	contactCooldownDays, err := strconv.Atoi(snapshotString(campaign, "min_days_between_contact"))
+	contactCooldownDays, err := parseNPSInt(snapshotString(campaign, "min_days_between_contact"))
 	if err != nil || contactCooldownDays < 1 || contactCooldownDays > 3650 {
 		return 0, false
 	}
@@ -1591,7 +1599,7 @@ func npsRunContactCooldownDefinition(definition map[string]any, campaign map[str
 	if recurrenceIntervalRaw == "" {
 		return contactCooldownDays, true
 	}
-	recurrenceIntervalDays, err := strconv.Atoi(recurrenceIntervalRaw)
+	recurrenceIntervalDays, err := parseNPSInt(recurrenceIntervalRaw)
 	if err != nil || recurrenceIntervalDays < 0 || recurrenceIntervalDays > 365 {
 		return 0, false
 	}
@@ -1602,7 +1610,7 @@ func npsRunContactCooldownDefinition(definition map[string]any, campaign map[str
 	if recurrenceCooldownRaw == "" {
 		return contactCooldownDays, true
 	}
-	recurrenceCooldownDays, err := strconv.Atoi(recurrenceCooldownRaw)
+	recurrenceCooldownDays, err := parseNPSInt(recurrenceCooldownRaw)
 	return recurrenceCooldownDays, err == nil && recurrenceCooldownDays >= 30 && recurrenceCooldownDays <= 3650
 }
 

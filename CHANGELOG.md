@@ -178,6 +178,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Bound frozen NPS run-definition integer parsing to the signed 32-bit proto
+  range before Console serialization, rejecting oversized or undersized values
+  instead of relying on architecture-dependent integer conversion (#236).
+
 - Prevent the shared Console page hero from reserving a 260px vertical gap on
   narrow screens. Its content basis now applies only once the responsive layout
   becomes horizontal, keeping NPS and other operations pages compact on mobile

@@ -264,6 +264,21 @@ func TestNPSRunRecipientLimitDistributesRecurringPulses(t *testing.T) {
 	}
 }
 
+func TestParseNPSIntRejectsValuesOutsideProtoInt32Range(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{"2147483648", "-2147483649"} {
+		if _, err := parseNPSInt(raw); err == nil {
+			t.Fatalf("parseNPSInt(%q) returned nil error for an out-of-range value", raw)
+		}
+	}
+	for _, raw := range []string{"2147483647", "-2147483648"} {
+		if _, err := parseNPSInt(raw); err != nil {
+			t.Fatalf("parseNPSInt(%q) returned error: %v", raw, err)
+		}
+	}
+}
+
 func npsMeasurementFixture(question, cohortID, maximumRecipients, sampleSeed, collectionDays, contactCooldownDays string) map[string]any {
 	return map[string]any{
 		"campaign": map[string]any{
