@@ -49,6 +49,71 @@ export interface GetClassificationQualitySamplesResponse {
   samples: ClassificationQualitySample[];
 }
 
+export interface GetClassificationReviewLearningRequest {
+  currentFrom: string;
+  currentTo: string;
+  signalReason: string;
+  limit: number;
+}
+
+export interface RecordClassificationReviewRequest {
+  feedbackId: string;
+  /** accepted | edited | dismissed */
+  outcome: string;
+  signalReason: string;
+  note: string;
+  correctionJson: string;
+}
+
+export interface GetClassificationReviewLearningResponse {
+  generatedAt: string;
+  currentFrom: string;
+  currentTo: string;
+  totalReviews: string;
+  accepted: string;
+  edited: string;
+  dismissed: string;
+  trainingCandidateCount: string;
+  reviewedFeedbackCount: string;
+  classifiedFeedbackCount: string;
+  reviewCoverageRate: number;
+  reasonBuckets: ClassificationReviewReasonBucket[];
+  recentEvents: ClassificationReviewEvent[];
+}
+
+export interface RecordClassificationReviewResponse {
+  event?: ClassificationReviewEvent | undefined;
+  learning?: GetClassificationReviewLearningResponse | undefined;
+}
+
+export interface ClassificationReviewReasonBucket {
+  signalReason: string;
+  totalReviews: string;
+  accepted: string;
+  edited: string;
+  dismissed: string;
+  trainingCandidateCount: string;
+  lastReviewedAt: string;
+}
+
+export interface ClassificationReviewEvent {
+  eventId: string;
+  feedbackId: string;
+  outcome: string;
+  signalReason: string;
+  note: string;
+  correctionJson: string;
+  source: string;
+  logicalModel: string;
+  providerModel: string;
+  channelId: string;
+  promptVersion: string;
+  promptVersionId: string;
+  classificationConfidence?: number | undefined;
+  reviewedBy: string;
+  reviewedAt: string;
+}
+
 export interface ClassificationQualitySummary {
   classificationEvents: string;
   failedAttempts: string;
@@ -133,4 +198,8 @@ export interface ClassificationQualityService {
   GetClassificationQualitySamples(
     request: GetClassificationQualitySamplesRequest,
   ): Promise<GetClassificationQualitySamplesResponse>;
+  GetClassificationReviewLearning(
+    request: GetClassificationReviewLearningRequest,
+  ): Promise<GetClassificationReviewLearningResponse>;
+  RecordClassificationReview(request: RecordClassificationReviewRequest): Promise<RecordClassificationReviewResponse>;
 }

@@ -29,19 +29,21 @@ import (
 	"log/slog"
 )
 
+const logMessage = "attune.log"
+
 // Infof is a printf-style slog.InfoContext wrapper.
 func Infof(ctx context.Context, format string, args ...any) {
-	slog.InfoContext(ctx, fmt.Sprintf(format, args...))
+	slog.InfoContext(ctx, logMessage, "detail", fmt.Sprintf(format, args...))
 }
 
 // Warnf is a printf-style slog.WarnContext wrapper.
 func Warnf(ctx context.Context, format string, args ...any) {
-	slog.WarnContext(ctx, fmt.Sprintf(format, args...))
+	slog.WarnContext(ctx, logMessage, "detail", fmt.Sprintf(format, args...))
 }
 
 // Errorf is a printf-style slog.ErrorContext wrapper.
 func Errorf(ctx context.Context, format string, args ...any) {
-	slog.ErrorContext(ctx, fmt.Sprintf(format, args...))
+	slog.ErrorContext(ctx, logMessage, "detail", fmt.Sprintf(format, args...))
 }
 
 // AsLogParam marshals v to a compact JSON string suitable for embedding

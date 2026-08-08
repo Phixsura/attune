@@ -1,6 +1,10 @@
 import { queryOptions, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api-client'
 import type {
+  BatchPreviewRequestNotificationsRequest,
+  BatchPreviewRequestNotificationsResponse,
+  BatchPublishRequestUpdatesRequest,
+  BatchPublishRequestUpdatesResponse,
   CreateRequestNotificationWebhookTargetRequest,
   ListRequestNotificationDeliveriesResponse,
   ListRequestNotificationWebhookTargetsResponse,
@@ -13,6 +17,7 @@ import type {
   RequestNotificationEvent,
   RequestNotificationSender,
   RequestNotificationSettings,
+  RequestNotificationStatusEvidenceResponse,
   RequestNotificationWebhookTarget,
   RequestNotificationWebhookTestResult,
   RequestSubscriber,
@@ -42,6 +47,11 @@ export const requestNotificationDeliveriesQueryKey = [
   'console',
   'request-notifications',
   'deliveries',
+] as const
+export const requestNotificationStatusEvidenceQueryKey = [
+  'console',
+  'request-notifications',
+  'status-evidence',
 ] as const
 
 export function requestNotificationSettingsQuery() {
@@ -92,6 +102,19 @@ export function requestNotificationDeliveriesQuery(limit = 25) {
         { signal },
       )
       return res.deliveries ?? []
+    },
+  })
+}
+
+export function requestNotificationStatusEvidenceQuery() {
+  return queryOptions({
+    queryKey: requestNotificationStatusEvidenceQueryKey,
+    queryFn: async ({ signal }) => {
+      const res = await api<RequestNotificationStatusEvidenceResponse>(
+        `${endpoint}/status-evidence`,
+        { signal },
+      )
+      return res.items ?? []
     },
   })
 }
@@ -198,6 +221,7 @@ export function useTestRequestNotificationWebhookTarget() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: requestNotificationWebhookTargetsQueryKey })
       qc.invalidateQueries({ queryKey: requestNotificationDeliveriesQueryKey })
+      qc.invalidateQueries({ queryKey: requestNotificationStatusEvidenceQueryKey })
     },
   })
 }
@@ -206,6 +230,16 @@ export function usePreviewRequestNotification() {
   return useMutation({
     mutationFn: (body: PreviewRequestNotificationRequest) =>
       api<PreviewRequestNotificationResponse>(`${endpoint}/preview`, {
+        method: 'POST',
+        body,
+      }),
+  })
+}
+
+export function useBatchPreviewRequestNotifications() {
+  return useMutation({
+    mutationFn: (body: BatchPreviewRequestNotificationsRequest) =>
+      api<BatchPreviewRequestNotificationsResponse>(`${endpoint}:batch-preview`, {
         method: 'POST',
         body,
       }),
@@ -222,6 +256,22 @@ export function usePublishRequestUpdate() {
       }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: requestNotificationDeliveriesQueryKey })
+      qc.invalidateQueries({ queryKey: requestNotificationStatusEvidenceQueryKey })
+    },
+  })
+}
+
+export function useBatchPublishRequestUpdates() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: BatchPublishRequestUpdatesRequest) =>
+      api<BatchPublishRequestUpdatesResponse>(`${endpoint}:batch-publish`, {
+        method: 'POST',
+        body,
+      }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: requestNotificationDeliveriesQueryKey })
+      qc.invalidateQueries({ queryKey: requestNotificationStatusEvidenceQueryKey })
     },
   })
 }
@@ -236,6 +286,7 @@ export function useRetryRequestNotificationDelivery() {
       }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: requestNotificationDeliveriesQueryKey })
+      qc.invalidateQueries({ queryKey: requestNotificationStatusEvidenceQueryKey })
     },
   })
 }
@@ -271,6 +322,7 @@ export function useRecordRequestNotificationProviderEvent() {
       }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: requestNotificationDeliveriesQueryKey })
+      qc.invalidateQueries({ queryKey: requestNotificationStatusEvidenceQueryKey })
     },
   })
 }

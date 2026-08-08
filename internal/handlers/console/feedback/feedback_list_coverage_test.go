@@ -47,6 +47,7 @@ func TestConsoleListOptsFromRequestMapsAllFields(t *testing.T) {
 		Q:                  ptrext.Of("billing"),
 		Source:             ptrext.Of("api"),
 		Type:               ptrext.Of("bug"),
+		AccountKey:         ptrext.Of(" acct:acme "),
 		Urgent:             ptrext.Of(true),
 		TagId:              ptrext.Of("tag-1"),
 		WorkflowStateId:    ptrext.Of("wf-1"),
@@ -80,6 +81,8 @@ func TestConsoleListOptsFromRequestMapsAllFields(t *testing.T) {
 	require.Equal(t, "api", *opts.Source)
 	require.NotNil(t, opts.Type)
 	require.Equal(t, "bug", *opts.Type)
+	require.NotNil(t, opts.AccountKey)
+	require.Equal(t, "acct:acme", *opts.AccountKey)
 	require.NotNil(t, opts.Urgent)
 	require.True(t, *opts.Urgent)
 	require.NotNil(t, opts.TagID)

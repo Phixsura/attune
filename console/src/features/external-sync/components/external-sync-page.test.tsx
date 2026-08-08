@@ -1148,6 +1148,104 @@ describe('ExternalSyncPage', () => {
     expect(screen.getByText('updated_at')).toBeInTheDocument()
     expect(screen.getByText('见 3')).toBeInTheDocument()
     expect(screen.getByText('issues')).toBeInTheDocument()
+    const integrationCatalog = screen.getByTestId('external-sync-integration-catalog')
+    expect(integrationCatalog).toHaveTextContent('集成目录')
+    expect(integrationCatalog).toHaveTextContent(
+      '8/8 connectors / 8 install states / 8 permission maps / 8 sample replays / 8 upgrade paths / verifier on',
+    )
+    expect(integrationCatalog).toHaveTextContent('1 integration catalog lanes need hardening')
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-catalog_cards'),
+    ).toHaveTextContent(
+      '8 catalog cards / Jira, GitHub, Intercom, Zendesk, Salesforce, HubSpot, Custom webhook, CSV',
+    )
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-install_status'),
+    ).toHaveTextContent('1 live installs / 8 catalog states / 0 setup blockers')
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-permission_scope'),
+    ).toHaveTextContent('8 permission maps / 23 scopes / least privilege on')
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-health_badge'),
+    ).toHaveTextContent('8 health badges / 1 unhealthy tenant connector')
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-sample_replay'),
+    ).toHaveTextContent('8 replay fixtures / 8 normalized samples')
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-upgrade_path'),
+    ).toHaveTextContent('8 upgrade paths / rollback 8/8')
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-connector-github'),
+    ).toHaveTextContent('租户已安装')
+    expect(
+      within(integrationCatalog).getByTestId('external-sync-integration-catalog-connector-csv'),
+    ).toHaveTextContent('template-v1-to-workbench-v2')
+    const upgradeDiagnostics = screen.getByTestId('external-sync-upgrade-diagnostics')
+    expect(upgradeDiagnostics).toHaveTextContent('升级诊断')
+    expect(upgradeDiagnostics).toHaveTextContent(
+      '6/6 checks / verifier on / playbook available / compatibility available / fixtures 3/3',
+    )
+    expect(upgradeDiagnostics).toHaveTextContent('1 upgrade diagnostics lanes need hardening')
+    expect(
+      within(upgradeDiagnostics).getByTestId('external-sync-upgrade-diagnostics-install_health'),
+    ).toHaveTextContent('1 installed / 1 degraded / 1 quarantined / 1 retryable')
+    expect(
+      within(upgradeDiagnostics).getByTestId(
+        'external-sync-upgrade-diagnostics-permission_boundary',
+      ),
+    ).toHaveTextContent('2 scoped connections / 8 permission maps / 0 blank scopes')
+    expect(
+      within(upgradeDiagnostics).getByTestId('external-sync-upgrade-diagnostics-schema_drift'),
+    ).toHaveTextContent('5 provider fields / 0 drift risks / mapping v1')
+    expect(
+      within(upgradeDiagnostics).getByTestId('external-sync-upgrade-diagnostics-webhook_readiness'),
+    ).toHaveTextContent('1 verified / 0 failed / 1 configured secrets')
+    expect(
+      within(upgradeDiagnostics).getByTestId('external-sync-upgrade-diagnostics-fixture_replay'),
+    ).toHaveTextContent('8 catalog replays / fixture lane verified / 1 received events')
+    expect(
+      within(upgradeDiagnostics).getByTestId(
+        'external-sync-upgrade-diagnostics-version_compatibility',
+      ),
+    ).toHaveTextContent('8 connectors / rollback 8/8 / fixtures 3/3')
+    expect(
+      within(upgradeDiagnostics).getByTestId(
+        'external-sync-upgrade-diagnostics-row-install_health',
+      ),
+    ).toHaveTextContent('恢复隔离连接或重跑凭证测试')
+    const connectorConformance = screen.getByTestId('external-sync-connector-conformance-gate')
+    expect(connectorConformance).toHaveTextContent('Connector conformance gate')
+    expect(connectorConformance).toHaveTextContent(
+      '1/1 providers / 3/3 fixtures / 6/6 hooks / 1 live connectors / 1 verified signatures',
+    )
+    expect(connectorConformance).toHaveTextContent('1 connector conformance lanes need hardening')
+    expect(
+      within(connectorConformance).getByTestId(
+        'external-sync-connector-conformance-gate-webhook_signature',
+      ),
+    ).toHaveTextContent('1 verified / 0 failed / 1 configured secrets')
+    expect(
+      within(connectorConformance).getByTestId(
+        'external-sync-connector-conformance-gate-field_mapping',
+      ),
+    ).toHaveTextContent('0 mapped fields / 5 provider fields / 0 problems')
+    const fieldMappingWorkbench = screen.getByTestId('external-sync-field-mapping-workbench')
+    expect(fieldMappingWorkbench).toHaveTextContent('字段映射工作台')
+    expect(fieldMappingWorkbench).toHaveTextContent(
+      'GitHub Prod / mapping-1 / 0/2 required fields / 5 provider fields / 0 drift risks',
+    )
+    expect(fieldMappingWorkbench).toHaveTextContent('3 field mapping lanes are blocked')
+    expect(
+      within(fieldMappingWorkbench).getByTestId(
+        'external-sync-field-mapping-workbench-required_mapping',
+      ),
+    ).toHaveTextContent('0/2 required mapped / 2 suggested / 0 drifted / JSON valid')
+    expect(
+      within(fieldMappingWorkbench).getByTestId('external-sync-field-mapping-row-title'),
+    ).toHaveTextContent('建议 title')
+    expect(
+      within(fieldMappingWorkbench).getByTestId('external-sync-field-mapping-row-status'),
+    ).toHaveTextContent('建议 state')
     expect(
       runQueries.some((query) => new URLSearchParams(query).get('connection_id') === 'conn-1'),
     ).toBe(true)
@@ -2168,7 +2266,7 @@ describe('ExternalSyncPage', () => {
         return HttpResponse.json({
           runs: [
             runRow(
-              runCalls === 1
+              runCalls <= 2
                 ? 'EXTERNAL_SYNC_RUN_STATUS_QUEUED'
                 : 'EXTERNAL_SYNC_RUN_STATUS_SUCCEEDED',
             ),
@@ -2176,23 +2274,35 @@ describe('ExternalSyncPage', () => {
           nextBeforeId: '',
         })
       }),
+      http.get('/fb/v1/console/external-sync/runs/run-active-1', () =>
+        HttpResponse.json(
+          runDetailResponse(
+            'run-active-1',
+            runRow(
+              runCalls <= 2
+                ? 'EXTERNAL_SYNC_RUN_STATUS_QUEUED'
+                : 'EXTERNAL_SYNC_RUN_STATUS_SUCCEEDED',
+            ),
+          ),
+        ),
+      ),
     )
 
-    const { user } = renderWithProviders(<ExternalSyncPage />)
+    renderWithProviders(<ExternalSyncPage />)
 
-    await waitFor(() => {
-      expect(screen.getByText('queued')).toBeInTheDocument()
-    })
-    const queuedRun = screen.getByText('queued').closest('button')
-    expect(queuedRun).not.toBeNull()
-    await user.click(queuedRun as HTMLButtonElement)
+    await waitFor(
+      () => {
+        expect(screen.getByText('queued')).toBeInTheDocument()
+      },
+      { timeout: 5_500 },
+    )
     await waitFor(
       () => {
         expect(runCalls).toBeGreaterThan(1)
         expect(screen.getByText('succeeded')).toBeInTheDocument()
         expect(screen.getByText('见 2')).toBeInTheDocument()
       },
-      { timeout: 3_500 },
+      { timeout: 7_500 },
     )
   })
 

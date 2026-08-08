@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -26,8 +27,8 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/cohortsyncwebhook"
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	cohortsyncrepo "github.com/Phixsura/attune/internal/repo/cohortsync"
-	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	"github.com/Phixsura/attune/internal/testdb"
 )
 
@@ -336,6 +337,78 @@ func TestCohortSyncEndToEnd(t *testing.T) {
 			t.Error("mixpanel adapter not registered")
 		}
 	})
+}
+
+func TestFullSnapshotKeepsFreshMembersWithSkewedCutoff(t *testing.T) {
+	ctx := context.Background()
+	pool := testdb.NewPool(t)
+
+	tenantID := uuid.NewString()
+	mustExec(t, ctx, pool, `INSERT INTO tenants (id, slug, name) VALUES ($1, $2, $3)`,
+		tenantID, "cohort-snapshot-cutoff", "Cohort Snapshot Cutoff")
+
+	repo := cohortsyncrepo.New(pool)
+	sourceID := uuid.New()
+	source, err := repo.CreateSource(ctx, cohortsyncrepo.Source{
+		ID:                   sourceID,
+		TenantID:             tenantID,
+		Provider:             "mixpanel",
+		Name:                 "Snapshot Cutoff Mixpanel",
+		AuthType:             "api_key",
+		CredentialKeyID:      "test-key",
+		CredentialCiphertext: []byte("ciphertext"),
+		Enabled:              true,
+		Status:               "active",
+		CreatedBy:            "e2e",
+		UpdatedBy:            "e2e",
+	})
+	if err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+
+	cohort, err := repo.UpsertCohort(ctx, cohortsyncrepo.Cohort{
+		ID:               uuid.New(),
+		TenantID:         tenantID,
+		CohortSourceID:   source.ID,
+		ExternalCohortID: "enterprise",
+		Name:             "Enterprise",
+		StaleTTLDays:     30,
+		Enabled:          true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertCohort: %v", err)
+	}
+
+	result, err := repo.ApplyMembershipDelta(ctx, cohortsyncrepo.ApplyInput{
+		TenantID: tenantID,
+		CohortID: cohort.ID,
+		SourceID: source.ID,
+		Trigger:  "webhook",
+		Members: []cohortsyncrepo.MembershipUpsert{
+			{ExternalUserID: "user-2", Email: "u2@test.com", DisplayName: "User Two"},
+			{ExternalUserID: "user-3", Email: "u3@test.com", DisplayName: "User Three"},
+		},
+		StaleTTLDays: 30,
+		OlderThan:    time.Now().Add(time.Hour),
+		IsSnapshot:   true,
+	})
+	if err != nil {
+		t.Fatalf("ApplyMembershipDelta: %v", err)
+	}
+	if result.Removed != 0 {
+		t.Fatalf("Removed = %d, want 0", result.Removed)
+	}
+	if result.MemberCount != 2 {
+		t.Fatalf("MemberCount = %d, want 2", result.MemberCount)
+	}
+
+	members, err := repo.ListMembers(ctx, tenantID, cohort.ID, 10)
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("active members = %d, want 2", len(members))
+	}
 }
 
 // ---------- helpers ----------

@@ -173,6 +173,48 @@ export interface PublishRequestUpdateRequest {
   confirmLargeAudience: boolean;
 }
 
+export interface BatchPreviewRequestNotificationsRequest {
+  updates: RequestNotificationUpdateDraft[];
+  channels: RequestNotificationChannel[];
+}
+
+export interface BatchRequestNotificationPreviewItem {
+  requestId: string;
+  eligibleRecipients: number;
+  excludedRecipients: number;
+  excludedByReason?: { [key: string]: any } | undefined;
+  emailPayload?: { [key: string]: any } | undefined;
+  webhookPayload?: { [key: string]: any } | undefined;
+}
+
+export interface BatchRequestNotificationFailure {
+  requestId: string;
+  code: string;
+  message: string;
+}
+
+export interface BatchPreviewRequestNotificationsResponse {
+  totalMatched: number;
+  eligibleRecipients: number;
+  excludedRecipients: number;
+  items: BatchRequestNotificationPreviewItem[];
+  failed: BatchRequestNotificationFailure[];
+}
+
+export interface BatchPublishRequestUpdatesRequest {
+  updates: RequestNotificationUpdateDraft[];
+  channels: RequestNotificationChannel[];
+  confirmLargeAudience: boolean;
+}
+
+export interface BatchPublishRequestUpdatesResponse {
+  totalMatched: number;
+  succeeded: number;
+  skipped: number;
+  events: RequestNotificationEvent[];
+  failed: BatchRequestNotificationFailure[];
+}
+
 export interface RequestNotificationEvent {
   id: string;
   eventType: RequestNotificationEventType;
@@ -217,6 +259,24 @@ export interface ListRequestNotificationDeliveriesRequest {
 export interface ListRequestNotificationDeliveriesResponse {
   deliveries: RequestNotificationDelivery[];
   nextBeforeId: string;
+}
+
+export interface GetRequestNotificationStatusEvidenceRequest {
+}
+
+export interface RequestNotificationStatusEvidenceItem {
+  requestStatus: string;
+  expectedCustomers: number;
+  notifiedCustomers: number;
+  failedCustomers: number;
+  suppressedCustomers: number;
+  recoveryPendingCustomers: number;
+  eventCount: number;
+  lastEventAt?: string | undefined;
+}
+
+export interface RequestNotificationStatusEvidenceResponse {
+  items: RequestNotificationStatusEvidenceItem[];
 }
 
 export interface RetryRequestNotificationDeliveryRequest {
@@ -318,10 +378,17 @@ export interface RequestNotificationService {
     request: TestRequestNotificationWebhookTargetRequest,
   ): Promise<RequestNotificationWebhookTestResult>;
   PreviewRequestNotification(request: PreviewRequestNotificationRequest): Promise<PreviewRequestNotificationResponse>;
+  BatchPreviewRequestNotifications(
+    request: BatchPreviewRequestNotificationsRequest,
+  ): Promise<BatchPreviewRequestNotificationsResponse>;
   PublishRequestUpdate(request: PublishRequestUpdateRequest): Promise<RequestNotificationEvent>;
+  BatchPublishRequestUpdates(request: BatchPublishRequestUpdatesRequest): Promise<BatchPublishRequestUpdatesResponse>;
   ListRequestNotificationDeliveries(
     request: ListRequestNotificationDeliveriesRequest,
   ): Promise<ListRequestNotificationDeliveriesResponse>;
+  GetRequestNotificationStatusEvidence(
+    request: GetRequestNotificationStatusEvidenceRequest,
+  ): Promise<RequestNotificationStatusEvidenceResponse>;
   RetryRequestNotificationDelivery(
     request: RetryRequestNotificationDeliveryRequest,
   ): Promise<RequestNotificationDelivery>;

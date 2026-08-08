@@ -23,6 +23,7 @@ import (
 	"github.com/Phixsura/attune/internal/infra/secretstore"
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
+	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
@@ -76,6 +77,21 @@ type Workflow struct {
 	repo    WorkflowRepo
 	secrets SecretStore
 	sender  ReplySender
+	surveys SurveySink
+}
+
+type SurveyReplySentEvent struct {
+	TenantID          string
+	FeedbackID        int64
+	DraftID           string
+	AttemptID         string
+	RevisionID        string
+	ExternalMessageID string
+	ActorID           string
+}
+
+type SurveySink interface {
+	RecordReplySent(ctx context.Context, event SurveyReplySentEvent) (int, error)
 }
 
 type Snapshot struct {
@@ -106,6 +122,10 @@ func NewWorkflow(repo WorkflowRepo, secrets SecretStore, sender ReplySender) *Wo
 		sender = NewWebhookReplySender(nil)
 	}
 	return ptrext.Of(Workflow{repo: repo, secrets: secrets, sender: sender})
+}
+
+func (s *Workflow) SetSurveySink(sink SurveySink) {
+	s.surveys = sink
 }
 
 // SetEgressPolicy installs the reply-send-hook SSRF policy used for config-time
@@ -184,9 +204,11 @@ func (s *Workflow) Send(
 		}
 		return SendResult{}, err
 	}
-	if _, err := s.repo.MarkDeliveryAccepted(ctx, prep.AttemptID, result.HTTPStatus, result.ExternalMessageID); err != nil {
+	accepted, err := s.repo.MarkDeliveryAccepted(ctx, prep.AttemptID, result.HTTPStatus, result.ExternalMessageID)
+	if err != nil {
 		return SendResult{}, err
 	}
+	s.recordSurveyReplySent(ctx, prep, accepted, result.ExternalMessageID)
 	snap, err := s.Snapshot(ctx, tenantID, feedbackID)
 	return SendResult{Snapshot: snap}, err
 }
@@ -310,11 +332,42 @@ func (s *Workflow) executeObservableDelivery(
 		attempt, err := s.repo.GetDeliveryAttempt(ctx, tenantID, prep.AttemptID)
 		return attempt, mapRepoErr(err)
 	}
-	if _, err := s.repo.MarkDeliveryAccepted(ctx, prep.AttemptID, result.HTTPStatus, result.ExternalMessageID); err != nil {
+	accepted, err := s.repo.MarkDeliveryAccepted(ctx, prep.AttemptID, result.HTTPStatus, result.ExternalMessageID)
+	if err != nil {
 		return replydraftrepo.DeliveryAttempt{}, mapRepoErr(err)
 	}
+	s.recordSurveyReplySent(ctx, prep, accepted, result.ExternalMessageID)
 	attempt, err := s.repo.GetDeliveryAttempt(ctx, tenantID, prep.AttemptID)
 	return attempt, mapRepoErr(err)
+}
+
+func (s *Workflow) recordSurveyReplySent(
+	ctx context.Context,
+	prep replydraftrepo.DeliveryPrepare,
+	accepted replydraftrepo.Draft,
+	externalMessageID string,
+) {
+	const where = "service.replydraft.recordSurveyReplySent"
+	if s.surveys == nil {
+		return
+	}
+	revisionID := prep.Revision.ID
+	if accepted.SentRevisionID != "" {
+		revisionID = accepted.SentRevisionID
+	}
+	_, err := s.surveys.RecordReplySent(ctx, SurveyReplySentEvent{
+		TenantID:          accepted.TenantID,
+		FeedbackID:        accepted.FeedbackID,
+		DraftID:           accepted.ID,
+		AttemptID:         prep.AttemptID,
+		RevisionID:        revisionID,
+		ExternalMessageID: externalMessageID,
+		ActorID:           prep.Actor.ID,
+	})
+	if err != nil {
+		logext.Warnf(ctx, "[%s] survey trigger failed,tenant_id:%s,feedback_id:%d,attempt_id:%s,err:%+v",
+			where, accepted.TenantID, accepted.FeedbackID, prep.AttemptID, err.Error())
+	}
 }
 
 func (s *Workflow) hookConfigured(ctx context.Context, tenantID string) bool {

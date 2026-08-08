@@ -94,6 +94,7 @@ type flowRepo struct {
 	upsertedSub        repo.Subscription
 	tenantEmailCount   int
 	contactEmailCount  map[uuid.UUID]int
+	statusEvidence     []repo.StatusEvidence
 	suppressedHash     string
 	suppressedKind     string
 	suppressedReason   string
@@ -1112,6 +1113,68 @@ func TestPublishFlow(t *testing.T) {
 	}
 }
 
+func TestBatchPreviewAndPublishReturnPerRequestFailures(t *testing.T) {
+	ctx := context.Background()
+	requestID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
+	fake := &flowRepo{
+		settings:   repo.Settings{TenantID: "tenant-1", EmailEnabled: true},
+		request:    repo.RequestSummary{ID: requestID, Title: "CSV export", Status: "shipped"},
+		recipients: []repo.Subscriber{{ContactID: uuid.New()}},
+		tx:         &serviceTx{},
+	}
+	service := newFlowService(fake)
+	input := BatchPublishInput{
+		TenantID: "tenant-1",
+		Updates: []BatchUpdateInput{
+			{RequestID: requestID.String(), Title: "Shipped", Body: "CSV export is live.", Kind: "shipped"},
+			{RequestID: "bad-request-id", Title: "Ignored", Body: "Invalid request.", Kind: "shipped"},
+		},
+		Channels:             []string{repo.ChannelEmail},
+		ConfirmLargeAudience: true,
+		Actor:                auditlogsvc.Actor{Type: "user", ID: "user-1"},
+	}
+
+	preview, err := service.BatchPreview(ctx, input)
+	if err != nil {
+		t.Fatalf("BatchPreview() error = %v", err)
+	}
+	if preview.TotalMatched != 2 || preview.EligibleRecipients != 1 || len(preview.Items) != 1 || len(preview.Failed) != 1 {
+		t.Fatalf("preview = %+v, want one preview and one failure", preview)
+	}
+	if preview.Failed[0].Code != "validation" || preview.Failed[0].RequestID != "bad-request-id" {
+		t.Fatalf("preview failure = %+v", preview.Failed[0])
+	}
+
+	published, err := service.BatchPublish(ctx, input)
+	if err != nil {
+		t.Fatalf("BatchPublish() error = %v", err)
+	}
+	if published.TotalMatched != 2 || published.Succeeded != 1 || len(published.Events) != 1 || len(published.Failed) != 1 {
+		t.Fatalf("published = %+v, want one event and one failure", published)
+	}
+	if len(fake.createdEvents) != 1 || fake.createdEvents[0].RequestID != requestID {
+		t.Fatalf("created events = %+v, want only valid request", fake.createdEvents)
+	}
+}
+
+func TestBatchEnvelopeValidation(t *testing.T) {
+	ctx := context.Background()
+	service := newFlowService(&flowRepo{})
+	if _, err := service.BatchPreview(ctx, BatchPublishInput{TenantID: "tenant-1"}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("BatchPreview(empty) error = %v, want validation", err)
+	}
+	updates := make([]BatchUpdateInput, maxRequestNotificationBatchSize+1)
+	for i := range updates {
+		updates[i] = BatchUpdateInput{RequestID: uuid.NewString()}
+	}
+	if _, err := service.BatchPublish(ctx, BatchPublishInput{
+		TenantID: "tenant-1",
+		Updates:  updates,
+	}); !errors.Is(err, ErrValidation) {
+		t.Fatalf("BatchPublish(too large) error = %v, want validation", err)
+	}
+}
+
 func TestPublishOperationErrorBranches(t *testing.T) {
 	ctx := context.Background()
 	requestID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
@@ -1400,6 +1463,45 @@ func TestListAndDeliveryPassThroughMethods(t *testing.T) {
 	}
 	if item, err := service.RetryDelivery(ctx, " tenant-1 ", 42, " user-1 "); err != nil || item.RetriedBy != "user-1" {
 		t.Fatalf("RetryDelivery() = %+v, %v", item, err)
+	}
+}
+
+func TestListStatusEvidenceOrdersDefaultsAndCounts(t *testing.T) {
+	ctx := context.Background()
+	fake := &flowRepo{
+		statusEvidence: []repo.StatusEvidence{
+			{
+				RequestStatus:            "shipped",
+				ExpectedCustomers:        4,
+				NotifiedCustomers:        2,
+				FailedCustomers:          1,
+				SuppressedCustomers:      1,
+				RecoveryPendingCustomers: 1,
+				EventCount:               2,
+				LastEventAt:              ptrext.Of(time.Now().UTC()),
+			},
+			{
+				RequestStatus:     "future",
+				ExpectedCustomers: 1,
+			},
+		},
+	}
+	service := newFlowService(fake)
+
+	evidence, err := service.ListStatusEvidence(ctx, " tenant-1 ")
+	if err != nil || len(evidence) != 6 {
+		t.Fatalf("ListStatusEvidence() = %+v, %v", evidence, err)
+	}
+	if evidence[0].RequestStatus != "open" || evidence[0].ExpectedCustomers != 0 {
+		t.Fatalf("open status evidence = %+v, want zero-filled status", evidence[0])
+	}
+	if evidence[3].RequestStatus != "shipped" ||
+		evidence[3].ExpectedCustomers != 4 ||
+		evidence[3].RecoveryPendingCustomers != 1 {
+		t.Fatalf("shipped status evidence = %+v, want merged notification counts", evidence[3])
+	}
+	if evidence[5].RequestStatus != "future" || evidence[5].ExpectedCustomers != 1 {
+		t.Fatalf("extra status evidence = %+v, want sorted extra status", evidence[5])
 	}
 }
 
@@ -2268,6 +2370,10 @@ func (f *flowRepo) RetryDelivery(_ context.Context, _ string, id int64, actorID 
 
 func (f *flowRepo) ListDeliveries(context.Context, repo.ListDeliveryFilter) ([]repo.Delivery, error) {
 	return f.claimedDeliveries, nil
+}
+
+func (f *flowRepo) ListStatusEvidence(context.Context, string) ([]repo.StatusEvidence, error) {
+	return f.statusEvidence, nil
 }
 
 func (f *flowRepo) ListWebhookTargets(context.Context, string) ([]repo.WebhookTarget, error) {

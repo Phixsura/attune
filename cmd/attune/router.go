@@ -29,6 +29,7 @@ import (
 	"github.com/Phixsura/attune/internal/handlers/mcp"
 	"github.com/Phixsura/attune/internal/handlers/portal"
 	"github.com/Phixsura/attune/internal/handlers/security"
+	"github.com/Phixsura/attune/internal/handlers/surveywebhook"
 	"github.com/Phixsura/attune/internal/inbound"
 	"github.com/Phixsura/attune/internal/infra/config"
 	"github.com/Phixsura/attune/internal/infra/llmclient"
@@ -118,8 +119,8 @@ func buildRouter(
 	rateLimiter := buildRateLimiter(cfg)
 	perKeyRateLimiter := buildPerKeyRateLimiter(cfg)
 	versionMW := apiversion.Middleware(apiversion.DefaultConfig())
-	portalLimiter := newPortalAnonymousLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
-	portalWriteLimiter := newPortalSubmissionLimiter(cfg.RateLimitPerMinute, cfg.RateLimitBurst, cfg.RateLimitDisabled, cfg.Security.TrustedProxyHops)
+	portalLimiters := newPortalLimiterSet(ctx, cfg)
+	surveyService := buildSurveyService(pool, cfg.ConsoleBaseURL, inboundSecrets)
 	publicVisibilityRepo := publicvisibilityrepo.New(pool)
 	portalHandler := portal.NewHandler(
 		publicvisibilitysvc.New(publicVisibilityRepo, nil),
@@ -133,7 +134,10 @@ func buildRouter(
 		inboundSecrets,
 	)
 	portalHandler.SetNotificationService(buildRequestNotificationService(pool, inboundSecrets, cfg.ConsoleBaseURL))
+	portalHandler.SetSurveyService(surveyService)
 
+	r.With(portal.NoStore, portalLimiters.read.Middleware, portalLimiters.surveyRead.Middleware).Get("/surveys/{token}", portalHandler.SurveyPage)
+	r.With(portal.NoStore, portalLimiters.write.Middleware, portalLimiters.surveyWrite.Middleware).Post("/surveys/{token}/responses", portalHandler.SubmitSurveyPageResponse)
 	r.Method(http.MethodGet, "/portal/{tenant_slug}", portal.NoStore(http.HandlerFunc(portalHandler.Page)))
 	r.Method(http.MethodGet, "/portal/{tenant_slug}/requests", portal.NoStore(http.HandlerFunc(portalHandler.RequestsPage)))
 	r.Method(http.MethodGet, "/portal/{tenant_slug}/roadmap", portal.NoStore(http.HandlerFunc(portalHandler.RoadmapPage)))
@@ -152,8 +156,8 @@ func buildRouter(
 		rateLimiter,
 		perKeyRateLimiter,
 		portalHandler,
-		portalLimiter,
-		portalWriteLimiter,
+		surveywebhook.NewHandler(surveyService),
+		portalLimiters,
 		adminRepo,
 	)
 

@@ -3,6 +3,7 @@ import { HttpResponse, http } from 'msw'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  customerRequestAccountSummaryQuery,
   customerRequestDetailQuery,
   customerRequestGitHubIssueConnectionOptionsQuery,
   customerRequestGitHubIssueConnectionsQuery,
@@ -10,6 +11,7 @@ import {
   customerRequestSavedViewsQuery,
   customerRequestScoringSettingsQuery,
   customerRequestsInfiniteQuery,
+  customerRequestsQuery,
   useAddCustomerRequestNote,
   useAddCustomerRequestVote,
   useCreateCustomerRequest,
@@ -186,6 +188,8 @@ describe('customer request API', () => {
         sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
         direction: SortDirection.SORT_DIRECTION_DESC,
         feedbackId: '42',
+        cohortId: 'cohort-vip',
+        accountKey: ' acct:acme ',
       }),
       pages: 2,
     })
@@ -208,6 +212,8 @@ describe('customer request API', () => {
     )
     expect(first.searchParams.get('direction')).toBe(SortDirection.SORT_DIRECTION_DESC)
     expect(first.searchParams.get('feedback_id')).toBe('42')
+    expect(first.searchParams.get('cohort_id')).toBe('cohort-vip')
+    expect(first.searchParams.get('account_key')).toBe('acct:acme')
     expect(first.searchParams.get('limit')).toBe('50')
     expect(first.searchParams.has('cursor')).toBe(false)
     expect(new URL(urls[1]).searchParams.get('cursor')).toBe('next-page')
@@ -245,6 +251,94 @@ describe('customer request API', () => {
     })
 
     expect(urls).toHaveLength(1)
+  })
+
+  it('builds a finite snapshot query for reliability consistency checks', async () => {
+    let url = ''
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        url = request.url
+        return HttpResponse.json({
+          requests: [{ id: 'req-1', title: 'Focus restore' }],
+        })
+      }),
+    )
+
+    const items = await makeQueryClient().fetchQuery(
+      customerRequestsQuery(
+        {
+          visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+          sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT,
+          direction: SortDirection.SORT_DIRECTION_DESC,
+        },
+        25,
+      ),
+    )
+
+    const params = new URL(url).searchParams
+    expect(params.get('visibility')).toBe(
+      CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ACTIVE,
+    )
+    expect(params.get('sort')).toBe(CustomerRequestSort.CUSTOMER_REQUEST_SORT_UPDATED_AT)
+    expect(params.get('direction')).toBe(SortDirection.SORT_DIRECTION_DESC)
+    expect(params.get('limit')).toBe('25')
+    expect(items).toEqual([{ id: 'req-1', title: 'Focus restore' }])
+  })
+
+  it('returns an empty finite snapshot when the response omits requests', async () => {
+    server.use(http.get(baseURL, () => HttpResponse.json({})))
+
+    await expect(makeQueryClient().fetchQuery(customerRequestsQuery({}, 10))).resolves.toEqual([])
+  })
+
+  it('fetches authoritative account summaries with the current filters', async () => {
+    let url = ''
+    server.use(
+      http.get(`${baseURL}/account-summary`, ({ request }) => {
+        url = request.url
+        return HttpResponse.json({
+          accountKey: 'acct:acme',
+          requestCount: 2,
+          feedbackCount: 6,
+          customerCount: 3,
+          voteCount: 8,
+          issueCount: 3,
+          revenueImpactCents: '3400000',
+          revenueCurrency: 'USD',
+          timeline: [],
+        })
+      }),
+    )
+
+    await expect(
+      makeQueryClient().fetchQuery(
+        customerRequestAccountSummaryQuery({
+          q: ' renewal ',
+          status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+          priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+          ownerMemberId: 'member-1',
+          visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
+          sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
+          direction: SortDirection.SORT_DIRECTION_DESC,
+          feedbackId: '42',
+          accountKey: ' acct:acme ',
+        }),
+      ),
+    ).resolves.toMatchObject({ accountKey: 'acct:acme', requestCount: 2 })
+
+    const params = new URL(url).searchParams
+    expect(params.get('account_key')).toBe('acct:acme')
+    expect(params.get('q')).toBe('renewal')
+    expect(params.get('status')).toBe(CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN)
+    expect(params.get('priority')).toBe(CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH)
+    expect(params.get('owner_member_id')).toBe('member-1')
+    expect(params.get('visibility')).toBe(CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL)
+    expect(params.get('sort')).toBe(CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE)
+    expect(params.get('direction')).toBe(SortDirection.SORT_DIRECTION_DESC)
+    expect(params.get('feedback_id')).toBe('42')
+    expect(params.get('timeline_limit')).toBe('5')
+    expect(params.get('event_limit')).toBe('12')
+    expect(customerRequestAccountSummaryQuery({}).enabled).toBe(false)
   })
 
   it('fetches details only when an id is present', async () => {
@@ -795,6 +889,7 @@ function sampleDetail(id: string): CustomerRequestDetail {
       revenueCurrency: 'USD',
       decisionScore: 0,
       decisionScoreExplanation: '',
+      decisionScoreFactors: [],
       deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_NO_LINKS,
       syncedIssueCount: 0,
       staleIssueCount: 0,
@@ -811,6 +906,7 @@ function sampleDetail(id: string): CustomerRequestDetail {
     duplicates: [],
     accountProfiles: [],
     notes: [],
+    decisionRecords: [],
   }
 }
 

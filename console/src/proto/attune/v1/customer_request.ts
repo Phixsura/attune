@@ -86,12 +86,125 @@ export enum SortDirection {
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
+export enum CustomerRequestDecisionScoreFactorKind {
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_UNSPECIFIED = "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_UNSPECIFIED",
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY = "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY",
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_FEEDBACK = "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_FEEDBACK",
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_CUSTOMERS = "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_CUSTOMERS",
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_ACCOUNTS = "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_ACCOUNTS",
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_VOTES = "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_VOTES",
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_REVENUE = "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_REVENUE",
+  CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH =
+    "CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum CustomerRequestEvidenceConfidence {
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_UNSPECIFIED = "CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_UNSPECIFIED",
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_LOW = "CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_LOW",
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_MEDIUM = "CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_MEDIUM",
+  CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_HIGH = "CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_HIGH",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum CustomerRequestEvidenceQualityReason {
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_UNSPECIFIED = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_UNSPECIFIED",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_SUPPORTING_FEEDBACK =
+    "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_SUPPORTING_FEEDBACK",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_LOW_FEEDBACK_VOLUME =
+    "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_LOW_FEEDBACK_VOLUME",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_CUSTOMER = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_CUSTOMER",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_ACCOUNT_CONTEXT =
+    "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_ACCOUNT_CONTEXT",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_STALE_EVIDENCE = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_STALE_EVIDENCE",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_DELIVERY_LINK =
+    "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_DELIVERY_LINK",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_HIDDEN_FEEDBACK = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_HIDDEN_FEEDBACK",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SUPPORTING_FEEDBACK =
+    "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SUPPORTING_FEEDBACK",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_CUSTOMER = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_CUSTOMER",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_ACCOUNT_CONTEXT = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_ACCOUNT_CONTEXT",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_FRESH_EVIDENCE = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_FRESH_EVIDENCE",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_DELIVERY_LINKED = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_DELIVERY_LINKED",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_SOURCE = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_SOURCE",
+  CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_SOURCE = "CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_SOURCE",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum CustomerRequestDecisionPublicSafeState {
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_UNSPECIFIED = "CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_UNSPECIFIED",
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_PUBLIC_SAFE = "CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_PUBLIC_SAFE",
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_NEEDS_REVIEW = "CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_NEEDS_REVIEW",
+  CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_INTERNAL_ONLY =
+    "CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_INTERNAL_ONLY",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum CustomerRequestAccountSignalKind {
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_UNSPECIFIED = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_UNSPECIFIED",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_DELIVERY_RISK = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_DELIVERY_RISK",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_HIGH_PRIORITY_DEMAND =
+    "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_HIGH_PRIORITY_DEMAND",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_REVENUE_IMPACT = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_REVENUE_IMPACT",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_BREADTH = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_BREADTH",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_GAP = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_GAP",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_SHIPPED_OUTCOME = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_SHIPPED_OUTCOME",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum CustomerRequestAccountSignalSeverity {
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_UNSPECIFIED = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_UNSPECIFIED",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_POSITIVE = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_POSITIVE",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_INFO = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_INFO",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING",
+  CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL = "CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum CustomerRequestAccountEventKind {
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_UNSPECIFIED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_UNSPECIFIED",
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_REQUEST_CREATED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_REQUEST_CREATED",
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_FEEDBACK_LINKED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_FEEDBACK_LINKED",
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_CUSTOMER_LINKED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_CUSTOMER_LINKED",
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_VOTE_ADDED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_VOTE_ADDED",
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_LINKED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_LINKED",
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_SYNCED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_SYNCED",
+  CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_NOTE_ADDED = "CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_NOTE_ADDED",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
 export interface CustomerRequestOwner {
   id: string;
   memberType: string;
   userId: string;
   email: string;
   role: string;
+}
+
+export interface CustomerRequestDecisionScoreFactor {
+  kind: CustomerRequestDecisionScoreFactorKind;
+  rawCount: number;
+  rawValueCents: string;
+  weight: number;
+  cap: number;
+  unitCents: string;
+  contribution: number;
+  capped: boolean;
+  contributesToScore: boolean;
+}
+
+export interface CustomerRequestEvidenceQuality {
+  score: number;
+  confidence: CustomerRequestEvidenceConfidence;
+  evidenceCount: number;
+  sourceCount: number;
+  customerCount: number;
+  accountCount: number;
+  latestEvidenceAt: string;
+  stale: boolean;
+  lowConfidence: boolean;
+  gapReasons: CustomerRequestEvidenceQualityReason[];
+  strengths: CustomerRequestEvidenceQualityReason[];
 }
 
 export interface CustomerRequestSummary {
@@ -125,6 +238,8 @@ export interface CustomerRequestSummary {
   failedIssueCount: number;
   pendingIssueCount: number;
   manualIssueCount: number;
+  decisionScoreFactors: CustomerRequestDecisionScoreFactor[];
+  evidenceQuality?: CustomerRequestEvidenceQuality | undefined;
 }
 
 export interface CustomerRequestFeedbackEvidence {
@@ -258,6 +373,42 @@ export interface CustomerRequestAuditEntry {
   createdAt: string;
 }
 
+export interface CustomerRequestDecisionRecord {
+  auditId: string;
+  action: string;
+  actorType: string;
+  actorId: string;
+  summary: string;
+  createdAt: string;
+  statusChanged: boolean;
+  oldStatus: CustomerRequestStatus;
+  newStatus: CustomerRequestStatus;
+  priorityChanged: boolean;
+  oldPriority: CustomerRequestPriority;
+  newPriority: CustomerRequestPriority;
+  ownerChanged: boolean;
+  oldOwnerMemberId: string;
+  newOwnerMemberId: string;
+  titleChanged: boolean;
+  descriptionChanged: boolean;
+  hasDecisionSnapshot: boolean;
+  decisionScore: number;
+  decisionScoreFactors: CustomerRequestDecisionScoreFactor[];
+  deliveryHealth: CustomerRequestDeliveryHealth;
+  supportingFeedbackCount: number;
+  customerCount: number;
+  accountCount: number;
+  voteCount: number;
+  revenueImpactCents: string;
+  revenueCurrency: string;
+  decisionRationale: string;
+  ownerMemberId: string;
+  ownerDisplay: string;
+  evidenceBundleRef: string;
+  publicSafeState: CustomerRequestDecisionPublicSafeState;
+  publicSafeReasons: string[];
+}
+
 export interface CustomerRequestDetail {
   request?: CustomerRequestSummary | undefined;
   description: string;
@@ -270,6 +421,57 @@ export interface CustomerRequestDetail {
   accountProfiles: CustomerRequestAccountProfile[];
   notes: CustomerRequestNote[];
   deliveryGraph?: CustomerRequestDeliveryGraph | undefined;
+  decisionRecords: CustomerRequestDecisionRecord[];
+}
+
+export interface CustomerRequestAccountDecisionSignal {
+  kind: CustomerRequestAccountSignalKind;
+  severity: CustomerRequestAccountSignalSeverity;
+  count: number;
+  valueCents: string;
+  score: number;
+}
+
+export interface CustomerRequestAccountEvent {
+  kind: CustomerRequestAccountEventKind;
+  requestId: string;
+  requestDisplayId: string;
+  requestTitle: string;
+  occurredAt: string;
+  actorId: string;
+  subjectDisplay: string;
+  source: string;
+  description: string;
+  feedbackId: string;
+  issueProvider: string;
+  issueKey: string;
+  issueUrl: string;
+  issueSyncState: CustomerRequestIssueSyncState;
+}
+
+export interface CustomerRequestAccountSummary {
+  accountKey: string;
+  accountProfile?: CustomerRequestAccountProfile | undefined;
+  requestCount: number;
+  feedbackCount: number;
+  customerCount: number;
+  voteCount: number;
+  issueCount: number;
+  syncedIssueCount: number;
+  staleIssueCount: number;
+  failedIssueCount: number;
+  pendingIssueCount: number;
+  manualIssueCount: number;
+  revenueImpactCents: string;
+  revenueCurrency: string;
+  highPriorityRequestCount: number;
+  shippedRequestCount: number;
+  staleOrFailedIssueCount: number;
+  timeline: CustomerRequestSummary[];
+  averageDecisionScore: number;
+  topDecisionScore: number;
+  decisionSignals: CustomerRequestAccountDecisionSignal[];
+  events: CustomerRequestAccountEvent[];
 }
 
 export interface CustomerRequestScoringSettings {
@@ -323,6 +525,7 @@ export interface CustomerRequestSavedViewState {
   sort: CustomerRequestSort;
   direction: SortDirection;
   feedbackId?: string | undefined;
+  accountKey?: string | undefined;
 }
 
 export interface CustomerRequestSavedView {
@@ -374,11 +577,26 @@ export interface ListCustomerRequestsRequest {
   cursor?: string | undefined;
   feedbackId?: string | undefined;
   cohortId?: string | undefined;
+  accountKey?: string | undefined;
 }
 
 export interface ListCustomerRequestsResponse {
   requests: CustomerRequestSummary[];
   nextCursor?: string | undefined;
+}
+
+export interface GetCustomerRequestAccountSummaryRequest {
+  accountKey: string;
+  q: string;
+  status: CustomerRequestStatus[];
+  priority: CustomerRequestPriority[];
+  ownerMemberId?: string | undefined;
+  visibility: CustomerRequestVisibility;
+  sort: CustomerRequestSort;
+  direction: SortDirection;
+  feedbackId?: string | undefined;
+  timelineLimit?: number | undefined;
+  eventLimit?: number | undefined;
 }
 
 export interface GetCustomerRequestRequest {
@@ -564,6 +782,9 @@ export interface UpdateRequestAutomationRequest {
 
 export interface CustomerRequestService {
   ListCustomerRequests(request: ListCustomerRequestsRequest): Promise<ListCustomerRequestsResponse>;
+  GetCustomerRequestAccountSummary(
+    request: GetCustomerRequestAccountSummaryRequest,
+  ): Promise<CustomerRequestAccountSummary>;
   GetCustomerRequestScoringSettings(
     request: GetCustomerRequestScoringSettingsRequest,
   ): Promise<CustomerRequestScoringSettings>;

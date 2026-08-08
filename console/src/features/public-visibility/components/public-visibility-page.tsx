@@ -84,6 +84,8 @@ import type {
   RoadmapStatusMapping,
   SavedPublicVisibilityView,
 } from '@/proto/attune/v1/public_visibility'
+import { buildPublicPrivacyPreflight } from '../public-privacy-preflight'
+import { PublicPrivacyPreflightCard } from './public-privacy-preflight-card'
 
 type PolicyForm = {
   portalAccessMode: PublicAccessMode
@@ -284,6 +286,10 @@ export function PublicVisibilityPage() {
   const subjects = moderationQuery.data ?? []
   const counts = useMemo(() => countStates(subjects), [subjects])
   const visibleSubjects = useMemo(() => filterSubjects(subjects, queueView), [subjects, queueView])
+  const privacyPreflight = buildPublicPrivacyPreflight({
+    moderationSubjects: moderationQuery.data,
+    policy: policyQuery.data,
+  })
   const loadedPublicSlug = loadedPublication?.profile?.publicSlug ?? ''
   const customerRequestsHref =
     canViewCustomerRequests && loadedPublication?.profile?.requestId
@@ -357,6 +363,8 @@ export function PublicVisibilityPage() {
           </>
         }
       />
+
+      <PublicPrivacyPreflightCard preflight={privacyPreflight} />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <div className="space-y-6">

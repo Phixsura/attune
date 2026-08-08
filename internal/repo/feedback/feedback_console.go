@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -28,6 +29,13 @@ type AttrFilter struct {
 	Dim   string
 	Value string
 	Multi bool
+}
+
+// AccountContext is the account/company projection derived from source metadata.
+type AccountContext struct {
+	AccountKey     string
+	AccountDisplay string
+	Source         string
 }
 
 // ConsoleListOpts is the filter set the console UI sends. Each field
@@ -53,6 +61,7 @@ type ConsoleListOpts struct {
 	EnrichedTo         *time.Time
 	QualitySignal      *string
 	CohortID           *string // UUID string; nil = no filter; filter feedback by cohort membership
+	AccountKey         *string
 }
 
 // ConsoleListRow is the projection sent to the console list view.
@@ -83,6 +92,50 @@ type ConsoleListRow struct {
 	TerminalFailureChannelName       string
 	TerminalFailureConfigFingerprint string
 	TerminalFailurePromptVersion     string
+	Assignment                       Assignment
+	AccountContext                   AccountContext
+}
+
+func feedbackSourceMetaSQL(alias string) string {
+	if alias == "" {
+		return "source_meta"
+	}
+	return alias + ".source_meta"
+}
+
+func feedbackAccountKeySQL(alias string) string {
+	meta := feedbackSourceMetaSQL(alias)
+	return "COALESCE(" +
+		"NULLIF(" + meta + "->>'account_key', ''), " +
+		"NULLIF(" + meta + "->>'accountKey', ''), " +
+		"NULLIF(" + meta + "->>'company_id', ''), " +
+		"NULLIF(" + meta + "->>'companyId', ''), " +
+		"NULLIF(" + meta + " #>> '{account,key}', ''), " +
+		"NULLIF(" + meta + " #>> '{account,id}', ''), " +
+		"NULLIF(" + meta + " #>> '{account,account_key}', ''), " +
+		"NULLIF(" + meta + " #>> '{account,accountKey}', ''), " +
+		"NULLIF(" + meta + " #>> '{company,key}', ''), " +
+		"NULLIF(" + meta + " #>> '{company,id}', '')" +
+		")"
+}
+
+func feedbackAccountDisplaySQL(alias string) string {
+	meta := feedbackSourceMetaSQL(alias)
+	return "COALESCE(" +
+		"NULLIF(" + meta + "->>'account_display', ''), " +
+		"NULLIF(" + meta + "->>'accountDisplay', ''), " +
+		"NULLIF(" + meta + "->>'company_name', ''), " +
+		"NULLIF(" + meta + "->>'companyName', ''), " +
+		"NULLIF(" + meta + " #>> '{account,name}', ''), " +
+		"NULLIF(" + meta + " #>> '{account,display}', ''), " +
+		"NULLIF(" + meta + " #>> '{company,name}', ''), " +
+		"NULLIF(" + meta + " #>> '{company,display}', ''), " +
+		feedbackAccountKeySQL(alias) +
+		")"
+}
+
+func feedbackAccountSourceSQL(alias string) string {
+	return "CASE WHEN " + feedbackAccountKeySQL(alias) + " IS NULL THEN '' ELSE 'source_meta' END"
 }
 
 type queryBuilder struct {
@@ -126,6 +179,11 @@ func (qb *queryBuilder) applyIdentityFilters(opts ConsoleListOpts) error {
 			return err
 		}
 		qb.and("enriched_attrs @> " + qb.addArg(clause) + "::jsonb")
+	}
+	if opts.AccountKey != nil {
+		if accountKey := strings.TrimSpace(ptrext.Indirect(opts.AccountKey)); accountKey != "" {
+			qb.and(feedbackAccountKeySQL("") + " = " + qb.addArg(accountKey))
+		}
 	}
 	return nil
 }
@@ -242,7 +300,19 @@ func (r *FeedbackRepo) ListForConsole(
 		 COALESCE(enrichment_failure_channel_id, ''),
 		 COALESCE(enrichment_failure_channel_name, ''),
 		 COALESCE(enrichment_failure_config_fingerprint, ''),
-		 COALESCE(enrichment_failure_prompt_version, '')
+		 COALESCE(enrichment_failure_prompt_version, ''),
+		 owner_member_id::text,
+		 owner_assigned_at,
+		 COALESCE(owner_assigned_by, ''),
+		 feedback_sla_due_at,
+		 COALESCE(owner_assignment_note, ''),
+		 COALESCE((SELECT tm.member_type FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE((SELECT tm.user_id FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE((SELECT tm.email FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE((SELECT tm.role FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE(` + feedbackAccountKeySQL("user_feedback") + `, ''),
+		 COALESCE(` + feedbackAccountDisplaySQL("user_feedback") + `, ''),
+		 ` + feedbackAccountSourceSQL("user_feedback") + `
 		 FROM user_feedback
 		 ` + qb.where + `
 		 ORDER BY id DESC
@@ -261,20 +331,27 @@ func (r *FeedbackRepo) ListForConsole(
 		var confidence sql.NullFloat64
 		var wsID sql.NullString    // ptrext:allow scan-target
 		var nextRetry sql.NullTime // ptrext:allow scan-target
+		var ownerID sql.NullString // ptrext:allow scan-target
+		var ownerAssignedAt sql.NullTime
+		var slaDueAt sql.NullTime
 		if err := rows.Scan(
 			&row.ID, &row.Content, &row.Source, &row.Type, &row.UserID, &row.Language, &row.PageURL, // ptrext:allow scan-target
 			&row.EnrichedTitle, &row.EnrichedDisplayTitle, &row.EnrichedDisplayLocale, // ptrext:allow scan-target
 			&row.EnrichedAttrs, &row.IsUrgent, &confidence, // ptrext:allow scan-target
 			&row.EnrichmentStatus, &row.CreatedAt, // ptrext:allow scan-target
-			&wsID,                                 // ptrext:allow scan-target
-			&row.EnrichmentAttempts,               // ptrext:allow scan-target
-			&nextRetry,                            // ptrext:allow scan-target
-			&row.TerminalFailureReasonClass,       // ptrext:allow scan-target
-			&row.TerminalFailureModel,             // ptrext:allow scan-target
-			&row.TerminalFailureChannelID,         // ptrext:allow scan-target
-			&row.TerminalFailureChannelName,       // ptrext:allow scan-target
-			&row.TerminalFailureConfigFingerprint, // ptrext:allow scan-target
-			&row.TerminalFailurePromptVersion,     // ptrext:allow scan-target
+			&wsID,                                                             // ptrext:allow scan-target
+			&row.EnrichmentAttempts,                                           // ptrext:allow scan-target
+			&nextRetry,                                                        // ptrext:allow scan-target
+			&row.TerminalFailureReasonClass,                                   // ptrext:allow scan-target
+			&row.TerminalFailureModel,                                         // ptrext:allow scan-target
+			&row.TerminalFailureChannelID,                                     // ptrext:allow scan-target
+			&row.TerminalFailureChannelName,                                   // ptrext:allow scan-target
+			&row.TerminalFailureConfigFingerprint,                             // ptrext:allow scan-target
+			&row.TerminalFailurePromptVersion,                                 // ptrext:allow scan-target
+			&ownerID, &ownerAssignedAt, &row.Assignment.AssignedBy, &slaDueAt, // ptrext:allow scan-target
+			&row.Assignment.Note, &row.Assignment.OwnerMemberType, // ptrext:allow scan-target
+			&row.Assignment.OwnerUserID, &row.Assignment.OwnerEmail, &row.Assignment.OwnerRole, // ptrext:allow scan-target
+			&row.AccountContext.AccountKey, &row.AccountContext.AccountDisplay, &row.AccountContext.Source, // ptrext:allow scan-target
 		); err != nil {
 			return nil, fmt.Errorf("scan feedback row: %w", err)
 		}
@@ -285,6 +362,7 @@ func (r *FeedbackRepo) ListForConsole(
 		if nextRetry.Valid {
 			row.EnrichmentNextRetryAt = ptrext.Of(nextRetry.Time)
 		}
+		row.Assignment = hydrateAssignmentTimes(row.Assignment, row.ID, ownerID, ownerAssignedAt, slaDueAt)
 		out = append(out, row)
 	}
 	return out, rows.Err()
@@ -318,6 +396,18 @@ type ConsoleDetailRow struct {
 	ReplyDraftEnabled        bool // tenant opt-in flag (joined from tenants)
 }
 
+// IdentityReviewRow is the bounded raw input for the console identity-review
+// projection. The handler owns evidence extraction so the review model stays
+// aligned with detail-page identity assessment.
+type IdentityReviewRow struct {
+	ID         int64
+	Source     string
+	UserID     string
+	Content    string
+	SourceMeta []byte
+	CreatedAt  time.Time
+}
+
 // ErrFeedbackNotFound returned by GetForConsole when id doesn't match
 // the tenant (cross-tenant query safety).
 var ErrFeedbackNotFound = errors.New("feedback not found")
@@ -329,6 +419,9 @@ func (r *FeedbackRepo) GetForConsole(
 	var confidence sql.NullFloat64
 	var wsID sql.NullString    // ptrext:allow scan-target
 	var nextRetry sql.NullTime // ptrext:allow scan-target
+	var ownerID sql.NullString // ptrext:allow scan-target
+	var ownerAssignedAt sql.NullTime
+	var slaDueAt sql.NullTime
 	err := r.pool.QueryRow(
 		ctx, `
 			SELECT id, content, source, type, user_id, COALESCE(language, ''), page_url,
@@ -355,7 +448,19 @@ func (r *FeedbackRepo) GetForConsole(
 		 COALESCE(enrichment_failure_channel_id, ''),
 		 COALESCE(enrichment_failure_channel_name, ''),
 		 COALESCE(enrichment_failure_config_fingerprint, ''),
-		 COALESCE(enrichment_failure_prompt_version, '')
+		 COALESCE(enrichment_failure_prompt_version, ''),
+		 owner_member_id::text,
+		 owner_assigned_at,
+		 COALESCE(owner_assigned_by, ''),
+		 feedback_sla_due_at,
+		 COALESCE(owner_assignment_note, ''),
+		 COALESCE((SELECT tm.member_type FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE((SELECT tm.user_id FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE((SELECT tm.email FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE((SELECT tm.role FROM tenant_members tm WHERE tm.id = user_feedback.owner_member_id), ''),
+		 COALESCE(`+feedbackAccountKeySQL("user_feedback")+`, ''),
+		 COALESCE(`+feedbackAccountDisplaySQL("user_feedback")+`, ''),
+		 `+feedbackAccountSourceSQL("user_feedback")+`
 		 FROM user_feedback
 		 WHERE id = $1 AND tenant_id = $2`,
 		id, tenantID,
@@ -368,15 +473,19 @@ func (r *FeedbackRepo) GetForConsole(
 		&row.EnrichmentError, &row.EnrichedAt, // ptrext:allow scan-target
 		&row.EnrichedRationale, &row.EnrichedDisplayRationale, // ptrext:allow scan-target
 		&row.ReplyDraft, &row.ReplyDraftGeneratedAt, &row.ReplyDraftEnabled, // ptrext:allow scan-target
-		&wsID,                                 // ptrext:allow scan-target
-		&row.EnrichmentAttempts,               // ptrext:allow scan-target
-		&nextRetry,                            // ptrext:allow scan-target
-		&row.TerminalFailureReasonClass,       // ptrext:allow scan-target
-		&row.TerminalFailureModel,             // ptrext:allow scan-target
-		&row.TerminalFailureChannelID,         // ptrext:allow scan-target
-		&row.TerminalFailureChannelName,       // ptrext:allow scan-target
-		&row.TerminalFailureConfigFingerprint, // ptrext:allow scan-target
-		&row.TerminalFailurePromptVersion,     // ptrext:allow scan-target
+		&wsID,                                                             // ptrext:allow scan-target
+		&row.EnrichmentAttempts,                                           // ptrext:allow scan-target
+		&nextRetry,                                                        // ptrext:allow scan-target
+		&row.TerminalFailureReasonClass,                                   // ptrext:allow scan-target
+		&row.TerminalFailureModel,                                         // ptrext:allow scan-target
+		&row.TerminalFailureChannelID,                                     // ptrext:allow scan-target
+		&row.TerminalFailureChannelName,                                   // ptrext:allow scan-target
+		&row.TerminalFailureConfigFingerprint,                             // ptrext:allow scan-target
+		&row.TerminalFailurePromptVersion,                                 // ptrext:allow scan-target
+		&ownerID, &ownerAssignedAt, &row.Assignment.AssignedBy, &slaDueAt, // ptrext:allow scan-target
+		&row.Assignment.Note, &row.Assignment.OwnerMemberType, // ptrext:allow scan-target
+		&row.Assignment.OwnerUserID, &row.Assignment.OwnerEmail, &row.Assignment.OwnerRole, // ptrext:allow scan-target
+		&row.AccountContext.AccountKey, &row.AccountContext.AccountDisplay, &row.AccountContext.Source, // ptrext:allow scan-target
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrFeedbackNotFound
@@ -394,7 +503,42 @@ func (r *FeedbackRepo) GetForConsole(
 	if nextRetry.Valid {
 		row.EnrichmentNextRetryAt = ptrext.Of(nextRetry.Time)
 	}
+	row.Assignment = hydrateAssignmentTimes(row.Assignment, row.ID, ownerID, ownerAssignedAt, slaDueAt)
 	return ptrext.Of(row), nil
+}
+
+func (r *FeedbackRepo) IdentityReviewRows(
+	ctx context.Context, tenantID string, limit int,
+) ([]IdentityReviewRow, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 250
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, source, user_id, content, source_meta, created_at
+		FROM user_feedback
+		WHERE tenant_id = $1
+		ORDER BY id DESC
+		LIMIT $2`,
+		tenantID, limit,
+	)
+	if err != nil {
+		const where = "repo.FeedbackRepo.IdentityReviewRows"
+		logext.Errorf(ctx, "[%s] query failed,tenant_id:%s,err:%+v",
+			where, tenantID, err.Error())
+		return nil, fmt.Errorf("identity review rows: %w", err)
+	}
+	defer rows.Close()
+	out := make([]IdentityReviewRow, 0, limit)
+	for rows.Next() {
+		var row IdentityReviewRow
+		if err := rows.Scan(
+			&row.ID, &row.Source, &row.UserID, &row.Content, &row.SourceMeta, &row.CreatedAt, // ptrext:allow scan-target
+		); err != nil {
+			return nil, fmt.Errorf("scan identity review row: %w", err)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 func nullFloatPtr(v sql.NullFloat64) *float64 {

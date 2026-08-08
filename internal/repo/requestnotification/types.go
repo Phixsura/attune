@@ -301,3 +301,14 @@ type ListDeliveryFilter struct {
 	RequestID *uuid.UUID
 	Channel   string
 }
+
+type StatusEvidence struct {
+	RequestStatus            string
+	ExpectedCustomers        int
+	NotifiedCustomers        int
+	FailedCustomers          int
+	SuppressedCustomers      int
+	RecoveryPendingCustomers int
+	EventCount               int
+	LastEventAt              *time.Time
+}

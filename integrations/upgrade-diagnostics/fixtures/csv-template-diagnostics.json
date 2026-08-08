@@ -1,0 +1,17 @@
+{
+  "connector": "csv",
+  "input": {
+    "installStatus": "available",
+    "health": "ready",
+    "schemaDrift": false,
+    "webhookSignature": "not_required",
+    "replayFixture": "available",
+    "compatibility": "non_breaking",
+    "rollback": true
+  },
+  "expected": {
+    "status": "verified",
+    "primaryAction": "run_compatibility_migration_plan",
+    "evidence": "template upgrade has replay and rollback evidence"
+  }
+}

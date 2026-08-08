@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -42,29 +43,21 @@ func TestPG_GDPRExportDeleteLifecycle(t *testing.T) {
 	writeFeedbackAudit(t, ctx, pool, tenantID, feedbackID1)
 	writeLLMAudit(t, ctx, pool, tenantID, feedbackID2)
 	replyIDs := insertReplyDraftWorkflow(t, ctx, pool, tenantID, feedbackID1)
+	surveyIDs := insertSurveySubjectRows(t, ctx, pool, tenantID, feedbackID1, otherFeedbackID, subjectHash)
 
 	bundle, err := svc.Export(ctx, tenantID, subjectKey, actor())
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
-	if bundle.Counts.FeedbackCount != 2 || bundle.Counts.TagAssignmentCount != 1 ||
-		bundle.Counts.FeedbackAuditCount != 1 || bundle.Counts.LLMAuditCount != 1 ||
-		bundle.Counts.ReplyDraftCount != 1 || bundle.Counts.ReplyDraftRevisionCount != 1 ||
-		bundle.Counts.ReplyDraftEventCount != 1 || bundle.Counts.ReplyDeliveryAttemptCount != 1 {
-		t.Fatalf("unexpected export counts: %+v", bundle.Counts)
-	}
+	expectedCounts := gdprLifecycleCounts()
+	assertCounts(t, bundle.Counts, expectedCounts)
 	files := unzipFiles(t, bundle.Data)
 	assertManifest(t, files["manifest.json"], tenantID, subjectKey, 2)
-	assertJSONLCount(t, files["feedback.jsonl"], 2)
-	assertJSONLCount(t, files["feedback_tags.jsonl"], 1)
-	assertJSONLCount(t, files["feedback_audit_log.jsonl"], 1)
-	assertJSONLCount(t, files["llm_audit.jsonl"], 1)
-	assertJSONLCount(t, files["reply_drafts.jsonl"], 1)
-	assertJSONLCount(t, files["reply_draft_revisions.jsonl"], 1)
-	assertJSONLCount(t, files["reply_draft_events.jsonl"], 1)
-	assertJSONLCount(t, files["reply_delivery_attempts.jsonl"], 1)
+	assertLifecycleJSONLCounts(t, files)
 	assertFeedbackRowsIncludeOnlySubject(t, files["feedback.jsonl"], subjectKey, []int64{feedbackID1, feedbackID2})
 	assertTagRow(t, files["feedback_tags.jsonl"], feedbackID1, tagID)
+	assertSurveyResponseComment(t, files["survey_responses.jsonl"], surveyIDs.responseID, "Survey comment for Alice")
+	assertSurveyProviderEventKey(t, files["survey_provider_events.jsonl"], surveyIDs.providerEventID, "gdpr-provider-event-1")
 	assertAuditLogActionCount(t, ctx, pool, tenantID, "gdpr.export", 1)
 
 	result, err := svc.Delete(ctx, tenantID, subjectKey, actor())
@@ -76,6 +69,67 @@ func TestPG_GDPRExportDeleteLifecycle(t *testing.T) {
 	}
 	assertFeedbackDeleted(t, ctx, pool, []int64{feedbackID1, feedbackID2})
 	assertFeedbackPresent(t, ctx, pool, otherFeedbackID)
+	assertLifecycleRowsDeleted(t, ctx, pool, feedbackID1, feedbackID2, replyIDs, surveyIDs)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM survey_responses WHERE id = $1`, 1, surveyIDs.otherResponseID)
+	assertAuditLogActionCount(t, ctx, pool, tenantID, "gdpr.delete", 1)
+}
+
+func gdprLifecycleCounts() gdprrepo.Counts {
+	return gdprrepo.Counts{
+		FeedbackCount:                   2,
+		TagAssignmentCount:              1,
+		FeedbackAuditCount:              1,
+		LLMAuditCount:                   1,
+		ReplyDraftCount:                 1,
+		ReplyDraftRevisionCount:         1,
+		ReplyDraftEventCount:            1,
+		ReplyDeliveryAttemptCount:       1,
+		SurveyInvitationCount:           1,
+		SurveyResponseCount:             1,
+		SurveyLowScoreReviewCount:       1,
+		SurveyProviderEventCount:        1,
+		SurveyRecoveryNotificationCount: 1,
+	}
+}
+
+func assertCounts(t *testing.T, got gdprrepo.Counts, want gdprrepo.Counts) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("counts = %+v, want %+v", got, want)
+	}
+}
+
+func assertLifecycleJSONLCounts(t *testing.T, files map[string][]byte) {
+	t.Helper()
+	for name, want := range map[string]int{
+		"feedback.jsonl":                      2,
+		"feedback_tags.jsonl":                 1,
+		"feedback_audit_log.jsonl":            1,
+		"llm_audit.jsonl":                     1,
+		"reply_drafts.jsonl":                  1,
+		"reply_draft_revisions.jsonl":         1,
+		"reply_draft_events.jsonl":            1,
+		"reply_delivery_attempts.jsonl":       1,
+		"survey_invitations.jsonl":            1,
+		"survey_responses.jsonl":              1,
+		"survey_low_score_reviews.jsonl":      1,
+		"survey_provider_events.jsonl":        1,
+		"survey_recovery_notifications.jsonl": 1,
+	} {
+		assertJSONLCount(t, files[name], want)
+	}
+}
+
+func assertLifecycleRowsDeleted(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	feedbackID1 int64,
+	feedbackID2 int64,
+	replyIDs replyDraftWorkflowIDs,
+	surveyIDs surveySubjectIDs,
+) {
+	t.Helper()
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = $1`, 0, feedbackID1)
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = $1`, 0, feedbackID1)
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM llm_audit WHERE feedback_id = $1`, 0, feedbackID2)
@@ -83,7 +137,11 @@ func TestPG_GDPRExportDeleteLifecycle(t *testing.T) {
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM reply_draft_events WHERE id = $1`, 0, replyIDs.eventID)
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM reply_draft_revisions WHERE id = $1`, 0, replyIDs.revisionID)
 	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM reply_drafts WHERE id = $1`, 0, replyIDs.draftID)
-	assertAuditLogActionCount(t, ctx, pool, tenantID, "gdpr.delete", 1)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM survey_recovery_notifications WHERE id = $1`, 0, surveyIDs.recoveryNotificationID)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM survey_low_score_reviews WHERE response_id = $1`, 0, surveyIDs.responseID)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM survey_provider_events WHERE id = $1`, 0, surveyIDs.providerEventID)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM survey_responses WHERE id = $1`, 0, surveyIDs.responseID)
+	assertTableCount(t, ctx, pool, `SELECT COUNT(*) FROM survey_invitations WHERE id = $1`, 0, surveyIDs.invitationID)
 }
 
 func TestPG_GDPRExportDeleteSupportsLegacyUnbackfilledRows(t *testing.T) {
@@ -593,6 +651,214 @@ func insertReplyDraftWorkflow(
 	return ids
 }
 
+type surveySubjectIDs struct {
+	invitationID           uuid.UUID
+	responseID             uuid.UUID
+	providerEventID        int64
+	recoveryNotificationID uuid.UUID
+	otherResponseID        uuid.UUID
+}
+
+func insertSurveySubjectRows(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	feedbackID int64,
+	otherFeedbackID int64,
+	subjectHash string,
+) surveySubjectIDs {
+	t.Helper()
+	campaignID := insertSurveyCampaign(t, ctx, pool, tenantID)
+	ids := surveySubjectIDs{
+		invitationID:           uuid.New(),
+		responseID:             uuid.New(),
+		recoveryNotificationID: uuid.New(),
+		otherResponseID:        uuid.New(),
+	}
+
+	insertSurveyInvitation(t, ctx, pool, tenantID, campaignID, surveyInvitationSeed{
+		id:                ids.invitationID,
+		dedupeKey:         "gdpr-target",
+		sourceType:        "reply_sent",
+		sourceID:          "delivery-attempt-1",
+		tokenChar:         "a",
+		recipientSnapshot: map[string]any{"feedback_id": feedbackID, "subject_hash": subjectHash},
+	})
+	if err := insertSurveyResponse(ctx, pool, tenantID, campaignID, ids.invitationID, ids.responseID, feedbackID, "Survey comment for Alice"); err != nil {
+		t.Fatalf("insert survey response: %v", err)
+	}
+	insertSurveyLowScoreReview(t, ctx, pool, tenantID, campaignID, ids.responseID)
+	ids.providerEventID = insertSurveyProviderEvent(t, ctx, pool, tenantID, ids.invitationID)
+	insertSurveyRecoveryNotification(t, ctx, pool, tenantID, ids.responseID, ids.recoveryNotificationID)
+
+	otherInvitationID := uuid.New()
+	insertSurveyInvitation(t, ctx, pool, tenantID, campaignID, surveyInvitationSeed{
+		id:                otherInvitationID,
+		dedupeKey:         "gdpr-other",
+		sourceType:        "workflow_transition",
+		sourceID:          strconv.FormatInt(otherFeedbackID, 10),
+		tokenChar:         "b",
+		recipientSnapshot: map[string]any{"feedback_id": otherFeedbackID},
+	})
+	if err := insertSurveyResponse(ctx, pool, tenantID, campaignID, otherInvitationID, ids.otherResponseID, otherFeedbackID, "Other subject comment"); err != nil {
+		t.Fatalf("insert other survey response: %v", err)
+	}
+	return ids
+}
+
+func insertSurveyCampaign(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string) uuid.UUID {
+	t.Helper()
+	campaignID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO survey_campaigns (
+			id, tenant_id, name, survey_type, status, trigger_event,
+			distribution_mode, content, created_by, updated_by
+		) VALUES (
+			$1, $2, 'GDPR survey', 'csat', 'active', 'manual_link',
+			'source_link', '{"title":"Resolution feedback"}'::jsonb,
+			'admin-1', 'admin-1'
+		)`,
+		campaignID, tenantID,
+	); err != nil {
+		t.Fatalf("insert survey campaign: %v", err)
+	}
+	return campaignID
+}
+
+type surveyInvitationSeed struct {
+	id                uuid.UUID
+	dedupeKey         string
+	sourceType        string
+	sourceID          string
+	tokenChar         string
+	recipientSnapshot map[string]any
+}
+
+func insertSurveyInvitation(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	campaignID uuid.UUID,
+	seed surveyInvitationSeed,
+) {
+	t.Helper()
+	snapshot, err := json.Marshal(seed.recipientSnapshot)
+	if err != nil {
+		t.Fatalf("marshal survey invitation snapshot: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO survey_invitations (
+			id, tenant_id, campaign_id, campaign_content_version,
+			campaign_snapshot, dedupe_key, source_type, source_id,
+			distribution_mode, token_hash, delivery_status, response_status,
+			suppression_status, recipient_snapshot, created_by
+		) VALUES (
+			$1, $2, $3, 1, '{"name":"GDPR survey"}'::jsonb,
+			$4, $5, $6, 'source_link', repeat($7::text, 64), 'not_applicable',
+			'completed', 'not_suppressed', $8::jsonb, 'admin-1'
+		)`,
+		seed.id, tenantID, campaignID, seed.dedupeKey, seed.sourceType,
+		seed.sourceID, seed.tokenChar, string(snapshot),
+	); err != nil {
+		t.Fatalf("insert survey invitation: %v", err)
+	}
+}
+
+func insertSurveyLowScoreReview(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	campaignID uuid.UUID,
+	responseID uuid.UUID,
+) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO survey_low_score_reviews (
+			response_id, tenant_id, campaign_id, status, severity,
+			root_cause, action_taken, customer_contacted, updated_by
+		) VALUES (
+			$1, $2, $3, 'open', 'high',
+			'unclear_resolution', 'Followed up with Alice', true, 'admin-1'
+		)`,
+		responseID, tenantID, campaignID,
+	); err != nil {
+		t.Fatalf("insert survey low-score review: %v", err)
+	}
+}
+
+func insertSurveyProviderEvent(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	invitationID uuid.UUID,
+) int64 {
+	t.Helper()
+	var providerEventID int64
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO survey_provider_events (
+			tenant_id, invitation_id, provider, provider_event_type,
+			provider_message_id, provider_event_key, payload
+		) VALUES (
+			$1, $2, 'gdpr-email', 'delivered', 'msg-1', 'gdpr-provider-event-1',
+			'{"diagnostic":"delivered"}'::jsonb
+		)
+		RETURNING id`,
+		tenantID, invitationID,
+	).Scan(&providerEventID); err != nil {
+		t.Fatalf("insert survey provider event: %v", err)
+	}
+	return providerEventID
+}
+
+func insertSurveyRecoveryNotification(
+	t *testing.T,
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	responseID uuid.UUID,
+	recoveryNotificationID uuid.UUID,
+) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO survey_recovery_notifications (
+			id, tenant_id, response_id, status, reason, destination_hash, payload
+		) VALUES (
+			$1, $2, $3, 'pending', 'overdue_sla', 'sha256:owner',
+			'{"comment":"Survey comment for Alice"}'::jsonb
+		)`,
+		recoveryNotificationID, tenantID, responseID,
+	); err != nil {
+		t.Fatalf("insert survey recovery notification: %v", err)
+	}
+}
+
+func insertSurveyResponse(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	tenantID string,
+	campaignID uuid.UUID,
+	invitationID uuid.UUID,
+	responseID uuid.UUID,
+	feedbackID int64,
+	comment string,
+) error {
+	_, err := pool.Exec(ctx, `
+		INSERT INTO survey_responses (
+			id, tenant_id, campaign_id, survey_type, invitation_id, source_type, source_id,
+			score, comment, locale, metadata, user_agent_hash, ip_hash
+			) VALUES (
+				$1, $2, $3, 'csat', $4, 'reply_sent', $5::bigint::text, 2, $6, 'en',
+			'{"surface":"gdpr-test"}'::jsonb, 'sha256:ua', 'sha256:ip'
+		)`,
+		responseID, tenantID, campaignID, invitationID, feedbackID, comment,
+	)
+	return err
+}
+
 func unzipFiles(t *testing.T, data []byte) map[string][]byte {
 	t.Helper()
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
@@ -687,6 +953,42 @@ func assertTagRow(t *testing.T, payload []byte, feedbackID int64, tagID uuid.UUI
 	}
 	if row.FeedbackID != feedbackID || row.TagID != tagID {
 		t.Fatalf("unexpected tag row: %+v", row)
+	}
+}
+
+func assertSurveyResponseComment(t *testing.T, payload []byte, responseID uuid.UUID, comment string) {
+	t.Helper()
+	lines := splitJSONL(payload)
+	if len(lines) != 1 {
+		t.Fatalf("survey response rows = %d want 1", len(lines))
+	}
+	var row struct {
+		ID      uuid.UUID `json:"id"`
+		Comment string    `json:"comment"`
+	}
+	if err := json.Unmarshal(lines[0], &row); err != nil {
+		t.Fatalf("unmarshal survey response row: %v", err)
+	}
+	if row.ID != responseID || row.Comment != comment {
+		t.Fatalf("unexpected survey response row: %+v", row)
+	}
+}
+
+func assertSurveyProviderEventKey(t *testing.T, payload []byte, eventID int64, eventKey string) {
+	t.Helper()
+	lines := splitJSONL(payload)
+	if len(lines) != 1 {
+		t.Fatalf("survey provider event rows = %d want 1", len(lines))
+	}
+	var row struct {
+		ID               int64  `json:"id"`
+		ProviderEventKey string `json:"provider_event_key"`
+	}
+	if err := json.Unmarshal(lines[0], &row); err != nil {
+		t.Fatalf("unmarshal survey provider event row: %v", err)
+	}
+	if row.ID != eventID || row.ProviderEventKey != eventKey {
+		t.Fatalf("unexpected survey provider event row: %+v", row)
 	}
 }
 

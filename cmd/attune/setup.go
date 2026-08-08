@@ -65,6 +65,8 @@ import (
 	publicvisibilityviewrepo "github.com/Phixsura/attune/internal/repo/publicvisibilityview"
 	replydraftrepo "github.com/Phixsura/attune/internal/repo/replydraft"
 	requestnotificationrepo "github.com/Phixsura/attune/internal/repo/requestnotification"
+	signalgraphrepo "github.com/Phixsura/attune/internal/repo/signalgraph"
+	surveyrepo "github.com/Phixsura/attune/internal/repo/survey"
 	systemsettingsrepo "github.com/Phixsura/attune/internal/repo/systemsettings"
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/tenantmember"
@@ -83,6 +85,7 @@ import (
 	enrichruntimesvc "github.com/Phixsura/attune/internal/service/enrichruntime"
 	evalsvc "github.com/Phixsura/attune/internal/service/eval"
 	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
+	feedbackassignmentsvc "github.com/Phixsura/attune/internal/service/feedbackassignment"
 	"github.com/Phixsura/attune/internal/service/feedbackbatch"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
 	guardpolicysvc "github.com/Phixsura/attune/internal/service/guardpolicy"
@@ -95,6 +98,8 @@ import (
 	requestnotificationsvc "github.com/Phixsura/attune/internal/service/requestnotification"
 	"github.com/Phixsura/attune/internal/service/securityalert"
 	"github.com/Phixsura/attune/internal/service/semanticsearch"
+	signalgraphsvc "github.com/Phixsura/attune/internal/service/signalgraph"
+	surveysvc "github.com/Phixsura/attune/internal/service/survey"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 
 	"github.com/Phixsura/attune/internal/preflight"
@@ -241,7 +246,8 @@ func buildConsoleRouter(
 	auditLog.SetSavedViewService(auditViewSvc)
 	apiKeys := console.NewAPIKeysHandler(apiKeySvc)
 	notifyTargets := console.NewNotifyTargetsHandler(notifyTargetRepo)
-	feedback := buildFeedbackHandler(feedbackRepo, tenantRepo, pool, secrets, llm)
+	surveySvc := buildSurveyService(pool, cfg.ConsoleBaseURL, secrets)
+	feedback := buildFeedbackHandler(feedbackRepo, tenantRepo, pool, secrets, llm, auditLogSvc, surveySvc)
 	usage := console.NewUsageHandler(feedbackRepo, llmauditrepo.New(pool))
 	gdprHandler := buildGDPRHandler(cfg, pool, auditLogSvc, signer, adminRepo)
 	enrichConfig := buildEnrichConfigHandler(tenantRepo, feedbackRepo, llm)
@@ -254,13 +260,12 @@ func buildConsoleRouter(
 	llmConfig := console.NewLLMConfigHandler(llmconfigsvc.NewService(llmconfigrepo.New(pool), secrets))
 	clustersHandler := console.NewClustersHandler(embeddingrepo.NewTaskRepo(pool))
 	digestSub := console.NewDigestSubscriptionHandler(digestsubrepo.New(pool), tenantRepo)
-	tagRepo := feedbacktagrepo.New(pool)
-	tagAssignmentRepo := feedbacktagassignmentrepo.New(pool)
-	feedback.SetTagAssignments(tagAssignmentRepo)
+	tagRepo, tagAssignmentRepo := buildFeedbackTagRepos(pool, feedback)
 	wfStateRepo := workflowstaterepo.New(pool)
 	wfAuditRepo := feedbackauditrepo.New(pool)
-	wfSvc := workflowsvc.NewService(wfStateRepo, wfAuditRepo, pool)
+	wfSvc := buildWorkflowService(wfStateRepo, wfAuditRepo, pool, surveySvc)
 	feedback.SetWorkflow(wfSvc)
+	wireFeedbackAssignment(feedback, feedbackRepo, wfAuditRepo, settingsRepo, auditLogSvc, pool)
 	feedback.SetAuditReader(wfAuditRepo)
 	feedback.SetWorkflowStates(wfStateRepo)
 	tagHandler := console.NewTagHandler(tagRepo)
@@ -310,12 +315,48 @@ func buildConsoleRouter(
 		guardPolicies, inboundHandler, llmConfig, clustersHandler, digestSub, tagHandler, tagAssignmentHandler,
 		workflowHandler, oidcHandler, memberHandler, adminRepo, memberRepo,
 	)
-	wireRequestNotificationHandlers(router, pool, secrets, cfg.ConsoleBaseURL, idempotencyRepo, auditLogSvc)
+	wireRequestNotificationHandlers(router, pool, secrets, cfg.ConsoleBaseURL, idempotencyRepo, auditLogSvc, surveySvc)
+	wireSurveyHandlers(router, surveySvc, auditLogSvc)
 	router.SetPublicVisibilityHandler(buildPublicVisibilityHandler(pool, auditLogSvc))
 	return configureConsoleRouter(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, feedbackRepo, secrets, cohortSyncSvc), nil
 }
 
 type consoleAuditTarget func(*auditlogsvc.Service)
+
+func buildWorkflowService(
+	states *workflowstaterepo.Repo,
+	audits *feedbackauditrepo.Repo,
+	pool *pgxpool.Pool,
+	surveys *surveysvc.Service,
+) *workflowsvc.Service {
+	service := workflowsvc.NewService(states, audits, pool)
+	service.SetSurveySink(workflowSurveySink{service: surveys})
+	return service
+}
+
+func buildFeedbackTagRepos(
+	pool *pgxpool.Pool,
+	handler *consolefeedback.FeedbackHandler,
+) (*feedbacktagrepo.Repo, *feedbacktagassignmentrepo.Repo) {
+	tagRepo := feedbacktagrepo.New(pool)
+	tagAssignmentRepo := feedbacktagassignmentrepo.New(pool)
+	handler.SetTagAssignments(tagAssignmentRepo)
+	return tagRepo, tagAssignmentRepo
+}
+
+func wireFeedbackAssignment(
+	handler *consolefeedback.FeedbackHandler,
+	feedbackRepo *feedback.FeedbackRepo,
+	audits *feedbackauditrepo.Repo,
+	settings *systemsettingsrepo.Repo,
+	auditLog *auditlogsvc.Service,
+	pool *pgxpool.Pool,
+) {
+	service := feedbackassignmentsvc.New(feedbackRepo, audits, pool)
+	service.SetPolicyStore(settings)
+	service.SetAuditLogger(auditLog)
+	handler.SetAssignment(service)
+}
 
 func wireConsoleAuditLoggers(targets []consoleAuditTarget, auditLogSvc *auditlogsvc.Service) {
 	for _, target := range targets {
@@ -328,12 +369,14 @@ func buildCustomerRequestHandler(
 	idempotencyRepo idempotencyrepo.Store,
 	auditLogSvc *auditlogsvc.Service,
 	notifications *requestnotificationsvc.Service,
+	surveys *surveysvc.Service,
 ) *consolecustomerrequest.Handler {
 	customerRequestRepo := customerrequestrepo.New(pool)
 	settingsRepo := systemsettingsrepo.NewRepo(pool)
 	service := customerrequestsvc.New(customerRequestRepo, idempotencyRepo, auditLogSvc)
 	service.SetNotificationSink(notifications)
 	service.SetIssueCreateRunStore(externalsyncrepo.New(pool))
+	service.SetSurveySink(customerRequestSurveySink{service: surveys})
 	service.SetAutomationSink(webhooksub.New(pool), outboxrepo.NewOutbox(pool))
 	handler := console.NewCustomerRequestHandler(service)
 	handler.SetSavedViewService(customerrequestviewsvc.New(customerrequestviewrepo.New(settingsRepo)))
@@ -347,9 +390,10 @@ func wireRequestNotificationHandlers(
 	publicBaseURL string,
 	idempotencyRepo idempotencyrepo.Store,
 	auditLogSvc *auditlogsvc.Service,
+	surveys *surveysvc.Service,
 ) {
 	service := buildRequestNotificationService(pool, secrets, publicBaseURL)
-	router.SetCustomerRequestHandler(buildCustomerRequestHandler(pool, idempotencyRepo, auditLogSvc, service))
+	router.SetCustomerRequestHandler(buildCustomerRequestHandler(pool, idempotencyRepo, auditLogSvc, service, surveys))
 	handler := console.NewRequestNotificationHandler(service)
 	handler.SetAuditLogger(auditLogSvc)
 	router.SetRequestNotificationHandler(handler)
@@ -366,6 +410,24 @@ func buildRequestNotificationService(
 		notify.NewTransport(nil, notify.DefaultRetry()),
 		publicBaseURL,
 	)
+}
+
+func wireSurveyHandlers(
+	router *console.Router,
+	service *surveysvc.Service,
+	auditLogSvc *auditlogsvc.Service,
+) {
+	handler := console.NewSurveyHandler(service)
+	handler.SetAuditLogger(auditLogSvc)
+	router.SetSurveyHandler(handler)
+}
+
+func buildSurveyService(pool *pgxpool.Pool, publicBaseURL string, secrets *secretstore.TinkStore) *surveysvc.Service {
+	service := surveysvc.New(surveyrepo.New(pool), publicBaseURL)
+	service.SetSecretStore(secrets)
+	service.SetFeedbackWriter(feedback.NewFeedback(pool))
+	service.SetDeliveryTransport(notify.NewTransport(nil, notify.NoRetry()))
+	return service
 }
 
 func buildPublicVisibilityHandler(pool *pgxpool.Pool, auditLogSvc *auditlogsvc.Service) *consolepublicvisibility.Handler {
@@ -550,11 +612,16 @@ func buildFeedbackHandler(
 	pool *pgxpool.Pool,
 	secrets *secretstore.TinkStore,
 	llm llmclient.LLMClient,
+	auditLogSvc *auditlogsvc.Service,
+	surveys *surveysvc.Service,
 ) *consolefeedback.FeedbackHandler {
 	h := console.NewFeedbackHandler(feedbackRepo, tenantRepo)
+	h.SetIdentityGraph(signalgraphsvc.New(signalgraphrepo.New(pool), auditLogSvc))
 	replyDraftRepo := replydraftrepo.NewDraftTaskRepo(pool)
 	h.SetDrafter(replydraftsvc.NewReplyDrafter(replyDraftRepo, llm))
-	h.SetReplyDraftWorkflow(replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil))
+	workflow := replydraftsvc.NewWorkflow(replyDraftRepo, secrets, nil)
+	workflow.SetSurveySink(replyDraftSurveySink{service: surveys})
+	h.SetReplyDraftWorkflow(workflow)
 	h.SetRegenLimiter(ratelimit.New(60, 20, false, nil))
 	h.SetSimilarFinder(feedbackRepo)
 	h.SetRequestLinkReader(feedbackRepo)

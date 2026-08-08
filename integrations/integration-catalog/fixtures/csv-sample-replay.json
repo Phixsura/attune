@@ -1,0 +1,17 @@
+{
+  "provider": "csv",
+  "eventType": "csv.row.imported",
+  "rawPayload": {
+    "row": 7,
+    "external_id": "csv-7",
+    "title": "Bulk import customer request backlog"
+  },
+  "normalized": {
+    "type": "feedback",
+    "action": "upsert",
+    "externalId": "csv:csv-7",
+    "title": "Bulk import customer request backlog",
+    "status": "open",
+    "source": "csv"
+  }
+}

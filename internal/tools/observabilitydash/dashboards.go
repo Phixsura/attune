@@ -251,24 +251,7 @@ func operationsDashboard() dashboard {
 			targetExpr("F", `sum by (result) (rate(attune_embedding_cache_hits_total{tenant=~"$tenant"}[$__rate_interval]))`, "cache / {{result}}"),
 		}, "short", gp(12, 34, 12, 8)),
 		rowPanel(20, "Delivery and contention", 42),
-		seriesDesc(21, "Delivery and contention", "Delivery failures, outbox lag, claim contention, and worker health. This is the final split between destination failure and worker capacity.", []target{
-			targetExpr("A", `sum by (destination_type, reason) (rate(attune_notify_failures_total[$__rate_interval]))`, "notify / {{destination_type}} / {{reason}}"),
-			targetExpr("B", `sum by (destination_type, result, status) (rate(attune_outbound_delivery_attempts_total[$__rate_interval]))`, "attempt / {{destination_type}} / {{result}} / {{status}}"),
-			targetExpr("C", `histogram_quantile(0.95, sum by (le, destination_type, result) (rate(attune_outbound_delivery_duration_seconds_bucket[$__rate_interval])))`, "delivery p95 / {{destination_type}} / {{result}}"),
-			targetExpr("D", `sum by (destination_type) (rate(attune_outbound_retry_after_total[$__rate_interval]))`, "retry-after / {{destination_type}}"),
-			targetExpr("E", `attune_outbox_lag_seconds`, "outbox lag"),
-			targetExpr("F", `rate(attune_claim_contention_total[$__rate_interval])`, "claim contention"),
-			targetExpr("G", `attune_outbox_dead_rows`, "dead deliveries"),
-			targetExpr("H", `sum by (worker) (increase(attune_worker_panics_total[$__range]))`, "worker panics / {{worker}}"),
-			targetExpr("I", `sum by (worker) (attune_worker_in_flight)`, "in-flight / {{worker}}"),
-			targetExpr("J", `sum by (worker, status) (rate(attune_worker_drain_total[$__rate_interval]))`, "drain / {{worker}} / {{status}}"),
-			targetExpr("K", `sum by (worker) (rate(attune_worker_stale_claims_recovered_total[$__rate_interval]))`, "stale recovered / {{worker}}"),
-			targetExpr("L", `sum by (worker, outcome) (rate(attune_worker_heartbeat_total[$__rate_interval]))`, "heartbeat / {{worker}} / {{outcome}}"),
-			targetExpr("M", `sum by (lock, outcome) (rate(attune_advisory_lock_total[$__rate_interval]))`, "advisory lock / {{lock}} / {{outcome}}"),
-			targetExpr("N", `sum by (name, result) (rate(attune_circuit_breaker_results_total[$__rate_interval]))`, "circuit / {{name}} / {{result}}"),
-			targetExpr("O", `sum by (name) (rate(attune_circuit_breaker_rejected_total[$__rate_interval]))`, "circuit rejected / {{name}}"),
-			targetExpr("P", `sum by (name, from, to) (increase(attune_circuit_breaker_transitions_total[$__range]))`, "circuit state / {{name}} / {{from}}->{{to}}"),
-		}, "short", gp(0, 43, 24, 8)),
+		operationsDeliveryPanel(),
 		rowPanel(22, "External sync", 51),
 		externalSyncHealthPanel(),
 		cohortSyncHealthPanel(),
@@ -297,6 +280,32 @@ func operationsDashboard() dashboard {
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 7, 7)
 	return d
+}
+
+func operationsDeliveryPanel() panel {
+	return seriesDesc(21, "Delivery and contention", "Delivery failures, outbox lag, claim contention, and worker health. This is the final split between destination failure and worker capacity.", []target{
+		targetExpr("A", `sum by (destination_type, reason) (rate(attune_notify_failures_total[$__rate_interval]))`, "notify / {{destination_type}} / {{reason}}"),
+		targetExpr("B", `sum by (destination_type, result, status) (rate(attune_outbound_delivery_attempts_total[$__rate_interval]))`, "attempt / {{destination_type}} / {{result}} / {{status}}"),
+		targetExpr("C", `histogram_quantile(0.95, sum by (le, destination_type, result) (rate(attune_outbound_delivery_duration_seconds_bucket[$__rate_interval])))`, "delivery p95 / {{destination_type}} / {{result}}"),
+		targetExpr("D", `sum by (destination_type) (rate(attune_outbound_retry_after_total[$__rate_interval]))`, "retry-after / {{destination_type}}"),
+		targetExpr("E", `attune_outbox_lag_seconds`, "outbox lag"),
+		targetExpr("F", `rate(attune_claim_contention_total[$__rate_interval])`, "claim contention"),
+		targetExpr("G", `attune_outbox_dead_rows`, "dead deliveries"),
+		targetExpr("H", `sum by (worker) (increase(attune_worker_panics_total[$__range]))`, "worker panics / {{worker}}"),
+		targetExpr("I", `sum by (worker) (attune_worker_in_flight)`, "in-flight / {{worker}}"),
+		targetExpr("J", `sum by (worker, status) (rate(attune_worker_drain_total[$__rate_interval]))`, "drain / {{worker}} / {{status}}"),
+		targetExpr("K", `sum by (worker) (rate(attune_worker_stale_claims_recovered_total[$__rate_interval]))`, "stale recovered / {{worker}}"),
+		targetExpr("L", `sum by (worker, outcome) (rate(attune_worker_heartbeat_total[$__rate_interval]))`, "heartbeat / {{worker}} / {{outcome}}"),
+		targetExpr("M", `sum by (lock, outcome) (rate(attune_advisory_lock_total[$__rate_interval]))`, "advisory lock / {{lock}} / {{outcome}}"),
+		targetExpr("N", `sum by (name, result) (rate(attune_circuit_breaker_results_total[$__rate_interval]))`, "circuit / {{name}} / {{result}}"),
+		targetExpr("O", `sum by (name) (rate(attune_circuit_breaker_rejected_total[$__rate_interval]))`, "circuit rejected / {{name}}"),
+		targetExpr("P", `sum by (name, from, to) (increase(attune_circuit_breaker_transitions_total[$__range]))`, "circuit state / {{name}} / {{from}}->{{to}}"),
+		targetExpr("Q", `sum by (result, reason) (rate(attune_survey_recovery_automation_total{tenant=~"$tenant"}[$__rate_interval]))`, "survey recovery / {{result}} / {{reason}}"),
+		targetExpr("R", `sum by (result, reason) (rate(attune_survey_recovery_notification_total{tenant=~"$tenant"}[$__rate_interval]))`, "survey recovery notify / {{result}} / {{reason}}"),
+		targetExpr("S", `sum by (result, reason) (rate(attune_survey_nps_run_materialization_total{tenant=~"$tenant"}[$__rate_interval]))`, "NPS materialization / {{result}} / {{reason}}"),
+		targetExpr("T", `sum by (result, reason) (rate(attune_survey_nps_recurrence_total{tenant=~"$tenant"}[$__rate_interval]))`, "NPS recurrence / {{result}} / {{reason}}"),
+		targetExpr("U", `sum by (result) (rate(attune_survey_nps_evidence_export_purge_total{tenant=~"$tenant"}[$__rate_interval]))`, "NPS evidence purge / {{result}}"),
+	}, "short", gp(0, 43, 24, 8))
 }
 
 func externalSyncHealthPanel() panel {

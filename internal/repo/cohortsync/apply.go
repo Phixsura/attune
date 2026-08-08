@@ -50,6 +50,12 @@ func (r *Repo) ApplyMembershipDelta(ctx context.Context, in ApplyInput) (ApplyRe
 		return ApplyResult{}, err
 	}
 
+	if in.IsSnapshot && in.OlderThan.IsZero() {
+		if err := tx.QueryRow(ctx, `SELECT NOW()`).Scan(&in.OlderThan); err != nil {
+			return ApplyResult{}, fmt.Errorf("select snapshot cutoff: %w", err)
+		}
+	}
+
 	added, err := upsertMembersInTx(ctx, tx, in)
 	if err != nil {
 		return ApplyResult{}, err
@@ -110,6 +116,10 @@ func upsertMembersInTx(ctx context.Context, tx pgx.Tx, in ApplyInput) (int, erro
 	if len(in.Members) == 0 {
 		return 0, nil
 	}
+	var snapshotSeenAt any
+	if in.IsSnapshot && !in.OlderThan.IsZero() {
+		snapshotSeenAt = in.OlderThan
+	}
 	var added int
 	batch := pgx.Batch{}
 	for _, m := range in.Members {
@@ -119,13 +129,13 @@ func upsertMembersInTx(ctx context.Context, tx pgx.Tx, in ApplyInput) (int, erro
 		}
 		batch.Queue(`
 			INSERT INTO cohort_memberships (id, tenant_id, cohort_id, external_user_id, email,
-			       display_name, user_properties)
-			VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6)
+			       display_name, user_properties, last_seen_at)
+			VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, COALESCE($7::timestamptz, NOW()))
 			ON CONFLICT (tenant_id, cohort_id, external_user_id)
 			DO UPDATE SET email = EXCLUDED.email, display_name = EXCLUDED.display_name,
 			       user_properties = EXCLUDED.user_properties,
-			       left_at = NULL, expires_at = NULL, last_seen_at = NOW()`,
-			in.TenantID, in.CohortID, m.ExternalUserID, m.Email, m.DisplayName, props)
+			       left_at = NULL, expires_at = NULL, last_seen_at = EXCLUDED.last_seen_at`,
+			in.TenantID, in.CohortID, m.ExternalUserID, m.Email, m.DisplayName, props, snapshotSeenAt)
 	}
 	br := tx.SendBatch(ctx, &batch) // ptrext:allow batch-send
 	for range in.Members {

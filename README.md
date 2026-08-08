@@ -157,7 +157,7 @@ channel, model-ability, route, and channel-test operations.
 | Required config | Notes |
 |---|---|
 | `database.url` | PostgreSQL DSN, e.g. `postgres://<user>@<host>:5432/attune` |
-| `secrets.tink_keyset` | Shared Tink AEAD keyset from `attune secrets generate-keyset`; all replicas need the same keyset. |
+| `secrets.tink_keyset` | Shared Tink AEAD keyset from `attune secrets generate-keyset`; all replicas need the same keyset. It also derives tenant-scoped, domain-separated public-survey HMAC pseudonyms, so a primary-key rotation starts a new metadata-correlation boundary. |
 | `secrets.legacy_inbound_master_key` | Optional migration-only old inbound master key, hex/base64; remove after `attune secrets reencrypt --apply`. |
 | `console.base_url` + `console.session_key` | Console origin and >=32-char session signing secret. |
 | `profile` | Runtime deployment intent. Use `dev` for local/evaluation installs and `production` for production-safe startup checks. |

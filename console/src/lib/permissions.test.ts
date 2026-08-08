@@ -67,8 +67,11 @@ describe('hasPermission', () => {
       expect(hasPermission(role, 'settings:gdpr:view')).toBe(true)
     })
 
-    it('does not get security-owner navigation', () => {
-      expect(hasPermission(role, 'settings:members:view')).toBe(false)
+    it('can read members for operational assignment without security-owner powers', () => {
+      expect(hasPermission(role, 'settings:members:view')).toBe(true)
+      expect(hasPermission(role, 'settings:members:invite')).toBe(false)
+      expect(hasPermission(role, 'settings:members:edit_role')).toBe(false)
+      expect(hasPermission(role, 'settings:members:remove')).toBe(false)
       expect(hasPermission(role, 'settings:api_keys:view')).toBe(false)
       expect(hasPermission(role, 'llm_config:view')).toBe(false)
       expect(hasPermission(role, 'nav:llm_config')).toBe(false)
@@ -192,6 +195,7 @@ describe('getPermissions', () => {
     expect(perms).toContain('settings:enrich_config:edit')
     expect(perms).toContain('settings:audit_log:view')
     expect(perms).toContain('settings:gdpr:view')
+    expect(perms).toContain('settings:members:view')
     expect(perms).not.toContain('settings:members:invite')
     expect(perms).not.toContain('nav:llm_config')
   })

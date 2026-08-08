@@ -111,12 +111,11 @@ func normalizeState(state State) (State, error) {
 			return State{}, fmt.Errorf("%w: invalid priority", ErrValidation)
 		}
 	}
-	state.OwnerMemberID = strings.TrimSpace(state.OwnerMemberID)
-	if state.OwnerMemberID != "" {
-		if _, err := uuid.Parse(state.OwnerMemberID); err != nil {
-			return State{}, fmt.Errorf("%w: invalid owner member id", ErrValidation)
-		}
+	ownerMemberID, err := normalizeOwnerMemberID(state.OwnerMemberID)
+	if err != nil {
+		return State{}, err
 	}
+	state.OwnerMemberID = ownerMemberID
 	if state.Visibility == "" {
 		state.Visibility = crrepo.VisibilityActive
 	}
@@ -138,7 +137,22 @@ func normalizeState(state State) (State, error) {
 	if state.FeedbackID < 0 {
 		return State{}, fmt.Errorf("%w: invalid feedback id", ErrValidation)
 	}
+	state.AccountKey = strings.TrimSpace(state.AccountKey)
+	if len([]rune(state.AccountKey)) > 512 {
+		return State{}, fmt.Errorf("%w: account key is too long", ErrValidation)
+	}
 	return state, nil
+}
+
+func normalizeOwnerMemberID(ownerMemberID string) (string, error) {
+	ownerMemberID = strings.TrimSpace(ownerMemberID)
+	if ownerMemberID == "" {
+		return "", nil
+	}
+	if _, err := uuid.Parse(ownerMemberID); err != nil {
+		return "", fmt.Errorf("%w: invalid owner member id", ErrValidation)
+	}
+	return ownerMemberID, nil
 }
 
 func normalizeStatuses(values []crrepo.Status) []crrepo.Status {

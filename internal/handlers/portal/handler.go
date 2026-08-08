@@ -18,14 +18,17 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	pvrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
 	rnrepo "github.com/Phixsura/attune/internal/repo/requestnotification"
+	surveyrepo "github.com/Phixsura/attune/internal/repo/survey"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 	portalsvc "github.com/Phixsura/attune/internal/service/portal"
 	pvsvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 	rnsvc "github.com/Phixsura/attune/internal/service/requestnotification"
+	surveysvc "github.com/Phixsura/attune/internal/service/survey"
 )
 
 const publicRequestCacheControl = "no-store"
@@ -45,6 +48,7 @@ type Handler struct {
 	read          readService
 	submission    submissionService
 	notifications notificationService
+	surveys       surveyService
 	secrets       visitorSecretStore
 }
 
@@ -68,11 +72,73 @@ func (h *Handler) SetNotificationService(service notificationService) {
 	h.notifications = service
 }
 
+type surveyService interface {
+	GetPublicSurvey(ctx context.Context, token string) (surveyrepo.PublicSurvey, error)
+	FingerprintPublicResponse(ctx context.Context, token, userAgent, clientIP string) (surveysvc.PublicResponseFingerprints, error)
+	SubmitPublicResponse(ctx context.Context, in surveysvc.PublicSubmitInput) (surveyrepo.Response, bool, string, error)
+}
+
+func (h *Handler) SetSurveyService(service surveyService) {
+	h.surveys = service
+}
+
 func NoStore(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", publicRequestCacheControl)
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (h *Handler) GetPublicSurvey(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.GetPublicSurveyRequest,
+) (dispatcher.Result[*attunev1.PublicSurvey], error) {
+	setSurveyHeaders(ctx)
+	if h.surveys == nil {
+		return dispatcher.Fail[*attunev1.PublicSurvey](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "surveys not configured")
+	}
+	result, err := h.surveys.GetPublicSurvey(ctx, req.GetToken())
+	if err != nil {
+		return portalSurveyError[*attunev1.PublicSurvey](err)
+	}
+	return dispatcher.OK(publicSurveyToProto(result))
+}
+
+func (h *Handler) SubmitPublicSurveyResponse(
+	ctx *dispatcher.RequestContext[struct{}],
+	req *attunev1.SubmitPublicSurveyResponseRequest,
+) (dispatcher.Result[*attunev1.PublicSurveyResponseReceipt], error) {
+	setSurveyHeaders(ctx)
+	if h.surveys == nil {
+		return dispatcher.Fail[*attunev1.PublicSurveyResponseReceipt](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "surveys not configured")
+	}
+	fingerprints, err := h.surveys.FingerprintPublicResponse(
+		ctx,
+		req.GetToken(),
+		userAgentFromRequest(ctx.Request()),
+		nethardening.ClientIPDefault(ctx.Request()),
+	)
+	if err != nil {
+		return portalSurveyError[*attunev1.PublicSurveyResponseReceipt](err)
+	}
+	response, lowScore, thankYou, err := h.surveys.SubmitPublicResponse(ctx, surveysvc.PublicSubmitInput{
+		Token:           req.GetToken(),
+		Score:           int(req.GetScore()),
+		Comment:         req.GetComment(),
+		Locale:          req.GetLocale(),
+		FollowUpConsent: req.FollowUpConsent,
+		UserAgentHash:   fingerprints.UserAgentHash,
+		IPHash:          fingerprints.IPHash,
+		QualityFlags:    fingerprints.QualityFlags,
+	})
+	if err != nil {
+		return portalSurveyError[*attunev1.PublicSurveyResponseReceipt](err)
+	}
+	return dispatcher.OK(ptrext.Of(attunev1.PublicSurveyResponseReceipt{
+		ResponseId: response.ID.String(),
+		ThankYou:   thankYou,
+		LowScore:   lowScore,
+	}))
 }
 
 func (h *Handler) ListPublicCustomerRequests(

@@ -1,0 +1,1132 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+import "google/api/field_behavior.proto";
+import "google/api/httpbody.proto";
+import "google/protobuf/struct.proto";
+
+service SurveyService {
+  rpc ListSurveyCampaigns(ListSurveyCampaignsRequest) returns (ListSurveyCampaignsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/campaigns"};
+  }
+  rpc CreateSurveyCampaign(CreateSurveyCampaignRequest) returns (SurveyCampaign) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns"
+      body: "*"
+    };
+  }
+  rpc UpdateSurveyCampaign(UpdateSurveyCampaignRequest) returns (SurveyCampaign) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/surveys/campaigns/{id}"
+      body: "*"
+    };
+  }
+  rpc ArchiveSurveyCampaign(ArchiveSurveyCampaignRequest) returns (SurveyCampaign) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{id}:archive"
+      body: "*"
+    };
+  }
+  rpc ScheduleNpsCampaignRun(ScheduleNpsCampaignRunRequest) returns (NpsCampaignRun) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}:scheduleNpsRun"
+      body: "*"
+    };
+  }
+  rpc CancelNpsCampaignRun(CancelNpsCampaignRunRequest) returns (NpsCampaignRun) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}:cancel"
+      body: "*"
+    };
+  }
+  rpc ListNpsCampaignRuns(ListNpsCampaignRunsRequest) returns (ListNpsCampaignRunsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs"};
+  }
+  rpc ExportNpsCampaignRunEvidence(ExportNpsCampaignRunEvidenceRequest) returns (google.api.HttpBody) {
+    option (google.api.http) = {
+      get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}/evidence.csv"
+    };
+  }
+  rpc CreateNpsCampaignRunEvidenceExport(CreateNpsCampaignRunEvidenceExportRequest) returns (NpsCampaignRunEvidenceExport) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}/evidence-exports"
+      body: "*"
+    };
+  }
+  rpc ListNpsCampaignRunEvidenceExports(ListNpsCampaignRunEvidenceExportsRequest) returns (ListNpsCampaignRunEvidenceExportsResponse) {
+    option (google.api.http) = {
+      get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}/evidence-exports"
+    };
+  }
+  rpc GetNpsCampaignPreflight(GetNpsCampaignPreflightRequest) returns (NpsCampaignPreflight) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-preflight"};
+  }
+  rpc CreateSurveyHostedLink(CreateSurveyHostedLinkRequest) returns (SurveyInvitation) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}/hosted-links"
+      body: "*"
+    };
+  }
+  rpc PreviewSurveyRecipients(PreviewSurveyRecipientsRequest) returns (PreviewSurveyRecipientsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}/recipients:preview"
+      body: "*"
+    };
+  }
+  rpc SendSurveyTestEmail(SendSurveyTestEmailRequest) returns (SendSurveyTestEmailResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}:sendTestEmail"
+      body: "*"
+    };
+  }
+  rpc GetSurveyCampaignHealth(GetSurveyCampaignHealthRequest) returns (SurveyCampaignHealth) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/campaigns/{campaign_id}/health"};
+  }
+  rpc RecordSurveyProviderEvent(RecordSurveyProviderEventRequest) returns (SurveyInvitation) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/provider-events:record"
+      body: "*"
+    };
+  }
+  rpc ListSurveyInvitations(ListSurveyInvitationsRequest) returns (ListSurveyInvitationsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/invitations"};
+  }
+  rpc RetrySurveyInvitationDelivery(RetrySurveyInvitationDeliveryRequest) returns (SurveyInvitation) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/invitations/{id}:retry"
+      body: "*"
+    };
+  }
+  rpc ListSurveyResponses(ListSurveyResponsesRequest) returns (ListSurveyResponsesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/responses"};
+  }
+  rpc GetSurveyAnalytics(GetSurveyAnalyticsRequest) returns (SurveyAnalytics) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/analytics"};
+  }
+  rpc GetSurveyAnalyticsTrend(GetSurveyAnalyticsTrendRequest) returns (GetSurveyAnalyticsTrendResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/analytics/trend"};
+  }
+  rpc GetSurveyAnalyticsSegments(GetSurveyAnalyticsSegmentsRequest) returns (GetSurveyAnalyticsSegmentsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/analytics/segments"};
+  }
+  rpc GetSurveyAnalyticsInsights(GetSurveyAnalyticsInsightsRequest) returns (GetSurveyAnalyticsInsightsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/analytics/insights"};
+  }
+  rpc UpdateSurveyLowScoreReview(UpdateSurveyLowScoreReviewRequest) returns (SurveyLowScoreReview) {
+    option (google.api.http) = {
+      patch: "/fb/v1/console/surveys/responses/{response_id}/low-score-review"
+      body: "*"
+    };
+  }
+  rpc BatchUpdateSurveyLowScoreReviews(BatchUpdateSurveyLowScoreReviewsRequest) returns (BatchUpdateSurveyLowScoreReviewsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/responses/low-score-reviews:batchUpdate"
+      body: "*"
+    };
+  }
+  rpc AssignSurveyLowScoreReviews(AssignSurveyLowScoreReviewsRequest) returns (AssignSurveyLowScoreReviewsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/responses/low-score-reviews:assign"
+      body: "*"
+    };
+  }
+  rpc EscalateSurveyLowScoreReviews(EscalateSurveyLowScoreReviewsRequest) returns (EscalateSurveyLowScoreReviewsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/responses/low-score-reviews:escalate"
+      body: "*"
+    };
+  }
+}
+
+service PublicSurveyService {
+  rpc GetPublicSurvey(GetPublicSurveyRequest) returns (PublicSurvey) {
+    option (google.api.http) = {get: "/v1/surveys/{token}"};
+  }
+  rpc SubmitPublicSurveyResponse(SubmitPublicSurveyResponseRequest) returns (PublicSurveyResponseReceipt) {
+    option (google.api.http) = {
+      post: "/v1/surveys/{token}/responses"
+      body: "*"
+    };
+  }
+}
+
+enum SurveyType {
+  SURVEY_TYPE_UNSPECIFIED = 0;
+  SURVEY_TYPE_CSAT = 1;
+  SURVEY_TYPE_CES = 2;
+  SURVEY_TYPE_NPS = 3;
+}
+
+enum SurveyCampaignStatus {
+  SURVEY_CAMPAIGN_STATUS_UNSPECIFIED = 0;
+  SURVEY_CAMPAIGN_STATUS_DRAFT = 1;
+  SURVEY_CAMPAIGN_STATUS_ACTIVE = 2;
+  SURVEY_CAMPAIGN_STATUS_ARCHIVED = 3;
+}
+
+enum SurveyTriggerEvent {
+  SURVEY_TRIGGER_EVENT_UNSPECIFIED = 0;
+  SURVEY_TRIGGER_EVENT_WORKFLOW_TRANSITION = 1;
+  SURVEY_TRIGGER_EVENT_REPLY_SENT = 2;
+  SURVEY_TRIGGER_EVENT_MANUAL_LINK = 3;
+  SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED = 4;
+  SURVEY_TRIGGER_EVENT_SCHEDULED_RUN = 5;
+}
+
+enum SurveyDistributionMode {
+  SURVEY_DISTRIBUTION_MODE_UNSPECIFIED = 0;
+  SURVEY_DISTRIBUTION_MODE_CONTACT_EMAIL = 1;
+  SURVEY_DISTRIBUTION_MODE_SOURCE_LINK = 2;
+}
+
+enum SurveyDedupePolicy {
+  SURVEY_DEDUPE_POLICY_UNSPECIFIED = 0;
+  SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE = 1;
+  SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION = 2;
+  SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER = 3;
+  SURVEY_DEDUPE_POLICY_ONE_PER_RUN = 4;
+}
+
+enum NpsBucket {
+  NPS_BUCKET_UNSPECIFIED = 0;
+  NPS_BUCKET_DETRACTOR = 1;
+  NPS_BUCKET_PASSIVE = 2;
+  NPS_BUCKET_PROMOTER = 3;
+}
+
+enum NpsCampaignRunStatus {
+  NPS_CAMPAIGN_RUN_STATUS_UNSPECIFIED = 0;
+  NPS_CAMPAIGN_RUN_STATUS_SCHEDULED = 1;
+  NPS_CAMPAIGN_RUN_STATUS_EVALUATING = 2;
+  NPS_CAMPAIGN_RUN_STATUS_COLLECTING = 4;
+  NPS_CAMPAIGN_RUN_STATUS_CLOSED = 5;
+  NPS_CAMPAIGN_RUN_STATUS_FAILED = 6;
+  NPS_CAMPAIGN_RUN_STATUS_CANCELLED = 7;
+}
+
+// An operator-facing interpretation of a run's frozen evidence thresholds.
+// It is not a claim of statistical significance or population representation.
+enum NpsMeasurementReadiness {
+  NPS_MEASUREMENT_READINESS_UNSPECIFIED = 0;
+  NPS_MEASUREMENT_READINESS_PENDING = 1;
+  NPS_MEASUREMENT_READINESS_PRELIMINARY = 2;
+  NPS_MEASUREMENT_READINESS_DIRECTIONAL = 3;
+  NPS_MEASUREMENT_READINESS_QUALIFIED = 4;
+  NPS_MEASUREMENT_READINESS_REDACTED = 5;
+  NPS_MEASUREMENT_READINESS_UNAVAILABLE = 6;
+}
+
+enum SurveyDeliveryStatus {
+  SURVEY_DELIVERY_STATUS_UNSPECIFIED = 0;
+  SURVEY_DELIVERY_STATUS_PENDING = 1;
+  SURVEY_DELIVERY_STATUS_ACCEPTED = 2;
+  SURVEY_DELIVERY_STATUS_DELIVERED = 3;
+  SURVEY_DELIVERY_STATUS_REJECTED = 4;
+  SURVEY_DELIVERY_STATUS_BOUNCED = 5;
+  SURVEY_DELIVERY_STATUS_COMPLAINED = 6;
+  SURVEY_DELIVERY_STATUS_DELAYED = 7;
+  SURVEY_DELIVERY_STATUS_NOT_APPLICABLE = 8;
+}
+
+enum SurveyResponseStatus {
+  SURVEY_RESPONSE_STATUS_UNSPECIFIED = 0;
+  SURVEY_RESPONSE_STATUS_NOT_STARTED = 1;
+  SURVEY_RESPONSE_STATUS_OPENED = 2;
+  SURVEY_RESPONSE_STATUS_STARTED = 3;
+  SURVEY_RESPONSE_STATUS_COMPLETED = 4;
+  SURVEY_RESPONSE_STATUS_EXPIRED = 5;
+}
+
+enum SurveySuppressionStatus {
+  SURVEY_SUPPRESSION_STATUS_UNSPECIFIED = 0;
+  SURVEY_SUPPRESSION_STATUS_NOT_SUPPRESSED = 1;
+  SURVEY_SUPPRESSION_STATUS_SUPPRESSED = 2;
+}
+
+enum SurveyLowScoreReviewStatus {
+  SURVEY_LOW_SCORE_REVIEW_STATUS_UNSPECIFIED = 0;
+  SURVEY_LOW_SCORE_REVIEW_STATUS_OPEN = 1;
+  SURVEY_LOW_SCORE_REVIEW_STATUS_IN_REVIEW = 2;
+  SURVEY_LOW_SCORE_REVIEW_STATUS_RESOLVED = 3;
+  SURVEY_LOW_SCORE_REVIEW_STATUS_DISMISSED = 4;
+}
+
+enum SurveyLowScoreSeverity {
+  SURVEY_LOW_SCORE_SEVERITY_UNSPECIFIED = 0;
+  SURVEY_LOW_SCORE_SEVERITY_LOW = 1;
+  SURVEY_LOW_SCORE_SEVERITY_MEDIUM = 2;
+  SURVEY_LOW_SCORE_SEVERITY_HIGH = 3;
+  SURVEY_LOW_SCORE_SEVERITY_CRITICAL = 4;
+}
+
+enum SurveyAnalyticsSegmentDimension {
+  SURVEY_ANALYTICS_SEGMENT_DIMENSION_UNSPECIFIED = 0;
+  SURVEY_ANALYTICS_SEGMENT_DIMENSION_SOURCE_TYPE = 1;
+  SURVEY_ANALYTICS_SEGMENT_DIMENSION_CAMPAIGN = 2;
+  SURVEY_ANALYTICS_SEGMENT_DIMENSION_DISTRIBUTION_MODE = 3;
+  SURVEY_ANALYTICS_SEGMENT_DIMENSION_TRIGGER_EVENT = 4;
+}
+
+enum SurveyAnalyticsInsightSeverity {
+  SURVEY_ANALYTICS_INSIGHT_SEVERITY_UNSPECIFIED = 0;
+  SURVEY_ANALYTICS_INSIGHT_SEVERITY_INFO = 1;
+  SURVEY_ANALYTICS_INSIGHT_SEVERITY_WARNING = 2;
+  SURVEY_ANALYTICS_INSIGHT_SEVERITY_CRITICAL = 3;
+}
+
+enum SurveyCampaignHealthStatus {
+  SURVEY_CAMPAIGN_HEALTH_STATUS_UNSPECIFIED = 0;
+  SURVEY_CAMPAIGN_HEALTH_STATUS_HEALTHY = 1;
+  SURVEY_CAMPAIGN_HEALTH_STATUS_NEEDS_ATTENTION = 2;
+  SURVEY_CAMPAIGN_HEALTH_STATUS_BLOCKED = 3;
+}
+
+enum SurveyCampaignHealthCheckStatus {
+  SURVEY_CAMPAIGN_HEALTH_CHECK_STATUS_UNSPECIFIED = 0;
+  SURVEY_CAMPAIGN_HEALTH_CHECK_STATUS_PASS = 1;
+  SURVEY_CAMPAIGN_HEALTH_CHECK_STATUS_WARN = 2;
+  SURVEY_CAMPAIGN_HEALTH_CHECK_STATUS_FAIL = 3;
+}
+
+enum SurveyRecoverySlaStatus {
+  SURVEY_RECOVERY_SLA_STATUS_UNSPECIFIED = 0;
+  SURVEY_RECOVERY_SLA_STATUS_ON_TRACK = 1;
+  SURVEY_RECOVERY_SLA_STATUS_DUE_SOON = 2;
+  SURVEY_RECOVERY_SLA_STATUS_OVERDUE = 3;
+  SURVEY_RECOVERY_SLA_STATUS_CLOSED = 4;
+}
+
+enum SurveyRecoveryNotificationStatus {
+  SURVEY_RECOVERY_NOTIFICATION_STATUS_UNSPECIFIED = 0;
+  SURVEY_RECOVERY_NOTIFICATION_STATUS_PENDING = 1;
+  SURVEY_RECOVERY_NOTIFICATION_STATUS_DELIVERED = 2;
+  SURVEY_RECOVERY_NOTIFICATION_STATUS_FAILED = 3;
+  SURVEY_RECOVERY_NOTIFICATION_STATUS_DEAD = 4;
+  SURVEY_RECOVERY_NOTIFICATION_STATUS_SUPPRESSED = 5;
+}
+
+message SurveyCampaign {
+  string id = 1;
+  string name = 2;
+  SurveyType survey_type = 3;
+  SurveyCampaignStatus status = 4;
+  SurveyTriggerEvent trigger_event = 5;
+  SurveyDistributionMode distribution_mode = 6;
+  SurveyDedupePolicy dedupe_policy = 7;
+  google.protobuf.Struct trigger_filter = 8;
+  google.protobuf.Struct content = 9;
+  string locale = 10;
+  int32 content_version = 11;
+  double sampling_percent = 12;
+  int32 min_days_between_contact = 13;
+  int32 expires_after_days = 14;
+  int32 max_daily_invitations = 15;
+  int32 low_score_threshold = 16;
+  bool require_recent_customer_activity = 17;
+  int32 recent_activity_days = 18;
+  bool suppress_auto_resolved = 19;
+  string created_by = 20;
+  string updated_by = 21;
+  string created_at = 22;
+  string updated_at = 23;
+  optional string archived_at = 24;
+  optional NpsCampaignSettings nps_settings = 25;
+}
+
+message NpsCampaignSettings {
+  string cohort_id = 1;
+  string detractor_owner_member_id = 2;
+  int32 collection_days = 3;
+  int32 maximum_run_recipients = 4;
+  // Minimum currently retained submitted responses required by this campaign's
+  // operating-evidence guardrail.
+  int32 minimum_completed_responses = 5;
+  // Minimum submitted responses divided by invitations, expressed as a percent.
+  int32 minimum_response_rate_percent = 6;
+  // Optional relationship-NPS pulse cadence. Zero disables automatic runs;
+  // enabled cadences are expressed in days and must be between 30 and 365.
+  optional int32 recurrence_interval_days = 7;
+  // Minimum days between invitations to the same contact in a recurring
+  // relationship-NPS program. Defaults to 365; valid values are 30-3650.
+  optional int32 recurrence_contact_cooldown_days = 8;
+  // Target share of currently serviceable contacts covered by each recurring
+  // pulse. Defaults to 25%; valid values are 1-100. Manual runs ignore it.
+  optional int32 recurrence_sampling_percent = 9;
+  // Conservative planning confidence target. This is a response-volume
+  // planning input, not a claim of statistical significance for NPS.
+  int32 sample_planning_confidence_percent = 10;
+  // Conservative planning margin of error target for a proportion proxy.
+  int32 sample_planning_margin_of_error_percent = 11;
+  // Expected submitted-response rate used to translate completes into invites.
+  int32 sample_planning_expected_response_rate_percent = 12;
+}
+
+message ListSurveyCampaignsRequest {
+  SurveyCampaignStatus status = 1;
+  int32 limit = 2;
+}
+
+message ListSurveyCampaignsResponse {
+  repeated SurveyCampaign campaigns = 1;
+}
+
+message CreateSurveyCampaignRequest {
+  string name = 1 [(google.api.field_behavior) = REQUIRED];
+  SurveyType survey_type = 2 [(google.api.field_behavior) = REQUIRED];
+  SurveyCampaignStatus status = 3;
+  SurveyTriggerEvent trigger_event = 4 [(google.api.field_behavior) = REQUIRED];
+  SurveyDistributionMode distribution_mode = 5 [(google.api.field_behavior) = REQUIRED];
+  SurveyDedupePolicy dedupe_policy = 6;
+  google.protobuf.Struct trigger_filter = 7;
+  google.protobuf.Struct content = 8;
+  string locale = 9;
+  optional double sampling_percent = 10;
+  optional int32 min_days_between_contact = 11;
+  optional int32 expires_after_days = 12;
+  optional int32 max_daily_invitations = 13;
+  optional int32 low_score_threshold = 14;
+  optional bool require_recent_customer_activity = 15;
+  optional int32 recent_activity_days = 16;
+  optional bool suppress_auto_resolved = 17;
+  optional NpsCampaignSettings nps_settings = 18;
+}
+
+message UpdateSurveyCampaignRequest {
+  string id = 1;
+  optional string name = 2;
+  SurveyCampaignStatus status = 3;
+  SurveyTriggerEvent trigger_event = 4;
+  SurveyDistributionMode distribution_mode = 5;
+  SurveyDedupePolicy dedupe_policy = 6;
+  google.protobuf.Struct trigger_filter = 7;
+  google.protobuf.Struct content = 8;
+  optional string locale = 9;
+  optional double sampling_percent = 10;
+  optional int32 min_days_between_contact = 11;
+  optional int32 expires_after_days = 12;
+  optional int32 max_daily_invitations = 13;
+  optional int32 low_score_threshold = 14;
+  optional bool require_recent_customer_activity = 15;
+  optional int32 recent_activity_days = 16;
+  optional bool suppress_auto_resolved = 17;
+  optional NpsCampaignSettings nps_settings = 18;
+}
+
+message ArchiveSurveyCampaignRequest {
+  string id = 1;
+}
+
+message ScheduleNpsCampaignRunRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string client_request_key = 2 [(google.api.field_behavior) = REQUIRED];
+  optional string scheduled_at = 3;
+}
+
+// Cancels a run before invitation materialization. A run that has started
+// collecting must be handled through the collection lifecycle instead.
+message CancelNpsCampaignRunRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ListNpsCampaignRunsRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  int32 limit = 2;
+  // Return runs strictly older than this immutable campaign-local sequence.
+  // Omit for the newest page.
+  optional int32 before_sequence = 3;
+}
+
+message ListNpsCampaignRunsResponse {
+  repeated NpsCampaignRun runs = 1;
+  // Pass this value as before_sequence to retrieve the next older page.
+  optional int32 next_before_sequence = 2;
+}
+
+message ExportNpsCampaignRunEvidenceRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message CreateNpsCampaignRunEvidenceExportRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string client_request_key = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ListNpsCampaignRunEvidenceExportsRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+  int32 limit = 3;
+}
+
+message ListNpsCampaignRunEvidenceExportsResponse {
+  repeated NpsCampaignRunEvidenceExport exports = 1;
+}
+
+message NpsCampaignRunEvidenceExport {
+  string id = 1;
+  string campaign_id = 2;
+  string run_id = 3;
+  string report_version = 4;
+  string generated_at = 5;
+  string artifact_sha256 = 6;
+  string created_by_type = 7;
+  string created_at = 8;
+  optional string downloaded_at = 9;
+  string download_path = 10;
+  optional string expires_at = 11;
+}
+
+message GetNpsCampaignPreflightRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Aggregate-only launch evidence. The eventual worker evaluation remains the
+// authoritative, immutable recipient boundary for a scheduled run.
+message NpsCampaignPreflight {
+  string campaign_id = 1;
+  int32 evaluated_count = 2;
+  int32 eligible_count = 3;
+  int32 excluded_count = 4;
+  int32 planned_invitation_count = 5;
+  int32 maximum_run_recipients = 6;
+  bool delivery_ready = 7;
+  string delivery_blocker = 8;
+  string generated_at = 9;
+  // Mutually exclusive, aggregate-only reasons for excluded audience members.
+  // No recipient identifiers are exposed.
+  repeated SurveySuppressionReasonBucket exclusion_reason_distribution = 10;
+  // Frozen operating-evidence threshold configured for this campaign.
+  int32 minimum_completed_responses = 11;
+  // Advisory current-state condition. When true, even a submission from every
+  // currently planned invitation cannot reach minimum_completed_responses. The
+  // worker still re-evaluates the authoritative audience at schedule time.
+  bool planned_invitation_count_below_minimum_completed_responses = 12;
+  // Target share used to size each recurring pulse. Zero means a manual run.
+  int32 recurrence_sampling_percent = 13;
+  // Current serviceable population used for the conservative planning estimate.
+  int32 sample_planning_population_count = 14;
+  int32 sample_planning_required_completed_responses = 15;
+  int32 sample_planning_invitation_target = 16;
+  int32 sample_planning_confidence_percent = 17;
+  int32 sample_planning_margin_of_error_percent = 18;
+  int32 sample_planning_expected_response_rate_percent = 19;
+  // True when the current run allocation cannot reach the planning invitation target.
+  bool planned_invitation_count_below_sample_planning_target = 20;
+  // True when the planning invitation target is above the configured run cap.
+  bool sample_planning_target_exceeds_recipient_cap = 21;
+}
+
+message NpsCampaignRun {
+  string id = 1;
+  string campaign_id = 2;
+  int32 sequence = 3;
+  NpsCampaignRunStatus status = 4;
+  string scheduled_at = 5;
+  optional string opened_at = 6;
+  optional string closes_at = 7;
+  int32 evaluated_count = 8;
+  int32 eligible_count = 9;
+  int32 invitation_count = 10;
+  int32 redacted_response_count = 11;
+  string failure_reason = 12;
+  string created_at = 13;
+  string updated_at = 14;
+  int32 delivered_count = 15;
+  // A hosted survey page has been visited or a response has been submitted.
+  // Email-link scanners and prefetchers can create a visit; this is not proof
+  // of a verified human interaction.
+  int32 started_count = 16;
+  int32 completed_count = 17;
+  // Deprecated: use hosted_visit_rate. This compatibility alias is the hosted
+  // survey page-visit rate, not the submitted response rate.
+  double response_rate = 18 [deprecated = true];
+  double nps = 19;
+  int32 detractor_count = 20;
+  int32 passive_count = 21;
+  int32 promoter_count = 22;
+  // Submitted responses divided by hosted survey page visits. This is a
+  // page-visit conversion proxy, not a verified-human completion rate.
+  double completion_rate = 23;
+  optional string cancelled_at = 24;
+  // Opaque immutable-definition fingerprint used to delimit comparable trends.
+  string measurement_key = 25;
+  // Frozen collection window used for this run's response capability.
+  int32 collection_days = 26;
+  // Frozen cap applied after eligibility resolution for this run.
+  int32 maximum_run_recipients = 27;
+  // Frozen minimum days since a prior survey invitation required for eligibility.
+  int32 contact_cooldown_days = 28;
+  // Submitted responses divided by invitations created for this run.
+  double completed_response_rate = 29;
+  NpsMeasurementReadiness measurement_readiness = 30;
+  // Frozen operating-evidence guardrail for submitted responses.
+  int32 minimum_completed_responses = 31;
+  // Frozen operating-evidence guardrail for submitted response rate.
+  int32 minimum_response_rate_percent = 32;
+  // Hosted survey page visits divided by invitations created for this run.
+  // This can include email-link scanners and prefetchers, so it is not a
+  // human-participation or submitted-response rate.
+  double hosted_visit_rate = 33;
+  // The closed run that caused this automatic pulse, when applicable.
+  optional string recurrence_source_run_id = 34;
+  // Frozen target share used to size this recurring pulse. Zero means a manual run.
+  int32 recurrence_sampling_percent = 35;
+  // Frozen conservative planning population observed when this run materialized.
+  int32 sample_planning_population_count = 36;
+  int32 sample_planning_required_completed_responses = 37;
+  int32 sample_planning_invitation_target = 38;
+  int32 sample_planning_confidence_percent = 39;
+  int32 sample_planning_margin_of_error_percent = 40;
+	int32 sample_planning_expected_response_rate_percent = 41;
+	bool invitation_count_below_sample_planning_target = 42;
+	// True when at least one current non-redacted NPS response contributes to nps.
+	bool nps_available = 43;
+}
+
+message CreateSurveyHostedLinkRequest {
+  string campaign_id = 1;
+  string source_type = 2;
+  string source_id = 3;
+  optional string request_id = 4;
+  google.protobuf.Struct context = 5;
+}
+
+message PreviewSurveyRecipientsRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string source_type = 2;
+  string source_id = 3;
+  optional string request_id = 4;
+  google.protobuf.Struct context = 5;
+  int32 limit = 6;
+}
+
+message PreviewSurveyRecipientsResponse {
+  string campaign_id = 1;
+  bool trigger_matched = 2;
+  bool sample_included = 3;
+  int32 matched_count = 4;
+  int32 eligible_count = 5;
+  int32 suppressed_count = 6;
+  repeated SurveyRecipientPreview recipients = 7;
+  repeated SurveySuppressionReasonBucket suppression_reason_distribution = 8;
+  bool delivery_ready = 9;
+  string delivery_blocker = 10;
+}
+
+message SurveyRecipientPreview {
+  string source_type = 1;
+  string source_id = 2;
+  optional string request_id = 3;
+  optional string contact_id = 4;
+  string channel = 5;
+  string display_name = 6;
+  string subject_display = 7;
+  bool eligible = 8;
+  string suppression_reason = 9;
+  google.protobuf.Struct recipient_snapshot = 10;
+  optional string last_activity_at = 11;
+}
+
+message SendSurveyTestEmailRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string to_email = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message SendSurveyTestEmailResponse {
+  bool ok = 1;
+  string provider = 2;
+  string sent_at = 3;
+}
+
+message GetSurveyCampaignHealthRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message SurveyCampaignHealth {
+  string campaign_id = 1;
+  SurveyCampaignHealthStatus status = 2;
+  int32 readiness_score = 3;
+  SurveyCampaignHealthFunnel funnel = 4;
+  repeated SurveyCampaignHealthCheck checks = 5;
+  repeated SurveySuppressionReasonBucket suppression_reason_distribution = 6;
+  string generated_at = 7;
+}
+
+message SurveyCampaignHealthFunnel {
+  int32 invitation_count = 1;
+  int32 pending_count = 2;
+  int32 delayed_count = 3;
+  int32 delivered_count = 4;
+  int32 opened_count = 5;
+  int32 completed_count = 6;
+  int32 suppressed_count = 7;
+  int32 expired_count = 8;
+  int32 rejected_count = 9;
+  int32 low_score_count = 10;
+  int32 open_low_score_review_count = 11;
+  int32 overdue_low_score_review_count = 12;
+  double delivery_rate = 13;
+  double open_rate = 14;
+  double response_rate = 15;
+  double suppression_rate = 16;
+  double expired_rate = 17;
+  double recovery_overdue_rate = 18;
+  // Hosted survey page visits can include email-link scanners and prefetchers.
+  int32 started_count = 19;
+  // Hosted survey page visits divided by invitations. This is not a verified
+  // human-participation or submitted-response rate.
+  double start_rate = 20;
+  // Submitted responses divided by hosted survey page visits. This is a
+  // page-visit conversion proxy, not a verified-human completion rate.
+  double completion_rate = 21;
+}
+
+message SurveyCampaignHealthCheck {
+  string id = 1;
+  SurveyCampaignHealthCheckStatus status = 2;
+  string title = 3;
+  string summary = 4;
+  string recommended_action = 5;
+  string evidence = 6;
+}
+
+message RecordSurveyProviderEventRequest {
+  optional string invitation_id = 1;
+  string provider = 2 [(google.api.field_behavior) = REQUIRED];
+  string provider_event_type = 3 [(google.api.field_behavior) = REQUIRED];
+  string provider_message_id = 4;
+  string provider_event_key = 5;
+  google.protobuf.Struct payload = 6;
+  optional string occurred_at = 7;
+}
+
+message SurveyInvitation {
+  string id = 1;
+  string campaign_id = 2;
+  optional string request_id = 3;
+  optional string contact_id = 4;
+  string source_type = 5;
+  string source_id = 6;
+  SurveyDistributionMode distribution_mode = 7;
+  SurveyDeliveryStatus delivery_status = 8;
+  SurveyResponseStatus response_status = 9;
+  SurveySuppressionStatus suppression_status = 10;
+  string suppression_reason = 11;
+  google.protobuf.Struct campaign_snapshot = 12;
+  google.protobuf.Struct recipient_snapshot = 13;
+  optional string public_url = 14;
+  optional string expires_at = 15;
+  optional string delivered_at = 16;
+  optional string opened_at = 17;
+  optional string responded_at = 18;
+  string created_at = 19;
+  string updated_at = 20;
+  bool delivery_retryable = 21;
+  optional string run_id = 22;
+}
+
+message ListSurveyInvitationsRequest {
+  optional string campaign_id = 1;
+  SurveyResponseStatus response_status = 2;
+  SurveySuppressionStatus suppression_status = 3;
+  int32 limit = 4;
+}
+
+message ListSurveyInvitationsResponse {
+  repeated SurveyInvitation invitations = 1;
+}
+
+message RetrySurveyInvitationDeliveryRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+message SurveyResponse {
+  string id = 1;
+  string campaign_id = 2;
+  string invitation_id = 3;
+  optional string request_id = 4;
+  optional string contact_id = 5;
+  string source_type = 6;
+  string source_id = 7;
+  int32 score = 8;
+  string comment = 9;
+  string locale = 10;
+  bool low_score = 11;
+  string submitted_at = 12;
+  optional SurveyLowScoreReview low_score_review = 13;
+  optional SurveyAccountContext account_context = 14;
+  NpsBucket nps_bucket = 15;
+  optional string feedback_id = 16;
+  // A respondent's answer to the NPS follow-up question. It is distinct from
+  // their notification subscription and does not represent a legal basis.
+  optional bool follow_up_consent = 17;
+  // Deterministic, privacy-safe response quality observation. Flagged
+  // responses remain included in score metrics until an operator decides how
+  // to handle them.
+  string quality_status = 18;
+  repeated string quality_reasons = 19;
+}
+
+// SurveyAccountContext normalizes account/company hints attached to a survey
+// invitation or response so recovery queues can be scoped by account.
+message SurveyAccountContext {
+  string account_key = 1;
+  string account_display = 2;
+  string source = 3;
+}
+
+message ListSurveyResponsesRequest {
+  optional string campaign_id = 1;
+  optional bool low_score_only = 2;
+  optional string from = 3;
+  optional string to = 4;
+  int32 limit = 5;
+  optional SurveyRecoverySlaStatus recovery_sla_status = 6;
+  optional string recovery_blocker_reason = 7;
+  optional SurveyLowScoreSeverity review_severity = 8;
+  optional string owner_member_id = 9;
+  optional string account_key = 10;
+}
+
+message ListSurveyResponsesResponse {
+  repeated SurveyResponse responses = 1;
+}
+
+message SurveyLowScoreReview {
+  string response_id = 1;
+  SurveyLowScoreReviewStatus status = 2;
+  SurveyLowScoreSeverity severity = 3;
+  string owner_member_id = 4;
+  string root_cause = 5;
+  string action_taken = 6;
+  bool customer_contacted = 7;
+  optional string due_at = 8;
+  optional string reviewed_at = 9;
+  string updated_by = 10;
+  string created_at = 11;
+  string updated_at = 12;
+  SurveyRecoverySlaStatus sla_status = 13;
+  string blocker_reason = 14;
+  string next_best_action = 15;
+  int32 risk_score = 16;
+  SurveyRecoveryNotificationStatus recovery_notification_status = 17;
+  string recovery_notification_reason = 18;
+  optional string recovery_notification_delivered_at = 19;
+  string recovery_notification_last_error = 20;
+  // The immutable target copied when the review was created. It is distinct
+  // from a later operational due-date change.
+  optional string initial_due_at = 21;
+  // The first durable record that an operator contacted the customer.
+  optional string customer_contacted_at = 22;
+  // The immutable first terminal disposition used for recovery timeliness.
+  optional string first_terminal_at = 23;
+}
+
+message UpdateSurveyLowScoreReviewRequest {
+  string response_id = 1;
+  SurveyLowScoreReviewStatus status = 2;
+  SurveyLowScoreSeverity severity = 3;
+  optional string owner_member_id = 4;
+  optional string root_cause = 5;
+  optional string action_taken = 6;
+  optional bool customer_contacted = 7;
+  optional string due_at = 8;
+}
+
+message BatchUpdateSurveyLowScoreReviewsRequest {
+  repeated string response_ids = 1 [(google.api.field_behavior) = REQUIRED];
+  SurveyLowScoreReviewStatus status = 2;
+  SurveyLowScoreSeverity severity = 3;
+  optional string owner_member_id = 4;
+  optional string root_cause = 5;
+  optional string action_taken = 6;
+  optional bool customer_contacted = 7;
+  optional string due_at = 8;
+}
+
+message BatchUpdateSurveyLowScoreReviewsResponse {
+  repeated SurveyLowScoreReview reviews = 1;
+}
+
+message AssignSurveyLowScoreReviewsRequest {
+  repeated string response_ids = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated string candidate_owner_member_ids = 2 [(google.api.field_behavior) = REQUIRED];
+  optional int32 due_in_hours = 3;
+}
+
+message AssignSurveyLowScoreReviewsResponse {
+  repeated SurveyLowScoreReview reviews = 1;
+  repeated SurveyRecoveryAssignmentDecision decisions = 2;
+}
+
+message SurveyRecoveryAssignmentDecision {
+  string response_id = 1;
+  string owner_member_id = 2;
+  optional string previous_owner_member_id = 3;
+  string due_at = 4;
+  SurveyLowScoreSeverity severity = 5;
+  bool escalated = 6;
+  string reason = 7;
+  int32 workload_score_before = 8;
+  int32 workload_score_after = 9;
+}
+
+message EscalateSurveyLowScoreReviewsRequest {
+  repeated string response_ids = 1 [(google.api.field_behavior) = REQUIRED];
+  optional int32 due_in_hours = 2;
+  optional string note = 3;
+}
+
+message EscalateSurveyLowScoreReviewsResponse {
+  repeated SurveyLowScoreReview reviews = 1;
+  repeated SurveyRecoveryEscalationDecision decisions = 2;
+}
+
+message SurveyRecoveryEscalationDecision {
+  string response_id = 1;
+  SurveyLowScoreSeverity previous_severity = 2;
+  SurveyLowScoreSeverity severity = 3;
+  optional string previous_due_at = 4;
+  string due_at = 5;
+  bool owner_missing = 6;
+  bool due_at_changed = 7;
+  string reason = 8;
+  string action_taken = 9;
+}
+
+message GetSurveyAnalyticsRequest {
+  optional string campaign_id = 1;
+  optional string from = 2;
+  optional string to = 3;
+  optional string run_id = 4;
+}
+
+message SurveyAnalytics {
+  optional string campaign_id = 1;
+  int32 invitation_count = 2;
+  int32 delivered_count = 3;
+  int32 suppressed_count = 4;
+  int32 completed_count = 5;
+  int32 low_score_count = 6;
+  double average_score = 7;
+  double response_rate = 8;
+  repeated SurveyScoreBucket score_distribution = 9;
+  repeated SurveySuppressionReasonBucket suppression_reason_distribution = 10;
+  double average_response_seconds = 11;
+  int32 positive_score_count = 12;
+  double positive_score_rate = 13;
+  int32 open_low_score_review_count = 14;
+  int32 overdue_low_score_review_count = 15;
+  int32 not_started_count = 16;
+  int32 opened_count = 17;
+  int32 expired_count = 18;
+  int32 unassigned_low_score_review_count = 19;
+  int32 critical_low_score_review_count = 20;
+  int32 pending_customer_contact_review_count = 21;
+  optional string oldest_open_low_score_review_due_at = 22;
+  int32 overdue_recovery_queue_count = 23;
+  int32 unassigned_recovery_queue_count = 24;
+  int32 pending_contact_recovery_queue_count = 25;
+  int32 missing_root_cause_recovery_queue_count = 26;
+  int32 missing_action_recovery_queue_count = 27;
+  repeated SurveyRecoveryOwnerLoad owner_recovery_loads = 28;
+  int32 pending_delivery_count = 29;
+  int32 delayed_delivery_count = 30;
+  int32 rejected_delivery_count = 31;
+  double nps = 32;
+  int32 detractor_count = 33;
+  int32 passive_count = 34;
+  int32 promoter_count = 35;
+  int32 redacted_response_count = 36;
+  // Hosted survey page visits can include email-link scanners and prefetchers.
+  int32 started_count = 37;
+  // Hosted survey page visits divided by invitations. This is not a verified
+  // human-participation or submitted-response rate.
+  double start_rate = 38;
+  // Submitted responses divided by hosted survey page visits. This is a
+  // page-visit conversion proxy, not a verified-human completion rate.
+  double completion_rate = 39;
+	SurveyRecoveryOutcome recovery_outcome = 40;
+	// True when at least one current non-redacted NPS response contributes to nps.
+	bool nps_available = 41;
+	// Count of responses with one or more explainable quality observations.
+	// This does not change score denominators.
+	int32 quality_flagged_response_count = 42;
+}
+
+// SurveyRecoveryOutcome records the durable operational work associated with
+// low-score responses in the same analytics scope. A dismissed review remains
+// distinct from an explicitly resolved recovery.
+message SurveyRecoveryOutcome {
+  int32 review_count = 1;
+  int32 resolved_count = 2;
+  int32 dismissed_count = 3;
+  int32 customer_contacted_count = 4;
+  int32 root_cause_recorded_count = 5;
+  int32 action_recorded_count = 6;
+  // Counts whose immutable initial target and relevant event timestamp are
+  // both available. Historical reviews with unknown timestamps are excluded.
+  int32 contacted_timeliness_evidence_count = 7;
+  int32 contacted_on_time_count = 8;
+  int32 contacted_late_count = 9;
+  int32 terminal_timeliness_evidence_count = 10;
+  int32 terminal_on_time_count = 11;
+  int32 terminal_late_count = 12;
+}
+
+message SurveyRecoveryOwnerLoad {
+  string owner_member_id = 1;
+  int32 open_count = 2;
+  int32 overdue_count = 3;
+  int32 due_soon_count = 4;
+  int32 critical_count = 5;
+  int32 pending_contact_count = 6;
+  optional string oldest_open_due_at = 7;
+  int32 workload_score = 8;
+}
+
+message GetSurveyAnalyticsTrendRequest {
+  optional string campaign_id = 1;
+  optional string from = 2;
+  optional string to = 3;
+  optional string run_id = 4;
+}
+
+message GetSurveyAnalyticsTrendResponse {
+  repeated SurveyAnalyticsTrendBucket buckets = 1;
+}
+
+message SurveyAnalyticsTrendBucket {
+  string date = 1;
+  int32 invitation_count = 2;
+  int32 delivered_count = 3;
+  int32 suppressed_count = 4;
+  int32 completed_count = 5;
+  int32 low_score_count = 6;
+  int32 positive_score_count = 7;
+  double average_score = 8;
+  double response_rate = 9;
+  int32 not_started_count = 10;
+  int32 opened_count = 11;
+  int32 expired_count = 12;
+  optional string run_id = 13;
+  double nps = 14;
+  int32 detractor_count = 15;
+  int32 passive_count = 16;
+  int32 promoter_count = 17;
+	int32 redacted_response_count = 18;
+	int32 started_count = 19;
+	// True when at least one current non-redacted NPS response contributes to nps.
+	bool nps_available = 20;
+	int32 quality_flagged_response_count = 21;
+}
+
+message GetSurveyAnalyticsSegmentsRequest {
+  optional string campaign_id = 1;
+  optional string from = 2;
+  optional string to = 3;
+  SurveyAnalyticsSegmentDimension dimension = 4;
+  int32 limit = 5;
+}
+
+message GetSurveyAnalyticsSegmentsResponse {
+  repeated SurveyAnalyticsSegment segments = 1;
+}
+
+message SurveyAnalyticsSegment {
+  SurveyAnalyticsSegmentDimension dimension = 1;
+  string key = 2;
+  string label = 3;
+  optional string campaign_id = 4;
+  int32 invitation_count = 5;
+  int32 delivered_count = 6;
+  int32 suppressed_count = 7;
+  int32 completed_count = 8;
+  int32 low_score_count = 9;
+  int32 positive_score_count = 10;
+  int32 expired_count = 11;
+  double average_score = 12;
+  double response_rate = 13;
+  double low_score_rate = 14;
+  double positive_score_rate = 15;
+  double suppression_rate = 16;
+  double average_response_seconds = 17;
+  double attention_score = 18;
+}
+
+message GetSurveyAnalyticsInsightsRequest {
+  optional string campaign_id = 1;
+  optional string from = 2;
+  optional string to = 3;
+  int32 limit = 4;
+}
+
+message GetSurveyAnalyticsInsightsResponse {
+  repeated SurveyAnalyticsInsight insights = 1;
+}
+
+message SurveyAnalyticsInsight {
+  string id = 1;
+  SurveyAnalyticsInsightSeverity severity = 2;
+  string title = 3;
+  string summary = 4;
+  string metric = 5;
+  double value = 6;
+  double threshold = 7;
+  optional string segment_key = 8;
+  optional string segment_label = 9;
+  SurveyAnalyticsSegmentDimension segment_dimension = 10;
+  string recommended_action = 11;
+  int32 rank = 12;
+}
+
+message SurveyScoreBucket {
+  int32 score = 1;
+  int32 count = 2;
+}
+
+message SurveySuppressionReasonBucket {
+  string reason = 1;
+  int32 count = 2;
+}
+
+message PublicSurvey {
+  string campaign_id = 1;
+  string invitation_id = 2;
+  SurveyType survey_type = 3;
+  string title = 4;
+  string intro = 5;
+  string question = 6;
+  string comment_prompt = 7;
+  string thank_you = 8;
+  string locale = 9;
+  int32 min_score = 10;
+  int32 max_score = 11;
+  optional string expires_at = 12;
+  SurveyResponseStatus response_status = 13;
+  optional string unsubscribe_url = 14;
+  // True when an NPS respondent may answer the optional follow-up question.
+  bool collects_follow_up_consent = 15;
+}
+
+message GetPublicSurveyRequest {
+  string token = 1;
+}
+
+message SubmitPublicSurveyResponseRequest {
+  string token = 1;
+  int32 score = 2 [(google.api.field_behavior) = REQUIRED];
+  string comment = 3;
+  string locale = 4;
+  optional bool follow_up_consent = 5;
+}
+
+message PublicSurveyResponseReceipt {
+  string response_id = 1;
+  string thank_you = 2;
+  bool low_score = 3;
+}

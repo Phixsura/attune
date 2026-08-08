@@ -942,6 +942,120 @@ func TestGetClassificationQualitySamplesMapsRepoErrors(t *testing.T) {
 	require.Equal(t, attunev1.ErrorCode_INTERNAL, ptrext.Indirect(typed).Code)
 }
 
+func TestGetClassificationReviewLearningReturnsSummary(t *testing.T) {
+	t.Parallel()
+
+	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC)
+	repo := ptrext.Of(fakeFeedbackRepo{
+		classificationReviewLearning: feedbackrepo.ClassificationReviewLearning{
+			From:                    from,
+			To:                      to,
+			TotalReviews:            9,
+			Accepted:                5,
+			Edited:                  3,
+			Dismissed:               1,
+			TrainingCandidateCount:  4,
+			ReviewedFeedbackCount:   8,
+			ClassifiedFeedbackCount: 40,
+			ReviewCoverageRate:      0.2,
+			ReasonBuckets: []feedbackrepo.ClassificationReviewReasonBucket{{
+				SignalReason:           "low_confidence_rate_spike",
+				TotalReviews:           4,
+				Accepted:               1,
+				Edited:                 2,
+				Dismissed:              1,
+				TrainingCandidateCount: 3,
+				LastReviewedAt:         to.Add(-time.Hour),
+			}},
+			RecentEvents: []feedbackrepo.ClassificationReviewEvent{classificationReviewEventFixture(from.Add(time.Hour))},
+		},
+	})
+	h := ptrext.Of(FeedbackHandler{repo: repo})
+
+	result, err := h.GetClassificationReviewLearning(qualityTestCtx(), ptrext.Of(attunev1.GetClassificationReviewLearningRequest{
+		CurrentFrom:  from.Format(time.RFC3339),
+		CurrentTo:    to.Format(time.RFC3339),
+		SignalReason: "low_confidence_rate_spike",
+		Limit:        5,
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.Status)
+	require.Equal(t, dispatchtest.TenantID, repo.classificationReviewLearningOpts.TenantID)
+	require.Equal(t, from, repo.classificationReviewLearningOpts.From)
+	require.Equal(t, to, repo.classificationReviewLearningOpts.To)
+	require.Equal(t, "low_confidence_rate_spike", repo.classificationReviewLearningOpts.SignalReason)
+	require.Equal(t, 5, repo.classificationReviewLearningOpts.Limit)
+	require.Equal(t, int64(9), result.Body.GetTotalReviews())
+	require.Equal(t, int64(4), result.Body.GetTrainingCandidateCount())
+	require.InDelta(t, 0.2, result.Body.GetReviewCoverageRate(), 0.001)
+	require.Equal(t, "low_confidence_rate_spike", result.Body.GetReasonBuckets()[0].GetSignalReason())
+	require.Equal(t, int64(101), result.Body.GetRecentEvents()[0].GetFeedbackId())
+}
+
+func TestRecordClassificationReviewPersistsEventAndAudit(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 2, 9, 0, 0, 0, time.UTC)
+	repo := ptrext.Of(fakeFeedbackRepo{
+		classificationReviewRecord: classificationReviewEventFixture(now),
+		classificationReviewLearning: feedbackrepo.ClassificationReviewLearning{
+			From:                   now.AddDate(0, 0, -7),
+			To:                     now,
+			TotalReviews:           1,
+			Edited:                 1,
+			TrainingCandidateCount: 1,
+		},
+	})
+	audit := ptrext.Of(fakeAuditRecorder{})
+	h := ptrext.Of(FeedbackHandler{repo: repo, audit: audit})
+
+	result, err := h.RecordClassificationReview(qualityTestCtx(), ptrext.Of(attunev1.RecordClassificationReviewRequest{
+		FeedbackId:     101,
+		Outcome:        " EDITED ",
+		SignalReason:   "low_confidence_rate_spike",
+		CorrectionJson: `{"severity":"bug"}`,
+		Note:           "corrected label",
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, result.Status)
+	require.Equal(t, dispatchtest.TenantID, repo.classificationReviewRecordInput.TenantID)
+	require.Equal(t, int64(101), repo.classificationReviewRecordInput.FeedbackID)
+	require.Equal(t, feedbackrepo.ClassificationReviewOutcomeEdited, repo.classificationReviewRecordInput.Outcome)
+	require.Equal(t, `{"severity":"bug"}`, repo.classificationReviewRecordInput.CorrectionJSON)
+	require.Equal(t, "corrected label", repo.classificationReviewRecordInput.Note)
+	require.Equal(t, dispatchtest.UserID, repo.classificationReviewRecordInput.ReviewedBy)
+	require.Equal(t, "77", result.Body.GetEvent().GetEventId())
+	require.InDelta(t, 0.42, result.Body.GetEvent().GetClassificationConfidence(), 0.001)
+	require.Equal(t, int64(1), result.Body.GetLearning().GetTrainingCandidateCount())
+	require.Len(t, audit.events, 1)
+	require.Equal(t, "classification_review.record", audit.events[0].Action)
+	require.Equal(t, "101", audit.events[0].TargetID)
+}
+
+func TestRecordClassificationReviewMapsValidationAndNotFound(t *testing.T) {
+	t.Parallel()
+
+	h := ptrext.Of(FeedbackHandler{repo: ptrext.Of(fakeFeedbackRepo{})})
+	_, err := h.RecordClassificationReview(qualityTestCtx(), ptrext.Of(attunev1.RecordClassificationReviewRequest{
+		FeedbackId:     101,
+		Outcome:        "edited",
+		CorrectionJson: "[]",
+	}))
+	requireDispatcherError(t, err, http.StatusBadRequest, attunev1.ErrorCode_VALIDATION)
+
+	missing := ptrext.Of(FeedbackHandler{repo: ptrext.Of(fakeFeedbackRepo{
+		classificationReviewRecordErr: feedbackrepo.ErrClassificationReviewFeedbackNotFound,
+	})})
+	_, err = missing.RecordClassificationReview(qualityTestCtx(), ptrext.Of(attunev1.RecordClassificationReviewRequest{
+		FeedbackId: 101,
+		Outcome:    "accepted",
+	}))
+	requireDispatcherError(t, err, http.StatusNotFound, attunev1.ErrorCode_NOT_FOUND)
+}
+
 func TestRecordClassificationQualityMetricsEdges(t *testing.T) {
 	t.Parallel()
 
@@ -965,6 +1079,29 @@ func TestRecordClassificationQualityMetricsEdges(t *testing.T) {
 			Reason: "low_confidence_rate_spike",
 		}},
 	)
+}
+
+func classificationReviewEventFixture(reviewedAt time.Time) feedbackrepo.ClassificationReviewEvent {
+	confidence := 0.42
+	runID := int64(17)
+	return feedbackrepo.ClassificationReviewEvent{
+		ID:                       77,
+		FeedbackID:               101,
+		SemanticRunID:            ptrext.Of(runID),
+		Outcome:                  feedbackrepo.ClassificationReviewOutcomeEdited,
+		SignalReason:             "low_confidence_rate_spike",
+		CorrectionJSON:           `{"severity":"bug"}`,
+		Note:                     "corrected label",
+		Source:                   "api",
+		LogicalModel:             "classifier-v1",
+		ProviderModel:            "gpt-4o-mini",
+		ChannelID:                "primary",
+		PromptVersion:            "default",
+		PromptVersionID:          "prompt-version-1",
+		ClassificationConfidence: ptrext.Of(confidence),
+		ReviewedBy:               dispatchtest.UserID,
+		ReviewedAt:               reviewedAt,
+	}
 }
 
 func requireQualityQueryOpts(t *testing.T, opts feedbackrepo.ClassificationQualityQueryOpts) {

@@ -28,11 +28,18 @@ export function useRowSelection(itemIds: string[]) {
   }, [itemIds])
 
   const clear = useCallback(() => setSelected(new Set()), [])
+  const selectOnly = useCallback(
+    (ids: string[]) => {
+      const valid = new Set(itemIds)
+      setSelected(new Set(ids.filter((id) => valid.has(id))))
+    },
+    [itemIds],
+  )
 
   const isAllSelected = useMemo(
     () => itemIds.length > 0 && selected.size === itemIds.length,
     [itemIds, selected],
   )
 
-  return { selected, toggle, toggleAll, clear, isAllSelected }
+  return { selected, toggle, toggleAll, clear, selectOnly, isAllSelected }
 }

@@ -50,7 +50,24 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useDocumentTitle } from '@/hooks/use-document-title'
 import { cn } from '@/lib/utils'
+import type { ApiKey } from '@/proto/attune/v1/api_key'
+import type { AuditLogEntry } from '@/proto/attune/v1/audit'
+import type { ExternalConnection, ExternalSyncEvent } from '@/proto/attune/v1/external_sync'
+import type { GdprOperationsResponse } from '@/proto/attune/v1/gdpr'
+import type { InboundSource } from '@/proto/attune/v1/inbound_source'
+import type { ReplySendHook, ReplySendHookHealth } from '@/proto/attune/v1/ingest'
+import type { LLMChannel } from '@/proto/attune/v1/llm_config'
+import type { Member } from '@/proto/attune/v1/member'
+import type { NotifyTarget } from '@/proto/attune/v1/notify_target'
+import type { ModerationSubject, PublicVisibilityPolicy } from '@/proto/attune/v1/public_visibility'
+import type {
+  RequestNotificationDelivery,
+  RequestNotificationSettings,
+  RequestNotificationWebhookTarget,
+} from '@/proto/attune/v1/request_notification'
+import type { PreflightCheckResult } from '@/proto/attune/v1/system'
 import { authModeQuery, cutoverToSSO, fallbackToHybrid } from '../api/auth-mode'
 import {
   type BreakGlassToken,
@@ -61,6 +78,18 @@ import {
   revokeBreakGlassToken,
   unlockBreakGlassLockout,
 } from '../api/breakglass'
+import { buildCompliancePackageEvidence } from '../compliance-package-evidence'
+import { buildFieldLevelPermissionsLedger } from '../field-level-permissions-ledger'
+import { buildGovernanceRbacReadiness } from '../governance-rbac-readiness'
+import { buildKeyRotationReadiness } from '../key-rotation-readiness'
+import { buildSecurityIncidentRunbook } from '../security-incident-runbook'
+import { buildWebhookSignatureTooling } from '../webhook-signature-tooling'
+import { CompliancePackageEvidenceCard } from './compliance-package-evidence-card'
+import { FieldLevelPermissionsLedgerCard } from './field-level-permissions-ledger-card'
+import { GovernanceRbacReadinessCard } from './governance-rbac-readiness-card'
+import { KeyRotationReadinessCard } from './key-rotation-readiness-card'
+import { SecurityIncidentRunbookCard } from './security-incident-runbook-card'
+import { WebhookSignatureToolingCard } from './webhook-signature-tooling-card'
 
 type TokenStatus = 'active' | 'used' | 'revoked' | 'expiring' | 'expired'
 
@@ -137,10 +166,56 @@ export const securityPageTestables = {
   getTokenStatus,
 }
 
-export function SecurityPage() {
+export type SecurityAuditLogFilters = {
+  actions?: string[]
+  limit?: number
+  targetType?: string
+}
+
+export type SecurityPageEvidence = {
+  apiKeys?: ApiKey[]
+  externalSyncConnections?: ExternalConnection[]
+  externalSyncEvents?: ExternalSyncEvent[]
+  fieldPermissionsAuditEntries?: AuditLogEntry[]
+  gdprOperations?: GdprOperationsResponse
+  governanceAuditEntries?: AuditLogEntry[]
+  inboundSources?: InboundSource[]
+  llmChannels?: LLMChannel[]
+  members?: Member[]
+  moderationSubjects?: ModerationSubject[]
+  notifyTargets?: NotifyTarget[]
+  preflightChecks?: PreflightCheckResult[]
+  publicVisibilityPolicy?: PublicVisibilityPolicy
+  replySendHook?: ReplySendHook | null
+  replySendHookHealth?: ReplySendHookHealth
+  requestNotificationDeliveries?: RequestNotificationDelivery[]
+  requestNotificationSettings?: RequestNotificationSettings
+  requestNotificationWebhookTargets?: RequestNotificationWebhookTarget[]
+}
+
+export const governanceAuditLogFilters: SecurityAuditLogFilters = {
+  actions: ['member.invite', 'member.remove', 'member.update_role'],
+  limit: 20,
+  targetType: 'member',
+}
+
+export const fieldPermissionsAuditLogFilters: SecurityAuditLogFilters = {
+  actions: [
+    'moderation.approve',
+    'moderation.reject',
+    'moderation.hide',
+    'moderation.mark_spam',
+    'moderation.restore',
+  ],
+  limit: 20,
+  targetType: 'public_moderation_subject',
+}
+
+export function SecurityPage({ evidence = {} }: { evidence?: SecurityPageEvidence }) {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
   const locale = i18n.language.startsWith('zh') ? zhCN : undefined
+  useDocumentTitle(t('nav.security'))
 
   const [showIssueDialog, setShowIssueDialog] = useState(false)
   const [showTokenDialog, setShowTokenDialog] = useState(false)
@@ -162,6 +237,26 @@ export function SecurityPage() {
   } | null>(null)
 
   const { data: authMode } = useQuery(authModeQuery())
+  const {
+    apiKeys,
+    externalSyncConnections,
+    externalSyncEvents,
+    fieldPermissionsAuditEntries,
+    gdprOperations,
+    governanceAuditEntries,
+    inboundSources,
+    llmChannels,
+    members,
+    moderationSubjects,
+    notifyTargets,
+    preflightChecks,
+    publicVisibilityPolicy,
+    replySendHook,
+    replySendHookHealth,
+    requestNotificationDeliveries,
+    requestNotificationSettings,
+    requestNotificationWebhookTargets,
+  } = evidence
 
   const { data: tokens, isLoading: tokensLoading } = useQuery({
     queryKey: ['breakglass-tokens'],
@@ -263,6 +358,74 @@ export function SecurityPage() {
   const lockoutRows = [...(lockouts?.lockouts ?? [])].sort(
     (a, b) => new Date(a.locked_until).getTime() - new Date(b.locked_until).getTime(),
   )
+  const governanceReadiness = buildGovernanceRbacReadiness({
+    auditEntries: governanceAuditEntries,
+    authMode,
+    lockouts: lockouts?.lockouts,
+    members,
+    tokens: tokens?.tokens,
+  })
+  const fieldPermissionsLedger = buildFieldLevelPermissionsLedger({
+    auditEntries: fieldPermissionsAuditEntries,
+    moderationSubjects,
+    policy: publicVisibilityPolicy,
+  })
+  const complianceAuditEntries =
+    governanceAuditEntries || fieldPermissionsAuditEntries
+      ? [...(governanceAuditEntries ?? []), ...(fieldPermissionsAuditEntries ?? [])]
+      : undefined
+  const compliancePackageEvidence = buildCompliancePackageEvidence({
+    auditEntries: complianceAuditEntries,
+    authMode,
+    gdprOperations,
+    lockouts: lockouts?.lockouts,
+    members,
+    moderationSubjects,
+    notifyTargets,
+    publicVisibilityPolicy,
+    tokens: tokens?.tokens,
+  })
+  const keyRotationReadiness = buildKeyRotationReadiness({
+    apiKeys,
+    inboundSources,
+    llmChannels,
+    notifyTargets,
+    preflightChecks,
+    replySendHook,
+    replySendHookHealth,
+  })
+  const webhookSignatureTooling = buildWebhookSignatureTooling({
+    externalSyncConnections,
+    externalSyncEvents,
+    inboundSources,
+    replySendHook,
+    replySendHookHealth,
+    requestNotificationDeliveries,
+    requestNotificationSettings,
+    requestNotificationWebhookTargets,
+  })
+  const securityIncidentRunbook = buildSecurityIncidentRunbook({
+    apiKeys,
+    auditEntries: complianceAuditEntries,
+    authMode,
+    externalSyncConnections,
+    externalSyncEvents,
+    gdprOperations,
+    inboundSources,
+    llmChannels,
+    lockouts: lockouts?.lockouts,
+    members,
+    moderationSubjects,
+    notifyTargets,
+    preflightChecks,
+    publicVisibilityPolicy,
+    replySendHook,
+    replySendHookHealth,
+    requestNotificationDeliveries,
+    requestNotificationSettings,
+    requestNotificationWebhookTargets,
+    tokens: tokens?.tokens,
+  })
 
   const totalPages = Math.ceil(allTokens.length / pageSize)
   const paginatedTokens = allTokens.slice((page - 1) * pageSize, page * pageSize)
@@ -372,6 +535,13 @@ export function SecurityPage() {
           </CardContent>
         </Card>
       </section>
+
+      <GovernanceRbacReadinessCard readiness={governanceReadiness} />
+      <FieldLevelPermissionsLedgerCard ledger={fieldPermissionsLedger} />
+      <CompliancePackageEvidenceCard evidence={compliancePackageEvidence} />
+      <KeyRotationReadinessCard readiness={keyRotationReadiness} />
+      <WebhookSignatureToolingCard tooling={webhookSignatureTooling} />
+      <SecurityIncidentRunbookCard runbook={securityIncidentRunbook} />
 
       {/* Tokens Table */}
       <Card className="gap-0 overflow-hidden rounded-[1.2rem] border-border/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.995),rgba(249,250,251,0.985))] py-0 shadow-[0_28px_72px_-52px_rgba(15,23,42,0.22)]">

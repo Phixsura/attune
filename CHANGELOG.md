@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Changed
+
+- Add a privacy-safe, explainable response-quality observation layer for public
+  survey submissions. Automated-client, missing-request-context,
+  submitted-without-page-visit, and unusually-fast submissions are marked as
+  evidence only; they remain in score denominators, while Console analytics,
+  trends, response records, and NPS evidence exports expose the flagged count
+  and status without storing raw request metadata (#236).
+
+- Make NPS measurement availability explicit across run, analytics, trend, and
+  aggregate evidence contracts, so no-response and privacy-redacted states are
+  never consumed as numeric NPS zero; version 2 evidence exports remain able to
+  replay version 1 artifacts (#236).
+
+- Add conservative NPS sample-planning evidence. Operators can set planning
+  confidence, margin of error, and expected submitted-response rate; preflight
+  reports required completes and an invitation target over the current
+  serviceable population, while each materialized run freezes the assumptions
+  and shows the actual-invitation-versus-target shortfall in run evidence. This
+  is explicitly capacity planning, not a statistical significance or
+  representativeness claim; preflight distinguishes a cap-constrained target
+  from a small eligible population (#236).
+
+- Add an optional durable relationship-NPS pulse program. Operators can keep a
+  campaign manual or select a 30-day, quarterly, semiannual, or annual cadence;
+  closed runs enqueue one auditable successor through a lease-claimed,
+  crash-recoverable scheduler, with a unique source-run link preventing
+  duplicate measurements (#236). Recurrence decisions expose bounded outcome
+  metrics and an Operations dashboard series for created, skipped, and retryable
+  pulses. Recurring runs separately freeze a per-contact cooldown, defaulting to
+  365 days, so program cadence does not force quarterly repeat invitations.
+
+- Add a frozen recurring-pulse allocation target. New relationship-NPS programs
+  cover 25% of currently serviceable contacts per pulse by default, with 1-100%
+  Console options; the deterministic selector uses the available population as
+  its planning base, then applies cooldown and transaction-time eligibility
+  fences. Preflight and run evidence expose the target separately from the
+  actual invitation ledger (#236).
+
+- Include the immutable NPS canonical-content revision and recurring allocation
+  policy in the version-4 run measurement fingerprint. A future wording
+  revision now starts a new trend
+  baseline, while legacy definitions without a revision are never silently
+  compared with current runs (#236).
+
+- Normalize every relationship-NPS campaign, hosted page, and stored response
+  to the language of its immutable shipped content. Only generic, region, and
+  script tags for Simplified Chinese select that translation; Traditional-Chinese
+  and other unsupported tags now use English rather than mislabeling text or
+  being injected through a public response submission. Legacy or malformed
+  invitation snapshots are rebuilt to their immutable canonical-content
+  revision before public HTML or API rendering. An unknown revision disables
+  the link rather than silently replacing its NPS question (#236).
+
+- Make the NPS scheduling time contract explicit in the Console: browser-local
+  date/time input and full-year run timestamps carry the active IANA time zone,
+  while a populated schedule also shows its exact UTC execution value (#236).
+
+- Render the complete 0-10 NPS response scale in the Console, including
+  zero-response buckets and the detractor, passive, and promoter group colors,
+  so sparse measurements remain legible without changing their denominator
+  (#236).
+
+- Add a concurrent NPS audience lookup index so large cohort-to-contact resolutions remain bounded by tenant and subject identity.
+
+- Let the NPS Console browse complete run history through stable keyset pages,
+  while limiting run-metric aggregation to the displayed page (#236).
+
+- Distinguish NPS hosted-page visit telemetry from submitted response outcomes.
+  The legacy `response_rate` remains a deprecated compatibility alias for the
+  new explicit `hosted_visit_rate`, because email security scanners and link
+  prefetchers can load a hosted survey without a verified human response (#236).
+
 ### Added
 
 - Zapier connector + unified webhook subscription API (#234):
@@ -32,6 +105,337 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   - **Zapier app**: in-repo Zapier Platform CLI project
     (`integrations/zapier/`) with 4 instant triggers, 4 actions, and
     integration tests runnable against mocks or a live local API.
+- Add an auditable, aggregate-only CSV export for one immutable NPS run. The
+  report includes the run definition fingerprint, denominator chain, delivery
+  and submission rates, qualification thresholds, sample-planning evidence, and
+  the complete 0-10 distribution, while excluding comments, emails, contacts,
+  and respondent identifiers. Each export is persisted as a versioned,
+  immutable artifact with creator, timestamp, and SHA-256 history; operators
+  can list and re-download the exact same bytes without recomputing a live
+  ledger. Creation and download each record a tenant-scoped audit event, and
+  the response exposes a standard body digest plus a matching strong ETag for
+  independent verification (#236).
+
+- Enforce NPS evidence export content-addressing in PostgreSQL and on
+  repository reads so a tampered artifact fails closed instead of being served
+  with a misleading audit digest (#236).
+
+- Make NPS evidence creation an explicit, idempotent POST contract with a
+  client request key. Retries replay the original artifact and return `200 OK`
+  without a duplicate creation audit event; new artifacts return `201 Created`.
+  Persisted exports now carry a 30-day retention deadline, expose it in the
+  Console history, reject expired downloads with `410 Gone`, and are removed in
+  bounded background cleanup batches after expiry while their audit events stay
+  available for governance review (#236).
+
+- Immutable initial-target, first-contact, and first-terminal timestamps for
+  low-score recovery, with run-scoped NPS evidence for on-time versus late
+  customer contact and terminal disposition. Historical records without a
+  trustworthy timestamp are excluded from the timeliness denominator and cannot
+  gain inferred evidence through later edits or reopening (#236).
+
+- Run-scoped NPS recovery-outcome evidence beside each selected measurement,
+  showing review, resolution, dismissal, customer-contact, root-cause, and
+  action-record counts without treating dismissed work as a resolved customer
+  recovery (#236).
+
+- NPS low-score recovery cards now link a comment's durable feedback signal to
+  its exact, ID-scoped Feedback workbench view, preserving the existing human
+  customer-request promotion flow (#236).
+
+- Hosted NPS responses can record an optional, response-specific follow-up
+  permission. The result is carried through the public contract, durable
+  recovery notification, and Console low-score workflow while remaining
+  distinct from the contact's subscription state. The recovery queue also
+  distinguishes an explicit refusal from historical replies where this answer
+  was never recorded (#236).
+
+- NPS campaigns now define frozen operating-evidence thresholds for submitted
+  responses and submitted-response rate. Each run reports whether its current
+  result is preliminary, directional, qualified for that campaign's threshold,
+  incomplete after redaction, or unavailable without claiming statistical
+  significance (#236).
+
+- Canonical English and Simplified-Chinese NPS respondent content and hosted
+  response-page controls. Changing an NPS campaign locale now creates a new
+  content version, while previously delivered links retain their original
+  localized snapshot (#236).
+
+- Operators can cancel a scheduled or evaluating NPS run before its invitation
+  ledger materializes. Cancellation is idempotent, records the acting operator,
+  and is fenced against concurrent workers so it never reports success after
+  invitations are committed (#236).
+
+- NPS campaign runs with selectable cohort-backed, consented email recipients,
+  immediate or future scheduling, hosted score and comment collection,
+  profile-linked feedback signals, and Console distribution and trend analytics
+  (#236).
+
+- Privacy-safe NPS launch preflight with current aggregate cohort, eligible,
+  excluded, and capped invitation counts plus delivery-readiness evidence;
+  recipients remain undisclosed and are still frozen by the worker at run time
+  (#236).
+
+- NPS launch preflight now warns when its current capped invitation estimate
+  cannot reach the campaign's frozen minimum submitted-response threshold, even
+  with perfect completion. The advisory remains non-blocking because the worker
+  re-evaluates the audience at scheduling time (#236).
+
+- Run-level NPS measurement history with per-run delivery, completion,
+  response-rate, promoter, passive, and detractor evidence, so response timing
+  within a collection window cannot be mistaken for a change in NPS (#236).
+
+- Explicit run-level NPS hosted-page visit (`started / invitations`) and
+  page-visit conversion (`completed / started`) metrics, with hosted-survey
+  visits and completed responses retained in the started audience so the
+  collection funnel remains auditable after a respondent submits (#236).
+
+- Per-tenant NPS run-materialization telemetry with bounded lifecycle and
+  failure reasons, surfaced in the Operations dashboard for worker triage
+  without exposing raw provider or database errors (#236).
+
+- NPS measurement evidence beside each selected score, including the immutable
+  run's eligible audience, invitations, submitted responses, recipient coverage,
+  and submission coverage without implying population-level statistical
+  significance (#236).
+
+### Fixed
+
+- Avoid holding a PostgreSQL campaign-list rows cursor while loading per-campaign
+  NPS settings, preventing low-connection pools from deadlocking after an NPS
+  campaign is created (#236).
+
+- Bound frozen NPS run-definition integer parsing to the signed 32-bit proto
+  range before Console serialization, rejecting oversized or undersized values
+  instead of relying on architecture-dependent integer conversion (#236).
+
+- Prevent the shared Console page hero from reserving a 260px vertical gap on
+  narrow screens. Its content basis now applies only once the responsive layout
+  becomes horizontal, keeping NPS and other operations pages compact on mobile
+  (#236). The production NPS browser smoke now enforces the compact mobile hero
+  geometry and horizontal containment.
+
+- Serialize failed and expired idempotency-key recovery with conditional state
+  transitions, so one concurrent customer-request promotion, feedback-batch,
+  or API-key retry executes while other callers observe the new key as in
+  progress (#236).
+
+- Clear the one-time NPS feedback-promotion route parameter after the dialog
+  closes, preventing a browser refresh from reopening an already-submitted
+  customer-request form. View-only operators now clear a direct promotion link
+  without being shown a form they cannot submit (#236).
+
+- Make survey provider-event processing replay-safe: an exact webhook replay
+  does not reapply side effects after a newer delivery fact, and fallback
+  idempotency keys bind the event payload to its invitation or provider-message
+  locator. No later provider event, including a conflicting terminal outcome,
+  can overwrite a terminal invitation's suppression, timestamps, or operational
+  evidence (#236).
+
+- Normalize public-survey network fingerprints through the configured
+  trusted-proxy model before hashing. JSON and hosted-form submissions now
+  exclude ephemeral transport ports and ignore untrusted forwarding headers
+  (#236).
+
+- Replace raw public-survey SHA-256 metadata hashes with versioned,
+  tenant-scoped, domain-separated HMAC pseudonyms derived from the managed Tink
+  keyset. A primary-key rotation starts a new correlation boundary without
+  storing raw client addresses or user agents, and identical values cannot be
+  correlated across tenant boundaries (#236).
+
+- Preserve the feedback signal linked to an NPS response when it is reloaded
+  by invitation, so hosted-response retries retain a complete feedback-trace
+  read model (#236).
+
+- Prevent NPS worker batch claims from expiring before later runs begin
+  materialization by claiming each run immediately before processing it (#236).
+
+- Allow GDPR export and deletion for a contact-linked NPS response with no
+  comment, including its survey invitation, response, and run redaction
+  evidence (#236).
+
+- Prevent a stale NPS audience snapshot from recreating a survey invitation
+  after GDPR erasure removes the respondent's cohort membership (#236).
+
+- Preserve GDPR export and deletion for legacy feedback records whose subject
+  identity columns have not been backfilled (#236).
+
+- Corrected the NPS campaign list's launch label. Scheduled-run campaigns now
+  render as planned runs instead of incorrectly inheriting the workflow-close
+  label in the Console (#236).
+
+- Kept active NPS campaign runs live in the Console: run state, delivery
+  funnel, recovery queue, and selected measurement now refresh until the run
+  reaches a terminal state (#236).
+
+- Prevented NPS campaign settings from requiring more completed responses than
+  a run can invite. The Console now flags the incompatible threshold and
+  recipient cap before submission, while PostgreSQL enforces the same invariant
+  for every write (#236).
+
+- Made NPS launch preflight identify the current aggregate exclusion cause as
+  missing contact, unavailable contact, or contact cooldown. The exclusive,
+  no-PII counts sum to the excluded audience while scheduled workers remain the
+  authoritative recipient boundary (#236).
+
+- NPS Console analytics now defaults to one finalized measurement run instead
+  of aggregating incompatible historical runs, and clearly separates live
+  collection previews from the finalized trend (#236).
+
+- Prevented the NPS Console from drawing a continuous trend across runs with
+  different immutable questions, cohorts, sample caps or seeds, or collection
+  windows. Each break now starts a visible measurement baseline instead of
+  implying an invalid comparison (#236).
+
+- Prevented the NPS Console from comparing runs across a changed frozen contact
+  cooldown, and exposed each run's immutable collection window, recipient cap,
+  and contact interval alongside its score (#236).
+
+- Made NPS cohort and cohort-source enablement an explicit send boundary. New
+  campaign setup omits disabled cohorts, while scheduling and materialization
+  lock and recheck the selected cohort/source so a committed disablement creates
+  no invitation and records an actionable run failure (#236).
+
+- Updated the Survey Console overview and creation guidance to include NPS,
+  so operators can discover the relationship-campaign path without first
+  changing the survey-type selector (#236).
+
+- Preserved the `SURVEY_TYPE_NPS` enum in hosted-survey API responses, so
+  trusted API clients can render the correct 0-10 NPS scale (#236).
+
+- Made hosted-survey HTML and JSON submissions reject oversized requests and
+  comments consistently, rather than silently truncating API feedback (#236).
+
+- Prevented NPS analytics from presenting a false score of `0` after GDPR
+  deletion removes every current response; the Console now preserves separate
+  redaction evidence and marks the score unavailable (#236).
+
+- Made NPS schedule request-key replays return the original run without a
+  second `survey.nps_run_schedule` audit event; only the initial scheduling
+  request returns `201 Created`, while a compatible replay returns `200 OK`
+  (#236).
+
+- Preserved exact NPS scheduling replays after later campaign archival, and
+  fenced new run snapshots to the Campaign revision locked at persistence so an
+  overlapping campaign update cannot combine two configuration versions (#236).
+
+- Enforced hosted-survey response deadlines inside the invitation transaction
+  using the database clock, so a submission that crosses its cutoff cannot
+  alter an NPS run's distribution or trend after its collection window closes
+  (#236).
+
+- Preserved a completed NPS response receipt when completion wins the
+  invitation lock against a simultaneous expiry write, rather than surfacing a
+  spurious missing-link result at the collection boundary (#236).
+
+- Rechecked invitation suppression under the response transaction lock, so a
+  concurrent complaint or delivery suppression cannot admit a stale NPS link
+  after the recipient is revoked (#236).
+
+- Revalidated NPS public-link lifecycle after recording a hosted survey start
+  and again after invitation-level customer-control persistence, so an
+  overlapping archive, expiry, or suppression cannot leave a respondent on a
+  now-unavailable response page (#236).
+
+- Bound each contact-email survey invitation to one encrypted tenant-unsubscribe
+  URL. Public-page refreshes and delivery retries reuse that URL, while an
+  expired 90-day token rotates atomically with its replacement (#236).
+
+- Protect relationship-NPS respondents with a configurable 30-365 day contact
+  cooldown (90 days by default), frozen into each scheduled run so a later
+  campaign edit cannot expand that run's audience. Recipient-ledger writes now
+  serialize and revalidate this tenant-wide guard against concurrent NPS and
+  contact-addressed survey activity rather than trusting a stale audience read
+  (#236).
+
+- Revalidated a contact-email survey recipient's consent, suppression, bounce,
+  complaint, and tenant-update unsubscribe state under the same lock used for
+  invitation materialization. A recipient who opts out after audience resolution
+  can no longer receive an NPS invitation; triggered surveys record the precise
+  `contact_not_eligible` suppression reason instead (#236).
+
+- Made tenant-wide unsubscribe revoke queued and already-claimed contact-email
+  survey invitations in the same transaction, clearing their delivery secrets
+  and leases. The delivery worker now rechecks the locked recipient immediately
+  before external handoff, so a stale claim cannot send or become delivered
+  after the customer withdraws (#236).
+
+- Applied contact-first lease revocation to manual contact suppression and
+  bounce or complaint signals from both notification and survey providers. A
+  suppression event now stops every outstanding contact-email survey invitation
+  for that recipient rather than waiting for each worker to discover it
+  independently (#236).
+
+- Preserve each recipient's versioned survey definition after later campaign
+  edits, while retaining current campaign status as the immediate response-link
+  revocation control and rechecking it under the response-write transaction
+  lock (#236).
+
+- Show accurate selection prompts for populated NPS cohort and detractor-owner
+  controls instead of implying that no options are available (#236).
+
+- Scoped NPS privacy-redaction evidence to the selected run measurement window,
+  so date-filtered analytics cannot combine one run's responses with another
+  run's erased-response count (#236).
+
+- Serialize GDPR erasure with in-flight NPS responses at the invitation ledger,
+  ensuring an erased response is counted exactly once in the run's privacy
+  redaction evidence (#236).
+
+- Fence NPS invitation materialization against concurrent campaign archival,
+  so an archived campaign cannot create a recipient ledger after an operator
+  disables it; the run records an actionable terminal reason instead (#236).
+
+- Terminate an NPS run when its scheduled cohort resolves to zero eligible
+  recipients, persist the evaluated and eligible audience evidence, and free
+  the campaign for a corrected re-run instead of holding an empty collection
+  window open (#236).
+
+- Prevented a final contact-cooldown race from leaving an NPS run in
+  `collecting` with zero invitations. The run now records a terminal
+  `no_eligible_recipients` outcome with its aggregate audience evidence (#236).
+
+- Rechecked NPS email delivery readiness at the scheduled materialization
+  boundary. Configuration drift now fails the run before it creates recipient
+  invitations, while transient materialization failures retain their lease for
+  an observable automatic retry (#236).
+
+- Preserved provider email-open telemetry after a hosted-page visit, and
+  exposed separate page-visit and page-visit conversion funnel metrics for
+  generic survey analytics and campaign health (#236).
+
+- Isolated the NPS cohort query cache from cohort-management data so the
+  Console preserves the correct response shape after operators visit both
+  surfaces (#236).
+
+- Prevented the Console from offering a second NPS campaign run while an
+  existing run is scheduled, evaluating, or collecting (#236).
+
+- Kept cohort-based NPS campaigns out of generic source-link and event-recipient
+  controls, and made their fixed contact-email delivery channel explicit in the
+  Console (#236).
+
+- Prevented an NPS run from being scheduled when its email delivery path is not
+  ready, and enforced that each run-linked invitation belongs to that run's
+  campaign (#236).
+
+- Recovered NPS runs whose worker claim expires after a crash, while fencing
+  stale workers from changing the reclaimed run (#236).
+
+- Required an explicit score selection on hosted NPS surveys, preserved the
+  valid `score=0` preselection, and fixed campaign-plus-run trend filtering
+  (#236).
+
+- Recorded scheduled NPS runs in the database audit allow-list and restored
+  tooltip context for populated cohort synchronization tables (#236).
+
+- Persist NPS detractor owner notifications with the submitted response and
+  low-score review, so owners are alerted before the recovery SLA expires
+  (#236).
+
+- Runtime smoke base-image overrides so local release sweeps can use verified
+  mirror or locally tagged Docker bases while CI keeps the official pinned
+  Dockerfile defaults.
 
 - Amplitude and Mixpanel cohort sync (#233):
   - **Backend**: 15 proto RPCs, Tink-encrypted dual credentials (webhook +
@@ -249,13 +653,422 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   binary or pinned Docker fallback, removing the previous local skip when the
   binary was absent.
 
+- Public survey routes now enforce separate hashed client and survey-token rate
+  limit buckets, evict idle anonymous limiter buckets, and redact survey tokens
+  from rate-limit rejection logs.
+
+- Survey email provider events can now be accepted through a sender-scoped
+  signed webhook endpoint with HMAC-SHA256 timestamp verification, hashed client
+  and sender rate-limit buckets, and invalid-signature rejection before provider
+  events can update invitation or contact state.
+
 - Removed `golang.org/x/crypto` from the root dependency graph and raised the
   Go floor to `1.26.5`. Console password hashing plus break-glass token and
   recovery-code hashing now use `github.com/ProtonMail/bcrypt`, which keeps
   bcrypt-compatible stored hashes while dropping the vulnerable `openpgp`
   package from the module graph.
 
+### Changed
+
+- Console production builds now split shared vendor dependencies into stable
+  chunks and run a bundle budget check, turning oversized JS/CSS assets into CI
+  failures instead of non-blocking Vite warnings. The product-readiness
+  contract now also fails CI if the Customer Signal OS scorecard, public survey
+  browser smoke, full Console browser smoke, bundle budget, release-smoke
+  wiring, supplemental Firefox/WebKit browser coverage, or related proposal
+  evidence is removed.
+
+- Console production builds now split the zh-CN locale catalog into its own
+  stable chunk, keeping Control Tower and Reliability copy growth from inflating
+  the main application bundle past the product bundle budget.
+
+- Control Tower now includes a closed-loop recovery scorecard sourced from
+  survey analytics, prioritizes overdue and unhealthy low-score recovery work in
+  the action queue, avoids calling survey administration APIs for operators who
+  cannot read them, shows a first-value activation scorecard for source
+  connection, feedback capture, insight generation, semantic discovery, and
+  closed-loop testing, adds a source health command center for enabled sources,
+  freshness, source-level errors, never-seen sources, disabled sources, and
+  prioritized intake repair, adds a closed-loop recovery command center for
+  overdue SLA work, unassigned recovery, customer contact, evidence debt, owner
+  load, and prioritized next action, and shows a world-class readiness matrix
+  for signal understanding, semantic discovery, closed-loop operations, action
+  accountability, and release verification. It also adds a release verification
+  evidence center that joins runtime blockers with proposal, product contract,
+  unit, browser, bundle-budget, and release-smoke evidence, plus a world-class
+  maturity gap register that exposes the top 100 benchmark gaps by category and
+  current evidence state. The register now includes a world-class execution
+  queue that assigns the highest-priority gaps to owner, acceptance evidence,
+  and verification scope. Browser accessibility checks cover the closed-loop
+  scorecard, source health command center, closed-loop recovery command center,
+  first-value activation scorecard, release verification evidence center,
+  world-class maturity gap register, world-class execution queue, and readiness
+  matrix workflow. The maturity register now treats the durable identity graph
+  foundation as verified evidence and filters verified gaps out of the active
+  execution queue, so the queue keeps pointing at remaining world-class work
+  instead of closed slices. Release smoke now rebuilds the production Console bundle and
+  runs the dedicated desktop/mobile Chromium Control Tower closed-loop browser
+  flow, plus a full desktop/mobile Chromium Console accessibility and reflow
+  browser suite and a supplemental Firefox/WebKit desktop browser suite.
+
+- Customer Request decision records now persist and render the decision
+  rationale, owner identity, evidence bundle reference, public-safe state, and
+  review reasons alongside score snapshots and field transitions, giving request
+  status changes an audit-grade why/owner/evidence trail. The Control Tower
+  maturity register now promotes request decision records as verified evidence
+  and moves the execution queue to the next unverified world-class gap.
+
+- Request Notifications now expose status-level closed-loop evidence for
+  expected, notified, failed, suppressed, and recovery-pending customers through
+  a generated API contract, backend delivery aggregation, Console route preload,
+  visible evidence table, component coverage, browser accessibility coverage,
+  and product-readiness contract checks. Control Tower now promotes
+  `closed_loop_notified_evidence` as verified evidence and moves the execution
+  queue to operator batch actions.
+
+- Classification Quality now includes a classification review learning ledger
+  for accepted, edited, and dismissed AI classification samples, with generated
+  read/write API contracts, PostgreSQL persistence, audit logging, Console
+  review controls, learning-summary metrics, unit coverage, browser
+  accessibility coverage, and product-readiness contract checks. Control Tower
+  now promotes `ai_accept_dismiss_learning` as verified evidence.
+
+- Feedback ingestion now persists a durable `signal_trace_id` anchor from source
+  metadata or runtime trace context, carries the same ID into enrichment jobs,
+  and exposes a generated end-to-end signal trace API that joins source,
+  enrichment, request, notification, and survey evidence. Feedback details show
+  the trace stages, missing stages, terminal status, and event metadata; unit,
+  browser, and product-readiness contract checks keep the Console API, UI,
+  mocks, and Control Tower maturity promotion wired. Control Tower now promotes
+  `reliability_end_to_end_trace` as verified evidence and removes the completed
+  slice from the active world-class execution queue.
+
+- Reliability now renders a replay/backfill drill that maps every product SLO to
+  an operator entry point, replay lens, action, evidence artifact, owner, and
+  escalation path, alongside the downloadable SLO replay worksheet. Browser
+  accessibility coverage now opens the Reliability page with mocked system
+  preflight, recovery, release, GDPR, API-key, MCP, and outbox data. Control
+  Tower now promotes `reliability_backfill_replay` as verified evidence and
+  advances the world-class execution queue to `reliability_error_budget`.
+
+- Reliability now renders an error budget / burn-rate ledger that maps every
+  generated product SLO to its objective, budget allowance, burn query,
+  remaining-budget query, exception policy, incident evidence, runbook, owner,
+  escalation, and current runtime signal. Unit and browser coverage keep the
+  ledger mounted on the Reliability route, and Control Tower now promotes
+  `reliability_error_budget` as verified evidence while advancing the execution
+  queue to `reliability_release_health`.
+
+- Reliability now renders a release health correlation ledger that ties runtime
+  version, lifecycle state, restore-drill result, feedback pressure, and request
+  notification failures to one release decision. The Reliability route preloads
+  feedback stats and notification status evidence, browser smoke verifies the
+  ledger on desktop and mobile, and Control Tower now promotes
+  `reliability_release_health` as verified evidence while advancing the
+  execution queue to `reliability_incident_timeline`.
+
+- Reliability now renders an incident timeline reconstruction that links
+  incident start, readiness detection, customer impact, mitigation pressure,
+  restore-drill recovery, and customer notification evidence into one ordered
+  timeline with owner, action, signal, status, timestamp, and fingerprint. Unit
+  and browser coverage keep the timeline mounted on the Reliability route, and
+  Control Tower now promotes `reliability_incident_timeline` as verified
+  evidence while advancing the execution queue to
+  `reliability_tenant_quota_dashboard`.
+
+- Reliability now renders a tenant quota / saturation dashboard that joins
+  ingest usage quota, API-key per-key RPM coverage, LLM provider error pressure,
+  MCP client rpm/burst coverage, GDPR workload pressure, and outbox dead-letter
+  saturation into one tenant boundary with capacity, consumption, guardrail,
+  owner, action, status, and fingerprint. The Reliability route preloads usage
+  and LLM usage evidence, browser smoke verifies the quota dashboard, and
+  Control Tower now promotes `reliability_tenant_quota_dashboard` as verified
+  evidence while advancing the execution queue to
+  `reliability_backup_restore_drill`.
+
+- Reliability now renders a backup / restore drill evidence center that joins
+  backup freshness, restore execution, migration readiness, runbook ownership,
+  and remediation evidence into one recovery proof with guardrail, owner,
+  action, status, and fingerprint. The Reliability route reuses recovery,
+  release, and preflight evidence for the model, browser smoke verifies the
+  recovery proof, and Control Tower now promotes
+  `reliability_backup_restore_drill` as verified evidence while advancing the
+  execution queue to `reliability_consistency_checks`.
+
+- Reliability now renders a data consistency checks evidence center that joins
+  ingest usage, feedback stats, customer request projections, request
+  notification status evidence, survey analytics, and low-score recovery queues
+  into one auditable data chain with guardrail, owner, action, status, and
+  fingerprint. The Reliability route now preloads customer requests and survey
+  analytics for the model, browser smoke verifies the consistency card, and
+  Control Tower now promotes `reliability_consistency_checks` as verified
+  evidence while advancing the execution queue to `reliability_pipeline_slo`.
+
+- Reliability now renders a pipeline SLO ledger that joins ingest usage, LLM
+  enrichment usage, outbox dead-letter recovery, request sync projection
+  health, preflight evidence, and release lifecycle state into four auditable
+  pipeline lanes with objective, burn signal, release gate, owner, escalation,
+  runbook, action, status, and fingerprint. Browser smoke verifies the pipeline
+  SLO card, Control Tower now promotes `reliability_pipeline_slo` as verified
+  evidence, and the world-class execution queue advances to
+  `governance_sso_scim_rbac`.
+
+- Security now renders a governance / RBAC readiness evidence center that joins
+  auth mode, break-glass token inventory, lockout evidence, member role/source
+  coverage, last-admin continuity, and member audit snapshots into one
+  inspectable control surface. The Security route preloads auth mode, members,
+  and bounded member audit evidence, browser smoke verifies the governance card,
+  Control Tower now promotes `governance_sso_scim_rbac` as verified evidence,
+  and the world-class execution queue advances to
+  `governance_field_level_permissions`.
+
+- Security now renders a field-level permissions ledger that joins the central
+  role permission matrix, public visibility policy, public write and identity
+  modes, moderation/redaction queue state, and public moderation audit snapshots
+  into one inspectable control surface. The Security route preloads public
+  policy, moderation queue, and bounded public moderation audit evidence,
+  browser smoke verifies the field-level ledger, Control Tower now promotes
+  `governance_field_level_permissions` as verified evidence, and the world-class
+  execution queue advances to `governance_public_privacy_preflight`.
+
+- Public Visibility now renders a public privacy preflight evidence center that
+  joins public access mode, enabled public surfaces, search indexing, default
+  moderation gates, submitter identity exposure, public timestamps, portal
+  submission fields, page-URL collection, and review recovery state before
+  content reaches public surfaces. Browser smoke verifies the preflight card,
+  Control Tower now promotes `governance_public_privacy_preflight` as verified
+  evidence, and the world-class execution queue advances to
+  `governance_retention_legal_hold`.
+
+- GDPR now renders a retention / legal hold workflow evidence center that joins
+  tenant retention policy, legal-hold gate, delete grace window, export artifact
+  residue, backup-retention residue, hashed audit residue, and visible GDPR
+  request records before irreversible operations run. Browser smoke verifies
+  the retention workflow, Control Tower now promotes
+  `governance_retention_legal_hold` as verified evidence, and the world-class
+  execution queue advances to `governance_compliance_package`.
+
+- Security now renders a compliance package evidence center that joins auth
+  mode, RBAC and member audit evidence, break-glass continuity, public data-flow
+  inventory, public moderation evidence, audit export readiness, GDPR retention
+  and data-subject request controls, and outbound notification target
+  boundaries into one DPA/SOC2-ready package. Browser smoke verifies the
+  compliance package, the Security route preloads GDPR and notify-target
+  evidence, Control Tower now promotes `governance_compliance_package` as
+  verified evidence, and the world-class execution queue advances to
+  `governance_key_rotation_ui`.
+- Security now renders a key rotation readiness center that joins system
+  preflight Tink/decryptability checks, API key expiry/grace/boundary evidence,
+  inbound webhook source rotation readiness, outbound notify-target and
+  reply-hook secret boundaries, and LLM provider managed credential/test
+  evidence. Browser smoke verifies the key-rotation evidence, the Security route
+  preloads API key, inbound-source, LLM channel, reply-hook health, and runtime
+  preflight evidence, Control Tower now promotes `governance_key_rotation_ui` as
+  verified evidence, and the world-class execution queue advances to
+  `governance_webhook_signature_tooling`.
+- Security now renders a webhook signature tooling center that joins inbound
+  webhook source health, reply-hook URL fingerprints and delivery probes,
+  request notification webhook signature/test evidence, external-sync webhook
+  secret and event signature status, and cross-surface failure diagnostics into
+  one security control surface. Browser smoke verifies the signature tooling,
+  the Security route preloads request-notification and external-sync evidence,
+  Control Tower now promotes `governance_webhook_signature_tooling` as verified
+  evidence, and the world-class execution queue advances to
+  `governance_security_runbook`.
+- Security now renders a security incident runbook evidence center that joins
+  credential compromise response, webhook signature incident handling, access
+  and identity continuity, public privacy incident controls, and customer
+  notification recovery into one rehearsal surface. Browser smoke verifies the
+  runbook, the Security page reuses the existing governance, key, signature,
+  public, GDPR, and notification evidence queries, Control Tower now promotes
+  `governance_security_runbook` as verified evidence, and the world-class
+  execution queue advances to `developer_openapi_sdk_examples`.
+- Developer Platform now renders a developer API adoption kit on the API Keys
+  page, joining generated OpenAPI coverage, scope and preset registry evidence,
+  Node and Go SDK live verification, example apps, deterministic demo
+  bootstrap, service-account automation identity, and webhook replay assets in
+  one adoption surface. Browser smoke verifies the kit, the product readiness
+  contract now checks the underlying OpenAPI/SDK/example/replay artifacts,
+  Control Tower promotes `developer_openapi_sdk_examples` as verified evidence,
+  and the world-class execution queue advances to `developer_sdk_parity`.
+- Developer Platform now verifies Node and Go SDK parity with a repository gate
+  and renders the evidence on the API Keys page, covering shared public
+  management methods, error envelopes, transport errors, retry and
+  idempotency behavior, browser-safe key boundaries, package metadata, packed
+  browser smoke, and live e2e entrypoints. The product readiness contract and
+  local check script now run the parity verifier, Control Tower promotes
+  `developer_sdk_parity` as verified evidence, and the world-class execution
+  queue advances to `developer_connector_sdk`.
+- Integrations now include a connector conformance contract with a manifest,
+  GitHub Issues webhook fixtures, deterministic HMAC signature verification,
+  fixture replay normalization, field mapping checks, and provider error
+  recovery classification. External Sync renders the live connector
+  conformance gate across manifest, replay, signature, mapping, and recovery
+  lanes; the product readiness contract and local check script run the
+  conformance verifier, Control Tower promotes `developer_connector_sdk` as
+  verified evidence, and the world-class execution queue advances to
+  `developer_field_mapping_ui`.
+- External Sync now renders a field mapping workbench for the selected
+  connector mapping, turning JSON-only mapping into a visible schema-diff,
+  required-field coverage, status lifecycle, preview/backfill safety, and
+  rollback recovery evidence surface. The workbench lists Attune-to-provider
+  field rows with saved, suggested, missing, and drifted states; browser smoke
+  verifies the workbench, the product readiness contract checks its model and
+  card, Control Tower promotes `developer_field_mapping_ui` as verified
+  evidence, and the world-class execution queue advances to
+  `developer_api_consistency`.
+- Developer Platform now verifies API consistency with a repository gate and
+  API Keys evidence card covering pagination surfaces, console mirrors, filter
+  wire names, Customer Request sort enums, ErrorResponse parsing,
+  Idempotency-Key handling, SDK pagers, and exact Node/Go query fixtures. The
+  product readiness contract and local check script now run the consistency
+  verifier, Control Tower promotes `developer_api_consistency` as verified
+  evidence, and the world-class execution queue advances to
+  `developer_import_export_ui`.
+- Developer Platform now renders a fixture-backed import/export workbench on
+  the API Keys page, covering CSV and JSON templates, import and export
+  coverage, schema preview, required-field mapping, dry-run create/update/reject
+  diffs, recovery classes, permission scopes, PII redaction, and audit events
+  for dry-run, commit, and export download. The product readiness contract and
+  local check script now run the import/export verifier, Control Tower promotes
+  `developer_import_export_ui` as verified evidence, and the world-class
+  execution queue advances to `developer_integration_catalog`.
+- External Sync now renders a verifier-backed integration catalog covering Jira,
+  GitHub, Intercom, Zendesk, Salesforce, HubSpot, custom webhook, and CSV
+  connector cards with install states, auth modes, setup checks, permission
+  scopes, health badges, sample replay fixtures, audit events, versioned upgrade
+  paths, and rollback evidence. The product readiness contract and local check
+  script now run the catalog verifier, Control Tower promotes
+  `developer_integration_catalog` as verified evidence, and the world-class
+  execution queue advances to `developer_upgrade_diagnostics`.
+- External Sync now renders verifier-backed upgrade diagnostics that combine
+  connector install health, permission boundaries, schema drift, webhook
+  readiness, fixture replay, and version compatibility into one executable
+  diagnosis with recovery actions. A new upgrade-diagnostics manifest and local
+  verifier check required diagnostic lanes, connector compatibility rows,
+  recovery playbooks, and representative GitHub, CSV, and Salesforce fixtures;
+  Control Tower promotes `developer_upgrade_diagnostics` as verified evidence
+  and advances the world-class execution queue to
+  `developer_north_star_metrics`.
+
+- Feedback details now expose normalized identity evidence for `user_id` plus
+  source metadata email, external ID, source contact ID, CRM ID, and support ID
+  signals, giving operators a verifiable first slice of the identity graph
+  before deeper merge and account-model work lands. The same detail view now
+  includes a generated identity-resolution assessment with strength,
+  recommended action, stable-key/source-path counts, missing identity kinds, and
+  risk reasons so merge review starts from inspectable evidence instead of raw
+  source metadata. Feedback now also includes an identity merge review queue
+  that scans a bounded recent window, groups stable identity keys into merge
+  candidates, separates weak evidence that needs stronger keys, and opens the
+  supporting feedback rows from the workbench. Approved merge candidates now
+  persist to a durable signal subject identity graph with subject, identity, and
+  merge-event tables, a generated merge endpoint, transactional
+  `signal_subject.merge` audit logging with hashed identity values, and a
+  Console approve action. The review workbench now also surfaces recent durable
+  merges and provides an audited undo action that revokes the selected identity
+  link, refreshes the subject's primary identity, and writes
+  `signal_subject.split` audit evidence. The same review response now includes
+  an active subject roster with subject, identity, and evidence totals plus top
+  resolved subjects, making the durable graph inspectable from Console instead
+  of leaving it as a hidden database projection. Operators can now open a
+  resolved subject from the roster and inspect its active and revoked identities
+  plus merge/split timeline events with bounded feedback evidence excerpts,
+  turning identity resolution into a reviewable history rather than a single
+  current-state count or a list of opaque feedback IDs.
+
+- Feedback list, detail, and assignment escalation views now expose a generated
+  `FeedbackAccountContext` derived from source metadata account/company keys,
+  and the console feedback list accepts an `account_key` filter across the
+  generated API contract, repository query, HTTP binder, Console filter UI,
+  unit tests, PostgreSQL integration coverage, and browser accessibility smoke.
+
+- Survey low-score recovery queues now expose generated `SurveyAccountContext`
+  from response metadata and invitation recipient snapshots, and the recovery
+  response list accepts an `account_key` filter across the generated contract,
+  repository query, handler binder, Console filter UI, unit tests, PostgreSQL
+  integration coverage, and browser accessibility smoke.
+
+- Feedback now exposes a feedback triage command center above the workbench,
+  grouping urgent open rows, untriaged rows, stalled active work, terminal
+  enrichment failures, and identity evidence debt into owner lanes with SLA
+  hours, overdue and due-soon counts, recommended actions, filter queries, and
+  sample feedback links.
+
+- Feedback details now include durable owner/SLA assignment through a generated
+  assignment API, tenant-member owner validation, persisted assignment notes,
+  changed-field audit entries, PostgreSQL integration coverage, Console detail
+  controls, MSW fixtures, and browser accessibility coverage, turning triage
+  lanes into accountable operator work instead of a read-only queue.
+  Feedback selection now also supports bulk owner/SLA assignment with explicit
+  keep/clear/set semantics, bounded validation, per-row assignment audit
+  entries, partial-failure reporting, Console selection-bar controls, and
+  PostgreSQL plus browser coverage. The same selection workflow now offers
+  feedback assignment recommendations that preview deterministic owner-lane,
+  severity, SLA, rationale, already-satisfied, and partial-failure outcomes
+  before applying audited policy notes and optional owner overrides. Delegated
+  administrators can now manage the tenant feedback assignment policy from
+  Console, tuning rule enablement, owner lanes, SLA hours, and validated default
+  owners. The policy is persisted in system settings, drives recommendation
+  preview and apply paths, uses policy default owners when no override is
+  supplied, keeps bounded version history, supports dry-run impact previews and
+  prior-version restore, and writes `feedback_assignment.policy_update` /
+  `feedback_assignment.policy_restore` audit events in the same database
+  transaction as the settings update. Feedback now also exposes an assignment
+  SLA escalation queue that counts and prioritizes open feedback with overdue
+  deadlines, deadlines inside the 12-hour warning window, missing owners, or
+  missing SLA commitments through a generated API, Console workbench panel,
+  typed mocks, cache refreshes after assignment mutations, PostgreSQL
+  integration coverage, and browser accessibility coverage.
+
+- Feedback selection now includes an operator batch command center that brings
+  link, assign, dismiss, notify, and failed-item recovery paths into one
+  selection-scoped workflow. The Console preserves the latest batch result after
+  selection clears, can refocus failed feedback IDs, batch-dismisses through the
+  workflow transition endpoint, links through Customer Request promotion, and
+  now opens a batch Request Notification dialog that previews audience,
+  publishes multi-request updates, and returns per-request failures without
+  blocking successful requests. Unit, Go handler/service, browser, and
+  product-readiness contract checks now cover the flow. Control Tower now marks
+  `operator_batch_actions` as verified evidence and removes it from the active
+  execution queue.
+
+- Customer Request lists now accept account-key filters through the generated
+  API contract, backend query, Console toolbar, and saved views, with browser
+  accessibility coverage proving account-scoped request review.
+
+- Customer Request detail account profiles now include an account-scoped request
+  review action, and the Customer Request route accepts `account_key` deep links
+  so account context can be shared and verified from the browser.
+
+- Account-scoped Customer Request lists now use a generated backend account
+  summary API to show an authoritative signal overview with demand, feedback,
+  customer, vote, delivery-health, revenue-impact, account decision-score,
+  decision-signal, account evidence-event, profile, and request timeline context
+  for the selected account. Request detail now also exposes structured
+  decision-score factors for priority, feedback, customers, accounts, votes,
+  revenue, and delivery-health context, replacing opaque score debug strings in
+  the Console with an auditable breakdown. Future Customer Request audit writes
+  now also include decision-score snapshots, and request detail renders an
+  auditable decision-record timeline with score factors, evidence counts,
+  delivery health, revenue context, and changed status or priority fields.
+
+- Customer Requests now expose evidence-quality scoring through the generated
+  contract, repository summaries, Console list/detail UI, PostgreSQL
+  integration coverage, browser coverage, and product-readiness contract checks.
+  Each request can show evidence count, source count, customer/account breadth,
+  freshness, stale and low-confidence flags, strengths, and gap reasons; Control
+  Tower now promotes `evidence_quality_score` as covered.
+
 ### Fixed
+
+- Survey email invitations now use the database timestamp for initial retry
+  eligibility, so newly created post-resolution survey invitations are
+  immediately claimable when the app and database clocks differ slightly.
+
+- Full-snapshot cohort sync now reuses one timestamp for membership upserts and
+  stale-member reconciliation, preventing newly received Mixpanel members from
+  being marked departed when app and database clocks differ slightly.
 
 - Fixed the Intercom watermark permanently skipping conversations whose
   search-index entry appeared late: `conversations/search` is eventually
@@ -405,6 +1218,11 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   successful submission, preventing duplicate success text when visitors submit
   feedback from the rendered page.
 
+- Console browser accessibility coverage now scopes modal-only axe scans and
+  waits for dialog teardown before full-page scans, keeping API-key secret
+  reveal, public-visibility moderation, and batch-assignment E2E flows stable
+  across Chromium, Firefox, and WebKit.
+
 - Request notification previews now wrap long JSON fields inside the card,
   preventing horizontal overflow in deployed Console pages on narrow viewports.
 
@@ -457,6 +1275,14 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   console list options, so the reserved request parameters actually affect the
   repo query instead of being dropped after binding.
 
+- Survey workflow and request-resolution campaigns now expose the same
+  `workflow_category` and `request_status` trigger attributes that Console
+  creates by default, so newly created campaigns match real closed/shipped
+  events.
+
+- Console tag pickers now expose a named popover and ARIA-valid empty listbox
+  state, keeping feedback tag assignment accessible in browser axe checks.
+
 ### Added
 
 - **Jira bidirectional issue sync.**
@@ -484,6 +1310,91 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   marker-deduped managed request-context comments, run input metadata
   diagnostics, and comment timeline entries without advancing the scheduled
   cursor.
+
+- Added the post-resolution survey foundation for CSAT and CES campaigns,
+  including tenant-scoped campaign configuration, customer-facing hosted survey
+  pages with score preselection, hosted survey links, public survey retrieval
+  and submission APIs, invitation/response persistence,
+  workflow/reply/request resolution triggers, contact-email invitations with a
+  retryable survey email worker with bounded expired-invitation sweeping and
+  expired-invitation revalidation,
+  auto-resolved and recent-activity suppression, score deep links, idempotent
+  public response retries, hosted survey GET rendering that does not mark
+  invitations as opened, hardened public survey page security headers, and a
+  honeypot guard that drops generic form-bot submissions before they can affect
+  response analytics, Console campaign guardrail editing, Console
+  low-score review detail editing, one-click unsubscribe headers plus
+  hosted-page unsubscribe links, low-score review tracking,
+  analytics aggregates with response-status funnel counts, suppression-reason
+  breakdowns, positive-score rates, daily trend buckets, segment diagnostics,
+  operational health insights, low-score recovery command metrics for overdue,
+  unassigned, critical, pending-contact, and oldest-due work, low-score review
+  SLA defaults, per-review recovery playbooks with SLA status, blockers,
+  next-best actions, risk scores, and backlog health, and average response-time
+  metrics, and an admin Console
+  workspace for campaign setup, hosted-link generation, invitation monitoring,
+  backend-filtered and SLA-prioritized low-score follow-up, generated
+  Go/TypeScript contracts, OpenAPI output, and audit-log actions for survey
+  administration. The low-score queue now also supports server-side recovery
+  focus filters for SLA status and blocker reason, so operators can work
+  overdue, unassigned, pending-contact, missing-root-cause, and missing-action
+  queues without client-side result truncation. Survey analytics now exposes
+  recovery queue counts for those same focus slices and raises insights when
+  active low-score recovery work lacks root-cause or action evidence. The
+  low-score queue also supports server-side review-severity and owner-member
+  filters, with Console controls for critical recovery work and owner-specific
+  queues, plus selected-row batch recovery updates for assigning owners,
+  escalating severity, starting reviews, setting due dates, and marking
+  customer contact across a focused queue. Survey analytics and Console now
+  also expose owner recovery workload pressure with open, overdue, due-soon,
+  critical, pending-contact, oldest-due, and workload-score signals plus a
+  suggested next owner for new recovery assignments. Selected low-score queue
+  rows can now also be smart-assigned through a recovery assignment endpoint
+  that balances candidate owner workload, moves reviews into recovery,
+  preserves stricter due dates, and returns per-review decision reasons plus
+  before/after workload scores. Selected rows can also be escalated through a
+  recovery escalation endpoint that promotes reviews to critical in-review
+  work, preserves already stricter due dates, appends escalation evidence to
+  the internal action record, and returns per-review escalation decisions for
+  the Console. The survey worker now also claims eligible low-score recovery
+  automation candidates, auto-escalates overdue, due-missing, critical, or
+  stale unowned recovery work with fenced stale-claim retries, records
+  automation evidence, surfaces automated escalation in Console recovery
+  playbooks, enqueues retryable owner recovery notifications with duplicate
+  suppression and provider failure states, surfaces notification state in
+  Console recovery playbooks, and exposes
+  `attune_survey_recovery_automation_total` plus
+  `attune_survey_recovery_notification_total` for operational visibility.
+  Survey email provider events now record idempotency keys, synchronize
+  accepted, delivered, delayed, opened, bounced, complained, and rejected
+  invitation states through an admin-gated Console API, keep provider-delayed
+  mail out of the resend queue, and suppress shared contacts plus
+  subscriptions after bounce or complaint events; provider-event audit entries
+  now capture only safe delivery-state evidence and presence flags instead of
+  raw provider payloads, message IDs, or event keys. Console operators can now
+  also manually requeue eligible pending or delayed survey email invitations
+  without resending provider-terminal, suppressed, or completed invitations.
+  Survey campaigns now also expose a generated campaign-health endpoint and
+  Console card with pass/warn/fail checks for campaign state, delivery
+  readiness, delivery backlog, response rate, suppression rate, expiry rate,
+  and low-score recovery risk, plus pending, delayed, rejected, delivered,
+  opened, submitted, suppressed, expired, and overdue-recovery funnel counts.
+  Console operators can now also preview recipients for a selected source
+  sample before sending, with server-side trigger, sampling, cooldown,
+  daily-limit, dedupe-conflict, delivery-readiness, and localized suppression
+  and lifecycle reasons, and can send marked test survey emails through the
+  active sender/provider without creating invitations or analytics records;
+  each successful test send records a non-sensitive audit snapshot with
+  provider, sent time, and proof that no invitation was persisted, while failed
+  test sends record only a stable error category and the same safety markers.
+  Survey invitations, responses, low-score reviews, provider events, and
+  recovery notifications are now also included in GDPR export/delete counts,
+  request history, ZIP JSONL bundles, and subject erasure cleanup.
+
+- Public survey browser smoke coverage now exercises hosted survey rendering,
+  score preselection, mobile overflow, axe accessibility, low-score submission,
+  already-submitted reloads, and persisted response/review rows against a real
+  server and PostgreSQL cluster.
 
 - **Close-the-loop request notifications.**
   Added tenant-scoped request notification settings, sender configuration,

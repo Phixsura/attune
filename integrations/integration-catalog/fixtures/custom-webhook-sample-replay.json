@@ -1,0 +1,17 @@
+{
+  "provider": "custom-webhook",
+  "eventType": "attune.feedback.created",
+  "rawPayload": {
+    "eventId": "evt-custom-304",
+    "title": "Partner portal needs request status callback",
+    "customer": "Acme"
+  },
+  "normalized": {
+    "type": "feedback",
+    "action": "upsert",
+    "externalId": "custom-webhook:evt-custom-304",
+    "title": "Partner portal needs request status callback",
+    "status": "open",
+    "source": "custom-webhook"
+  }
+}

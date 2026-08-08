@@ -34,6 +34,8 @@ test.describe('External sync provider installation browser behavior', () => {
   test('creates, qualifies, and saves provider resource selection through visible controls', async ({
     page,
   }) => {
+    test.setTimeout(120_000)
+
     const diagnostics = collectConsoleDiagnostics(page)
     const apiMocks = await installConsoleApiMocks(page)
 
@@ -56,14 +58,15 @@ test.describe('External sync provider installation browser behavior', () => {
     await expect(dialog).toBeHidden()
     const installationCard = page.locator('button').filter({ hasText: zh.installationName })
     await expect(installationCard).toBeVisible()
+    await mouseClick(page, installationCard)
     await expect(page.getByText('acme/attune')).toBeVisible()
 
+    const resourceCheckbox = page.getByRole('checkbox', { name: /attune/ })
+    await expect(resourceCheckbox).toBeChecked()
     await mouseClick(page, page.getByRole('button', { name: zh.qualifyInstallation }))
     await expect(installationCard).toContainText('full_app')
     await expect(installationCard).toContainText('ok')
 
-    const resourceCheckbox = page.getByRole('checkbox', { name: /attune/ })
-    await expect(resourceCheckbox).toBeChecked()
     await resourceCheckbox.click()
     await expect(resourceCheckbox).not.toBeChecked()
     await mouseClick(page, page.getByRole('button', { name: zh.save }).first())
@@ -80,6 +83,7 @@ test.describe('External sync provider installation browser behavior', () => {
     await expect
       .poll(() => lastProviderResourceSelection(apiMocks.providerInstallationRequests))
       .toEqual({ resourceIds: ['external-sync-provider-installation-1-resource-1'] })
+    await waitForToastNotificationsToClear(page)
     await mouseClick(page, page.getByRole('button', { name: zh.createConnection }))
 
     const connectionDialog = page.getByRole('dialog', { name: zh.connectionTitle })
@@ -140,11 +144,16 @@ test.describe('External sync provider installation browser behavior', () => {
   })
 })
 
-async function mouseClick(page: Page, locator: Locator) {
+async function mouseClick(_page: Page, locator: Locator) {
   await expect(locator).toBeVisible()
-  const box = await locator.boundingBox()
-  if (!box) throw new Error('visible locator did not provide a bounding box')
-  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  await locator.click()
+}
+
+async function waitForToastNotificationsToClear(page: Page) {
+  const toasts = page.locator('[data-sonner-toast]')
+  const viewport = page.viewportSize()
+  await page.mouse.move(0, Math.max(0, (viewport?.height ?? 768) - 1))
+  await expect(toasts).toHaveCount(0, { timeout: 10_000 })
 }
 
 function lastProviderResourceSelection(

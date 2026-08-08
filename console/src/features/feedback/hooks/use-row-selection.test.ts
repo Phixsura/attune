@@ -36,6 +36,13 @@ describe('useRowSelection', () => {
     expect(result.current.selected.size).toBe(0)
   })
 
+  it('selectOnly replaces selection and ignores stale IDs', () => {
+    const { result } = renderHook(() => useRowSelection(ids))
+    act(() => result.current.toggle('a'))
+    act(() => result.current.selectOnly(['b', 'missing', 'c']))
+    expect(Array.from(result.current.selected).sort()).toEqual(['b', 'c'])
+  })
+
   it('removes stale IDs when itemIds changes', () => {
     const { result, rerender } = renderHook(({ items }) => useRowSelection(items), {
       initialProps: { items: ['a', 'b', 'c'] },

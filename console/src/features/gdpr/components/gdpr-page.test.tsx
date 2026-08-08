@@ -61,6 +61,11 @@ const scheduledDeleteRequest = {
   feedbackAuditCount: 4,
   llmAuditCount: 3,
   outboxCount: 1,
+  surveyInvitationCount: 2,
+  surveyResponseCount: 1,
+  surveyLowScoreReviewCount: 1,
+  surveyProviderEventCount: 1,
+  surveyRecoveryNotificationCount: 0,
   createdAt: '2026-06-17T09:00:00Z',
   executeAfter: '2026-06-17T09:30:00Z',
 }
@@ -77,6 +82,11 @@ const readyExportRequest = {
   feedbackAuditCount: 6,
   llmAuditCount: 4,
   outboxCount: 0,
+  surveyInvitationCount: 2,
+  surveyResponseCount: 2,
+  surveyLowScoreReviewCount: 0,
+  surveyProviderEventCount: 1,
+  surveyRecoveryNotificationCount: 0,
   createdAt: '2026-06-17T08:00:00Z',
   archiveFilename: 'bob-export.zip',
   expiresAt: '2026-06-18T08:00:00Z',
@@ -94,6 +104,11 @@ const downloadedExportRequest = {
   feedbackAuditCount: 1,
   llmAuditCount: 1,
   outboxCount: 0,
+  surveyInvitationCount: 0,
+  surveyResponseCount: 0,
+  surveyLowScoreReviewCount: 0,
+  surveyProviderEventCount: 0,
+  surveyRecoveryNotificationCount: 0,
   createdAt: '2026-06-16T08:00:00Z',
   archiveFilename: 'charlie-export.zip',
   downloadedAt: '2026-06-16T09:00:00Z',
@@ -111,6 +126,11 @@ const newReadyExportRequest = {
   feedbackAuditCount: 4,
   llmAuditCount: 3,
   outboxCount: 0,
+  surveyInvitationCount: 2,
+  surveyResponseCount: 1,
+  surveyLowScoreReviewCount: 1,
+  surveyProviderEventCount: 1,
+  surveyRecoveryNotificationCount: 0,
   createdAt: '2026-06-17T10:00:00Z',
   archiveFilename: 'alice-export.zip',
   expiresAt: '2026-06-18T10:00:00Z',
@@ -199,6 +219,11 @@ describe('GDPRPage', () => {
             tagAssignmentCount: 2,
             feedbackAuditCount: 4,
             llmAuditCount: 3,
+            surveyInvitationCount: 2,
+            surveyResponseCount: 1,
+            surveyLowScoreReviewCount: 1,
+            surveyProviderEventCount: 1,
+            surveyRecoveryNotificationCount: 0,
             createdAt: '2026-06-17T10:00:00Z',
             completedAt: '2026-06-17T10:01:00Z',
           })
@@ -227,6 +252,11 @@ describe('GDPRPage', () => {
           feedbackAuditCount: 4,
           llmAuditCount: 3,
           outboxCount: 1,
+          surveyInvitationCount: 2,
+          surveyResponseCount: 1,
+          surveyLowScoreReviewCount: 1,
+          surveyProviderEventCount: 1,
+          surveyRecoveryNotificationCount: 0,
         })
       }),
     )
@@ -244,6 +274,33 @@ describe('GDPRPage', () => {
       expect(screen.getByTestId('gdpr-request-row-req-delete-1')).toBeInTheDocument()
       expect(screen.getByTestId('gdpr-request-row-job-ready-1')).toBeInTheDocument()
     })
+    const retentionWorkflow = screen.getByTestId('gdpr-retention-legal-hold-workflow')
+    expect(within(retentionWorkflow).getByText('Retention / legal hold 工作流')).toBeInTheDocument()
+    expect(
+      within(retentionWorkflow).getByText(
+        '30d audit / 30m delete grace / legal hold on / 2 request records',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(retentionWorkflow).getByText('3 retention and legal-hold checks need attention'),
+    ).toBeInTheDocument()
+    expect(
+      within(retentionWorkflow).getByText('audit 30d / export 2h / prune 1d'),
+    ).toBeInTheDocument()
+    expect(
+      within(retentionWorkflow).getByText('legal hold on / 1 scheduled deletes'),
+    ).toBeInTheDocument()
+    expect(
+      within(retentionWorkflow).getByText('grace 30m / 1 scheduled deletes / 1 visible'),
+    ).toBeInTheDocument()
+    expect(
+      within(retentionWorkflow).getByText(
+        '1 ready exports / expires 2026-06-18T10:00:00Z / TTL 2h',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      within(retentionWorkflow).getByText('hashed audit on / backup residue on / audit 30d'),
+    ).toBeInTheDocument()
     expect(screen.getByText('30 天')).toBeInTheDocument()
     await expectNoA11yViolations(container)
 
@@ -290,6 +347,7 @@ describe('GDPRPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('gdpr-download-current-export')).toBeInTheDocument()
     })
+    expect(screen.getByText(/Survey: 5\/2\/4\/3\/5/)).toBeInTheDocument()
     await waitFor(() => {
       expect(screen.getByTestId('gdpr-request-row-job-new-1')).toBeInTheDocument()
       expect(screen.getByTestId('gdpr-download-export-job-new-1')).toBeInTheDocument()
@@ -307,7 +365,12 @@ describe('GDPRPage', () => {
     })
 
     expect(screen.getAllByText(/alice-export\.zip/).length).toBeGreaterThanOrEqual(2)
-    expect(screen.getByText('5/2/4/3/1')).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('gdpr-request-row-req-delete-1')).getByText('5/2/4/3/1/5'),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId('gdpr-request-row-job-new-1')).getByText('5/2/4/3/0/5'),
+    ).toBeInTheDocument()
 
     await user.type(screen.getByTestId('gdpr-confirm-subject-key'), 'alice@example.com')
     await user.click(screen.getByTestId('gdpr-delete-submit'))
@@ -318,6 +381,7 @@ describe('GDPRPage', () => {
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('Outbox'))
     })
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('Survey'))
 
     expect(requestTypeQueries).toContain('all')
     expect(requestTypeQueries).toContain('export')
@@ -374,6 +438,11 @@ describe('GDPRPage', () => {
           tagAssignmentCount: 0,
           feedbackAuditCount: 0,
           llmAuditCount: 0,
+          surveyInvitationCount: 0,
+          surveyResponseCount: 0,
+          surveyLowScoreReviewCount: 0,
+          surveyProviderEventCount: 0,
+          surveyRecoveryNotificationCount: 0,
           createdAt: '2026-06-17T10:00:00Z',
         }),
       ),
@@ -590,6 +659,11 @@ describe('GDPRPage', () => {
           tagAssignmentCount: 0,
           feedbackAuditCount: 0,
           llmAuditCount: 0,
+          surveyInvitationCount: 0,
+          surveyResponseCount: 0,
+          surveyLowScoreReviewCount: 0,
+          surveyProviderEventCount: 0,
+          surveyRecoveryNotificationCount: 0,
           createdAt: '2026-06-17T10:00:00Z',
         }),
       ),

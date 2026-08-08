@@ -1,0 +1,17 @@
+{
+  "provider": "intercom",
+  "eventType": "conversation.user.replied",
+  "rawPayload": {
+    "conversationId": "conv-742",
+    "subject": "Need digest webhooks for weekly updates",
+    "contactId": "contact-88"
+  },
+  "normalized": {
+    "type": "feedback",
+    "action": "upsert",
+    "externalId": "intercom:conv-742",
+    "title": "Need digest webhooks for weekly updates",
+    "status": "open",
+    "source": "intercom"
+  }
+}

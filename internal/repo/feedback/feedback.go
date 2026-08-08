@@ -149,14 +149,14 @@ func insertFeedback(
 	err = db.QueryRow(
 		ctx, `
 		INSERT INTO user_feedback
-		 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id)
+		 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, signal_trace_id, inbound_source_id, workflow_state_id)
 		VALUES
-		 ($1, $2, $3, $4, $5, $6, $7, $8, '[]'::jsonb, $9, $10,
-		  (SELECT id FROM inbound_sources WHERE id = $11 AND tenant_id = $2 AND channel = $9),
+		 ($1, $2, $3, $4, $5, $6, $7, $8, '[]'::jsonb, $9, $10, $11,
+		  (SELECT id FROM inbound_sources WHERE id = $12 AND tenant_id = $2 AND channel = $9),
 		  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1))
 		RETURNING id`,
 		userID, tenantID, subjectKey, subjectDisplay, subjectHash, feedbackType(in),
-		in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
+		in.Content, in.PageURL, in.Source, sourceMetaJSON, requiredSignalTraceID(in.SignalTraceID), inboundSourceID,
 	).Scan(&id)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] insert failed,tenant_id:%s,source:%s,err:%+v",
@@ -189,17 +189,17 @@ func insertFeedbackIdempotent(
 		err := db.QueryRow(
 			ctx, `
 			INSERT INTO user_feedback
-			 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, inbound_source_id, workflow_state_id, idempotency_key, idempotency_hash)
+			 (user_id, tenant_id, subject_key, subject_display, subject_hash, type, content, page_url, attachments, source, source_meta, signal_trace_id, inbound_source_id, workflow_state_id, idempotency_key, idempotency_hash)
 			VALUES
-			 ($1, $2, $3, $4, $5, $6, $7, $8, '[]'::jsonb, $9, $10,
-			  (SELECT id FROM inbound_sources WHERE id = $11 AND tenant_id = $2 AND channel = $9),
+			 ($1, $2, $3, $4, $5, $6, $7, $8, '[]'::jsonb, $9, $10, $11,
+			  (SELECT id FROM inbound_sources WHERE id = $12 AND tenant_id = $2 AND channel = $9),
 			  (SELECT id FROM tenant_workflow_states WHERE tenant_id = $2 AND is_default AND archived_at IS NULL ORDER BY position LIMIT 1),
-			  $12, $13)
+			  $13, $14)
 			ON CONFLICT (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL
 			DO NOTHING
 			RETURNING id`,
 			userID, tenantID, subjectKey, subjectDisplay, subjectHash, feedbackType(in),
-			in.Content, in.PageURL, in.Source, sourceMetaJSON, inboundSourceID,
+			in.Content, in.PageURL, in.Source, sourceMetaJSON, requiredSignalTraceID(in.SignalTraceID), inboundSourceID,
 			in.IdempotencyKey, idemHash,
 		).Scan(&id)
 		if err == nil {
@@ -386,6 +386,72 @@ func inboundSourceIDFromMeta(meta map[string]any) *uuid.UUID {
 		return nil
 	}
 	return ptrext.Of(id)
+}
+
+var signalTraceMetaKeys = []string{
+	"signal_trace_id",
+	"signalTraceId",
+	"trace_id", // lint-slog:allow rule-2
+	"traceId",
+	"event_id",
+	"eventId",
+	"source_event_id",
+	"sourceEventId",
+	"external_event_id",
+	"externalEventId",
+}
+
+const maxSignalTraceIDLen = 160
+
+// SignalTraceIDFromSourceMeta resolves the durable business trace attached to a
+// feedback signal. Upstream source/event identifiers win so retries and
+// cross-system records converge; callers provide a request/background fallback.
+func SignalTraceIDFromSourceMeta(meta map[string]any, fallback string) string {
+	for _, key := range signalTraceMetaKeys {
+		if id := normalizeSignalTraceID(metaString(meta, key)); id != "" {
+			return id
+		}
+	}
+	return normalizeSignalTraceID(fallback)
+}
+
+func metaString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta[key]
+	if !ok {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return v
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return ""
+	}
+}
+
+func normalizeSignalTraceID(raw string) string {
+	id := strings.TrimSpace(raw)
+	if id == "" {
+		return ""
+	}
+	id = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, id)
+	return pgxutil.Truncate(id, maxSignalTraceIDLen)
+}
+
+func requiredSignalTraceID(raw string) string {
+	if id := normalizeSignalTraceID(raw); id != "" {
+		return id
+	}
+	return uuid.NewString()
 }
 
 type EnrichmentMetadata struct {

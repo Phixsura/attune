@@ -58,7 +58,9 @@ type ExportJob struct {
 
 const exportJobCols = `id, tenant_id, subject_key, subject_hash, subject_display, status,
 	archive, archive_filename, feedback_count, tag_assignment_count, feedback_audit_count,
-	llm_audit_count, COALESCE(error, ''), created_by_type, created_by, created_at, started_at, completed_at,
+	llm_audit_count, survey_invitation_count, survey_response_count, survey_low_score_review_count,
+	survey_provider_event_count, survey_recovery_notification_count,
+	COALESCE(error, ''), created_by_type, created_by, created_at, started_at, completed_at,
 	expires_at, downloaded_at, revoked_at, claimed_at, last_heartbeat`
 
 func scanExportJob(row pgx.Row) (*ExportJob, error) {
@@ -66,7 +68,9 @@ func scanExportJob(row pgx.Row) (*ExportJob, error) {
 	err := row.Scan(
 		&job.ID, &job.TenantID, &job.SubjectKey, &job.SubjectHash, &job.SubjectDisplay, &job.Status,
 		&job.Archive, &job.ArchiveFilename, &job.Counts.FeedbackCount, &job.Counts.TagAssignmentCount,
-		&job.Counts.FeedbackAuditCount, &job.Counts.LLMAuditCount, &job.Error, &job.CreatedByType, &job.CreatedBy,
+		&job.Counts.FeedbackAuditCount, &job.Counts.LLMAuditCount, &job.Counts.SurveyInvitationCount,
+		&job.Counts.SurveyResponseCount, &job.Counts.SurveyLowScoreReviewCount, &job.Counts.SurveyProviderEventCount,
+		&job.Counts.SurveyRecoveryNotificationCount, &job.Error, &job.CreatedByType, &job.CreatedBy,
 		&job.CreatedAt, &job.StartedAt, &job.CompletedAt, &job.ExpiresAt, &job.DownloadedAt, &job.RevokedAt,
 		&job.ClaimedAt, &job.HeartbeatAt,
 	)
@@ -248,25 +252,33 @@ func (r *Repo) CompleteExportJobWithOwner(
 		sql = `UPDATE gdpr_export_jobs
 		       SET status = 'completed', subject_display = $2, archive = $3, archive_filename = $4,
 		           feedback_count = $5, tag_assignment_count = $6, feedback_audit_count = $7,
-		           llm_audit_count = $8, completed_at = NOW(), expires_at = $9,
+		           llm_audit_count = $8, survey_invitation_count = $9,
+		           survey_response_count = $10, survey_low_score_review_count = $11,
+		           survey_provider_event_count = $12, survey_recovery_notification_count = $13,
+		           completed_at = NOW(), expires_at = $14,
 		           claimed_at = NULL, claimed_by = NULL, error = ''
 		       WHERE id = $1 AND status = 'running'`
 		args = []any{
 			jobID, subjectDisplay, archive, archiveFilename,
 			counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
-			expiresAt.UTC(),
+			counts.SurveyInvitationCount, counts.SurveyResponseCount, counts.SurveyLowScoreReviewCount,
+			counts.SurveyProviderEventCount, counts.SurveyRecoveryNotificationCount, expiresAt.UTC(),
 		}
 	} else {
 		sql = `UPDATE gdpr_export_jobs
 		       SET status = 'completed', subject_display = $2, archive = $3, archive_filename = $4,
 		           feedback_count = $5, tag_assignment_count = $6, feedback_audit_count = $7,
-		           llm_audit_count = $8, completed_at = NOW(), expires_at = $9,
+		           llm_audit_count = $8, survey_invitation_count = $9,
+		           survey_response_count = $10, survey_low_score_review_count = $11,
+		           survey_provider_event_count = $12, survey_recovery_notification_count = $13,
+		           completed_at = NOW(), expires_at = $14,
 		           claimed_at = NULL, claimed_by = NULL, error = ''
-		       WHERE id = $1 AND status = 'running' AND claimed_by = $10`
+		       WHERE id = $1 AND status = 'running' AND claimed_by = $15`
 		args = []any{
 			jobID, subjectDisplay, archive, archiveFilename,
 			counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
-			expiresAt.UTC(), owner,
+			counts.SurveyInvitationCount, counts.SurveyResponseCount, counts.SurveyLowScoreReviewCount,
+			counts.SurveyProviderEventCount, counts.SurveyRecoveryNotificationCount, expiresAt.UTC(), owner,
 		}
 	}
 	tag, err := tx.Exec(ctx, sql, args...)
@@ -286,14 +298,20 @@ func (r *Repo) CompleteExportJobWithOwner(
 		    tag_assignment_count = $5,
 		    feedback_audit_count = $6,
 		    llm_audit_count = $7,
+		    survey_invitation_count = $8,
+		    survey_response_count = $9,
+		    survey_low_score_review_count = $10,
+		    survey_provider_event_count = $11,
+		    survey_recovery_notification_count = $12,
 		    completed_at = NOW(),
-		    expires_at = $8,
+		    expires_at = $13,
 		    claimed_at = NULL, claimed_by = NULL,
 		    error = ''
 		WHERE id = $1`,
 		jobID, subjectDisplay, archiveFilename,
 		counts.FeedbackCount, counts.TagAssignmentCount, counts.FeedbackAuditCount, counts.LLMAuditCount,
-		expiresAt.UTC(),
+		counts.SurveyInvitationCount, counts.SurveyResponseCount, counts.SurveyLowScoreReviewCount,
+		counts.SurveyProviderEventCount, counts.SurveyRecoveryNotificationCount, expiresAt.UTC(),
 	); err != nil {
 		return 0, fmt.Errorf("complete gdpr request: %w", err)
 	}

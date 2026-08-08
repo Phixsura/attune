@@ -1,10 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
-import { Activity, AlertTriangle, BarChart3, Loader2, Search, TrendingUp, X } from 'lucide-react'
+import {
+  Activity,
+  AlertTriangle,
+  Ban,
+  BarChart3,
+  CheckCircle2,
+  Loader2,
+  PencilLine,
+  Search,
+  TrendingUp,
+  X,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { EmptyState } from '@/components/empty-state'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
@@ -23,16 +35,21 @@ import {
   type ClassificationQualityFilters,
   type ClassificationQualityRange,
   type ClassificationQualitySeverity,
+  type ClassificationReviewLearning,
   classificationQualityBucketForRange,
   classificationQualityQuery,
+  classificationReviewLearningQuery,
   defaultClassificationQualityFilters,
+  useRecordClassificationReview,
 } from '@/features/classification-quality/api/get-classification-quality'
+import { useDocumentTitle } from '@/hooks/use-document-title'
 import { consolePath } from '@/lib/console-path'
 import type {
   ClassificationDimensionDrift,
   ClassificationQualitySample,
   ClassificationQualityTimeBucket,
   ClassificationQualityWarning,
+  ClassificationReviewReasonBucket,
   ClassificationValueDrift,
 } from '@/proto/attune/v1/classification_quality'
 
@@ -43,8 +60,10 @@ type QualityUiFilters = Required<
 
 export function ClassificationQualityPage() {
   const { t } = useTranslation()
+  useDocumentTitle(t('nav.classification_quality'))
   const [filters, setFilters] = useState<QualityUiFilters>(defaultClassificationQualityFilters)
   const quality = useQuery(classificationQualityQuery(filters))
+  const learning = useQuery(classificationReviewLearningQuery({ range: filters.range }))
   const summary = quality.data?.summary
   const warningCount = quality.data?.warnings.length ?? 0
 
@@ -87,7 +106,11 @@ export function ClassificationQualityPage() {
           {t('app.loading')}
         </div>
       ) : quality.data ? (
-        <ClassificationQualityBody data={quality.data} />
+        <ClassificationQualityBody
+          data={quality.data}
+          learning={learning.data}
+          learningPending={learning.isPending}
+        />
       ) : null}
     </div>
   )
@@ -120,7 +143,10 @@ function QualityFilters({
           })
         }}
       >
-        <SelectTrigger className="w-28 bg-background/90">
+        <SelectTrigger
+          className="w-28 bg-background/90"
+          aria-label={t('classification_quality.filters.range')}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -141,7 +167,10 @@ function QualityFilters({
           })
         }
       >
-        <SelectTrigger className="w-28 bg-background/90">
+        <SelectTrigger
+          className="w-28 bg-background/90"
+          aria-label={t('classification_quality.filters.bucket')}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -157,7 +186,10 @@ function QualityFilters({
           onChange({ ...filters, severity: severity as ClassificationQualitySeverity })
         }
       >
-        <SelectTrigger className="w-36 bg-background/90">
+        <SelectTrigger
+          className="w-36 bg-background/90"
+          aria-label={t('classification_quality.filters.severity')}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -234,7 +266,15 @@ function QualityTextFilter({
   )
 }
 
-function ClassificationQualityBody({ data }: { data: ClassificationQuality }) {
+function ClassificationQualityBody({
+  data,
+  learning,
+  learningPending,
+}: {
+  data: ClassificationQuality
+  learning: ClassificationReviewLearning | undefined
+  learningPending: boolean
+}) {
   const { t } = useTranslation()
   const period = t('classification_quality.period', {
     start: formatDate(data.currentFrom),
@@ -265,6 +305,7 @@ function ClassificationQualityBody({ data }: { data: ClassificationQuality }) {
       </div>
 
       <DimensionDriftCard dimensions={data.dimensions} />
+      <ReviewLearningCard learning={learning} pending={learningPending} />
       <SamplesCard samples={data.samples} />
     </div>
   )
@@ -295,11 +336,15 @@ function QualityTrend({ series }: { series: ClassificationQualityTimeBucket[] })
 
   return (
     <div className="space-y-4">
-      <div className="grid h-44 grid-flow-col items-end gap-2 overflow-x-auto pb-1">
+      <section
+        className="grid h-44 items-end gap-2 pb-1"
+        aria-label={t('classification_quality.trend.chart')}
+        style={{ gridTemplateColumns: `repeat(${rows.length}, minmax(0, 1fr))` }}
+      >
         {rows.map((row) => (
           <div
             key={row.bucket}
-            className="flex min-w-12 flex-col items-center justify-end gap-1 text-[10px]"
+            className="flex min-w-0 flex-col items-center justify-end gap-1 text-[10px]"
             title={formatDate(row.bucket)}
           >
             <Bar value={row.lowConfidenceRate} max={maxRate} className="bg-amber-500" />
@@ -311,7 +356,7 @@ function QualityTrend({ series }: { series: ClassificationQualityTimeBucket[] })
             </span>
           </div>
         ))}
-      </div>
+      </section>
       <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
         <Legend color="bg-amber-500" label={t('classification_quality.legend.low_confidence')} />
         <Legend color="bg-sky-500" label={t('classification_quality.legend.off_list')} />
@@ -486,8 +531,158 @@ function ValueShift({ value }: { value: ClassificationValueDrift }) {
   )
 }
 
+function ReviewLearningCard({
+  learning,
+  pending,
+}: {
+  learning: ClassificationReviewLearning | undefined
+  pending: boolean
+}) {
+  const { t } = useTranslation()
+  const buckets = learning?.reasonBuckets ?? []
+  return (
+    <Card className="gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none">
+      <CardHeader className="border-b border-border/60 bg-muted/15 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <CardTitle>{t('classification_quality.learning.title')}</CardTitle>
+            <CardDescription>{t('classification_quality.learning.description')}</CardDescription>
+          </div>
+          {pending ? (
+            <Badge tone="muted">{t('classification_quality.learning.loading')}</Badge>
+          ) : (
+            <Badge
+              tone={learning && toCount(learning.trainingCandidateCount) > 0 ? 'watch' : 'default'}
+            >
+              {t('classification_quality.learning.training_candidates', {
+                count: toCount(learning?.trainingCandidateCount),
+              })}
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 px-4 py-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <MetricTile
+            label={t('classification_quality.learning.total_reviews')}
+            value={formatInt(learning?.totalReviews)}
+          />
+          <MetricTile
+            label={t('classification_quality.learning.coverage')}
+            value={formatRate(learning?.reviewCoverageRate)}
+            hint={t('classification_quality.learning.coverage_hint', {
+              reviewed: formatInt(learning?.reviewedFeedbackCount),
+              classified: formatInt(learning?.classifiedFeedbackCount),
+            })}
+          />
+          <MetricTile
+            label={t('classification_quality.learning.accepted')}
+            value={formatInt(learning?.accepted)}
+          />
+          <MetricTile
+            label={t('classification_quality.learning.edited')}
+            value={formatInt(learning?.edited)}
+          />
+          <MetricTile
+            label={t('classification_quality.learning.dismissed')}
+            value={formatInt(learning?.dismissed)}
+          />
+        </div>
+        {buckets.length > 0 ? (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {buckets.slice(0, 4).map((bucket) => (
+              <ReviewReasonBucketRow key={bucket.signalReason || 'unknown'} bucket={bucket} />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
+            {t('classification_quality.learning.empty')}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function MetricTile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-border/70 bg-background p-3">
+      <div className="text-[11px] font-medium text-muted-foreground">{label}</div>
+      <div className="mt-1 font-mono text-lg font-semibold tabular-nums">{value}</div>
+      {hint ? <div className="mt-1 truncate text-xs text-muted-foreground">{hint}</div> : null}
+    </div>
+  )
+}
+
+function ReviewReasonBucketRow({ bucket }: { bucket: ClassificationReviewReasonBucket }) {
+  const { t } = useTranslation()
+  return (
+    <div className="rounded-md border border-border/70 bg-background p-3 text-sm">
+      <div className="flex items-center justify-between gap-3">
+        <span className="truncate font-medium">
+          {warningReasonLabel(bucket.signalReason, t) ||
+            t('classification_quality.learning.unknown_reason')}
+        </span>
+        <span className="font-mono text-xs text-muted-foreground">
+          {formatInt(bucket.totalReviews)}
+        </span>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+        <span>
+          {t('classification_quality.learning.accepted_short', {
+            count: toCount(bucket.accepted),
+          })}
+        </span>
+        <span>
+          {t('classification_quality.learning.edited_short', { count: toCount(bucket.edited) })}
+        </span>
+        <span>
+          {t('classification_quality.learning.dismissed_short', {
+            count: toCount(bucket.dismissed),
+          })}
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function SamplesCard({ samples }: { samples: ClassificationQualitySample[] }) {
   const { t } = useTranslation()
+  const review = useRecordClassificationReview()
+  const [editingID, setEditingID] = useState<string | null>(null)
+  const [correctionJSON, setCorrectionJSON] = useState('{\n  \n}')
+  const [reviewNote, setReviewNote] = useState('')
+
+  const recordReview = (
+    sample: ClassificationQualitySample,
+    outcome: 'accepted' | 'edited' | 'dismissed',
+    correctionJson = '{}',
+    note = '',
+  ) => {
+    review.mutate(
+      {
+        feedbackId: sample.id,
+        outcome,
+        signalReason: sample.signalReason,
+        correctionJson,
+        note,
+      },
+      {
+        onSuccess: () => {
+          toast.success(t('classification_quality.learning.review_saved'))
+          setEditingID(null)
+          setCorrectionJSON('{\n  \n}')
+          setReviewNote('')
+        },
+        onError: (err) => {
+          toast.error(
+            err instanceof Error ? err.message : t('classification_quality.learning.review_failed'),
+          )
+        },
+      },
+    )
+  }
+
   return (
     <Card className="gap-0 overflow-hidden rounded-lg border-border/70 py-0 shadow-none">
       <CardHeader className="border-b border-border/60 bg-muted/15 px-4 py-3">
@@ -502,7 +697,7 @@ function SamplesCard({ samples }: { samples: ClassificationQualitySample[] }) {
             {samples.map((sample) => (
               <div
                 key={sample.id}
-                className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(10rem,1fr)_8rem_8rem_8rem]"
+                className="grid gap-3 px-4 py-3 text-sm md:grid-cols-[minmax(10rem,1fr)_8rem_8rem_minmax(16rem,auto)]"
               >
                 <div className="min-w-0">
                   <div className="truncate font-medium">{sample.title || sample.id}</div>
@@ -522,17 +717,101 @@ function SamplesCard({ samples }: { samples: ClassificationQualitySample[] }) {
                   label={t('classification_quality.samples.status')}
                   value={sample.enrichmentStatus || '-'}
                 />
-                <Button
-                  asChild
-                  variant="ghost"
-                  size="sm"
-                  className="justify-self-start md:justify-self-end"
-                >
-                  <a href={feedbackHref([sample.id], sample.signalReason)}>
-                    <Search className="size-3.5" />
-                    {t('classification_quality.open_feedback')}
-                  </a>
-                </Button>
+                <div className="flex flex-wrap items-center justify-start gap-1.5 md:justify-end">
+                  <Button
+                    asChild
+                    variant="ghost"
+                    size="icon-sm"
+                    title={t('classification_quality.open_feedback')}
+                  >
+                    <a
+                      href={feedbackHref([sample.id], sample.signalReason)}
+                      aria-label={t('classification_quality.open_feedback_with_id', {
+                        id: sample.id,
+                      })}
+                    >
+                      <Search className="size-3.5" />
+                    </a>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title={t('classification_quality.learning.accept')}
+                    aria-label={t('classification_quality.learning.accept_with_id', {
+                      id: sample.id,
+                    })}
+                    disabled={review.isPending}
+                    onClick={() => recordReview(sample, 'accepted')}
+                  >
+                    <CheckCircle2 className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title={t('classification_quality.learning.correct')}
+                    aria-label={t('classification_quality.learning.correct_with_id', {
+                      id: sample.id,
+                    })}
+                    disabled={review.isPending}
+                    onClick={() => setEditingID(editingID === sample.id ? null : sample.id)}
+                  >
+                    <PencilLine className="size-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    title={t('classification_quality.learning.dismiss')}
+                    aria-label={t('classification_quality.learning.dismiss_with_id', {
+                      id: sample.id,
+                    })}
+                    disabled={review.isPending}
+                    onClick={() => recordReview(sample, 'dismissed')}
+                  >
+                    <Ban className="size-3.5" />
+                  </Button>
+                </div>
+                {editingID === sample.id ? (
+                  <div className="space-y-3 rounded-md border border-border/70 bg-muted/15 p-3 md:col-span-4">
+                    <div className="grid gap-3 lg:grid-cols-[minmax(14rem,1fr)_minmax(14rem,1fr)_auto] lg:items-end">
+                      <label
+                        htmlFor={`classification-review-correction-${sample.id}`}
+                        className="grid gap-1.5 text-xs font-medium text-muted-foreground"
+                      >
+                        {t('classification_quality.learning.correction_json')}
+                        <textarea
+                          id={`classification-review-correction-${sample.id}`}
+                          value={correctionJSON}
+                          className="min-h-24 rounded-md border border-input bg-background px-3 py-2 font-mono text-xs shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                          onChange={(event) => setCorrectionJSON(event.target.value)}
+                        />
+                      </label>
+                      <label
+                        htmlFor={`classification-review-note-${sample.id}`}
+                        className="grid gap-1.5 text-xs font-medium text-muted-foreground"
+                      >
+                        {t('classification_quality.learning.note')}
+                        <textarea
+                          id={`classification-review-note-${sample.id}`}
+                          value={reviewNote}
+                          className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                          onChange={(event) => setReviewNote(event.target.value)}
+                        />
+                      </label>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={review.isPending}
+                        onClick={() => recordReview(sample, 'edited', correctionJSON, reviewNote)}
+                      >
+                        <PencilLine className="size-3.5" />
+                        {t('classification_quality.learning.save_correction')}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -657,6 +936,11 @@ function rateTone(value: number | undefined, alert: number, watch: number) {
 
 function formatInt(value: string | number | undefined) {
   return new Intl.NumberFormat('en-US').format(Number(value ?? 0))
+}
+
+function toCount(value: string | number | undefined) {
+  const count = Number(value ?? 0)
+  return Number.isFinite(count) ? count : 0
 }
 
 function formatRate(value: number | undefined) {

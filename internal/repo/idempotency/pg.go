@@ -68,51 +68,62 @@ func (r *Repo) Acquire(ctx context.Context, tenantID, key string, requestHash []
 		}), true, nil
 	}
 
-	// Key already exists — fetch it and check the state.
+	// Key already exists — fetch it and check the state. A failed key is
+	// recovered with a compare-and-set update, so simultaneous retries cannot
+	// both claim execution.
 	existing, err := r.Get(ctx, tenantID, key)
 	if err != nil {
 		return nil, false, err
 	}
-
-	// Check if expired.
-	if time.Now().After(existing.ExpiresAt) {
-		return nil, false, ErrExpired
-	}
-
-	// Check if request hash matches (constant-time to avoid timing attacks).
-	if subtle.ConstantTimeCompare(existing.RequestHash, requestHash) != 1 {
-		return nil, false, ErrHashMismatch
-	}
-
-	// Hash matches — check status.
-	switch existing.Status {
-	case StatusPending:
-		// Same request is already in progress.
-		return existing, false, nil
-
-	case StatusCompleted:
-		// Request already completed — caller should return cached response.
-		return existing, false, nil
-
-	case StatusFailed:
-		// Previous attempt failed — allow retry by returning acquired=true.
-		// Reset status to pending.
-		if _, err := r.pool.Exec(
-			ctx, `
-			UPDATE idempotency_keys
-			SET status = 'pending', response_code = NULL, response_body = NULL
-			WHERE tenant_id = $1 AND key = $2 AND status = 'failed'`,
-			tenantID, key,
-		); err != nil {
-			logext.Errorf(ctx, "[%s] reset failed key failed,tenant_id:%s,key:%s,err:%+v",
-				where, tenantID, key, err.Error())
-			return nil, false, fmt.Errorf("reset failed key: %w", err)
+	for {
+		// Check if expired.
+		if time.Now().After(existing.ExpiresAt) {
+			return nil, false, ErrExpired
 		}
-		existing.Status = StatusPending
-		return existing, true, nil
 
-	default:
-		return nil, false, fmt.Errorf("unknown status: %s", existing.Status)
+		// Check if request hash matches (constant-time to avoid timing attacks).
+		if subtle.ConstantTimeCompare(existing.RequestHash, requestHash) != 1 {
+			return nil, false, ErrHashMismatch
+		}
+
+		// Hash matches — check status.
+		switch existing.Status {
+		case StatusPending:
+			// Same request is already in progress.
+			return existing, false, nil
+
+		case StatusCompleted:
+			// Request already completed — caller should return cached response.
+			return existing, false, nil
+
+		case StatusFailed:
+			// A previous attempt failed. Only the caller that changes the failed
+			// row to pending acquires the retry; contenders re-read the winner's
+			// state and report it as in progress.
+			retryTag, err := r.pool.Exec(
+				ctx, `
+				UPDATE idempotency_keys
+				SET status = 'pending', response_code = NULL, response_body = NULL
+				WHERE tenant_id = $1 AND key = $2 AND status = 'failed'`,
+				tenantID, key,
+			)
+			if err != nil {
+				logext.Errorf(ctx, "[%s] reset failed key failed,tenant_id:%s,key:%s,err:%+v",
+					where, tenantID, key, err.Error())
+				return nil, false, fmt.Errorf("reset failed key: %w", err)
+			}
+			if retryTag.RowsAffected() == 1 {
+				existing.Status = StatusPending
+				return existing, true, nil
+			}
+			existing, err = r.Get(ctx, tenantID, key)
+			if err != nil {
+				return nil, false, err
+			}
+
+		default:
+			return nil, false, fmt.Errorf("unknown status: %s", existing.Status)
+		}
 	}
 }
 
@@ -185,21 +196,23 @@ func (r *Repo) Get(ctx context.Context, tenantID, key string) (*Key, error) {
 	return ptrext.Of(k), nil
 }
 
-// Delete removes a key. No-op if the key does not exist.
-func (r *Repo) Delete(ctx context.Context, tenantID, key string) error {
-	const where = "repo.idempotency.Delete"
+// DeleteExpired removes a key only while it remains expired. The expiration
+// predicate prevents a delayed retry from deleting another retry's fresh key.
+func (r *Repo) DeleteExpired(ctx context.Context, tenantID, key string) (bool, error) {
+	const where = "repo.idempotency.DeleteExpired"
 
-	if _, err := r.pool.Exec(
+	tag, err := r.pool.Exec(
 		ctx, `
 		DELETE FROM idempotency_keys
-		WHERE tenant_id = $1 AND key = $2`,
+		WHERE tenant_id = $1 AND key = $2 AND expires_at <= NOW()`,
 		tenantID, key,
-	); err != nil {
+	)
+	if err != nil {
 		logext.Errorf(ctx, "[%s] delete failed,tenant_id:%s,key:%s,err:%+v",
 			where, tenantID, key, err.Error())
-		return fmt.Errorf("delete idempotency key: %w", err)
+		return false, fmt.Errorf("delete expired idempotency key: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 // CleanupExpired removes all expired keys.

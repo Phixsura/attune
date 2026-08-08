@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
+	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
 	repo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
@@ -951,7 +952,13 @@ func TestAuditMetadataHelpers(t *testing.T) {
 		AccountCount:            1,
 		VoteCount:               3,
 		RevenueImpactCents:      12345,
-		DeliveryHealth:          repo.DeliveryHealthSynced,
+		RevenueCurrency:         "USD",
+		DecisionScore:           91,
+		DecisionScoreFactors: []repo.DecisionScoreFactor{
+			{Kind: repo.DecisionScoreFactorPriority, RawCount: 1, Weight: 60, Contribution: 60, ContributesToScore: true},
+			{Kind: repo.DecisionScoreFactorDeliveryHealth, RawCount: 1, ContributesToScore: false},
+		},
+		DeliveryHealth: repo.DeliveryHealthSynced,
 	}
 	if got := createAuditSummary("customer_request.create", summary); got != "Created customer request CR-7" {
 		t.Fatalf("createAuditSummary() = %q, want display id summary", got)
@@ -982,6 +989,97 @@ func TestAuditMetadataHelpers(t *testing.T) {
 	}
 	if uuidPtrString(ptrext.Of(ownerID)) != ownerID.String() || uuidPtrString(nil) != "" {
 		t.Fatal("uuidPtrString() returned unexpected values")
+	}
+}
+
+func TestWithDecisionSnapshot(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	summary := repo.Summary{
+		ID:                 requestID,
+		RevenueCurrency:    "USD",
+		DecisionScore:      91,
+		DeliveryHealth:     repo.DeliveryHealthSynced,
+		RevenueImpactCents: 12345,
+		DecisionScoreFactors: []repo.DecisionScoreFactor{
+			{Kind: repo.DecisionScoreFactorPriority, RawCount: 1, Weight: 60, Contribution: 60, ContributesToScore: true},
+			{Kind: repo.DecisionScoreFactorDeliveryHealth, RawCount: 1, ContributesToScore: false},
+		},
+	}
+	snapshot := withDecisionSnapshot(map[string]any{"request_id": requestID.String()}, summary)
+	if snapshot["decision_score"] != 91 || snapshot["revenue_currency"] != "USD" {
+		t.Fatalf("withDecisionSnapshot() = %+v, want score and revenue currency", snapshot)
+	}
+	if snapshot["decision_rationale"] == "" || snapshot["evidence_bundle_ref"] == "" || snapshot["public_safe_state"] == "" {
+		t.Fatalf("withDecisionSnapshot() = %+v, want decision context fields", snapshot)
+	}
+	factors, ok := snapshot["decision_score_factors"].([]map[string]any)
+	if !ok || len(factors) != 2 || factors[0]["kind"] != repo.DecisionScoreFactorPriority {
+		t.Fatalf("decision_score_factors = %+v, want structured score factors", snapshot["decision_score_factors"])
+	}
+}
+
+func TestDecisionRecordFromAudit(t *testing.T) {
+	requestID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	afterSummary := repo.Summary{
+		ID:                      requestID,
+		Status:                  repo.StatusPlanned,
+		Priority:                repo.PriorityUrgent,
+		SupportingFeedbackCount: 3,
+		CustomerCount:           2,
+		AccountCount:            1,
+		VoteCount:               5,
+		RevenueImpactCents:      2400000,
+		RevenueCurrency:         "USD",
+		DecisionScore:           126,
+		DecisionScoreFactors: []repo.DecisionScoreFactor{
+			{Kind: repo.DecisionScoreFactorPriority, RawCount: 1, Weight: 80, Contribution: 80, ContributesToScore: true},
+			{Kind: repo.DecisionScoreFactorRevenue, RawValueCents: 2400000, UnitCents: 100000, Cap: 100, Contribution: 24, ContributesToScore: true},
+		},
+		DeliveryHealth: repo.DeliveryHealthPending,
+	}
+	beforeSummary := repo.Summary{ID: requestID, Status: repo.StatusOpen, Priority: repo.PriorityHigh}
+	rawAfter, err := json.Marshal(withDecisionSnapshot(updateAuditBeforeAfter(beforeSummary, afterSummary), afterSummary))
+	if err != nil {
+		t.Fatalf("json.Marshal(after) error = %v", err)
+	}
+	record, ok := decisionRecordFromAudit(auditlogrepo.Entry{
+		ID:         99,
+		Action:     "customer_request.update",
+		TargetType: "customer_request",
+		TargetID:   requestID.String(),
+		ActorType:  "user",
+		ActorID:    "pm-1",
+		Summary:    "Updated customer request",
+		AfterJSON:  rawAfter,
+		CreatedAt:  time.Date(2026, 7, 7, 1, 2, 3, 0, time.UTC),
+	})
+	if !ok || !record.StatusChanged || record.OldStatus != repo.StatusOpen || record.NewStatus != repo.StatusPlanned {
+		t.Fatalf("decisionRecordFromAudit() = %+v, want status transition", record)
+	}
+	assertDecisionRecordTransition(t, record)
+	assertDecisionRecordSnapshot(t, record)
+}
+
+func assertDecisionRecordTransition(t *testing.T, record DecisionRecord) {
+	t.Helper()
+	if !record.PriorityChanged || record.DecisionScore != 126 || record.DeliveryHealth != repo.DeliveryHealthPending {
+		t.Fatalf("decision record score/priority = %+v, want decision snapshot", record)
+	}
+	if record.SupportingFeedbackCount != 3 || record.CustomerCount != 2 || record.VoteCount != 5 {
+		t.Fatalf("record evidence counts = %+v, want snapshot counts", record)
+	}
+}
+
+func assertDecisionRecordSnapshot(t *testing.T, record DecisionRecord) {
+	t.Helper()
+	if len(record.DecisionScoreFactors) != 2 || record.DecisionScoreFactors[1].Kind != repo.DecisionScoreFactorRevenue {
+		t.Fatalf("DecisionScoreFactors = %+v, want parsed revenue factor", record.DecisionScoreFactors)
+	}
+	if record.DecisionRationale == "" || record.EvidenceBundleRef == "" || record.PublicSafeState != "needs_review" {
+		t.Fatalf("decision record context = %+v, want rationale, evidence bundle, public review state", record)
+	}
+	if len(record.PublicSafeReasons) == 0 || record.PublicSafeReasons[0] != "revenue_context" {
+		t.Fatalf("public safe reasons = %+v, want revenue context reason", record.PublicSafeReasons)
 	}
 }
 
@@ -1060,8 +1158,8 @@ func TestAcquireIdempotencyStates(t *testing.T) {
 
 	store = &fakeIdempotencyStore{acquireErr: idempotency.ErrExpired, reacquire: true}
 	service = New(nil, store, nil)
-	if _, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); err != nil || !acquired || !store.deleted {
-		t.Fatalf("acquireIdempotency(expired) acquired:%v deleted:%v err:%v", acquired, store.deleted, err)
+	if _, acquired, err := service.acquireIdempotency(ctx, "tenant-a", "key", "create", map[string]string{"title": "Export"}); err != nil || !acquired || !store.expiredDeleted {
+		t.Fatalf("acquireIdempotency(expired) acquired:%v deleted:%v err:%v", acquired, store.expiredDeleted, err)
 	}
 
 	store = &fakeIdempotencyStore{acquireErr: idempotency.ErrExpired, deleteErr: errors.New("delete failed")}
@@ -1111,6 +1209,10 @@ func TestServiceMethodsRejectInvalidInputsBeforeRepoUse(t *testing.T) {
 	cases := map[string]func() error{
 		"list": func() error {
 			_, err := service.List(ctx, ListInput{})
+			return err
+		},
+		"account summary": func() error {
+			_, err := service.GetAccountSummary(ctx, AccountSummaryInput{TenantID: "tenant-a"})
 			return err
 		},
 		"get scoring settings": func() error {
@@ -1268,15 +1370,15 @@ func (s *recordingIssueCreateRunStore) CreateCustomerRequestIssuePullRun(
 }
 
 type fakeIdempotencyStore struct {
-	record      *idempotency.Key
-	acquired    bool
-	acquireErr  error
-	reacquire   bool
-	deleteErr   error
-	completeErr error
-	deleted     bool
-	completed   bool
-	failed      bool
+	record         *idempotency.Key
+	acquired       bool
+	acquireErr     error
+	reacquire      bool
+	deleteErr      error
+	completeErr    error
+	expiredDeleted bool
+	completed      bool
+	failed         bool
 }
 
 func (f *fakeIdempotencyStore) Acquire(_ context.Context, tenantID, key string, requestHash []byte, ttl time.Duration) (*idempotency.Key, bool, error) {
@@ -1288,7 +1390,7 @@ func (f *fakeIdempotencyStore) Acquire(_ context.Context, tenantID, key string, 
 		}
 		return nil, false, err
 	}
-	if f.reacquire && f.deleted {
+	if f.reacquire && f.expiredDeleted {
 		return &idempotency.Key{TenantID: tenantID, Key: key, RequestHash: requestHash, Status: idempotency.StatusPending}, true, nil
 	}
 	return f.record, f.acquired, nil
@@ -1308,9 +1410,9 @@ func (f *fakeIdempotencyStore) Get(_ context.Context, _ string, _ string) (*idem
 	return nil, idempotency.ErrNotFound
 }
 
-func (f *fakeIdempotencyStore) Delete(_ context.Context, _ string, _ string) error {
-	f.deleted = true
-	return f.deleteErr
+func (f *fakeIdempotencyStore) DeleteExpired(_ context.Context, _ string, _ string) (bool, error) {
+	f.expiredDeleted = true
+	return f.deleteErr == nil, f.deleteErr
 }
 
 func (f *fakeIdempotencyStore) CleanupExpired(context.Context) (int64, error) {

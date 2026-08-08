@@ -1,18 +1,25 @@
+// biome-ignore-all lint/a11y/noNoninteractiveTabindex: Table scroll containers must be keyboard focusable for horizontal overflow.
 'use client'
 
 import type * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
-function Table({ className, ...props }: React.ComponentProps<'table'>) {
+function Table({ className, 'aria-label': ariaLabel, ...props }: React.ComponentProps<'table'>) {
   return (
-    <div data-slot="table-container" className="relative w-full min-w-0 max-w-full overflow-x-auto">
+    <section
+      aria-label={typeof ariaLabel === 'string' ? `${ariaLabel} scroll area` : undefined}
+      data-slot="table-container"
+      className="relative w-full min-w-0 max-w-full overflow-x-auto focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+      tabIndex={0}
+    >
       <table
+        aria-label={ariaLabel}
         data-slot="table"
         className={cn('w-full caption-bottom text-sm', className)}
         {...props}
       />
-    </div>
+    </section>
   )
 }
 

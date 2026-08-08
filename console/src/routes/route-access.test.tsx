@@ -42,6 +42,7 @@ import { Route as NotifyTargetsRoute } from '@/routes/_authed.integrations.notif
 import { Route as PublicVisibilityRoute } from '@/routes/_authed.integrations.public-visibility'
 import { Route as ReplySendHookRoute } from '@/routes/_authed.integrations.reply-send-hook'
 import { Route as RequestNotificationsRoute } from '@/routes/_authed.integrations.request-notifications'
+import { Route as SurveysRoute } from '@/routes/_authed.integrations.surveys'
 import { Route as LegacyLLMConfigRoute } from '@/routes/_authed.llm-config'
 import { Route as MCPClientsRoute } from '@/routes/_authed.mcp-clients'
 import { Route as LegacyNotifyTargetsRoute } from '@/routes/_authed.notify-targets'
@@ -270,6 +271,10 @@ describe('route access guards', () => {
         seenPaths.add(`${url.pathname}${url.search}`)
         return HttpResponse.json({ deliveries: [] })
       }),
+      http.get('/fb/v1/console/request-notifications/status-evidence', ({ request }) => {
+        seenPaths.add(new URL(request.url).pathname)
+        return HttpResponse.json({ items: [] })
+      }),
     )
 
     const queryClient = new QueryClient({
@@ -287,6 +292,68 @@ describe('route access guards', () => {
         '/fb/v1/console/request-notifications/sender',
         '/fb/v1/console/request-notifications/webhook-targets',
         '/fb/v1/console/request-notifications/deliveries?limit=25',
+        '/fb/v1/console/request-notifications/status-evidence',
+      ]),
+    )
+  })
+
+  it('keeps surveys admin-only and preloads survey workspace data', async () => {
+    mockMe('member')
+    const thrown = await callBeforeLoad(SurveysRoute.options.beforeLoad)
+    expect(isRedirect(thrown)).toBe(true)
+    expect((thrown as ThrownRedirect).options.to).toBe('/feedback')
+
+    mockMe('admin')
+    expect(await callBeforeLoad(SurveysRoute.options.beforeLoad)).toBeNull()
+
+    const seenPaths = new Set<string>()
+    server.use(
+      http.get('/fb/v1/console/surveys/campaigns', ({ request }) => {
+        const url = new URL(request.url)
+        seenPaths.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json({ campaigns: [] })
+      }),
+      http.get('/fb/v1/console/surveys/analytics', ({ request }) => {
+        const url = new URL(request.url)
+        seenPaths.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json({
+          invitationCount: 0,
+          deliveredCount: 0,
+          suppressedCount: 0,
+          completedCount: 0,
+          lowScoreCount: 0,
+          averageScore: 0,
+          responseRate: 0,
+          scoreDistribution: [],
+        })
+      }),
+      http.get('/fb/v1/console/surveys/invitations', ({ request }) => {
+        const url = new URL(request.url)
+        seenPaths.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json({ invitations: [] })
+      }),
+      http.get('/fb/v1/console/surveys/responses', ({ request }) => {
+        const url = new URL(request.url)
+        seenPaths.add(`${url.pathname}${url.search}`)
+        return HttpResponse.json({ responses: [] })
+      }),
+    )
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const loader = SurveysRoute.options.loader as (args: {
+      context: { queryClient: QueryClient }
+    }) => Promise<unknown>
+
+    await expect(loader({ context: { queryClient } })).resolves.toBeUndefined()
+    expect(SurveysRoute.options.component).toBeTypeOf('function')
+    expect(seenPaths).toEqual(
+      new Set([
+        '/fb/v1/console/surveys/campaigns?limit=50',
+        '/fb/v1/console/surveys/analytics',
+        '/fb/v1/console/surveys/invitations?limit=25',
+        '/fb/v1/console/surveys/responses?low_score_only=true&limit=25',
       ]),
     )
   })

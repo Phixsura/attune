@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { renderWithProviders, screen } from '@/testing/test-utils'
+import { renderWithProviders, screen, waitFor } from '@/testing/test-utils'
 import { CreateMCPClientDialog, RevokeMCPClientDialog } from './dialogs'
 
 describe('CreateMCPClientDialog', () => {
@@ -28,9 +28,11 @@ describe('CreateMCPClientDialog', () => {
       redirect_uris: ['http://localhost:8080/callback', 'https://vscode.dev/redirect'],
       scopes: ['mcp:write'],
     })
-    expect(screen.getByLabelText('客户端名称')).toHaveValue('')
-    expect(screen.getByLabelText('重定向 URI')).toHaveValue('')
-    expect(screen.getByRole('checkbox', { name: /Read/ })).toBeChecked()
+    await waitFor(() => {
+      expect(screen.getByLabelText('客户端名称')).toHaveValue('')
+      expect(screen.getByLabelText('重定向 URI')).toHaveValue('')
+      expect(screen.getByRole('checkbox', { name: /Read/ })).toBeChecked()
+    })
   })
 
   it('keeps entered values when submit rejects and closes through cancel', async () => {

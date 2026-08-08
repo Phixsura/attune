@@ -51,9 +51,9 @@ describe('TagCombobox', () => {
     await waitFor(() => {
       expect(screen.getByRole('combobox')).toBeInTheDocument()
     })
-    expect(screen.getByRole('dialog', { name: '添加 标签' })).toBeInTheDocument()
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     expect(screen.getAllByRole('option')).toHaveLength(3)
+    expect(screen.getByRole('dialog', { name: '标签选择器' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button'))
     await waitFor(() => {

@@ -86,6 +86,11 @@ import {
 } from '@/features/external-sync/api/external-sync'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { cn } from '@/lib/utils'
+import { buildConnectorConformanceGate } from '../connector-conformance-gate'
+import { buildFieldMappingWorkbench } from '../field-mapping-workbench'
+import { buildIntegrationCatalog } from '../integration-catalog'
+import { buildUpgradeDiagnostics } from '../upgrade-diagnostics'
+import { ConnectorConformanceGateCard } from './connector-conformance-gate-card'
 import {
   EventDetailCard,
   type RecordTimelineTarget,
@@ -105,6 +110,9 @@ import {
   shortID,
   statusLabel,
 } from './external-sync-ui'
+import { FieldMappingWorkbenchCard } from './field-mapping-workbench-card'
+import { IntegrationCatalogCard } from './integration-catalog-card'
+import { UpgradeDiagnosticsCard } from './upgrade-diagnostics-card'
 
 export {
   BatchConflictResolutionControls,
@@ -312,6 +320,16 @@ export function ExternalSyncPage() {
   const qualifyProviderInstallation = useMutation({
     mutationFn: qualifyExternalProviderInstallation,
     onSuccess: async (result) => {
+      const updatedInstallation = result.installation
+      if (updatedInstallation) {
+        queryClient.setQueryData<ExternalProviderInstallation[]>(
+          externalSyncQueryKeys.providerInstallations(),
+          (installations = []) =>
+            installations.map((installation) =>
+              installation.id === updatedInstallation.id ? updatedInstallation : installation,
+            ),
+        )
+      }
       await invalidateExternalSync()
       const description = qualificationToastDescription(result.checks)
       if (result.ready) {
@@ -592,6 +610,38 @@ export function ExternalSyncPage() {
     throttledRuns +
     unauthorizedRuns +
     providerUnavailableRuns
+  const connectorConformanceGate = buildConnectorConformanceGate({
+    connections,
+    events,
+    health: summary,
+    mappings,
+    runs,
+    schemas,
+  })
+  const fieldMappingWorkbench = buildFieldMappingWorkbench({
+    connection: selectedConnection,
+    health: summary,
+    mapping: selectedMapping,
+    mappings,
+    runs,
+    schemas,
+  })
+  const integrationCatalog = buildIntegrationCatalog({
+    connections,
+    events,
+    health: summary,
+  })
+  const upgradeDiagnostics = buildUpgradeDiagnostics({
+    catalog: integrationCatalog,
+    conformance: connectorConformanceGate,
+    connections,
+    events,
+    fieldMapping: fieldMappingWorkbench,
+    health: summary,
+    mappings,
+    runs,
+    schemas,
+  })
 
   return (
     <div className="space-y-6">
@@ -675,6 +725,14 @@ export function ExternalSyncPage() {
           </>
         }
       />
+
+      <IntegrationCatalogCard catalog={integrationCatalog} />
+
+      <UpgradeDiagnosticsCard diagnostics={upgradeDiagnostics} />
+
+      <ConnectorConformanceGateCard gate={connectorConformanceGate} />
+
+      <FieldMappingWorkbenchCard workbench={fieldMappingWorkbench} />
 
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
         <div className="min-w-0 space-y-6">

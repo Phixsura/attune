@@ -1,0 +1,17 @@
+{
+  "provider": "github",
+  "rawBody": "{\"action\":\"edited\",\"issue\":{\"number\":982,\"title\":\"Slack importer misses threaded replies\",\"body\":\"Thread replies should attach to the original customer signal.\",\"state\":\"open\",\"html_url\":\"https://github.com/acme/product/issues/982\",\"labels\":[{\"name\":\"slack\"},{\"name\":\"import\"}],\"updated_at\":\"2026-07-08T02:11:00Z\"},\"changes\":{\"body\":{\"from\":\"Thread replies should attach.\"}},\"repository\":{\"full_name\":\"acme/product\"},\"sender\":{\"login\":\"hubot\"}}",
+  "headers": {
+    "x-github-event": "issues",
+    "x-github-delivery": "github-delivery-1002",
+    "x-hub-signature-256": "sha256=88ff9c409be4a5a393483c5683bc92842d8e0bca33cd6dee11d5688559210a2f"
+  },
+  "expected": {
+    "dedupeKey": "github:issues:github-delivery-1002",
+    "eventType": "issues.edited",
+    "externalKey": "github:acme/product#982",
+    "title": "Slack importer misses threaded replies",
+    "status": "open",
+    "labels": ["slack", "import"]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "summary": {
+    "create": 37,
+    "update": 2,
+    "reject": 1
+  },
+  "rows": [
+    {
+      "row": 1,
+      "external_id": "cr-2001",
+      "action": "create",
+      "reason": "new external id"
+    },
+    {
+      "row": 2,
+      "external_id": "cr-2002",
+      "action": "update",
+      "reason": "matching external id with newer evidence timestamp"
+    },
+    {
+      "row": 3,
+      "external_id": "cr-2003",
+      "action": "reject",
+      "error_code": "invalid_enum",
+      "recovery_action": "map_status",
+      "reason": "source state needs mapping before commit"
+    }
+  ]
+}

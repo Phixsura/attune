@@ -296,11 +296,8 @@ func (w *Worker) processNextExport(ctx context.Context) error {
 			TargetID:   job.SubjectHash,
 			Summary:    "Exported GDPR bundle for subject",
 			After: map[string]any{
-				"subject_hash":         job.SubjectHash,
-				"feedback_count":       data.Counts.FeedbackCount,
-				"tag_assignment_count": data.Counts.TagAssignmentCount,
-				"feedback_audit_count": data.Counts.FeedbackAuditCount,
-				"llm_audit_count":      data.Counts.LLMAuditCount,
+				"subject_hash": job.SubjectHash,
+				"counts":       auditCounts(data.Counts),
 			},
 		}); err != nil {
 			return err
@@ -337,12 +334,9 @@ func (w *Worker) processNextDelete(ctx context.Context) error {
 			TargetID:   req.SubjectHash,
 			Summary:    "Deleted GDPR subject data",
 			After: map[string]any{
-				"request_id":           req.ID,
-				"subject_hash":         req.SubjectHash,
-				"feedback_count":       result.Counts.FeedbackCount,
-				"tag_assignment_count": result.Counts.TagAssignmentCount,
-				"feedback_audit_count": result.Counts.FeedbackAuditCount,
-				"llm_audit_count":      result.Counts.LLMAuditCount,
+				"request_id":   req.ID,
+				"subject_hash": req.SubjectHash,
+				"counts":       auditCounts(result.Counts),
 			},
 		}); err != nil {
 			return err
@@ -388,16 +382,21 @@ func (w *Worker) heartbeat(ctx context.Context, jobID string, cancelJob context.
 
 func jobStatusResponse(job *gdprrepo.ExportJob) *attunev1.GdprExportStatusResponse {
 	resp := ptrext.Of(attunev1.GdprExportStatusResponse{
-		JobId:              job.ID,
-		SubjectKey:         job.SubjectKey,
-		SubjectDisplay:     job.SubjectDisplay,
-		Status:             exportJobStatusProto(job.Status),
-		RetryAfterSeconds:  int32(DefaultExportPoll.Seconds()),
-		FeedbackCount:      int32(job.Counts.FeedbackCount),
-		TagAssignmentCount: int32(job.Counts.TagAssignmentCount),
-		FeedbackAuditCount: int32(job.Counts.FeedbackAuditCount),
-		LlmAuditCount:      int32(job.Counts.LLMAuditCount),
-		CreatedAt:          job.CreatedAt.UTC().Format(time.RFC3339),
+		JobId:                           job.ID,
+		SubjectKey:                      job.SubjectKey,
+		SubjectDisplay:                  job.SubjectDisplay,
+		Status:                          exportJobStatusProto(job.Status),
+		RetryAfterSeconds:               int32(DefaultExportPoll.Seconds()),
+		FeedbackCount:                   int32(job.Counts.FeedbackCount),
+		TagAssignmentCount:              int32(job.Counts.TagAssignmentCount),
+		FeedbackAuditCount:              int32(job.Counts.FeedbackAuditCount),
+		LlmAuditCount:                   int32(job.Counts.LLMAuditCount),
+		SurveyInvitationCount:           int32(job.Counts.SurveyInvitationCount),
+		SurveyResponseCount:             int32(job.Counts.SurveyResponseCount),
+		SurveyLowScoreReviewCount:       int32(job.Counts.SurveyLowScoreReviewCount),
+		SurveyProviderEventCount:        int32(job.Counts.SurveyProviderEventCount),
+		SurveyRecoveryNotificationCount: int32(job.Counts.SurveyRecoveryNotificationCount),
+		CreatedAt:                       job.CreatedAt.UTC().Format(time.RFC3339),
 	})
 	if job.StartedAt != nil {
 		resp.StartedAt = ptrext.Of(job.StartedAt.UTC().Format(time.RFC3339))

@@ -17,6 +17,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 func TestRepoConstructorAndPoolMethodsReturnErrors(t *testing.T) {
@@ -35,6 +37,9 @@ func TestRepoConstructorAndPoolMethodsReturnErrors(t *testing.T) {
 	}
 	if _, err := r.List(ctx, ListFilter{TenantID: "tenant-a", Limit: 1}); err == nil {
 		t.Fatalf("List() error = nil, want pool error")
+	}
+	if _, err := r.GetAccountSummary(ctx, ListFilter{TenantID: "tenant-a", AccountKey: "acct:acme", Limit: 1}); err == nil {
+		t.Fatalf("GetAccountSummary() error = nil, want pool error")
 	}
 	if _, err := r.GetDetail(ctx, "tenant-a", requestID, 1); err == nil {
 		t.Fatalf("GetDetail() error = nil, want pool error")
@@ -58,6 +63,7 @@ func TestBuildListQueryFiltersAndOrdering(t *testing.T) {
 		Sort:          SortPriority,
 		Direction:     DirectionAsc,
 		FeedbackID:    42,
+		AccountKey:    "acct:acme",
 	}, 101, 25)
 
 	for _, want := range []string{
@@ -71,18 +77,22 @@ func TestBuildListQueryFiltersAndOrdering(t *testing.T) {
 		"cr.priority = ANY($4)",
 		"cr.owner_member_id = $5",
 		"fl.feedback_id = $6",
+		"FROM customer_request_customer_links acl",
+		"acl.account_key = $7",
+		"FROM customer_request_votes av",
+		"av.account_key = $7",
 		"ORDER BY CASE cr.priority WHEN 'urgent' THEN 4",
 		"ASC NULLS LAST, cr.id ASC",
-		"LIMIT $7 OFFSET $8",
+		"LIMIT $8 OFFSET $9",
 	} {
 		if !strings.Contains(query, want) {
 			t.Fatalf("buildListQuery() SQL missing %q:\n%s", want, query)
 		}
 	}
-	if len(args) != 8 {
-		t.Fatalf("args len = %d, want 8: %#v", len(args), args)
+	if len(args) != 9 {
+		t.Fatalf("args len = %d, want 9: %#v", len(args), args)
 	}
-	if args[0] != "tenant-a" || args[1] != "%export%" || args[4] != ownerID || args[5] != int64(42) || args[6] != 101 || args[7] != 25 {
+	if args[0] != "tenant-a" || args[1] != "%export%" || args[4] != ownerID || args[5] != int64(42) || args[6] != "acct:acme" || args[7] != 101 || args[8] != 25 {
 		t.Fatalf("args = %#v, want normalized query args", args)
 	}
 	if !reflect.DeepEqual(args[2], []string{"open", "planned"}) {
@@ -91,6 +101,144 @@ func TestBuildListQueryFiltersAndOrdering(t *testing.T) {
 	if !reflect.DeepEqual(args[3], []string{"high"}) {
 		t.Fatalf("priority args = %#v", args[3])
 	}
+}
+
+func TestBuildAccountSummaryQueryFilters(t *testing.T) {
+	t.Parallel()
+
+	ownerID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	query, args := buildAccountSummaryQuery(ListFilter{
+		TenantID:      "tenant-a",
+		Query:         " Renewal ",
+		Statuses:      []Status{StatusOpen},
+		Priorities:    []Priority{PriorityUrgent},
+		OwnerMemberID: &ownerID,
+		Visibility:    VisibilityActive,
+		Sort:          SortDecisionScore,
+		Direction:     DirectionDesc,
+		FeedbackID:    42,
+		AccountKey:    "acct:acme",
+	})
+
+	for _, want := range []string{
+		"WITH scoped AS",
+		"cr.archived_at IS NULL AND cr.merged_into_request_id IS NULL",
+		"(LOWER(cr.title) LIKE $2 OR LOWER(cr.display_id) LIKE $2)",
+		"cr.status = ANY($3)",
+		"cr.priority = ANY($4)",
+		"cr.owner_member_id = $5",
+		"fl.feedback_id = $6",
+		"acl.account_key = $7",
+		"av.account_key = $7",
+		"FROM customer_request_accounts",
+		"WHERE tenant_id = $1 AND account_key = $8",
+		"$8::text",
+		"high_priority_request_count",
+		"stale_or_failed_issue_count",
+		"average_decision_score",
+		"top_decision_score",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("buildAccountSummaryQuery() SQL missing %q:\n%s", want, query)
+		}
+	}
+	if len(args) != 8 {
+		t.Fatalf("args len = %d, want 8: %#v", len(args), args)
+	}
+	if args[0] != "tenant-a" || args[1] != "%renewal%" || args[4] != ownerID || args[5] != int64(42) || args[6] != "acct:acme" || args[7] != "acct:acme" {
+		t.Fatalf("args = %#v, want normalized account summary args", args)
+	}
+}
+
+func TestBuildAccountEventsQueryFilters(t *testing.T) {
+	t.Parallel()
+
+	ownerID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	query, args := buildAccountEventsQuery(ListFilter{
+		TenantID:      "tenant-a",
+		Query:         " Renewal ",
+		Statuses:      []Status{StatusOpen},
+		Priorities:    []Priority{PriorityUrgent},
+		OwnerMemberID: &ownerID,
+		Visibility:    VisibilityActive,
+		FeedbackID:    42,
+		AccountKey:    "acct:acme",
+		EventLimit:    7,
+	})
+
+	for _, want := range []string{
+		"WITH account_requests AS",
+		"cr.archived_at IS NULL AND cr.merged_into_request_id IS NULL",
+		"cr.status = ANY($3)",
+		"cr.priority = ANY($4)",
+		"cr.owner_member_id = $5",
+		"fl.feedback_id = $6",
+		"acl.account_key = $7",
+		"av.account_key = $7",
+		"customer_request_feedback_links fl",
+		"customer_request_customer_links cl",
+		"customer_request_votes v",
+		"customer_request_issue_links il",
+		"customer_request_notes n",
+		"ORDER BY occurred_at DESC",
+		"LIMIT $8",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("buildAccountEventsQuery() SQL missing %q:\n%s", want, query)
+		}
+	}
+	if len(args) != 8 || args[7] != 7 {
+		t.Fatalf("args = %#v, want event limit in final position", args)
+	}
+	if args[0] != "tenant-a" || args[6] != "acct:acme" {
+		t.Fatalf("args = %#v, want normalized tenant and account", args)
+	}
+}
+
+func TestScanAccountSummary(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	got, err := scanAccountSummary(fakeRepoRow{values: []any{
+		"acct:acme",
+		sql.NullString{String: "acct:acme", Valid: true},
+		sql.NullString{String: "Acme", Valid: true},
+		sql.NullInt64{Int64: 2400000, Valid: true},
+		sql.NullString{String: "USD", Valid: true},
+		sql.NullString{String: "enterprise", Valid: true},
+		sql.NullString{String: "mid_market", Valid: true},
+		sql.NullString{String: "active", Valid: true},
+		sql.NullString{String: "salesforce", Valid: true},
+		sql.NullString{String: "001-acme", Valid: true},
+		sql.NullString{String: "manual", Valid: true},
+		sql.NullTime{Time: now, Valid: true},
+		2,
+		5,
+		3,
+		4,
+		2,
+		1,
+		1,
+		0,
+		0,
+		0,
+		int64(4800000),
+		"USD",
+		1,
+		0,
+		1,
+		71,
+		114,
+	}})
+	require.NoError(t, err)
+	require.Equal(t, "acct:acme", got.AccountKey)
+	require.Equal(t, 2, got.RequestCount)
+	require.Equal(t, int64(4800000), got.RevenueImpactCents)
+	require.Equal(t, 1, got.StaleOrFailedIssueCount)
+	require.Equal(t, 71, got.AverageDecisionScore)
+	require.Equal(t, 114, got.TopDecisionScore)
+	require.NotNil(t, got.AccountProfile)
+	require.Equal(t, "Acme", got.AccountProfile.AccountDisplay)
 }
 
 func TestVisibilityAndSortClauses(t *testing.T) {
@@ -148,7 +296,7 @@ func TestLoadDetailScansAllCollections(t *testing.T) {
 	voteID := uuid.MustParse("77777777-7777-7777-7777-777777777777")
 	noteID := uuid.MustParse("88888888-8888-8888-8888-888888888888")
 	duplicateID := uuid.MustParse("99999999-9999-9999-9999-999999999999")
-	latest := now.Add(2 * time.Hour)
+	latest := time.Now().UTC().Add(-2 * time.Hour)
 	syncedAt := now.Add(time.Hour)
 
 	db := &fakeRepoDB{
@@ -193,6 +341,20 @@ func TestLoadDetailScansAllCollections(t *testing.T) {
 	require.Len(t, detail.Duplicates, 1)
 	require.Equal(t, "CR-2", detail.Duplicates[0].DisplayID)
 	require.Len(t, detail.AccountProfiles, 2)
+	require.Len(t, detail.Summary.DecisionScoreFactors, 7)
+	require.Equal(t, DecisionScoreFactorPriority, detail.Summary.DecisionScoreFactors[0].Kind)
+	require.Equal(t, 60, detail.Summary.DecisionScoreFactors[0].Contribution)
+	require.Equal(t, DecisionScoreFactorFeedback, detail.Summary.DecisionScoreFactors[1].Kind)
+	require.Equal(t, 3, detail.Summary.DecisionScoreFactors[1].RawCount)
+	require.Equal(t, 6, detail.Summary.DecisionScoreFactors[1].Contribution)
+	require.Equal(t, DecisionScoreFactorRevenue, detail.Summary.DecisionScoreFactors[5].Kind)
+	require.Equal(t, int64(100000), detail.Summary.DecisionScoreFactors[5].UnitCents)
+	require.Equal(t, 12, detail.Summary.DecisionScoreFactors[5].Contribution)
+	require.Equal(t, DecisionScoreFactorDeliveryHealth, detail.Summary.DecisionScoreFactors[6].Kind)
+	require.False(t, detail.Summary.DecisionScoreFactors[6].ContributesToScore)
+	require.Equal(t, 75, detail.Summary.EvidenceQuality.Score)
+	require.Equal(t, EvidenceConfidenceHigh, detail.Summary.EvidenceQuality.Confidence)
+	require.Contains(t, detail.Summary.EvidenceQuality.Strengths, EvidenceReasonMultiSource)
 	require.Equal(t, 100, db.queryArgs[0][2])
 }
 
@@ -262,6 +424,7 @@ func TestScanHelpersAndErrorMapping(t *testing.T) {
 	if !strings.Contains(explanation, "priority=high") || !strings.Contains(explanation, "delivery_health=pending") {
 		t.Fatalf("decisionScoreExplanation() = %q", explanation)
 	}
+	assertDecisionScoreFactorCaps(t)
 
 	for _, tc := range []struct {
 		code string
@@ -482,6 +645,59 @@ func TestBuildDeliveryGraphWithoutIssueLinks(t *testing.T) {
 	require.Equal(t, DeliveryHealthNoLinks, graph.Health)
 	require.Equal(t, "No delivery artifacts are linked.", graph.HealthExplanation)
 	require.Equal(t, updatedAt, *graph.UpdatedAt)
+}
+
+func assertDecisionScoreFactorCaps(t *testing.T) {
+	t.Helper()
+	factors := decisionScoreFactors(&Summary{SupportingFeedbackCount: 99, RevenueImpactCents: 1200000, LinkedIssueCount: 1, FailedIssueCount: 1}, decisionScoreFactorInputs{
+		FeedbackWeight:       2,
+		FeedbackCap:          80,
+		FeedbackContribution: 80,
+		RevenueUnitCents:     100000,
+		RevenueCap:           10,
+		RevenueContribution:  10,
+	})
+	if !factors[1].Capped || factors[1].Contribution != 80 || !factors[5].Capped || factors[5].Contribution != 10 || factors[6].ContributesToScore {
+		t.Fatalf("decisionScoreFactors() = %+v, want capped feedback/revenue and non-scoring delivery", factors)
+	}
+}
+
+func TestEvidenceQualityExplainsConfidenceAndGaps(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	latest := now.Add(-2 * time.Hour)
+	strong := evidenceQuality(&Summary{
+		SupportingFeedbackCount: 4,
+		EvidenceSourceCount:     2,
+		CustomerCount:           3,
+		AccountCount:            1,
+		LinkedIssueCount:        1,
+		LatestFeedbackAt:        ptrext.Of(latest),
+	}, now)
+	require.Equal(t, 90, strong.Score)
+	require.Equal(t, EvidenceConfidenceHigh, strong.Confidence)
+	require.False(t, strong.LowConfidence)
+	require.Contains(t, strong.Strengths, EvidenceReasonMultiSource)
+	require.Contains(t, strong.Strengths, EvidenceReasonFreshEvidence)
+
+	stale := now.Add(-120 * 24 * time.Hour)
+	weak := evidenceQuality(&Summary{
+		SupportingFeedbackCount: 2,
+		EvidenceSourceCount:     1,
+		CustomerCount:           1,
+		HiddenFeedbackCount:     1,
+		LatestFeedbackAt:        ptrext.Of(stale),
+	}, now)
+	require.Equal(t, EvidenceConfidenceLow, weak.Confidence)
+	require.True(t, weak.LowConfidence)
+	require.True(t, weak.Stale)
+	require.Contains(t, weak.GapReasons, EvidenceReasonLowFeedbackVolume)
+	require.Contains(t, weak.GapReasons, EvidenceReasonSingleSource)
+	require.Contains(t, weak.GapReasons, EvidenceReasonNoAccountContext)
+	require.Contains(t, weak.GapReasons, EvidenceReasonStaleEvidence)
+	require.Contains(t, weak.GapReasons, EvidenceReasonNoDeliveryLink)
+	require.Contains(t, weak.GapReasons, EvidenceReasonHiddenFeedback)
 }
 
 func TestTransactionHelpers(t *testing.T) {
@@ -1019,6 +1235,7 @@ func summaryRow(id uuid.UUID, tenantID, displayID string, ownerID uuid.UUID, mer
 		ownerRole,
 		3,
 		2,
+		2,
 		1,
 		1,
 		4,
@@ -1027,6 +1244,22 @@ func summaryRow(id uuid.UUID, tenantID, displayID string, ownerID uuid.UUID, mer
 		int64(1200000),
 		"USD",
 		95,
+		60,
+		2,
+		80,
+		6,
+		5,
+		100,
+		10,
+		8,
+		120,
+		8,
+		4,
+		80,
+		16,
+		int64(100000),
+		100,
+		12,
 		string(DeliveryHealthSynced),
 		1,
 		1,

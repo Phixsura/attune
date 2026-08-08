@@ -131,15 +131,20 @@ func (h *Handler) Delete(
 		return dispatcher.Result[*attunev1.DeleteGdprSubjectResponse]{}, mapError(err)
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.DeleteGdprSubjectResponse{
-		RequestId:          result.RequestID,
-		Status:             requestStatusProto(result.Status),
-		ExecuteAfter:       ptrext.Map(result.ExecuteAfter, func(v time.Time) string { return v.UTC().Format(time.RFC3339) }),
-		SubjectKey:         result.SubjectKey,
-		FeedbackCount:      int32(result.Counts.FeedbackCount),
-		TagAssignmentCount: int32(result.Counts.TagAssignmentCount),
-		FeedbackAuditCount: int32(result.Counts.FeedbackAuditCount),
-		LlmAuditCount:      int32(result.Counts.LLMAuditCount),
-		OutboxCount:        int32(result.Counts.OutboxCount),
+		RequestId:                       result.RequestID,
+		Status:                          requestStatusProto(result.Status),
+		ExecuteAfter:                    ptrext.Map(result.ExecuteAfter, func(v time.Time) string { return v.UTC().Format(time.RFC3339) }),
+		SubjectKey:                      result.SubjectKey,
+		FeedbackCount:                   int32(result.Counts.FeedbackCount),
+		TagAssignmentCount:              int32(result.Counts.TagAssignmentCount),
+		FeedbackAuditCount:              int32(result.Counts.FeedbackAuditCount),
+		LlmAuditCount:                   int32(result.Counts.LLMAuditCount),
+		OutboxCount:                     int32(result.Counts.OutboxCount),
+		SurveyInvitationCount:           int32(result.Counts.SurveyInvitationCount),
+		SurveyResponseCount:             int32(result.Counts.SurveyResponseCount),
+		SurveyLowScoreReviewCount:       int32(result.Counts.SurveyLowScoreReviewCount),
+		SurveyProviderEventCount:        int32(result.Counts.SurveyProviderEventCount),
+		SurveyRecoveryNotificationCount: int32(result.Counts.SurveyRecoveryNotificationCount),
 	}))
 }
 

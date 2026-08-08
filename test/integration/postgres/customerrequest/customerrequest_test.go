@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -126,6 +127,177 @@ func TestPGCustomerRequestDecisionIntelligence(t *testing.T) {
 	fixture := seedDecisionIntelligence(t, e)
 	detail := assertDecisionIntelligenceDetail(t, e, fixture)
 	assertDecisionScoreSort(t, e, fixture.highValue.ID, detail.Summary.DecisionScore)
+}
+
+func TestPGCustomerRequestAccountSummaryAggregatesFullPortfolio(t *testing.T) {
+	e := setup(t)
+	seedAccountSummaryPortfolio(t, e)
+
+	summary := loadAccountSummary(t, e, 1, 20)
+	assertAccountSummaryPortfolio(t, summary)
+}
+
+func TestPGCustomerRequestEvidenceQualityScoresEvidenceDepth(t *testing.T) {
+	e := setup(t)
+	strong := e.createRequest(t, e.tenantID, "Multi-source request")
+	weak := e.createRequest(t, e.tenantID, "Thin stale request")
+	strongFeedback := []int64{
+		e.seedFeedbackFromSource(t, e.tenantID, "ada", "subject:ada", "web", nil),
+		e.seedFeedbackFromSource(t, e.tenantID, "grace", "subject:grace", "slack", nil),
+		e.seedFeedbackFromSource(t, e.tenantID, "linus", "subject:linus", "email", nil),
+	}
+	staleAt := time.Now().UTC().Add(-120 * 24 * time.Hour)
+	weakFeedback := e.seedFeedbackFromSource(t, e.tenantID, "thin", "subject:thin", "web", &staleAt)
+
+	tx := e.begin(t)
+	for _, feedbackID := range strongFeedback {
+		linkFeedback(t, e.ctx, e.repo, tx, e.tenantID, strong.ID, feedbackID)
+	}
+	linkFeedback(t, e.ctx, e.repo, tx, e.tenantID, weak.ID, weakFeedback)
+	linkCustomer(t, e.ctx, e.repo, tx, e.tenantID, strong.ID, "subject:buyer", "account:acme")
+	seedIssueState(t, e, tx, strong.ID, "synced", crrepo.IssueSyncStateSynced)
+	commit(t, e.ctx, tx)
+
+	strongDetail, err := e.repo.GetDetail(e.ctx, e.tenantID, strong.ID, 50)
+	require.NoError(t, err)
+	assertStrongEvidenceQuality(t, strongDetail.Summary.EvidenceQuality)
+
+	weakDetail, err := e.repo.GetDetail(e.ctx, e.tenantID, weak.ID, 50)
+	require.NoError(t, err)
+	assertWeakEvidenceQuality(t, weakDetail.Summary.EvidenceQuality)
+}
+
+func assertStrongEvidenceQuality(t *testing.T, quality crrepo.EvidenceQuality) {
+	t.Helper()
+	require.GreaterOrEqual(t, quality.Score, 85)
+	require.Equal(t, crrepo.EvidenceConfidenceHigh, quality.Confidence)
+	require.Equal(t, 3, quality.SourceCount)
+	require.Equal(t, 1, quality.AccountCount)
+	require.False(t, quality.LowConfidence)
+	require.Contains(t, quality.Strengths, crrepo.EvidenceReasonMultiSource)
+	require.Contains(t, quality.Strengths, crrepo.EvidenceReasonDeliveryLinked)
+}
+
+func assertWeakEvidenceQuality(t *testing.T, weakQuality crrepo.EvidenceQuality) {
+	t.Helper()
+	require.True(t, weakQuality.LowConfidence)
+	require.True(t, weakQuality.Stale)
+	require.Equal(t, crrepo.EvidenceConfidenceLow, weakQuality.Confidence)
+	for _, reason := range []crrepo.EvidenceQualityReason{
+		crrepo.EvidenceReasonLowFeedbackVolume,
+		crrepo.EvidenceReasonSingleCustomer,
+		crrepo.EvidenceReasonNoAccountContext,
+		crrepo.EvidenceReasonStaleEvidence,
+		crrepo.EvidenceReasonNoDeliveryLink,
+	} {
+		require.Contains(t, weakQuality.GapReasons, reason)
+	}
+}
+
+func seedAccountSummaryPortfolio(t *testing.T, e env) {
+	t.Helper()
+	first := e.createRequest(t, e.tenantID, "Renewal blocker")
+	second := e.createRequest(t, e.tenantID, "Workflow follow-up")
+	other := e.createRequest(t, e.tenantID, "Different account")
+	firstFeedback := []int64{
+		e.seedFeedback(t, e.tenantID, "ada", "subject:ada"),
+		e.seedFeedback(t, e.tenantID, "grace", "subject:grace"),
+	}
+	secondFeedback := e.seedFeedback(t, e.tenantID, "linus", "subject:linus")
+
+	tx := e.begin(t)
+	updatePriority(t, e, tx, first.ID, crrepo.PriorityHigh)
+	linkFeedback(t, e.ctx, e.repo, tx, e.tenantID, first.ID, firstFeedback[0])
+	linkFeedback(t, e.ctx, e.repo, tx, e.tenantID, first.ID, firstFeedback[1])
+	linkFeedback(t, e.ctx, e.repo, tx, e.tenantID, second.ID, secondFeedback)
+	linkAccountProfile(t, e, tx, first.ID, "subject:first", "account:acme")
+	linkAccountProfile(t, e, tx, second.ID, "subject:second", "account:acme")
+	addVote(t, e.ctx, e.repo, tx, e.tenantID, first.ID, "vote:first", "account:acme")
+	addVote(t, e.ctx, e.repo, tx, e.tenantID, second.ID, "vote:second", "account:acme")
+	linkCustomer(t, e.ctx, e.repo, tx, e.tenantID, other.ID, "subject:other", "account:other")
+	seedIssueState(t, e, tx, first.ID, "synced", crrepo.IssueSyncStateSynced)
+	seedIssueState(t, e, tx, second.ID, "stale", crrepo.IssueSyncStateStale)
+	addNote(t, e.ctx, e.repo, tx, e.tenantID, first.ID, "Renewal owner confirmed account impact.")
+	commit(t, e.ctx, tx)
+}
+
+func loadAccountSummary(t *testing.T, e env, timelineLimit, eventLimit int) crrepo.AccountSummary {
+	t.Helper()
+	summary, err := e.repo.GetAccountSummary(e.ctx, crrepo.ListFilter{
+		TenantID:   e.tenantID,
+		AccountKey: "account:acme",
+		Visibility: crrepo.VisibilityActive,
+		Sort:       crrepo.SortUpdatedAt,
+		Direction:  crrepo.DirectionDesc,
+		Limit:      timelineLimit,
+		EventLimit: eventLimit,
+	})
+	if err != nil {
+		t.Fatalf("GetAccountSummary: %v", err)
+	}
+	return summary
+}
+
+func assertAccountSummaryPortfolio(t *testing.T, summary crrepo.AccountSummary) {
+	t.Helper()
+	if summary.RequestCount != 2 || len(summary.Timeline) != 1 {
+		t.Fatalf("account summary requests/timeline = %d/%d, want full count 2 with timeline limit 1",
+			summary.RequestCount, len(summary.Timeline))
+	}
+	if summary.FeedbackCount != 3 || summary.VoteCount != 2 || summary.IssueCount != 2 {
+		t.Fatalf("account summary counts = feedback:%d votes:%d issues:%d, want 3/2/2",
+			summary.FeedbackCount, summary.VoteCount, summary.IssueCount)
+	}
+	if summary.SyncedIssueCount != 1 || summary.StaleIssueCount != 1 || summary.StaleOrFailedIssueCount != 1 {
+		t.Fatalf("account summary issue health = synced:%d stale:%d risk:%d, want 1/1/1",
+			summary.SyncedIssueCount, summary.StaleIssueCount, summary.StaleOrFailedIssueCount)
+	}
+	if summary.HighPriorityRequestCount != 1 || summary.RevenueImpactCents != 4_800_000 {
+		t.Fatalf("account summary priority/revenue = %d/%d, want 1/4800000",
+			summary.HighPriorityRequestCount, summary.RevenueImpactCents)
+	}
+	if summary.AverageDecisionScore != 87 || summary.TopDecisionScore != 120 {
+		t.Fatalf("account summary scores = average:%d top:%d, want 87/120",
+			summary.AverageDecisionScore, summary.TopDecisionScore)
+	}
+	if summary.AccountProfile == nil || summary.AccountProfile.AccountDisplay != "Acme Corp" {
+		t.Fatalf("account profile = %+v, want Acme Corp", summary.AccountProfile)
+	}
+	assertAccountSummaryEvents(t, summary.Events)
+}
+
+func assertAccountSummaryEvents(t *testing.T, events []crrepo.AccountEvent) {
+	t.Helper()
+	if len(events) < 10 {
+		t.Fatalf("account events len = %d, want a full account evidence timeline", len(events))
+	}
+	kinds := accountEventKindCounts(events)
+	for _, kind := range []crrepo.AccountEventKind{
+		crrepo.AccountEventRequestCreated,
+		crrepo.AccountEventFeedbackLinked,
+		crrepo.AccountEventCustomerLinked,
+		crrepo.AccountEventVoteAdded,
+		crrepo.AccountEventIssueLinked,
+		crrepo.AccountEventIssueSynced,
+		crrepo.AccountEventNoteAdded,
+	} {
+		if kinds[kind] == 0 {
+			t.Fatalf("account events missing %s: %+v", kind, events)
+		}
+	}
+	for _, event := range events {
+		if event.RequestTitle == "Different account" {
+			t.Fatalf("account events included another account request: %+v", event)
+		}
+	}
+}
+
+func accountEventKindCounts(events []crrepo.AccountEvent) map[crrepo.AccountEventKind]int {
+	out := make(map[crrepo.AccountEventKind]int)
+	for _, event := range events {
+		out[event.Kind]++
+	}
+	return out
 }
 
 func TestPGCustomerRequestScoringSettingsCustomizeDecisionScore(t *testing.T) {
@@ -1208,6 +1380,102 @@ func TestPGCustomerRequestPromoteFeedbackWritesAuditAndIdempotency(t *testing.T)
 	}
 }
 
+func TestPGCustomerRequestPromoteFeedbackReclaimsExpiredIdempotencyKey(t *testing.T) {
+	e := setup(t)
+	feedbackID := e.seedFeedback(t, e.tenantID, "expired-promote-user", "expired-promote-subject")
+	idempotencyKey := "promote_expired_key_1"
+	idempotencyRepo := idempotencyrepo.New(e.pool)
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, idempotencyRepo, auditlogsvc.New(auditRepo))
+	input := crsvc.PromoteInput{
+		TenantID:       e.tenantID,
+		FeedbackIDs:    []int64{feedbackID},
+		Title:          "Expired promotion request",
+		Description:    "Reclaimed after expiration",
+		Status:         crrepo.StatusOpen,
+		Priority:       crrepo.PriorityMedium,
+		IdempotencyKey: idempotencyKey,
+		Actor:          auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	}
+
+	_, acquired, err := idempotencyRepo.Acquire(e.ctx, e.tenantID, idempotencyKey, []byte("expired"), time.Minute)
+	if err != nil || !acquired {
+		t.Fatalf("Acquire expired key acquired:%v err:%v", acquired, err)
+	}
+	if _, err := e.pool.Exec(e.ctx, `
+		UPDATE idempotency_keys
+		SET expires_at = NOW() - INTERVAL '1 minute'
+		WHERE tenant_id = $1 AND key = $2`, e.tenantID, idempotencyKey); err != nil {
+		t.Fatalf("expire idempotency key: %v", err)
+	}
+
+	detail, err := service.PromoteFeedback(e.ctx, input)
+	if err != nil {
+		t.Fatalf("PromoteFeedback after expiration: %v", err)
+	}
+	if detail.Request.Summary.Title != input.Title {
+		t.Fatalf("promoted title = %q, want %q", detail.Request.Summary.Title, input.Title)
+	}
+	assertRequestCount(t, e, 1)
+	assertPromoteAuditEntry(t, detail, auditRepo, e.tenantID, feedbackID)
+
+	stored, err := idempotencyRepo.Get(e.ctx, e.tenantID, idempotencyKey)
+	if err != nil {
+		t.Fatalf("Get reclaimed idempotency key: %v", err)
+	}
+	if stored.Status != idempotencyrepo.StatusCompleted || stored.ResponseCode != 200 || len(stored.ResponseBody) == 0 {
+		t.Fatalf("reclaimed idempotency key = status:%s code:%d body:%d, want completed/200/body",
+			stored.Status, stored.ResponseCode, len(stored.ResponseBody))
+	}
+}
+
+func TestPGCustomerRequestPromoteFeedbackRejectsForeignEvidenceAtomically(t *testing.T) {
+	e := setup(t)
+	foreignTenant := e.createTenant(t, "customer-request-promote-foreign")
+	foreignFeedbackID := e.seedFeedback(t, foreignTenant, "foreign-user", "foreign-subject")
+	idempotencyKey := "promote_foreign_feedback_1"
+	idempotencyRepo := idempotencyrepo.New(e.pool)
+	auditRepo := auditlogrepo.New(e.pool)
+	service := crsvc.New(e.repo, idempotencyRepo, auditlogsvc.New(auditRepo))
+	input := crsvc.PromoteInput{
+		TenantID:       e.tenantID,
+		FeedbackIDs:    []int64{foreignFeedbackID},
+		Title:          "Foreign evidence request",
+		Description:    "Must not be created",
+		Status:         crrepo.StatusOpen,
+		Priority:       crrepo.PriorityNone,
+		IdempotencyKey: idempotencyKey,
+		Actor:          auditlogsvc.Actor{Type: "admin", ID: "operator-1"},
+	}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		_, err := service.PromoteFeedback(e.ctx, input)
+		if !errors.Is(err, crrepo.ErrFeedbackNotFound) {
+			t.Fatalf("PromoteFeedback foreign evidence attempt %d error = %v, want ErrFeedbackNotFound", attempt+1, err)
+		}
+	}
+
+	assertRequestCount(t, e, 0)
+	auditEntries, err := auditRepo.List(e.ctx, auditlogrepo.ListFilter{
+		TenantID:  e.tenantID,
+		Actions:   []string{"customer_request.promote_feedback"},
+		Unbounded: true,
+	})
+	if err != nil {
+		t.Fatalf("List promote audit rows: %v", err)
+	}
+	if len(auditEntries.Items) != 0 {
+		t.Fatalf("foreign promotion audit rows = %d, want 0", len(auditEntries.Items))
+	}
+	key, err := idempotencyRepo.Get(e.ctx, e.tenantID, idempotencyKey)
+	if err != nil {
+		t.Fatalf("Get failed idempotency key: %v", err)
+	}
+	if key.Status != idempotencyrepo.StatusFailed {
+		t.Fatalf("foreign promotion idempotency status = %s, want failed", key.Status)
+	}
+}
+
 func TestPGCustomerRequestMergePreservesBacklinks(t *testing.T) {
 	e := setup(t)
 	target := e.createRequest(t, e.tenantID, "Target request")
@@ -1739,16 +2007,36 @@ func (e env) createRequest(t *testing.T, tenantID, title string) crrepo.Summary 
 
 func (e env) seedFeedback(t *testing.T, tenantID, userID, subjectKey string) int64 {
 	t.Helper()
+	return e.seedFeedbackFromSource(t, tenantID, userID, subjectKey, "web", nil)
+}
+
+func (e env) seedFeedbackFromSource(
+	t *testing.T,
+	tenantID string,
+	userID string,
+	subjectKey string,
+	source string,
+	createdAt *time.Time,
+) int64 {
+	t.Helper()
 	var id int64
 	err := e.pool.QueryRow(
 		e.ctx, `
 		INSERT INTO user_feedback (tenant_id, user_id, subject_key, subject_hash, subject_display, source, content)
-		VALUES ($1, $2, $3, $3, $2, 'web', 'customer feedback')
+		VALUES ($1, $2, $3, $3, $2, $4, 'customer feedback')
 		RETURNING id`,
-		tenantID, userID, subjectKey,
+		tenantID, userID, subjectKey, source,
 	).Scan(&id)
 	if err != nil {
 		t.Fatalf("seed feedback: %v", err)
+	}
+	if createdAt != nil {
+		if _, err := e.pool.Exec(e.ctx, `
+			UPDATE user_feedback
+			SET created_at = $3
+			WHERE tenant_id = $1 AND id = $2`, tenantID, id, createdAt); err != nil {
+			t.Fatalf("set feedback created_at: %v", err)
+		}
 	}
 	return id
 }
@@ -1804,6 +2092,46 @@ func linkCustomer(t *testing.T, ctx context.Context, repo *crrepo.Repo, tx pgx.T
 		ActorID:        "tester",
 	}); err != nil {
 		t.Fatalf("LinkCustomerTx: %v", err)
+	}
+}
+
+func updatePriority(t *testing.T, e env, tx pgx.Tx, requestID uuid.UUID, priority crrepo.Priority) {
+	t.Helper()
+	if _, _, err := e.repo.UpdateTx(e.ctx, tx, crrepo.UpdateInput{
+		TenantID: e.tenantID,
+		ID:       requestID,
+		Priority: &priority,
+		ActorID:  "operator",
+	}); err != nil {
+		t.Fatalf("UpdateTx priority: %v", err)
+	}
+}
+
+func linkAccountProfile(t *testing.T, e env, tx pgx.Tx, requestID uuid.UUID, subjectKey, accountKey string) {
+	t.Helper()
+	if _, err := e.repo.LinkCustomerTx(e.ctx, tx, crrepo.CustomerLinkInput{
+		TenantID:       e.tenantID,
+		RequestID:      requestID,
+		SubjectKey:     subjectKey,
+		SubjectDisplay: subjectKey,
+		AccountKey:     accountKey,
+		AccountDisplay: "Acme Corp",
+		ActorID:        "tester",
+		AccountProfile: crrepo.AccountProfileInput{
+			AccountKey:      accountKey,
+			AccountDisplay:  "Acme Corp",
+			RevenueCents:    2_400_000,
+			RevenueCurrency: "USD",
+			Tier:            "enterprise",
+			SizeSegment:     "mid_market",
+			LifecycleStatus: "active",
+			CRMProvider:     "salesforce",
+			CRMExternalID:   "001-acme",
+			Source:          "manual",
+			ActorID:         "tester",
+		},
+	}); err != nil {
+		t.Fatalf("LinkCustomerTx account profile: %v", err)
 	}
 }
 

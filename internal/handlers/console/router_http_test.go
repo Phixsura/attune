@@ -38,6 +38,7 @@ import (
 	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
 	consolepublicvisibility "github.com/Phixsura/attune/internal/handlers/console/publicvisibility"
 	consolerequestnotification "github.com/Phixsura/attune/internal/handlers/console/requestnotification"
+	consolesurvey "github.com/Phixsura/attune/internal/handlers/console/survey"
 	"github.com/Phixsura/attune/internal/handlers/console/system"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
 	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
@@ -79,6 +80,7 @@ func dispatchRouter() *Router {
 		customerRequests:     &consolecustomerrequest.Handler{},
 		publicVisibility:     &consolepublicvisibility.Handler{},
 		requestNotifications: &consolerequestnotification.Handler{},
+		surveys:              &consolesurvey.Handler{},
 		feedbackJob:          &feedbackjob.Handler{},
 		gdpr:                 &consolegdpr.Handler{},
 		usage:                &usage.UsageHandler{},
@@ -156,8 +158,11 @@ func TestRouterHTTPDispatch_Session(t *testing.T) {
 		{"GET /llm-usage", http.MethodGet, "/llm-usage", ""},
 		{"GET /quality-actions", http.MethodGet, "/quality-actions", ""},
 		{"POST /quality-actions/update", http.MethodPost, "/quality-actions/update", `{}`},
+		{"GET /classification-quality/review-learning", http.MethodGet, "/classification-quality/review-learning", ""},
+		{"POST /classification-quality/reviews", http.MethodPost, "/classification-quality/reviews", `{}`},
 		{"GET /customer-requests/", http.MethodGet, "/customer-requests/", ""},
 		{"GET /customer-requests/11111111-1111-1111-1111-111111111111", http.MethodGet, "/customer-requests/11111111-1111-1111-1111-111111111111", ""},
+		{"GET /customer-requests/account-summary", http.MethodGet, "/customer-requests/account-summary?account_key=acct:acme", ""},
 		{"GET /customer-requests/saved-views", http.MethodGet, "/customer-requests/saved-views", ""},
 		{"POST /customer-requests/saved-views", http.MethodPost, "/customer-requests/saved-views", `{"name":"Planning"}`},
 		{"PUT /customer-requests/saved-views/{view_id}", http.MethodPut, "/customer-requests/saved-views/view-1", `{"name":"Planning"}`},
@@ -432,6 +437,7 @@ func TestRouterHTTPDispatch_Feedback(t *testing.T) {
 	}{
 		{"GET /feedback/", http.MethodGet, "/feedback/", ""},
 		{"GET /feedback/stats", http.MethodGet, "/feedback/stats", ""},
+		{"GET /feedback/1/signal-trace", http.MethodGet, "/feedback/1/signal-trace", ""},
 		{"GET /feedback/1", http.MethodGet, "/feedback/1", ""},
 		{"POST /feedback/1/reply-draft/regenerate", http.MethodPost, "/feedback/1/reply-draft/regenerate", ""},
 		{"POST /feedback/1/retry-enrichment", http.MethodPost, "/feedback/1/retry-enrichment", ""},
@@ -693,12 +699,61 @@ func TestRouterHTTPDispatch_RequestNotifications(t *testing.T) {
 		{"DELETE /request-notifications/webhook-targets/{id}", http.MethodDelete, "/request-notifications/webhook-targets/" + id, ""},
 		{"POST /request-notifications/webhook-targets/{id}:test", http.MethodPost, "/request-notifications/webhook-targets/" + id + ":test", `{}`},
 		{"POST /request-notifications/preview", http.MethodPost, "/request-notifications/preview", `{}`},
+		{"POST /request-notifications:batch-preview", http.MethodPost, "/request-notifications:batch-preview", `{}`},
 		{"POST /request-notifications/publish", http.MethodPost, "/request-notifications/publish", `{}`},
+		{"POST /request-notifications:batch-publish", http.MethodPost, "/request-notifications:batch-publish", `{}`},
+		{"GET /request-notifications/status-evidence", http.MethodGet, "/request-notifications/status-evidence", ""},
 		{"GET /request-notifications/deliveries", http.MethodGet, "/request-notifications/deliveries?status=failed&limit=25&before_id=99&request_id=" + id + "&channel=webhook", ""},
 		{"POST /request-notifications/deliveries/{id}:retry", http.MethodPost, "/request-notifications/deliveries/1:retry", `{}`},
 		{"GET /request-notifications/requests/{request_id}/subscribers", http.MethodGet, "/request-notifications/requests/" + id + "/subscribers", ""},
 		{"POST /request-notifications/subscribers/{contact_id}:suppress", http.MethodPost, "/request-notifications/subscribers/" + id + ":suppress", `{}`},
 		{"POST /request-notifications/provider-events:suppress", http.MethodPost, "/request-notifications/provider-events:suppress", `{}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serveAndAssertDispatched(t, mux, tc.method, tc.path, tc.body)
+		})
+	}
+}
+
+// ---------- mountSurveys routes ----------
+
+func TestRouterHTTPDispatch_Surveys(t *testing.T) {
+	t.Parallel()
+	r := dispatchRouter()
+	mux := newRecovererMux()
+	r.mountSurveys(mux)
+
+	id := "11111111-1111-1111-1111-111111111111"
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"GET /surveys/campaigns", http.MethodGet, "/surveys/campaigns", ""},
+		{"POST /surveys/campaigns", http.MethodPost, "/surveys/campaigns", `{}`},
+		{"PATCH /surveys/campaigns/{id}", http.MethodPatch, "/surveys/campaigns/" + id, `{}`},
+		{"POST /surveys/campaigns/{id}:archive", http.MethodPost, "/surveys/campaigns/" + id + ":archive", `{}`},
+		{"POST /surveys/campaigns/{id}:scheduleNpsRun", http.MethodPost, "/surveys/campaigns/" + id + ":scheduleNpsRun", `{}`},
+		{"POST /surveys/campaigns/{id}/nps-runs/{run_id}:cancel", http.MethodPost, "/surveys/campaigns/" + id + "/nps-runs/" + id + ":cancel", `{}`},
+		{"GET /surveys/campaigns/{id}/nps-runs", http.MethodGet, "/surveys/campaigns/" + id + "/nps-runs", ""},
+		{"GET /surveys/campaigns/{id}/nps-runs/{run_id}/evidence.csv", http.MethodGet, "/surveys/campaigns/" + id + "/nps-runs/" + id + "/evidence.csv", ""},
+		{"POST /surveys/campaigns/{id}/nps-runs/{run_id}/evidence-exports", http.MethodPost, "/surveys/campaigns/" + id + "/nps-runs/" + id + "/evidence-exports", `{}`},
+		{"GET /surveys/campaigns/{id}/nps-preflight", http.MethodGet, "/surveys/campaigns/" + id + "/nps-preflight", ""},
+		{"POST /surveys/campaigns/{id}/hosted-links", http.MethodPost, "/surveys/campaigns/" + id + "/hosted-links", `{}`},
+		{"POST /surveys/campaigns/{id}/recipients:preview", http.MethodPost, "/surveys/campaigns/" + id + "/recipients:preview", `{}`},
+		{"GET /surveys/campaigns/{id}/health", http.MethodGet, "/surveys/campaigns/" + id + "/health", ""},
+		{"POST /surveys/provider-events:record", http.MethodPost, "/surveys/provider-events:record", `{}`},
+		{"POST /surveys/invitations/{id}:retry", http.MethodPost, "/surveys/invitations/" + id + ":retry", `{}`},
+		{"GET /surveys/invitations", http.MethodGet, "/surveys/invitations", ""},
+		{"GET /surveys/responses", http.MethodGet, "/surveys/responses", ""},
+		{"GET /surveys/analytics", http.MethodGet, "/surveys/analytics", ""},
+		{"GET /surveys/analytics/trend", http.MethodGet, "/surveys/analytics/trend", ""},
+		{"GET /surveys/analytics/segments", http.MethodGet, "/surveys/analytics/segments", ""},
+		{"GET /surveys/analytics/insights", http.MethodGet, "/surveys/analytics/insights", ""},
+		{"PATCH /surveys/responses/{id}/low-score-review", http.MethodPatch, "/surveys/responses/" + id + "/low-score-review", `{}`},
+		{"POST /surveys/responses/low-score-reviews:batchUpdate", http.MethodPost, "/surveys/responses/low-score-reviews:batchUpdate", `{}`},
+		{"POST /surveys/responses/low-score-reviews:assign", http.MethodPost, "/surveys/responses/low-score-reviews:assign", `{}`},
+		{"POST /surveys/responses/low-score-reviews:escalate", http.MethodPost, "/surveys/responses/low-score-reviews:escalate", `{}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

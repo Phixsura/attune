@@ -1,10 +1,18 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CustomerRequestsPage } from '@/features/customer-requests/components/customer-requests-page'
 import {
+  CustomerRequestAccountEventKind,
+  CustomerRequestAccountSignalKind,
+  CustomerRequestAccountSignalSeverity,
+  type CustomerRequestAccountSummary,
+  CustomerRequestDecisionPublicSafeState,
+  CustomerRequestDecisionScoreFactorKind,
   type CustomerRequestDeliveryGraph,
   CustomerRequestDeliveryHealth,
   type CustomerRequestDetail,
+  CustomerRequestEvidenceConfidence,
+  CustomerRequestEvidenceQualityReason,
   CustomerRequestImportance,
   type CustomerRequestIssueLink,
   CustomerRequestIssueSyncState,
@@ -38,6 +46,46 @@ describe('CustomerRequestsPage', () => {
 
     expect(await screen.findByText('关联反馈')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('反馈 ID')).toBeInTheDocument()
+    expect(screen.getAllByText('证据质量 85 · 高').length).toBeGreaterThan(0)
+    expect(screen.getByText('多来源证据')).toBeInTheDocument()
+  })
+
+  it('shows evidence quality gaps for low-confidence requests', async () => {
+    const weak = sampleSummary({
+      supportingFeedbackCount: 1,
+      customerCount: 1,
+      accountCount: 0,
+      linkedIssueCount: 0,
+      evidenceQuality: {
+        score: 15,
+        confidence: CustomerRequestEvidenceConfidence.CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_LOW,
+        evidenceCount: 1,
+        sourceCount: 1,
+        customerCount: 1,
+        accountCount: 0,
+        latestEvidenceAt: '2026-01-01T00:00:00Z',
+        stale: true,
+        lowConfidence: true,
+        gapReasons: [
+          CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_LOW_FEEDBACK_VOLUME,
+          CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_CUSTOMER,
+          CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_ACCOUNT_CONTEXT,
+          CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_STALE_EVIDENCE,
+          CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_DELIVERY_LINK,
+        ],
+        strengths: [],
+      },
+    })
+    mockList({ requests: [weak] })
+    mockDetail(sampleDetail(weak))
+
+    renderWithProviders(<CustomerRequestsPage initialRequestID={requestID} />)
+
+    expect(await screen.findByText('证据质量 15 · 低')).toBeInTheDocument()
+    expect(screen.getByText('低信心')).toBeInTheDocument()
+    expect(screen.getByText('证据过期')).toBeInTheDocument()
+    expect(screen.getByText('反馈量不足')).toBeInTheDocument()
+    expect(screen.getByText('缺少账户上下文')).toBeInTheDocument()
   })
 
   it('pre-fills the merge target from an initial deep link', async () => {
@@ -49,6 +97,109 @@ describe('CustomerRequestsPage', () => {
     )
 
     expect(await screen.findByPlaceholderText('目标客户需求 UUID')).toHaveValue(targetRequestID)
+  })
+
+  it('loads account-scoped customer request deep links', async () => {
+    const urls: string[] = []
+    const summaryUrls: string[] = []
+    const accountRequests = [
+      sampleSummary(),
+      sampleSummary({
+        id: targetRequestID,
+        displayId: 'CR-2',
+        displayNumber: '2',
+        title: 'Renewal blocker',
+        supportingFeedbackCount: 4,
+        customerCount: 2,
+        linkedIssueCount: 2,
+        voteCount: 5,
+        revenueImpactCents: '1000000',
+        decisionScore: 80,
+        syncedIssueCount: 0,
+        staleIssueCount: 1,
+        failedIssueCount: 1,
+        pendingIssueCount: 0,
+        deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_FAILED,
+      }),
+    ]
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ requests: [accountRequests[0]] })
+      }),
+      http.get(`${baseURL}/account-summary`, ({ request }) => {
+        summaryUrls.push(request.url)
+        return HttpResponse.json(sampleAccountSummary({ timeline: accountRequests }))
+      }),
+      http.get(`${baseURL}/${targetRequestID}`, () =>
+        HttpResponse.json(
+          sampleDetail({
+            id: targetRequestID,
+            displayId: 'CR-2',
+            displayNumber: '2',
+            title: 'Renewal blocker',
+          }),
+        ),
+      ),
+      http.get(`${baseURL}/saved-views`, () => HttpResponse.json({ views: [] })),
+    )
+
+    const { user } = renderWithProviders(<CustomerRequestsPage initialAccountKey="acct:acme" />)
+
+    await waitFor(() =>
+      expect(urls.some((url) => new URL(url).searchParams.get('account_key') === 'acct:acme')).toBe(
+        true,
+      ),
+    )
+    await waitFor(() =>
+      expect(
+        summaryUrls.some(
+          (url) =>
+            new URL(url).searchParams.get('account_key') === 'acct:acme' &&
+            new URL(url).searchParams.get('timeline_limit') === '5',
+        ),
+      ).toBe(true),
+    )
+    expect(screen.getByLabelText('账户标识')).toHaveValue('acct:acme')
+    const accountOverview = await screen.findByTestId('customer-request-account-overview')
+    expect(within(accountOverview).getByText('账户信号概览')).toBeInTheDocument()
+    expect(screen.getByText('Acme Corp 需求组合')).toBeInTheDocument()
+    expect(screen.getByText('enterprise · mid_market · active · salesforce')).toBeInTheDocument()
+    expect(screen.getByText('2 个需求')).toBeInTheDocument()
+    expect(screen.getByText('6 条反馈')).toBeInTheDocument()
+    expect(screen.getByText('3 位客户')).toBeInTheDocument()
+    expect(screen.getByText('8 票')).toBeInTheDocument()
+    expect(screen.getByText('3 个交付引用')).toBeInTheDocument()
+    expect(screen.getByText('收入影响 $34,000')).toBeInTheDocument()
+    expect(screen.getByText('平均决策分 83')).toBeInTheDocument()
+    expect(screen.getByText('最高决策分 126')).toBeInTheDocument()
+    expect(screen.getByText('1 高优先级')).toBeInTheDocument()
+    expect(screen.getByText('0 已发布')).toBeInTheDocument()
+    expect(screen.getByText('1 个交付风险')).toBeInTheDocument()
+    expect(screen.getByText('1 已同步 · 1 过期 · 1 失败 · 0 待同步 · 0 手动')).toBeInTheDocument()
+    expect(screen.getByText('决策信号')).toBeInTheDocument()
+    expect(screen.getByText('1 个交付风险需要恢复')).toBeInTheDocument()
+    expect(screen.getByText('1 个高优先级需求，最高分 126')).toBeInTheDocument()
+    expect(screen.getByText('收入影响 $34,000，平均分 83')).toBeInTheDocument()
+    expect(screen.getByText('17 条客户证据，平均分 83')).toBeInTheDocument()
+    expect(screen.getByText('账户证据时间线')).toBeInTheDocument()
+    expect(screen.getByText('反馈关联')).toBeInTheDocument()
+    expect(screen.getByText('Renewal owner reported export failure.')).toBeInTheDocument()
+    expect(
+      screen.getByText('对象 Ada Lovelace · 来源 portal · 操作人 operator · 反馈 #42'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('交付同步')).toBeInTheDocument()
+    expect(screen.getByText('ATT-235')).toBeInTheDocument()
+    expect(screen.getByText('内部备注')).toBeInTheDocument()
+    expect(screen.getByText('请求时间线')).toBeInTheDocument()
+    expect(within(accountOverview).getAllByText('Renewal blocker').length).toBeGreaterThan(0)
+
+    await user.click(
+      within(accountOverview).getByRole('button', { name: /反馈关联.*CR-2.*Renewal blocker/s }),
+    )
+    expect(
+      await screen.findByRole('dialog', { name: /CR-2.*Renewal blocker/s }),
+    ).toBeInTheDocument()
   })
 
   it('renders customer request rows and opens detail actions', async () => {
@@ -65,10 +216,84 @@ describe('CustomerRequestsPage', () => {
     expect(screen.getAllByText('1 位客户').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/收入影响/).length).toBeGreaterThan(0)
     expect(screen.getAllByText('决策分 114').length).toBeGreaterThan(0)
+    expect(screen.getByText('决策分解释')).toBeInTheDocument()
+    expect(screen.getByText('计分贡献 114')).toBeInTheDocument()
+    expect(screen.getByText('反馈证据')).toBeInTheDocument()
+    expect(screen.getByText('2 × 权重 2 · 上限 80')).toBeInTheDocument()
+    expect(screen.getByText('收入影响')).toBeInTheDocument()
+    expect(screen.getByText('$25,000 · 每 $1,000 计 1 分 · 上限 100')).toBeInTheDocument()
+    expect(screen.getByText('交付健康')).toBeInTheDocument()
+    expect(screen.getByText('1 个交付引用 · 不计入分数')).toBeInTheDocument()
+    expect(screen.getByText('上下文')).toBeInTheDocument()
+    expect(screen.getByText('决策记录')).toBeInTheDocument()
+    expect(screen.getByText('Updated customer request')).toBeInTheDocument()
+    expect(
+      screen.getByText((text) => text.includes('pm-1') && text.includes('2026')),
+    ).toBeInTheDocument()
+    expect(screen.getByText('负责人 owner@example.com')).toBeInTheDocument()
+    expect(
+      screen.getByText('原因 priority=high feedback=2 customers=1 accounts=1'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(`证据包 customer-request/${requestID}/evidence/CR-1`),
+    ).toBeInTheDocument()
+    expect(screen.getByText('公开安全 需复核')).toBeInTheDocument()
+    expect(screen.getByText('收入上下文')).toBeInTheDocument()
+    expect(screen.getByText('状态 Open → Planned')).toBeInTheDocument()
+    expect(screen.getByText('优先级 High → Urgent')).toBeInTheDocument()
+    expect(screen.getByText('描述变更')).toBeInTheDocument()
     expect(screen.getAllByText('已同步').length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('button', { name: 'Close' }))
     await waitFor(() => expect(screen.queryByPlaceholderText('反馈 ID')).not.toBeInTheDocument())
+  })
+
+  it('filters the request list from an account profile in the detail drawer', async () => {
+    const urls: string[] = []
+    server.use(
+      http.get(baseURL, ({ request }) => {
+        urls.push(request.url)
+        return HttpResponse.json({ requests: [sampleSummary()] })
+      }),
+      http.get(`${baseURL}/account-summary`, ({ request }) =>
+        HttpResponse.json(
+          sampleAccountSummary({
+            accountKey: new URL(request.url).searchParams.get('account_key') ?? 'acme',
+            accountProfile: {
+              accountKey: 'acme',
+              accountDisplay: 'Acme',
+              revenueCents: '2400000',
+              revenueCurrency: 'USD',
+              tier: 'enterprise',
+              sizeSegment: 'mid_market',
+              lifecycleStatus: 'active',
+              crmProvider: 'salesforce',
+              crmExternalId: '001',
+              source: 'manual',
+              updatedAt: '2026-07-07T00:10:00Z',
+            },
+          }),
+        ),
+      ),
+      http.get(`${baseURL}/saved-views`, () => HttpResponse.json({ views: [] })),
+    )
+    mockDetail(sampleDetail())
+
+    const { user } = renderWithProviders(<CustomerRequestsPage />)
+
+    await user.click(await screen.findByRole('button', { name: /CR-1.*Export bundles/s }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: '查看 Acme 的客户需求' }))
+
+    await waitFor(() =>
+      expect(urls.some((url) => new URL(url).searchParams.get('account_key') === 'acme')).toBe(
+        true,
+      ),
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('账户标识')).toHaveValue('acme')
+    expect(await screen.findByText('账户信号概览')).toBeInTheDocument()
+    expect(screen.getByText('Acme 需求组合')).toBeInTheDocument()
   })
 
   it('retries after the list query fails', async () => {
@@ -121,12 +346,26 @@ describe('CustomerRequestsPage', () => {
         urls.push(request.url)
         return HttpResponse.json({ requests: [sampleSummary()] })
       }),
+      http.get(`${baseURL}/account-summary`, ({ request }) =>
+        HttpResponse.json(
+          sampleAccountSummary({
+            accountKey: new URL(request.url).searchParams.get('account_key') ?? 'acct:acme',
+          }),
+        ),
+      ),
       http.get(`${baseURL}/saved-views`, () => HttpResponse.json({ views: [] })),
     )
 
     const { user } = renderWithProviders(<CustomerRequestsPage />)
 
     await screen.findByText('Export bundles')
+    await user.type(screen.getByLabelText('账户标识'), 'acct:acme')
+    await waitFor(() =>
+      expect(urls.some((url) => new URL(url).searchParams.get('account_key') === 'acct:acme')).toBe(
+        true,
+      ),
+    )
+
     const toolbarCombos = () => screen.getAllByRole('combobox').slice(1)
 
     await user.click(toolbarCombos()[0])
@@ -318,6 +557,7 @@ describe('CustomerRequestsPage', () => {
                 visibility: CustomerRequestVisibility.CUSTOMER_REQUEST_VISIBILITY_ALL,
                 sort: CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE,
                 direction: SortDirection.SORT_DIRECTION_DESC,
+                accountKey: 'acct:acme',
               },
               createdAt: '2026-07-08T00:00:00Z',
               updatedAt: '2026-07-08T00:00:00Z',
@@ -358,6 +598,7 @@ describe('CustomerRequestsPage', () => {
       const params = new URL(urls.at(-1) ?? '').searchParams
       expect(params.get('q')).toBe('renewal')
       expect(params.get('sort')).toBe(CustomerRequestSort.CUSTOMER_REQUEST_SORT_DECISION_SCORE)
+      expect(params.get('account_key')).toBe('acct:acme')
     })
 
     await user.click(screen.getByRole('button', { name: '保存视图' }))
@@ -371,7 +612,11 @@ describe('CustomerRequestsPage', () => {
       expect(writes).toContainEqual({
         method: 'PUT',
         path: `${baseURL}/saved-views/view-1`,
-        body: expect.objectContaining({ id: 'view-1', name: 'Scoreboard updated' }),
+        body: expect.objectContaining({
+          id: 'view-1',
+          name: 'Scoreboard updated',
+          state: expect.objectContaining({ accountKey: 'acct:acme' }),
+        }),
       }),
     )
 
@@ -495,6 +740,7 @@ describe('CustomerRequestsPage', () => {
 
   it('posts selected feedback ids when promoting feedback', async () => {
     let payload: Record<string, unknown> | undefined
+    const onPromoteClose = vi.fn()
     mockList({ requests: [] })
     server.use(
       http.post(`${baseURL}:promote-feedback`, async ({ request }) => {
@@ -504,7 +750,10 @@ describe('CustomerRequestsPage', () => {
     )
 
     const { user } = renderWithProviders(
-      <CustomerRequestsPage initialPromoteFeedbackIDs={['101', '102']} />,
+      <CustomerRequestsPage
+        initialPromoteFeedbackIDs={['101', '102']}
+        onPromoteClose={onPromoteClose}
+      />,
     )
 
     const dialog = await screen.findByRole('dialog')
@@ -520,6 +769,7 @@ describe('CustomerRequestsPage', () => {
       priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_NONE,
     })
     expect(payload?.idempotencyKey).toEqual(expect.stringMatching(/^cr_[A-Za-z0-9_-]+$/))
+    await waitFor(() => expect(onPromoteClose).toHaveBeenCalledTimes(1))
   })
 
   it('keeps the promote dialog open when promoting feedback fails', async () => {
@@ -542,6 +792,26 @@ describe('CustomerRequestsPage', () => {
 
     await waitFor(() => expect(attempts).toBe(1))
     expect(screen.getByRole('dialog', { name: '从反馈提升为客户需求' })).toBeInTheDocument()
+  })
+
+  it('does not open a promotion deep link for a read-only operator', async () => {
+    const onPromoteClose = vi.fn()
+    server.use(
+      http.get('/fb/v1/console/me', () =>
+        HttpResponse.json({
+          ...defaultMe,
+          user: { ...defaultMe.user, role: 'viewer' },
+        }),
+      ),
+    )
+    mockList({ requests: [] })
+
+    renderWithProviders(
+      <CustomerRequestsPage initialPromoteFeedbackIDs={['101']} onPromoteClose={onPromoteClose} />,
+    )
+
+    await waitFor(() => expect(onPromoteClose).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog', { name: '从反馈提升为客户需求' })).not.toBeInTheDocument()
   })
 
   it('filters the list by feedback id when opened from a feedback context', async () => {
@@ -1662,11 +1932,110 @@ function sampleSummary(overrides: Partial<CustomerRequestSummary> = {}): Custome
     voteCount: 3,
     duplicateRequestCount: 0,
     hiddenFeedbackCount: 0,
-    revenueImpactCents: '2400000',
+    revenueImpactCents: '2500000',
     revenueCurrency: 'USD',
     decisionScore: 114,
     decisionScoreExplanation:
-      'priority=high feedback=2 customers=1 accounts=1 votes=3 revenue_cents=2400000 delivery_health=synced',
+      'priority=high feedback=2 customers=1 accounts=1 votes=3 revenue_cents=2500000 delivery_health=synced',
+    decisionScoreFactors: [
+      {
+        kind: CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY,
+        rawCount: 1,
+        rawValueCents: '0',
+        weight: 60,
+        cap: 0,
+        unitCents: '0',
+        contribution: 60,
+        capped: false,
+        contributesToScore: true,
+      },
+      {
+        kind: CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_FEEDBACK,
+        rawCount: 2,
+        rawValueCents: '0',
+        weight: 2,
+        cap: 80,
+        unitCents: '0',
+        contribution: 4,
+        capped: false,
+        contributesToScore: true,
+      },
+      {
+        kind: CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_CUSTOMERS,
+        rawCount: 1,
+        rawValueCents: '0',
+        weight: 5,
+        cap: 100,
+        unitCents: '0',
+        contribution: 5,
+        capped: false,
+        contributesToScore: true,
+      },
+      {
+        kind: CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_ACCOUNTS,
+        rawCount: 1,
+        rawValueCents: '0',
+        weight: 8,
+        cap: 120,
+        unitCents: '0',
+        contribution: 8,
+        capped: false,
+        contributesToScore: true,
+      },
+      {
+        kind: CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_VOTES,
+        rawCount: 3,
+        rawValueCents: '0',
+        weight: 4,
+        cap: 80,
+        unitCents: '0',
+        contribution: 12,
+        capped: false,
+        contributesToScore: true,
+      },
+      {
+        kind: CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_REVENUE,
+        rawCount: 0,
+        rawValueCents: '2500000',
+        weight: 0,
+        cap: 100,
+        unitCents: '100000',
+        contribution: 25,
+        capped: false,
+        contributesToScore: true,
+      },
+      {
+        kind: CustomerRequestDecisionScoreFactorKind.CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH,
+        rawCount: 1,
+        rawValueCents: '0',
+        weight: 0,
+        cap: 0,
+        unitCents: '0',
+        contribution: 0,
+        capped: false,
+        contributesToScore: false,
+      },
+    ],
+    evidenceQuality: {
+      score: 85,
+      confidence: CustomerRequestEvidenceConfidence.CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_HIGH,
+      evidenceCount: 3,
+      sourceCount: 2,
+      customerCount: 3,
+      accountCount: 1,
+      latestEvidenceAt: '2026-07-07T00:30:00Z',
+      stale: false,
+      lowConfidence: false,
+      gapReasons: [],
+      strengths: [
+        CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SUPPORTING_FEEDBACK,
+        CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_SOURCE,
+        CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_CUSTOMER,
+        CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_ACCOUNT_CONTEXT,
+        CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_FRESH_EVIDENCE,
+        CustomerRequestEvidenceQualityReason.CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_DELIVERY_LINKED,
+      ],
+    },
     deliveryHealth: CustomerRequestDeliveryHealth.CUSTOMER_REQUEST_DELIVERY_HEALTH_SYNCED,
     syncedIssueCount: 1,
     staleIssueCount: 0,
@@ -1675,6 +2044,130 @@ function sampleSummary(overrides: Partial<CustomerRequestSummary> = {}): Custome
     manualIssueCount: 0,
     latestFeedbackAt: '2026-07-07T00:30:00Z',
     firstFeedbackAt: '2026-07-07T00:00:00Z',
+    ...overrides,
+  }
+}
+
+function sampleAccountSummary(
+  overrides: Partial<CustomerRequestAccountSummary> = {},
+): CustomerRequestAccountSummary {
+  return {
+    accountKey: 'acct:acme',
+    accountProfile: {
+      accountKey: 'acct:acme',
+      accountDisplay: 'Acme Corp',
+      revenueCents: '2400000',
+      revenueCurrency: 'USD',
+      tier: 'enterprise',
+      sizeSegment: 'mid_market',
+      lifecycleStatus: 'active',
+      crmProvider: 'salesforce',
+      crmExternalId: '001-acme',
+      source: 'manual',
+      updatedAt: '2026-07-07T00:10:00Z',
+    },
+    requestCount: 2,
+    feedbackCount: 6,
+    customerCount: 3,
+    voteCount: 8,
+    issueCount: 3,
+    syncedIssueCount: 1,
+    staleIssueCount: 1,
+    failedIssueCount: 1,
+    pendingIssueCount: 0,
+    manualIssueCount: 0,
+    revenueImpactCents: '3400000',
+    revenueCurrency: 'USD',
+    highPriorityRequestCount: 1,
+    shippedRequestCount: 0,
+    staleOrFailedIssueCount: 1,
+    averageDecisionScore: 83,
+    topDecisionScore: 126,
+    decisionSignals: [
+      {
+        kind: CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_DELIVERY_RISK,
+        severity:
+          CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL,
+        count: 1,
+        valueCents: '0',
+        score: 1,
+      },
+      {
+        kind: CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_HIGH_PRIORITY_DEMAND,
+        severity:
+          CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING,
+        count: 1,
+        valueCents: '0',
+        score: 126,
+      },
+      {
+        kind: CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_REVENUE_IMPACT,
+        severity:
+          CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_INFO,
+        count: 2,
+        valueCents: '3400000',
+        score: 83,
+      },
+      {
+        kind: CustomerRequestAccountSignalKind.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_BREADTH,
+        severity:
+          CustomerRequestAccountSignalSeverity.CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_INFO,
+        count: 17,
+        valueCents: '0',
+        score: 83,
+      },
+    ],
+    events: [
+      {
+        kind: CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_FEEDBACK_LINKED,
+        requestId: targetRequestID,
+        requestDisplayId: 'CR-2',
+        requestTitle: 'Renewal blocker',
+        occurredAt: '2026-07-07T00:20:00Z',
+        actorId: 'operator',
+        subjectDisplay: 'Ada Lovelace',
+        source: 'portal',
+        description: 'Renewal owner reported export failure.',
+        feedbackId: '42',
+        issueProvider: '',
+        issueKey: '',
+        issueUrl: '',
+        issueSyncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED,
+      },
+      {
+        kind: CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_SYNCED,
+        requestId: targetRequestID,
+        requestDisplayId: 'CR-2',
+        requestTitle: 'Renewal blocker',
+        occurredAt: '2026-07-07T00:19:00Z',
+        actorId: 'sync-worker',
+        subjectDisplay: 'enterprise-team',
+        source: 'github',
+        description: 'failed',
+        feedbackId: '0',
+        issueProvider: 'github',
+        issueKey: 'ATT-235',
+        issueUrl: 'https://github.example/attune/issues/235',
+        issueSyncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_FAILED,
+      },
+      {
+        kind: CustomerRequestAccountEventKind.CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_NOTE_ADDED,
+        requestId: requestID,
+        requestDisplayId: 'CR-1',
+        requestTitle: 'Export bundle',
+        occurredAt: '2026-07-07T00:18:00Z',
+        actorId: 'cs-lead',
+        subjectDisplay: '',
+        source: 'note',
+        description: 'CS marked this account as renewal-sensitive.',
+        feedbackId: '0',
+        issueProvider: '',
+        issueKey: '',
+        issueUrl: '',
+        issueSyncState: CustomerRequestIssueSyncState.CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED,
+      },
+    ],
+    timeline: [sampleSummary()],
     ...overrides,
   }
 }
@@ -1695,6 +2188,7 @@ function sampleDetail(
     votes: overrides.votes ?? [],
     notes: overrides.notes ?? [],
     duplicates: overrides.duplicates ?? [],
+    decisionRecords: overrides.decisionRecords ?? [sampleDecisionRecord(request)],
     accountProfiles: overrides.accountProfiles ?? [
       {
         accountKey: 'acme',
@@ -1823,6 +2317,45 @@ function issueStateCount(
 ) {
   const count = issueLinks.filter((issue) => issue.syncState === state).length
   return count ? `${count} ${label}` : ''
+}
+
+function sampleDecisionRecord(request: CustomerRequestSummary) {
+  return {
+    auditId: '1',
+    action: 'customer_request.update',
+    actorType: 'admin',
+    actorId: 'pm-1',
+    summary: 'Updated customer request',
+    createdAt: '2026-07-07T01:05:00Z',
+    statusChanged: true,
+    oldStatus: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_OPEN,
+    newStatus: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_PLANNED,
+    priorityChanged: true,
+    oldPriority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_HIGH,
+    newPriority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_URGENT,
+    ownerChanged: false,
+    oldOwnerMemberId: '',
+    newOwnerMemberId: '',
+    titleChanged: false,
+    descriptionChanged: true,
+    hasDecisionSnapshot: true,
+    decisionScore: request.decisionScore,
+    decisionScoreFactors: request.decisionScoreFactors,
+    deliveryHealth: request.deliveryHealth,
+    supportingFeedbackCount: request.supportingFeedbackCount,
+    customerCount: request.customerCount,
+    accountCount: request.accountCount,
+    voteCount: request.voteCount,
+    revenueImpactCents: request.revenueImpactCents,
+    revenueCurrency: request.revenueCurrency,
+    decisionRationale: 'priority=high feedback=2 customers=1 accounts=1',
+    ownerMemberId: '22222222-2222-2222-2222-222222222222',
+    ownerDisplay: 'owner@example.com',
+    evidenceBundleRef: `customer-request/${request.id}/evidence/${request.displayId}`,
+    publicSafeState:
+      CustomerRequestDecisionPublicSafeState.CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_NEEDS_REVIEW,
+    publicSafeReasons: ['revenue_context'],
+  }
 }
 
 function sampleNote(overrides: Partial<CustomerRequestNote> = {}): CustomerRequestNote {

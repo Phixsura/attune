@@ -22,6 +22,7 @@ export interface FeedbackListFilters {
   q?: string
   source?: string
   type?: string
+  accountKey?: string
   urgent?: boolean
   tag?: string
   workflowState?: string
@@ -52,6 +53,7 @@ export const feedbackListInfiniteQuery = (filters: FeedbackListFilters) =>
       if (filters.q) params.set('q', filters.q)
       if (filters.source) params.set('source', filters.source)
       if (filters.type) params.set('type', filters.type)
+      if (filters.accountKey) params.set('account_key', filters.accountKey)
       if (filters.tag) params.set('tag', filters.tag)
       if (filters.workflowState) params.set('workflow_state', filters.workflowState)
       if (filters.urgent != null) params.set('urgent', String(filters.urgent))

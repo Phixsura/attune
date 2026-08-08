@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -24,11 +25,19 @@ import (
 const defaultLimit = 50
 
 type Repo struct {
-	pool *pgxpool.Pool
+	pool       pool
+	secretPool *pgxpool.Pool
+}
+
+type pool interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 func New(pool *pgxpool.Pool) *Repo {
-	return ptrext.Of(Repo{pool: pool})
+	return ptrext.Of(Repo{pool: pool, secretPool: pool})
 }
 
 func (r *Repo) ListConnections(ctx context.Context, tenantID string) ([]Connection, error) {
@@ -81,7 +90,7 @@ func (r *Repo) GetConnection(ctx context.Context, tenantID string, id uuid.UUID)
 
 func (r *Repo) CreateConnection(ctx context.Context, in Connection) (*Connection, error) {
 	var row Connection
-	err := secretlock.WithTx(ctx, r.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+	err := secretlock.WithTx(ctx, r.secretPool, true, func(ctx context.Context, tx secretlock.Tx) error {
 		if err := secretlock.EnsureWritableKey(ctx, tx, in.CredentialKeyID); err != nil {
 			return err
 		}
@@ -134,7 +143,7 @@ func (r *Repo) CreateConnection(ctx context.Context, in Connection) (*Connection
 
 func (r *Repo) UpdateConnection(ctx context.Context, in Connection, updateCredential, updateWebhookSecret bool) (*Connection, error) {
 	var row Connection
-	err := secretlock.WithTx(ctx, r.pool, true, func(ctx context.Context, tx secretlock.Tx) error {
+	err := secretlock.WithTx(ctx, r.secretPool, true, func(ctx context.Context, tx secretlock.Tx) error {
 		if updateCredential {
 			if err := secretlock.EnsureWritableKey(ctx, tx, in.CredentialKeyID); err != nil {
 				return err
@@ -3845,8 +3854,8 @@ func scanObjectLink(row scanner) (objectLinkRow, error) {
 	return link, err
 }
 
-func mustListAttempts(ctx context.Context, pool *pgxpool.Pool, runID uuid.UUID) []SyncAttempt {
-	rows, err := pool.Query(ctx, `
+func mustListAttempts(ctx context.Context, db pool, runID uuid.UUID) []SyncAttempt {
+	rows, err := db.Query(ctx, `
 		SELECT id, run_id, attempt_number, started_at, finished_at, result,
 		       http_status, provider_request_id, retry_after, error_kind, error_message
 		  FROM external_sync_attempts
@@ -3867,8 +3876,8 @@ func mustListAttempts(ctx context.Context, pool *pgxpool.Pool, runID uuid.UUID) 
 	return out
 }
 
-func mustListFailures(ctx context.Context, pool *pgxpool.Pool, tenantID string, runID uuid.UUID) []RecordFailure {
-	rows, err := pool.Query(ctx, `
+func mustListFailures(ctx context.Context, db pool, tenantID string, runID uuid.UUID) []RecordFailure {
+	rows, err := db.Query(ctx, `
 		SELECT id, tenant_id, run_id, mapping_id, operation, local_object_id, external_key,
 		       failure_kind, message, payload_digest, retry_mode, normalized_payload,
 		       retryable, resolved_at, resolved_by, created_at
@@ -3890,11 +3899,11 @@ func mustListFailures(ctx context.Context, pool *pgxpool.Pool, tenantID string, 
 	return out
 }
 
-func mustListConflicts(ctx context.Context, pool *pgxpool.Pool, tenantID string, mappingID *uuid.UUID) []ConflictRow {
+func mustListConflicts(ctx context.Context, db pool, tenantID string, mappingID *uuid.UUID) []ConflictRow {
 	if mappingID == nil {
 		return nil
 	}
-	rows, err := pool.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		SELECT id, tenant_id, mapping_id, local_object_id, external_key, conflict_kind,
 		       status, local_snapshot, external_snapshot, resolution, resolved_at,
 		       resolved_by, created_at, updated_at

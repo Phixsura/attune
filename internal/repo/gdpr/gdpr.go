@@ -52,8 +52,13 @@ type Counts struct {
 	// CustomerLinkCount / VoteCount are customer-request rows carrying
 	// the subject's identity (email/name); erasure anonymizes them
 	// in place instead of deleting so request aggregates survive.
-	CustomerLinkCount int
-	VoteCount         int
+	CustomerLinkCount               int
+	VoteCount                       int
+	SurveyInvitationCount           int
+	SurveyResponseCount             int
+	SurveyLowScoreReviewCount       int
+	SurveyProviderEventCount        int
+	SurveyRecoveryNotificationCount int
 }
 
 type ExportData struct {
@@ -70,9 +75,14 @@ type ExportData struct {
 	ReplyDeliveryAttemptRows []json.RawMessage
 	// Customer-request rows carrying the subject's identity — the same
 	// rows the delete path anonymizes (Art. 15 must cover Art. 17's scope).
-	CustomerLinkRows []json.RawMessage
-	VoteRows         []json.RawMessage
-	Counts           Counts
+	CustomerLinkRows               []json.RawMessage
+	VoteRows                       []json.RawMessage
+	SurveyInvitationRows           []json.RawMessage
+	SurveyResponseRows             []json.RawMessage
+	SurveyLowScoreReviewRows       []json.RawMessage
+	SurveyProviderEventRows        []json.RawMessage
+	SurveyRecoveryNotificationRows []json.RawMessage
+	Counts                         Counts
 }
 
 type DeleteResult struct {
@@ -94,52 +104,84 @@ func (r *Repo) Export(ctx context.Context, tenantID, subjectKey string) (*Export
 	}
 
 	return ptrext.Of(ExportData{
-		SubjectKey:               subjectKey,
-		SubjectDisplay:           info.subjectDisplay,
-		GeneratedAt:              time.Now().UTC(),
-		FeedbackRows:             rows.feedback,
-		FeedbackTagRows:          rows.tags,
-		FeedbackAuditRows:        rows.feedbackAudit,
-		LLMAuditRows:             rows.llmAudit,
-		ReplyDraftRows:           rows.replyDrafts,
-		ReplyDraftRevisionRows:   rows.replyDraftRevisions,
-		ReplyDraftEventRows:      rows.replyDraftEvents,
-		ReplyDeliveryAttemptRows: rows.replyDeliveryAttempts,
-		CustomerLinkRows:         rows.customerLinks,
-		VoteRows:                 rows.votes,
-		Counts:                   rows.counts(),
+		SubjectKey:                     subjectKey,
+		SubjectDisplay:                 info.subjectDisplay,
+		GeneratedAt:                    time.Now().UTC(),
+		FeedbackRows:                   rows.feedback,
+		FeedbackTagRows:                rows.tags,
+		FeedbackAuditRows:              rows.feedbackAudit,
+		LLMAuditRows:                   rows.llmAudit,
+		ReplyDraftRows:                 rows.replyDrafts,
+		ReplyDraftRevisionRows:         rows.replyDraftRevisions,
+		ReplyDraftEventRows:            rows.replyDraftEvents,
+		ReplyDeliveryAttemptRows:       rows.replyDeliveryAttempts,
+		CustomerLinkRows:               rows.customerLinks,
+		VoteRows:                       rows.votes,
+		SurveyInvitationRows:           rows.surveyInvitations,
+		SurveyResponseRows:             rows.surveyResponses,
+		SurveyLowScoreReviewRows:       rows.surveyLowScoreReviews,
+		SurveyProviderEventRows:        rows.surveyProviderEvents,
+		SurveyRecoveryNotificationRows: rows.surveyRecoveryNotifications,
+		Counts:                         rows.counts(),
 	}), nil
 }
 
 type subjectExportRows struct {
-	feedback              []json.RawMessage
-	tags                  []json.RawMessage
-	feedbackAudit         []json.RawMessage
-	llmAudit              []json.RawMessage
-	replyDrafts           []json.RawMessage
-	replyDraftRevisions   []json.RawMessage
-	replyDraftEvents      []json.RawMessage
-	replyDeliveryAttempts []json.RawMessage
-	customerLinks         []json.RawMessage
-	votes                 []json.RawMessage
+	feedback                    []json.RawMessage
+	tags                        []json.RawMessage
+	feedbackAudit               []json.RawMessage
+	llmAudit                    []json.RawMessage
+	replyDrafts                 []json.RawMessage
+	replyDraftRevisions         []json.RawMessage
+	replyDraftEvents            []json.RawMessage
+	replyDeliveryAttempts       []json.RawMessage
+	customerLinks               []json.RawMessage
+	votes                       []json.RawMessage
+	surveyInvitations           []json.RawMessage
+	surveyResponses             []json.RawMessage
+	surveyLowScoreReviews       []json.RawMessage
+	surveyProviderEvents        []json.RawMessage
+	surveyRecoveryNotifications []json.RawMessage
 }
 
 func (rows subjectExportRows) counts() Counts {
 	return Counts{
-		FeedbackCount:             len(rows.feedback),
-		TagAssignmentCount:        len(rows.tags),
-		FeedbackAuditCount:        len(rows.feedbackAudit),
-		LLMAuditCount:             len(rows.llmAudit),
-		ReplyDraftCount:           len(rows.replyDrafts),
-		ReplyDraftRevisionCount:   len(rows.replyDraftRevisions),
-		ReplyDraftEventCount:      len(rows.replyDraftEvents),
-		ReplyDeliveryAttemptCount: len(rows.replyDeliveryAttempts),
-		CustomerLinkCount:         len(rows.customerLinks),
-		VoteCount:                 len(rows.votes),
+		FeedbackCount:                   len(rows.feedback),
+		TagAssignmentCount:              len(rows.tags),
+		FeedbackAuditCount:              len(rows.feedbackAudit),
+		LLMAuditCount:                   len(rows.llmAudit),
+		ReplyDraftCount:                 len(rows.replyDrafts),
+		ReplyDraftRevisionCount:         len(rows.replyDraftRevisions),
+		ReplyDraftEventCount:            len(rows.replyDraftEvents),
+		ReplyDeliveryAttemptCount:       len(rows.replyDeliveryAttempts),
+		CustomerLinkCount:               len(rows.customerLinks),
+		VoteCount:                       len(rows.votes),
+		SurveyInvitationCount:           len(rows.surveyInvitations),
+		SurveyResponseCount:             len(rows.surveyResponses),
+		SurveyLowScoreReviewCount:       len(rows.surveyLowScoreReviews),
+		SurveyProviderEventCount:        len(rows.surveyProviderEvents),
+		SurveyRecoveryNotificationCount: len(rows.surveyRecoveryNotifications),
 	}
 }
 
 func (r *Repo) exportSubjectRows(ctx context.Context, tenantID, subjectKey string) (subjectExportRows, error) {
+	rows, err := r.exportFeedbackSubjectRows(ctx, tenantID, subjectKey)
+	if err != nil {
+		return subjectExportRows{}, err
+	}
+	surveyRows, err := r.exportSurveySubjectRows(ctx, tenantID, subjectKey)
+	if err != nil {
+		return subjectExportRows{}, err
+	}
+	rows.surveyInvitations = surveyRows.surveyInvitations
+	rows.surveyResponses = surveyRows.surveyResponses
+	rows.surveyLowScoreReviews = surveyRows.surveyLowScoreReviews
+	rows.surveyProviderEvents = surveyRows.surveyProviderEvents
+	rows.surveyRecoveryNotifications = surveyRows.surveyRecoveryNotifications
+	return rows, nil
+}
+
+func (r *Repo) exportFeedbackSubjectRows(ctx context.Context, tenantID, subjectKey string) (subjectExportRows, error) {
 	var rows subjectExportRows
 	var err error
 	if rows.feedback, err = r.exportFeedbackRows(ctx, tenantID, subjectKey); err != nil {
@@ -170,6 +212,30 @@ func (r *Repo) exportSubjectRows(ctx context.Context, tenantID, subjectKey strin
 		return rows, err
 	}
 	if rows.replyDeliveryAttempts, err = r.exportReplyDeliveryAttemptRows(ctx, tenantID, subjectKey); err != nil {
+		return subjectExportRows{}, err
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportSurveySubjectRows(ctx context.Context, tenantID, subjectKey string) (subjectExportRows, error) {
+	info, err := r.subjectInfo(ctx, tenantID, subjectKey)
+	if err != nil {
+		return subjectExportRows{}, err
+	}
+	var rows subjectExportRows
+	if rows.surveyInvitations, err = r.exportSurveyInvitationRows(ctx, tenantID, info); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.surveyResponses, err = r.exportSurveyResponseRows(ctx, tenantID, info); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.surveyLowScoreReviews, err = r.exportSurveyLowScoreReviewRows(ctx, tenantID, info); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.surveyProviderEvents, err = r.exportSurveyProviderEventRows(ctx, tenantID, info); err != nil {
+		return subjectExportRows{}, err
+	}
+	if rows.surveyRecoveryNotifications, err = r.exportSurveyRecoveryNotificationRows(ctx, tenantID, info); err != nil {
 		return subjectExportRows{}, err
 	}
 	return rows, nil
@@ -362,6 +428,144 @@ func (r *Repo) exportReplyDeliveryAttemptRows(ctx context.Context, tenantID, sub
 	return rows, nil
 }
 
+func (r *Repo) exportSurveyInvitationRows(ctx context.Context, tenantID string, info *subjectMetadata) ([]json.RawMessage, error) {
+	rows, err := r.queryJSONLines(ctx, `
+		SELECT row_to_json(t)
+		FROM (
+			SELECT si.id, si.tenant_id, si.campaign_id, si.campaign_content_version,
+			       si.campaign_snapshot, si.dedupe_key, si.source_type, si.source_id,
+			       si.request_id, si.contact_id, si.distribution_mode, si.token_hash,
+			       si.delivery_status, si.response_status, si.suppression_status,
+			       si.suppression_reason, si.recipient_snapshot,
+			       encode(si.delivery_secret, 'hex') AS delivery_secret_hex,
+			       si.provider, si.provider_message_id, si.attempts, si.failure_kind,
+			       si.http_status, si.last_error, si.delivered_at, si.opened_at,
+			       si.responded_at, si.expires_at, si.created_by, si.created_at,
+			       si.updated_at
+			FROM survey_invitations si
+			WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(2, 3, 4)+`
+			ORDER BY si.created_at, si.id
+		) t`,
+		tenantID, info.feedbackIDTexts, info.subjectKey, info.subjectHashes)
+	if err != nil {
+		return nil, fmt.Errorf("query survey invitation export rows: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportSurveyResponseRows(ctx context.Context, tenantID string, info *subjectMetadata) ([]json.RawMessage, error) {
+	rows, err := r.queryJSONLines(ctx, `
+		WITH subject_invitations AS (
+			SELECT si.id
+			FROM survey_invitations si
+			WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(2, 3, 4)+`
+		)
+		SELECT row_to_json(t)
+		FROM (
+			SELECT sr.id, sr.tenant_id, sr.campaign_id, sr.invitation_id,
+			       sr.request_id, sr.contact_id, sr.source_type, sr.source_id,
+			       sr.score, sr.comment, sr.locale, sr.metadata, sr.user_agent_hash,
+			       sr.ip_hash, sr.submitted_at, sr.created_at
+			FROM survey_responses sr
+			JOIN subject_invitations si ON si.id = sr.invitation_id
+			WHERE sr.tenant_id = $1
+			ORDER BY sr.submitted_at, sr.id
+		) t`,
+		tenantID, info.feedbackIDTexts, info.subjectKey, info.subjectHashes)
+	if err != nil {
+		return nil, fmt.Errorf("query survey response export rows: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportSurveyLowScoreReviewRows(ctx context.Context, tenantID string, info *subjectMetadata) ([]json.RawMessage, error) {
+	rows, err := r.queryJSONLines(ctx, `
+		WITH subject_invitations AS (
+			SELECT si.id
+			FROM survey_invitations si
+			WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(2, 3, 4)+`
+		)
+		SELECT row_to_json(t)
+		FROM (
+			SELECT lsr.response_id, lsr.tenant_id, lsr.campaign_id, lsr.status,
+			       lsr.severity, lsr.owner_member_id, lsr.root_cause,
+			       lsr.action_taken, lsr.customer_contacted, lsr.due_at,
+			       lsr.reviewed_at, lsr.updated_by, lsr.created_at,
+			       lsr.updated_at
+			FROM survey_low_score_reviews lsr
+			JOIN survey_responses sr
+			  ON sr.tenant_id = lsr.tenant_id
+			 AND sr.id = lsr.response_id
+			JOIN subject_invitations si ON si.id = sr.invitation_id
+			WHERE lsr.tenant_id = $1
+			ORDER BY lsr.updated_at, lsr.response_id
+		) t`,
+		tenantID, info.feedbackIDTexts, info.subjectKey, info.subjectHashes)
+	if err != nil {
+		return nil, fmt.Errorf("query survey low-score review export rows: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportSurveyProviderEventRows(ctx context.Context, tenantID string, info *subjectMetadata) ([]json.RawMessage, error) {
+	rows, err := r.queryJSONLines(ctx, `
+		WITH subject_invitations AS (
+			SELECT si.id
+			FROM survey_invitations si
+			WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(2, 3, 4)+`
+		)
+		SELECT row_to_json(t)
+		FROM (
+			SELECT spe.id, spe.tenant_id, spe.invitation_id, spe.provider,
+			       spe.provider_event_type, spe.provider_message_id,
+			       spe.provider_event_key, spe.payload, spe.occurred_at,
+			       spe.created_at
+			FROM survey_provider_events spe
+			JOIN subject_invitations si ON si.id = spe.invitation_id
+			WHERE spe.tenant_id = $1
+			ORDER BY spe.created_at, spe.id
+		) t`,
+		tenantID, info.feedbackIDTexts, info.subjectKey, info.subjectHashes)
+	if err != nil {
+		return nil, fmt.Errorf("query survey provider event export rows: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *Repo) exportSurveyRecoveryNotificationRows(
+	ctx context.Context,
+	tenantID string,
+	info *subjectMetadata,
+) ([]json.RawMessage, error) {
+	rows, err := r.queryJSONLines(ctx, `
+		WITH subject_invitations AS (
+			SELECT si.id
+			FROM survey_invitations si
+			WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(2, 3, 4)+`
+		)
+		SELECT row_to_json(t)
+		FROM (
+			SELECT srn.id, srn.tenant_id, srn.response_id, srn.owner_member_id,
+			       srn.channel, srn.status, srn.reason, srn.destination_hash,
+			       srn.payload, srn.provider, srn.provider_message_id,
+			       srn.attempts, srn.failure_kind, srn.http_status,
+			       srn.last_error, srn.next_retry_at, srn.delivered_at,
+			       srn.created_at, srn.updated_at
+			FROM survey_recovery_notifications srn
+			JOIN survey_responses sr
+			  ON sr.tenant_id = srn.tenant_id
+			 AND sr.id = srn.response_id
+			JOIN subject_invitations si ON si.id = sr.invitation_id
+			WHERE srn.tenant_id = $1
+			ORDER BY srn.created_at, srn.id
+		) t`,
+		tenantID, info.feedbackIDTexts, info.subjectKey, info.subjectHashes)
+	if err != nil {
+		return nil, fmt.Errorf("query survey recovery notification export rows: %w", err)
+	}
+	return rows, nil
+}
+
 func (r *Repo) Delete(ctx context.Context, tenantID, subjectKey string) (*DeleteResult, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -381,7 +585,7 @@ func (r *Repo) Delete(ctx context.Context, tenantID, subjectKey string) (*Delete
 		return nil, fmt.Errorf("delete cohort memberships: %w", err)
 	}
 
-	counts, err := deleteLockedSubject(ctx, tx, tenantID, subjectKey, info.feedbackIDs)
+	counts, err := deleteLockedSubject(ctx, tx, tenantID, info)
 	if err != nil {
 		return nil, err
 	}
@@ -417,16 +621,18 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 		return nil, fmt.Errorf("load gdpr delete request: %w", err)
 	}
 
-	// Cohort memberships: see Delete() comment.
-	if _, err := tx.Exec(ctx, `DELETE FROM cohort_memberships WHERE tenant_id = $1 AND external_user_id = $2`, tenantID, subjectKey); err != nil {
-		return nil, fmt.Errorf("delete cohort memberships: %w", err)
-	}
-
 	info, err := subjectInfoTx(ctx, tx, tenantID, subjectKey)
 	if err != nil {
 		return nil, err
 	}
-	counts, err := deleteLockedSubject(ctx, tx, tenantID, subjectKey, info.feedbackIDs)
+
+	// Match Delete's contact-then-membership lock order. Survey materialization
+	// takes the same contact lock before validating cohort membership, so a
+	// scheduled erasure cannot deadlock with a claimed NPS run.
+	if _, err := tx.Exec(ctx, `DELETE FROM cohort_memberships WHERE tenant_id = $1 AND external_user_id = $2`, tenantID, subjectKey); err != nil {
+		return nil, fmt.Errorf("delete cohort memberships: %w", err)
+	}
+	counts, err := deleteLockedSubject(ctx, tx, tenantID, info)
 	if err != nil {
 		return nil, err
 	}
@@ -441,34 +647,23 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 	}), nil
 }
 
-func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectKey string, feedbackIDs []int64) (Counts, error) {
-	var counts Counts
-	if err := tx.QueryRow(
-		ctx, `
-		SELECT
-			(SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_drafts WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_draft_revisions WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_draft_events WHERE feedback_id = ANY($1)),
-			(SELECT COUNT(*) FROM reply_delivery_attempts WHERE feedback_id = ANY($1))`,
-		feedbackIDs,
-	).Scan(
-		&counts.TagAssignmentCount,
-		&counts.FeedbackAuditCount,
-		&counts.LLMAuditCount,
-		&counts.OutboxCount,
-		&counts.ReplyDraftCount,
-		&counts.ReplyDraftRevisionCount,
-		&counts.ReplyDraftEventCount,
-		&counts.ReplyDeliveryAttemptCount,
-	); err != nil {
-		return Counts{}, fmt.Errorf("count subject-linked rows: %w", err)
+func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, info *subjectMetadata) (Counts, error) {
+	// A public response holds a row lock on its invitation while it writes the
+	// response and any derived feedback. Take the same invitation locks before
+	// counting redactions so a response can neither commit between the count and
+	// deletion nor survive an erase transaction through a stale statement snapshot.
+	if err := lockSubjectSurveyInvitations(ctx, tx, tenantID, info); err != nil {
+		return Counts{}, err
 	}
-	counts.FeedbackCount = len(feedbackIDs)
+	counts, err := countLockedSubject(ctx, tx, tenantID, info)
+	if err != nil {
+		return Counts{}, err
+	}
+	if err := deleteSurveySubjectRows(ctx, tx, tenantID, info); err != nil {
+		return Counts{}, err
+	}
 
+	feedbackIDs := info.feedbackIDs
 	if _, err := tx.Exec(ctx, `DELETE FROM reply_delivery_attempts WHERE feedback_id = ANY($1)`, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete reply_delivery_attempts rows: %w", err)
 	}
@@ -488,13 +683,36 @@ func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID, subjectKey st
 	if _, err := tx.Exec(ctx, `DELETE FROM user_feedback WHERE tenant_id = $1 AND id = ANY($2)`, tenantID, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete user_feedback rows: %w", err)
 	}
-	linkCount, voteCount, err := anonymizeCustomerRequestSubject(ctx, tx, tenantID, subjectKey)
+	linkCount, voteCount, err := anonymizeCustomerRequestSubject(ctx, tx, tenantID, info.subjectKey)
 	if err != nil {
 		return Counts{}, err
 	}
 	counts.CustomerLinkCount = linkCount
 	counts.VoteCount = voteCount
 	return counts, nil
+}
+
+func lockSubjectSurveyInvitations(ctx context.Context, tx pgx.Tx, tenantID string, info *subjectMetadata) error {
+	rows, err := tx.Query(ctx, `
+		SELECT si.id
+		FROM survey_invitations si
+		WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(2, 3, 4)+`
+		FOR UPDATE`,
+		tenantID,
+		info.feedbackIDTexts,
+		info.subjectKey,
+		info.subjectHashes,
+	)
+	if err != nil {
+		return fmt.Errorf("lock survey invitations: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("lock survey invitations rows: %w", err)
+	}
+	return nil
 }
 
 // anonymizeCustomerRequestSubject scrubs the subject's identity from
@@ -555,9 +773,194 @@ func anonymizeSubjectRowsInTable(ctx context.Context, tx pgx.Tx, table, tenantID
 	return int(tag.RowsAffected()), nil
 }
 
+func countLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, info *subjectMetadata) (Counts, error) {
+	var counts Counts
+	if err := tx.QueryRow(
+		ctx, `
+		WITH subject_invitations AS (
+			SELECT si.id
+			FROM survey_invitations si
+			WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(3, 4, 5)+`
+		)
+		SELECT
+			(SELECT COUNT(*) FROM feedback_tag_assignments WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM feedback_audit_log WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM llm_audit WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM notify_outbox WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM reply_drafts WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM reply_draft_revisions WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM reply_draft_events WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM reply_delivery_attempts WHERE feedback_id = ANY($2)),
+			(SELECT COUNT(*) FROM subject_invitations),
+			(SELECT COUNT(*)
+			 FROM survey_responses sr
+			 JOIN subject_invitations si ON si.id = sr.invitation_id
+			 WHERE sr.tenant_id = $1),
+			(SELECT COUNT(*)
+			 FROM survey_low_score_reviews lsr
+			 JOIN survey_responses sr
+			   ON sr.tenant_id = lsr.tenant_id
+			  AND sr.id = lsr.response_id
+			 JOIN subject_invitations si ON si.id = sr.invitation_id
+			 WHERE lsr.tenant_id = $1),
+			(SELECT COUNT(*)
+			 FROM survey_provider_events spe
+			 JOIN subject_invitations si ON si.id = spe.invitation_id
+			 WHERE spe.tenant_id = $1),
+			(SELECT COUNT(*)
+			 FROM survey_recovery_notifications srn
+			 JOIN survey_responses sr
+			   ON sr.tenant_id = srn.tenant_id
+			  AND sr.id = srn.response_id
+			 JOIN subject_invitations si ON si.id = sr.invitation_id
+			 WHERE srn.tenant_id = $1)`,
+		tenantID,
+		info.feedbackIDs,
+		info.feedbackIDTexts,
+		info.subjectKey,
+		info.subjectHashes,
+	).Scan(
+		&counts.TagAssignmentCount,
+		&counts.FeedbackAuditCount,
+		&counts.LLMAuditCount,
+		&counts.OutboxCount,
+		&counts.ReplyDraftCount,
+		&counts.ReplyDraftRevisionCount,
+		&counts.ReplyDraftEventCount,
+		&counts.ReplyDeliveryAttemptCount,
+		&counts.SurveyInvitationCount,
+		&counts.SurveyResponseCount,
+		&counts.SurveyLowScoreReviewCount,
+		&counts.SurveyProviderEventCount,
+		&counts.SurveyRecoveryNotificationCount,
+	); err != nil {
+		return Counts{}, fmt.Errorf("count subject-linked rows: %w", err)
+	}
+	counts.FeedbackCount = len(info.feedbackIDs)
+	return counts, nil
+}
+
+func deleteSurveySubjectRows(ctx context.Context, tx pgx.Tx, tenantID string, info *subjectMetadata) error {
+	args := []any{tenantID, info.feedbackIDTexts, info.subjectKey, info.subjectHashes}
+	if _, err := tx.Exec(ctx, incrementNPSRunRedactionCountsSQL(), args...); err != nil {
+		return fmt.Errorf("record survey campaign run redactions: %w", err)
+	}
+	for _, stmt := range []struct {
+		name string
+		sql  string
+	}{
+		{name: "survey_recovery_notifications", sql: deleteSurveyRecoveryNotificationsSQL()},
+		{name: "survey_low_score_reviews", sql: deleteSurveyLowScoreReviewsSQL()},
+		{name: "survey_provider_events", sql: deleteSurveyProviderEventsSQL()},
+		{name: "survey_responses", sql: deleteSurveyResponsesSQL()},
+		{name: "survey_invitations", sql: deleteSurveyInvitationsSQL()},
+	} {
+		if _, err := tx.Exec(ctx, stmt.sql, args...); err != nil {
+			return fmt.Errorf("delete %s rows: %w", stmt.name, err)
+		}
+	}
+	return nil
+}
+
+// incrementNPSRunRedactionCountsSQL preserves the aggregate interpretation of
+// a completed NPS run after GDPR removes an individual's response and its
+// feedback bridge through the response foreign key cascade.
+func incrementNPSRunRedactionCountsSQL() string {
+	return subjectSurveyInvitationCTE() + `,
+	redacted_runs AS (
+		SELECT si.run_id, COUNT(*) AS response_count
+		FROM survey_responses sr
+		JOIN subject_invitations si ON si.id = sr.invitation_id
+		WHERE sr.tenant_id = $1
+		  AND sr.survey_type = 'nps'
+		  AND si.run_id IS NOT NULL
+		GROUP BY si.run_id
+	)
+	UPDATE survey_campaign_runs run
+	SET redacted_response_count = run.redacted_response_count + redacted_runs.response_count
+	FROM redacted_runs
+	WHERE run.tenant_id = $1
+	  AND run.id = redacted_runs.run_id`
+}
+
+func subjectSurveyInvitationClause(feedbackIDsArg, subjectKeyArg, subjectHashesArg int) string {
+	return fmt.Sprintf(`(
+		(
+				si.source_type IN ('workflow_transition', 'reply_sent', 'manual_link', 'request_resolved')
+			AND si.source_id = ANY($%d)
+		)
+		OR si.recipient_snapshot->>'feedback_id' = ANY($%d)
+		OR EXISTS (
+			SELECT 1
+			FROM customer_notification_contacts c
+			WHERE c.tenant_id = si.tenant_id
+			  AND c.id = si.contact_id
+			  AND (
+				(c.subject_key <> '' AND c.subject_key = $%d)
+				OR (c.subject_hash <> '' AND c.subject_hash = ANY($%d))
+			  )
+		)
+	)`, feedbackIDsArg, feedbackIDsArg, subjectKeyArg, subjectHashesArg)
+}
+
+func subjectSurveyInvitationCTE() string {
+	return `WITH subject_invitations AS (
+		SELECT si.id, si.run_id
+		FROM survey_invitations si
+		WHERE si.tenant_id = $1 AND ` + subjectSurveyInvitationClause(2, 3, 4) + `
+	)`
+}
+
+func deleteSurveyRecoveryNotificationsSQL() string {
+	return subjectSurveyInvitationCTE() + `
+	DELETE FROM survey_recovery_notifications srn
+	USING survey_responses sr, subject_invitations si
+	WHERE srn.tenant_id = $1
+	  AND sr.tenant_id = srn.tenant_id
+	  AND sr.id = srn.response_id
+	  AND sr.invitation_id = si.id`
+}
+
+func deleteSurveyLowScoreReviewsSQL() string {
+	return subjectSurveyInvitationCTE() + `
+	DELETE FROM survey_low_score_reviews lsr
+	USING survey_responses sr, subject_invitations si
+	WHERE lsr.tenant_id = $1
+	  AND sr.tenant_id = lsr.tenant_id
+	  AND sr.id = lsr.response_id
+	  AND sr.invitation_id = si.id`
+}
+
+func deleteSurveyProviderEventsSQL() string {
+	return subjectSurveyInvitationCTE() + `
+	DELETE FROM survey_provider_events spe
+	USING subject_invitations si
+	WHERE spe.tenant_id = $1
+	  AND spe.invitation_id = si.id`
+}
+
+func deleteSurveyResponsesSQL() string {
+	return subjectSurveyInvitationCTE() + `
+	DELETE FROM survey_responses sr
+	USING subject_invitations si
+	WHERE sr.tenant_id = $1
+	  AND sr.invitation_id = si.id`
+}
+
+func deleteSurveyInvitationsSQL() string {
+	return subjectSurveyInvitationCTE() + `
+	DELETE FROM survey_invitations si
+	USING subject_invitations subject_si
+	WHERE si.tenant_id = $1
+	  AND si.id = subject_si.id`
+}
+
 type subjectMetadata struct {
-	feedbackIDs    []int64
-	subjectDisplay string
+	feedbackIDs     []int64
+	feedbackIDTexts []string
+	subjectKey      string
+	subjectHashes   []string
+	subjectDisplay  string
 }
 
 func (r *Repo) subjectInfo(ctx context.Context, tenantID, subjectKey string) (*subjectMetadata, error) {
@@ -571,24 +974,51 @@ type queryer interface {
 func subjectInfoTx(ctx context.Context, q queryer, tenantID, subjectKey string) (*subjectMetadata, error) {
 	subjectFilter := subjectMatchClause(2)
 	rows, err := q.Query(ctx, `
-		SELECT id, COALESCE(NULLIF(subject_display, ''), subject_key)
-		FROM user_feedback
-		WHERE tenant_id = $1 AND `+subjectFilter+`
-		ORDER BY id
-		FOR UPDATE`, tenantID, subjectKey)
+		WITH matching_feedback AS (
+			SELECT id AS feedback_id,
+			       COALESCE(NULLIF(subject_display, ''), subject_key) AS subject_display,
+			       subject_hash
+			FROM user_feedback
+			WHERE tenant_id = $1 AND `+subjectFilter+`
+			FOR UPDATE
+		), matching_contacts AS (
+			SELECT 0::BIGINT AS feedback_id,
+			       COALESCE(NULLIF(display_name, ''), subject_key) AS subject_display,
+			       subject_hash
+			FROM customer_notification_contacts
+			WHERE tenant_id = $1
+			  AND subject_key <> ''
+			  AND subject_key = $2
+			FOR UPDATE
+		)
+		SELECT feedback_id, subject_display, subject_hash
+		FROM (
+			SELECT feedback_id, subject_display, subject_hash FROM matching_feedback
+			UNION ALL
+			SELECT feedback_id, subject_display, subject_hash FROM matching_contacts
+		) subject_rows
+		ORDER BY CASE WHEN feedback_id = 0 THEN 1 ELSE 0 END, feedback_id`, tenantID, subjectKey)
 	if err != nil {
-		return nil, fmt.Errorf("query subject feedback ids: %w", err)
+		return nil, fmt.Errorf("query subject identity rows: %w", err)
 	}
 	defer rows.Close()
 
 	info := ptrext.Of(subjectMetadata{})
+	info.subjectKey = strings.TrimSpace(subjectKey)
+	found := false
 	for rows.Next() {
+		found = true
 		var id int64
 		var subjectDisplay string
-		if err := rows.Scan(&id, &subjectDisplay); err != nil {
+		var subjectHash string
+		if err := rows.Scan(&id, &subjectDisplay, &subjectHash); err != nil {
 			return nil, fmt.Errorf("scan subject feedback ids: %w", err)
 		}
-		info.feedbackIDs = append(info.feedbackIDs, id)
+		if id > 0 {
+			info.feedbackIDs = append(info.feedbackIDs, id)
+			info.feedbackIDTexts = append(info.feedbackIDTexts, fmt.Sprintf("%d", id))
+		}
+		info.subjectHashes = appendUniqueNonEmpty(info.subjectHashes, subjectHash)
 		if info.subjectDisplay == "" {
 			info.subjectDisplay = subjectDisplay
 		}
@@ -596,10 +1026,26 @@ func subjectInfoTx(ctx context.Context, q queryer, tenantID, subjectKey string) 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate subject feedback ids: %w", err)
 	}
-	if len(info.feedbackIDs) == 0 {
+	if !found {
 		return nil, ErrSubjectNotFound
 	}
+	if info.subjectDisplay == "" {
+		info.subjectDisplay = info.subjectKey
+	}
 	return info, nil
+}
+
+func appendUniqueNonEmpty(items []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return items
+	}
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	return append(items, value)
 }
 
 func (r *Repo) queryJSONLines(ctx context.Context, query string, args ...any) ([]json.RawMessage, error) {

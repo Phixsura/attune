@@ -61,14 +61,29 @@ service RequestNotificationService {
       body: "*"
     };
   }
+  rpc BatchPreviewRequestNotifications(BatchPreviewRequestNotificationsRequest) returns (BatchPreviewRequestNotificationsResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications:batch-preview"
+      body: "*"
+    };
+  }
   rpc PublishRequestUpdate(PublishRequestUpdateRequest) returns (RequestNotificationEvent) {
     option (google.api.http) = {
       post: "/fb/v1/console/request-notifications/publish"
       body: "*"
     };
   }
+  rpc BatchPublishRequestUpdates(BatchPublishRequestUpdatesRequest) returns (BatchPublishRequestUpdatesResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/request-notifications:batch-publish"
+      body: "*"
+    };
+  }
   rpc ListRequestNotificationDeliveries(ListRequestNotificationDeliveriesRequest) returns (ListRequestNotificationDeliveriesResponse) {
     option (google.api.http) = {get: "/fb/v1/console/request-notifications/deliveries"};
+  }
+  rpc GetRequestNotificationStatusEvidence(GetRequestNotificationStatusEvidenceRequest) returns (RequestNotificationStatusEvidenceResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/request-notifications/status-evidence"};
   }
   rpc RetryRequestNotificationDelivery(RetryRequestNotificationDeliveryRequest) returns (RequestNotificationDelivery) {
     option (google.api.http) = {
@@ -273,6 +288,48 @@ message PublishRequestUpdateRequest {
   bool confirm_large_audience = 3;
 }
 
+message BatchPreviewRequestNotificationsRequest {
+  repeated RequestNotificationUpdateDraft updates = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated RequestNotificationChannel channels = 2;
+}
+
+message BatchRequestNotificationPreviewItem {
+  string request_id = 1;
+  int32 eligible_recipients = 2;
+  int32 excluded_recipients = 3;
+  google.protobuf.Struct excluded_by_reason = 4;
+  google.protobuf.Struct email_payload = 5;
+  google.protobuf.Struct webhook_payload = 6;
+}
+
+message BatchRequestNotificationFailure {
+  string request_id = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message BatchPreviewRequestNotificationsResponse {
+  int32 total_matched = 1;
+  int32 eligible_recipients = 2;
+  int32 excluded_recipients = 3;
+  repeated BatchRequestNotificationPreviewItem items = 4;
+  repeated BatchRequestNotificationFailure failed = 5;
+}
+
+message BatchPublishRequestUpdatesRequest {
+  repeated RequestNotificationUpdateDraft updates = 1 [(google.api.field_behavior) = REQUIRED];
+  repeated RequestNotificationChannel channels = 2;
+  bool confirm_large_audience = 3;
+}
+
+message BatchPublishRequestUpdatesResponse {
+  int32 total_matched = 1;
+  int32 succeeded = 2;
+  int32 skipped = 3;
+  repeated RequestNotificationEvent events = 4;
+  repeated BatchRequestNotificationFailure failed = 5;
+}
+
 message RequestNotificationEvent {
   string id = 1;
   RequestNotificationEventType event_type = 2;
@@ -317,6 +374,23 @@ message ListRequestNotificationDeliveriesRequest {
 message ListRequestNotificationDeliveriesResponse {
   repeated RequestNotificationDelivery deliveries = 1;
   int64 next_before_id = 2;
+}
+
+message GetRequestNotificationStatusEvidenceRequest {}
+
+message RequestNotificationStatusEvidenceItem {
+  string request_status = 1;
+  int32 expected_customers = 2;
+  int32 notified_customers = 3;
+  int32 failed_customers = 4;
+  int32 suppressed_customers = 5;
+  int32 recovery_pending_customers = 6;
+  int32 event_count = 7;
+  optional string last_event_at = 8;
+}
+
+message RequestNotificationStatusEvidenceResponse {
+  repeated RequestNotificationStatusEvidenceItem items = 1;
 }
 
 message RetryRequestNotificationDeliveryRequest {

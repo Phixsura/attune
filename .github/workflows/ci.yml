@@ -375,7 +375,7 @@ jobs:
       - run: pnpm exec vite build
       - run: pnpm tsc -b --noEmit
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e:a11y
+      - run: ATTUNE_CONSOLE_E2E_PREBUILT=1 pnpm test:e2e:a11y
       - run: pnpm vitest run --coverage
       - name: Upload console coverage to Codecov
         if: >-

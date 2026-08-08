@@ -68,19 +68,40 @@ type BatchResult struct {
 	Failed    []BatchItemFailure
 }
 
+type SurveyTransitionEvent struct {
+	TenantID          string
+	FeedbackID        int64
+	FromStateID       string
+	FromStateName     string
+	FromStateCategory string
+	ToStateID         string
+	ToStateName       string
+	ToStateCategory   string
+	ActorID           string
+}
+
+type SurveySink interface {
+	RecordWorkflowTransition(ctx context.Context, event SurveyTransitionEvent) (int, error)
+}
+
 type TxBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 	BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error)
 }
 
 type Service struct {
-	states StateStore
-	audits AuditWriter
-	pool   TxBeginner
+	states  StateStore
+	audits  AuditWriter
+	pool    TxBeginner
+	surveys SurveySink
 }
 
 func NewService(states StateStore, audits AuditWriter, pool TxBeginner) *Service {
 	return ptrext.Of(Service{states: states, audits: audits, pool: pool})
+}
+
+func (s *Service) SetSurveySink(sink SurveySink) {
+	s.surveys = sink
 }
 
 func (s *Service) Transition(ctx context.Context, tenantID string, feedbackID int64, toStateID, byUser, comment string) (*TransitionResult, error) {
@@ -157,6 +178,8 @@ func (s *Service) Transition(ctx context.Context, tenantID string, feedbackID in
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,feedback_id:%d,from:%s,to:%s,by:%s",
 		where, tenantID, feedbackID, fromState.Name, toState.Name, byUser)
 
+	s.recordSurveyTransition(ctx, tenantID, feedbackID, fromState, toState, byUser)
+
 	return ptrext.Of(TransitionResult{
 		FeedbackID: feedbackID,
 		FromState:  fromState,
@@ -197,6 +220,35 @@ func (s *Service) BatchTransition(ctx context.Context, tenantID string, feedback
 		result.Succeeded++
 	}
 	return result, nil
+}
+
+func (s *Service) recordSurveyTransition(
+	ctx context.Context,
+	tenantID string,
+	feedbackID int64,
+	fromState *workflowstate.WorkflowState,
+	toState *workflowstate.WorkflowState,
+	actorID string,
+) {
+	const where = "service.workflow.recordSurveyTransition"
+	if s.surveys == nil || fromState == nil || toState == nil {
+		return
+	}
+	_, err := s.surveys.RecordWorkflowTransition(ctx, SurveyTransitionEvent{
+		TenantID:          tenantID,
+		FeedbackID:        feedbackID,
+		FromStateID:       fromState.ID,
+		FromStateName:     fromState.Name,
+		FromStateCategory: fromState.Category,
+		ToStateID:         toState.ID,
+		ToStateName:       toState.Name,
+		ToStateCategory:   toState.Category,
+		ActorID:           actorID,
+	})
+	if err != nil {
+		logext.Warnf(ctx, "[%s] survey trigger failed,tenant_id:%s,feedback_id:%d,err:%+v",
+			where, tenantID, feedbackID, err.Error())
+	}
 }
 
 func (s *Service) ArchiveState(ctx context.Context, tenantID, stateID string) error {

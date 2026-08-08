@@ -64,6 +64,7 @@ func TestSaveNormalizesState(t *testing.T) {
 			Sort:          crrepo.SortDecisionScore,
 			Direction:     crrepo.DirectionAsc,
 			FeedbackID:    42,
+			AccountKey:    " acct:acme ",
 		},
 		UpdatedBy: " user-1 ",
 	})
@@ -78,6 +79,9 @@ func TestSaveNormalizesState(t *testing.T) {
 	}
 	if captured.State.OwnerMemberID != ownerID.String() {
 		t.Fatalf("owner = %q, want %s", captured.State.OwnerMemberID, ownerID)
+	}
+	if captured.State.AccountKey != "acct:acme" {
+		t.Fatalf("account key = %q, want acct:acme", captured.State.AccountKey)
 	}
 }
 
@@ -118,6 +122,7 @@ func TestSaveValidatesState(t *testing.T) {
 		{name: "bad sort", state: State{Sort: "rank"}},
 		{name: "bad direction", state: State{Direction: "sideways"}},
 		{name: "bad feedback", state: State{FeedbackID: -1}},
+		{name: "long account key", state: State{AccountKey: strings.Repeat("a", 513)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

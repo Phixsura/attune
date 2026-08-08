@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import {
   type CohortSource,
@@ -176,20 +177,22 @@ export function CohortSyncPage() {
         </div>
       )}
 
-      <div className="mt-6 space-y-8">
-        <SourcesTab
-          sources={sources}
-          testingId={testM.isPending ? (testM.variables as string) : undefined}
-          onTest={(s) => testM.mutate(s.id)}
-          onEdit={setEditSource}
-          onDelete={setDeleteSource}
-          onToggleEnabled={(s) =>
-            updateM.mutate({ id: s.id, provider: s.provider, name: s.name, enabled: !s.enabled })
-          }
-          onCreateClick={() => setCreateOpen(true)}
-        />
-        <CohortsTab cohorts={cohorts} />
-      </div>
+      <TooltipProvider>
+        <div className="mt-6 space-y-8">
+          <SourcesTab
+            sources={sources}
+            testingId={testM.isPending ? (testM.variables as string) : undefined}
+            onTest={(s) => testM.mutate(s.id)}
+            onEdit={setEditSource}
+            onDelete={setDeleteSource}
+            onToggleEnabled={(s) =>
+              updateM.mutate({ id: s.id, provider: s.provider, name: s.name, enabled: !s.enabled })
+            }
+            onCreateClick={() => setCreateOpen(true)}
+          />
+          <CohortsTab cohorts={cohorts} />
+        </div>
+      </TooltipProvider>
 
       <SourceFormDialog
         mode="create"

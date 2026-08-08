@@ -600,6 +600,58 @@ var DigestClusterCount = prometheus.NewHistogramVec(
 	[]string{"tenant"},
 )
 
+// SurveyRecoveryAutomationTotal counts low-score recovery automation outcomes.
+// result ∈ {escalated, skipped, error}; reason is a bounded recovery reason.
+var SurveyRecoveryAutomationTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_survey_recovery_automation_total",
+		Help: "Low-score survey recovery automation outcomes by tenant and reason.",
+	},
+	[]string{"tenant", "result", "reason"},
+)
+
+// SurveyRecoveryNotificationTotal counts low-score recovery owner notification outcomes.
+// result ∈ {enqueued, sent, suppressed, failed, dead, skipped, error}; reason is bounded.
+var SurveyRecoveryNotificationTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_survey_recovery_notification_total",
+		Help: "Low-score survey recovery owner notification outcomes by tenant and reason.",
+	},
+	[]string{"tenant", "result", "reason"},
+)
+
+// SurveyNPSRunMaterializationTotal counts NPS run materialization outcomes.
+// result ∈ {materialized, failed, retrying, superseded, error}; reason is a bounded
+// lifecycle or failure class, never a raw provider or database error.
+var SurveyNPSRunMaterializationTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_survey_nps_run_materialization_total",
+		Help: "NPS run materialization outcomes by tenant and bounded reason.",
+	},
+	[]string{"tenant", "result", "reason"},
+)
+
+// SurveyNPSRecurrenceTotal counts durable relationship-NPS pulse outcomes.
+// result ∈ {scheduled, skipped, retrying, error}; reason is a bounded
+// scheduler or lifecycle class, never a raw database or provider error.
+var SurveyNPSRecurrenceTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_survey_nps_recurrence_total",
+		Help: "Relationship-NPS recurrence outcomes by tenant and bounded reason.",
+	},
+	[]string{"tenant", "result", "reason"},
+)
+
+// SurveyNPSEvidenceExportPurgeTotal counts expired NPS evidence artifacts
+// removed by the bounded lifecycle cleanup worker.
+var SurveyNPSEvidenceExportPurgeTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_survey_nps_evidence_export_purge_total",
+		Help: "Expired NPS evidence export artifacts removed by tenant and result.",
+	},
+	[]string{"tenant", "result"},
+)
+
 // WorkflowTransitionsTotal counts workflow state transitions by outcome.
 // result ∈ {success, invalid, error}.
 var WorkflowTransitionsTotal = prometheus.NewCounterVec(
@@ -1190,6 +1242,11 @@ var allMetrics = []prometheus.Collector{
 	DigestDuration,
 	DigestClusteringFallbackTotal,
 	DigestClusterCount,
+	SurveyRecoveryAutomationTotal,
+	SurveyRecoveryNotificationTotal,
+	SurveyNPSRunMaterializationTotal,
+	SurveyNPSRecurrenceTotal,
+	SurveyNPSEvidenceExportPurgeTotal,
 	WorkflowTransitionsTotal,
 	WorkflowBatchSize,
 	BatchJobsClaimed,
@@ -1310,6 +1367,11 @@ func registeredMetricNamesCore() []string {
 		"attune_digest_duration_seconds",
 		"attune_digest_clustering_fallback_total",
 		"attune_digest_cluster_count",
+		"attune_survey_recovery_automation_total",
+		"attune_survey_recovery_notification_total",
+		"attune_survey_nps_run_materialization_total",
+		"attune_survey_nps_recurrence_total",
+		"attune_survey_nps_evidence_export_purge_total",
 	}
 }
 

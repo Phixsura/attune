@@ -61,6 +61,8 @@ func TestHandlerServesPrometheusFormat(t *testing.T) {
 	// Force a value so the metric appears in output (counters at 0
 	// are sometimes omitted by the encoder).
 	IngestTotal.WithLabelValues("test-tenant", "api", "ok").Inc()
+	SurveyNPSRunMaterializationTotal.WithLabelValues("test-tenant", "materialized", "ok").Inc()
+	SurveyNPSRecurrenceTotal.WithLabelValues("test-tenant", "scheduled", "created").Inc()
 
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	rec := httptest.NewRecorder()
@@ -72,6 +74,14 @@ func TestHandlerServesPrometheusFormat(t *testing.T) {
 	body, _ := io.ReadAll(rec.Body)
 	if !strings.Contains(string(body), "attune_ingest_total") {
 		t.Fatalf("expected attune_ingest_total in body, got:\n%s",
+			string(body)[:min(len(body), 500)])
+	}
+	if !strings.Contains(string(body), "attune_survey_nps_run_materialization_total") {
+		t.Fatalf("expected NPS materialization metric in body, got:\n%s",
+			string(body)[:min(len(body), 500)])
+	}
+	if !strings.Contains(string(body), "attune_survey_nps_recurrence_total") {
+		t.Fatalf("expected NPS recurrence metric in body, got:\n%s",
 			string(body)[:min(len(body), 500)])
 	}
 }

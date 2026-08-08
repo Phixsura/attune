@@ -9,13 +9,17 @@
 # falls back to fixed-version local plugins. To change a proto dependency, run
 # `make proto-deps`.
 
-.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality maturity-contract dev-stack demo-seed demo-reset demo-bootstrap test fast-check adversarial-check script-tests test-live test-live-list test-integration public-board-smoke runtime-smoke secret-scan release-smoke ci-check
+.PHONY: help proto proto-lint proto-breaking proto-deps observability-dashboards observability-rules observability-load-e2e search-quality maturity-contract product-readiness-contract sdk-parity connector-conformance api-consistency import-export-workbench integration-catalog upgrade-diagnostics dev-stack demo-seed demo-reset demo-bootstrap test fast-check adversarial-check script-tests test-live test-live-list test-integration public-board-smoke control-tower-smoke console-browser-smoke console-browser-supplemental-smoke runtime-smoke secret-scan release-smoke ci-check
 
 NODE_RUNNER ?= bash $(CURDIR)/scripts/with-supported-node.sh
 NODE ?= $(NODE_RUNNER) node
 NPX ?= $(NODE_RUNNER) npx
 PNPM ?= $(NODE_RUNNER) corepack pnpm
 FUZZTIME ?= 10s
+ATTUNE_RUNTIME_SMOKE_IMAGE ?= attune:runtime-smoke
+ATTUNE_RUNTIME_SMOKE_NODE_IMAGE ?=
+ATTUNE_RUNTIME_SMOKE_GO_IMAGE ?=
+ATTUNE_RUNTIME_SMOKE_RUNTIME_IMAGE ?=
 
 help: ## List targets.
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-16s %s\n", $$1, $$2}'
@@ -63,6 +67,27 @@ search-quality: ## Verify the committed semantic-search relevance baseline.
 
 maturity-contract: ## Verify the platform maturity proposal graph and verification links.
 	bash scripts/lint-maturity-contract.sh
+
+product-readiness-contract: ## Verify product-readiness proof gates for Customer Signal OS slices.
+	bash scripts/lint-product-readiness-contract.sh
+
+sdk-parity: ## Verify Node and Go SDK public surface / contract parity.
+	node scripts/check-sdk-parity.mjs
+
+connector-conformance: ## Verify connector SDK manifest, fixtures, signatures, mappings, and recovery matrix.
+	node scripts/check-connector-conformance.mjs
+
+api-consistency: ## Verify API pagination, filter, sort, error, idempotency, and SDK wire semantics.
+	node scripts/check-api-consistency.mjs
+
+import-export-workbench: ## Verify import/export templates, schema, dry-run fixtures, recovery, and governance.
+	node scripts/check-import-export-workbench.mjs
+
+integration-catalog: ## Verify integration catalog install states, permissions, replay fixtures, health badges, and upgrades.
+	node scripts/check-integration-catalog.mjs
+
+upgrade-diagnostics: ## Verify upgrade diagnostics checks, compatibility matrix, fixtures, and recovery playbooks.
+	node scripts/check-upgrade-diagnostics.mjs
 
 dev-stack: ## Start disposable local Postgres + Attune + Console demo stack.
 	$(NODE) scripts/dev-local-stack.mjs
@@ -123,9 +148,25 @@ test-integration: ## IO tier — real Postgres. Needs Docker or ATTUNE_TEST_DATA
 public-board-smoke: ## Browser runtime smoke — temporary local stack, Console bundle build, and portal + Console Chromium coverage.
 	cd console && $(PNPM) --ignore-workspace test:e2e:public-board
 
+control-tower-smoke: ## Browser release smoke — production Console bundle and Control Tower closed-loop Chromium coverage.
+	cd console && $(PNPM) --ignore-workspace build
+	cd console && ATTUNE_CONSOLE_E2E_PREBUILT=1 $(PNPM) --ignore-workspace run test:e2e:control-tower
+
+console-browser-smoke: ## Browser release smoke — production Console bundle and full Console Chromium accessibility/reflow coverage.
+	cd console && $(PNPM) --ignore-workspace build
+	cd console && ATTUNE_CONSOLE_E2E_PREBUILT=1 $(PNPM) --ignore-workspace run test:e2e:a11y
+
+console-browser-supplemental-smoke: ## Browser release smoke — production Console bundle and Firefox/WebKit accessibility/reflow coverage.
+	cd console && $(PNPM) --ignore-workspace build
+	cd console && ATTUNE_CONSOLE_E2E_PREBUILT=1 $(PNPM) --ignore-workspace run test:e2e:a11y:supplemental:ci
+
 runtime-smoke: ## Build the production image and boot it against throwaway pgvector Postgres.
-	docker build -t attune:runtime-smoke .
-	ATTUNE_RUNTIME_SMOKE_IMAGE=attune:runtime-smoke bash scripts/runtime-smoke.sh
+	ATTUNE_RUNTIME_SMOKE_IMAGE="$(ATTUNE_RUNTIME_SMOKE_IMAGE)" \
+	ATTUNE_RUNTIME_SMOKE_NODE_IMAGE="$(ATTUNE_RUNTIME_SMOKE_NODE_IMAGE)" \
+	ATTUNE_RUNTIME_SMOKE_GO_IMAGE="$(ATTUNE_RUNTIME_SMOKE_GO_IMAGE)" \
+	ATTUNE_RUNTIME_SMOKE_RUNTIME_IMAGE="$(ATTUNE_RUNTIME_SMOKE_RUNTIME_IMAGE)" \
+		bash scripts/runtime-smoke-build.sh
+	ATTUNE_RUNTIME_SMOKE_IMAGE="$(ATTUNE_RUNTIME_SMOKE_IMAGE)" bash scripts/runtime-smoke.sh
 
 secret-scan: ## Run TruffleHog secret scan through local binary or Docker fallback.
 	bash scripts/secret-scan.sh
@@ -134,6 +175,9 @@ release-smoke: ## Heavy pre-release sweep: CI checks, contracts, integration, de
 	$(MAKE) ci-check
 	$(MAKE) test-integration
 	$(MAKE) public-board-smoke
+	$(MAKE) control-tower-smoke
+	$(MAKE) console-browser-smoke
+	$(MAKE) console-browser-supplemental-smoke
 	$(MAKE) proto-lint
 	$(MAKE) proto-breaking
 	$(MAKE) observability-dashboards
@@ -207,6 +251,10 @@ ci-check: ## Run all CI checks locally before push.
 	@bash scripts/lint-maturity-contract.sh
 	@echo "✓ lint-maturity-contract"
 	@echo
+	@echo "▸ scripts/lint-product-readiness-contract.sh"
+	@bash scripts/lint-product-readiness-contract.sh
+	@echo "✓ lint-product-readiness-contract"
+	@echo
 	@echo "▸ scripts/lint-outbound-conformance.sh"
 	@bash scripts/lint-outbound-conformance.sh
 	@echo "✓ lint-outbound-conformance"
@@ -226,6 +274,10 @@ ci-check: ## Run all CI checks locally before push.
 	@echo "▸ console: vite build"
 	@cd console && $(PNPM) --ignore-workspace exec vite build
 	@echo "✓ console vite build"
+	@echo
+	@echo "▸ console: bundle budget"
+	@cd console && $(PNPM) --ignore-workspace run check:bundle
+	@echo "✓ console bundle budget"
 	@echo
 	@echo "▸ console: pnpm tsc"
 	@cd console && $(PNPM) --ignore-workspace tsc -b --noEmit

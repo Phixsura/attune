@@ -1,0 +1,17 @@
+{
+  "provider": "hubspot",
+  "eventType": "ticket.propertyChange",
+  "rawPayload": {
+    "ticketId": "hs-551",
+    "subject": "Decision coverage report",
+    "companyId": "company-42"
+  },
+  "normalized": {
+    "type": "account_context",
+    "action": "upsert",
+    "externalId": "hubspot:hs-551",
+    "title": "Decision coverage report",
+    "status": "open",
+    "source": "hubspot"
+  }
+}

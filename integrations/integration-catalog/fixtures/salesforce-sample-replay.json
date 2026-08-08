@@ -1,0 +1,17 @@
+{
+  "provider": "salesforce",
+  "eventType": "account.updated",
+  "rawPayload": {
+    "accountId": "001-attune",
+    "name": "Acme Corp",
+    "tier": "enterprise"
+  },
+  "normalized": {
+    "type": "account_context",
+    "action": "upsert",
+    "externalId": "salesforce:001-attune",
+    "title": "Acme Corp",
+    "status": "active",
+    "source": "salesforce"
+  }
+}

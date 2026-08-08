@@ -25,6 +25,7 @@ import (
 
 type service interface {
 	List(ctx context.Context, in svc.ListInput) (repo.ListResult, error)
+	GetAccountSummary(ctx context.Context, in svc.AccountSummaryInput) (repo.AccountSummary, error)
 	GetScoringSettings(ctx context.Context, tenantID string) (repo.ScoringSettings, error)
 	UpdateScoringSettings(ctx context.Context, in svc.ScoringSettingsInput) (repo.ScoringSettings, error)
 	Get(ctx context.Context, tenantID string, id uuid.UUID, evidenceLimit int) (*svc.Detail, error)
@@ -92,6 +93,7 @@ func (h *Handler) List(
 		Cursor:        req.GetCursor(),
 		FeedbackID:    req.GetFeedbackId(),
 		CohortID:      req.CohortId,
+		AccountKey:    req.GetAccountKey(),
 	})
 	if err != nil {
 		return h.listError(ctx, err)
@@ -105,6 +107,45 @@ func (h *Handler) List(
 		resp.NextCursor = ptrext.Of(result.NextCursor)
 	}
 	return dispatcher.OK(resp)
+}
+
+func (h *Handler) GetAccountSummary(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	req *attunev1.GetCustomerRequestAccountSummaryRequest,
+) (dispatcher.Result[*attunev1.CustomerRequestAccountSummary], error) {
+	if h.service == nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestAccountSummary](http.StatusNotImplemented, attunev1.ErrorCode_INTERNAL, "customer requests not configured")
+	}
+	statuses, err := statusesFromProto(req.GetStatus())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestAccountSummary](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid status")
+	}
+	priorities, err := prioritiesFromProto(req.GetPriority())
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestAccountSummary](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid priority")
+	}
+	ownerID, err := optionalUUID(req.OwnerMemberId)
+	if err != nil {
+		return dispatcher.Fail[*attunev1.CustomerRequestAccountSummary](http.StatusBadRequest, attunev1.ErrorCode_BAD_ID, "invalid owner member id")
+	}
+	result, err := h.service.GetAccountSummary(ctx, svc.AccountSummaryInput{
+		TenantID:      ctx.Auth.TenantID,
+		Query:         req.GetQ(),
+		Statuses:      statuses,
+		Priorities:    priorities,
+		OwnerMemberID: ownerID,
+		Visibility:    visibilityFromProto(req.GetVisibility()),
+		Sort:          sortFromProto(req.GetSort()),
+		Direction:     directionFromProto(req.GetDirection()),
+		FeedbackID:    req.GetFeedbackId(),
+		AccountKey:    req.GetAccountKey(),
+		TimelineLimit: int(req.GetTimelineLimit()),
+		EventLimit:    int(req.GetEventLimit()),
+	})
+	if err != nil {
+		return h.accountSummaryError(ctx, err)
+	}
+	return dispatcher.OK(accountSummaryToProto(result))
 }
 
 func (h *Handler) GetScoringSettings(
@@ -701,7 +742,41 @@ func BindListRequest(r *http.Request, req *attunev1.ListCustomerRequestsRequest)
 	if cohortID := strings.TrimSpace(q.Get("cohort_id")); cohortID != "" {
 		req.CohortId = ptrext.Of(cohortID)
 	}
+	if accountKey := strings.TrimSpace(q.Get("account_key")); accountKey != "" {
+		req.AccountKey = ptrext.Of(accountKey)
+	}
 	return bindListFeedbackID(q, req)
+}
+
+func BindAccountSummaryRequest(r *http.Request, req *attunev1.GetCustomerRequestAccountSummaryRequest) error {
+	listReq := ptrext.Of(attunev1.ListCustomerRequestsRequest{})
+	if err := BindListRequest(r, listReq); err != nil {
+		return err
+	}
+	req.AccountKey = listReq.GetAccountKey()
+	req.Q = listReq.GetQ()
+	req.Status = listReq.GetStatus()
+	req.Priority = listReq.GetPriority()
+	req.OwnerMemberId = listReq.OwnerMemberId
+	req.Visibility = listReq.GetVisibility()
+	req.Sort = listReq.GetSort()
+	req.Direction = listReq.GetDirection()
+	req.FeedbackId = listReq.FeedbackId
+	if raw := strings.TrimSpace(r.URL.Query().Get("timeline_limit")); raw != "" {
+		limit, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || limit <= 0 {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "timeline_limit must be a positive integer")
+		}
+		req.TimelineLimit = ptrext.Of(int32(limit))
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("event_limit")); raw != "" {
+		limit, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || limit <= 0 {
+			return dispatcher.NewError(http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "event_limit must be a positive integer")
+		}
+		req.EventLimit = ptrext.Of(int32(limit))
+	}
+	return nil
 }
 
 type listQueryParams interface {
@@ -779,6 +854,17 @@ func (h *Handler) listError(
 	}
 	logext.Errorf(ctx, "[console.CustomerRequestHandler.List] failed,tenant_id:%s,err:%+v", ctx.Auth.TenantID, err.Error())
 	return dispatcher.Fail[*attunev1.ListCustomerRequestsResponse](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to list customer requests")
+}
+
+func (h *Handler) accountSummaryError(
+	ctx *dispatcher.RequestContext[*session.AuthCtx],
+	err error,
+) (dispatcher.Result[*attunev1.CustomerRequestAccountSummary], error) {
+	if errors.Is(err, repo.ErrInvalidInput) || errors.Is(err, svc.ErrValidation) {
+		return dispatcher.Fail[*attunev1.CustomerRequestAccountSummary](http.StatusBadRequest, attunev1.ErrorCode_BAD_REQUEST, "invalid customer request account summary query")
+	}
+	logext.Errorf(ctx, "[console.CustomerRequestHandler.GetAccountSummary] failed,tenant_id:%s,err:%+v", ctx.Auth.TenantID, err.Error())
+	return dispatcher.Fail[*attunev1.CustomerRequestAccountSummary](http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to get customer request account summary")
 }
 
 func (h *Handler) scoringSettingsError(
@@ -878,6 +964,10 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 			CreatedAt: formatTime(ptrext.Of(item.CreatedAt)),
 		}))
 	}
+	decisionRecords := make([]*attunev1.CustomerRequestDecisionRecord, 0, len(detail.DecisionRecords))
+	for _, item := range detail.DecisionRecords {
+		decisionRecords = append(decisionRecords, decisionRecordToProto(item))
+	}
 	return ptrext.Of(attunev1.CustomerRequestDetail{
 		Request:         summaryToProto(detail.Request.Summary),
 		Description:     detail.Request.Summary.Description,
@@ -890,6 +980,7 @@ func detailToProto(detail svc.Detail) *attunev1.CustomerRequestDetail {
 		Notes:           notes,
 		Duplicates:      duplicates,
 		AccountProfiles: accountProfiles,
+		DecisionRecords: decisionRecords,
 	})
 }
 
@@ -943,6 +1034,57 @@ func deliveryRelationshipToProto(
 	})
 }
 
+func decisionRecordToProto(record svc.DecisionRecord) *attunev1.CustomerRequestDecisionRecord {
+	return ptrext.Of(attunev1.CustomerRequestDecisionRecord{
+		AuditId:                 record.AuditID,
+		Action:                  record.Action,
+		ActorType:               record.ActorType,
+		ActorId:                 record.ActorID,
+		Summary:                 record.Summary,
+		CreatedAt:               formatTime(ptrext.Of(record.CreatedAt)),
+		StatusChanged:           record.StatusChanged,
+		OldStatus:               statusToProto(record.OldStatus),
+		NewStatus:               statusToProto(record.NewStatus),
+		PriorityChanged:         record.PriorityChanged,
+		OldPriority:             priorityToProto(record.OldPriority),
+		NewPriority:             priorityToProto(record.NewPriority),
+		OwnerChanged:            record.OwnerChanged,
+		OldOwnerMemberId:        record.OldOwnerMemberID,
+		NewOwnerMemberId:        record.NewOwnerMemberID,
+		TitleChanged:            record.TitleChanged,
+		DescriptionChanged:      record.DescriptionChanged,
+		HasDecisionSnapshot:     record.HasDecisionSnapshot,
+		DecisionScore:           int32(record.DecisionScore),
+		DecisionScoreFactors:    decisionScoreFactorsToProto(record.DecisionScoreFactors),
+		DeliveryHealth:          deliveryHealthToProto(record.DeliveryHealth),
+		SupportingFeedbackCount: int32(record.SupportingFeedbackCount),
+		CustomerCount:           int32(record.CustomerCount),
+		AccountCount:            int32(record.AccountCount),
+		VoteCount:               int32(record.VoteCount),
+		RevenueImpactCents:      record.RevenueImpactCents,
+		RevenueCurrency:         record.RevenueCurrency,
+		DecisionRationale:       record.DecisionRationale,
+		OwnerMemberId:           record.OwnerMemberID,
+		OwnerDisplay:            record.OwnerDisplay,
+		EvidenceBundleRef:       record.EvidenceBundleRef,
+		PublicSafeState:         decisionPublicSafeStateToProto(record.PublicSafeState),
+		PublicSafeReasons:       record.PublicSafeReasons,
+	})
+}
+
+func decisionPublicSafeStateToProto(state string) attunev1.CustomerRequestDecisionPublicSafeState {
+	switch state {
+	case "public_safe":
+		return attunev1.CustomerRequestDecisionPublicSafeState_CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_PUBLIC_SAFE
+	case "needs_review":
+		return attunev1.CustomerRequestDecisionPublicSafeState_CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_NEEDS_REVIEW
+	case "internal_only":
+		return attunev1.CustomerRequestDecisionPublicSafeState_CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_INTERNAL_ONLY
+	default:
+		return attunev1.CustomerRequestDecisionPublicSafeState_CUSTOMER_REQUEST_DECISION_PUBLIC_SAFE_STATE_UNSPECIFIED
+	}
+}
+
 func summaryToProto(summary repo.Summary) *attunev1.CustomerRequestSummary {
 	out := ptrext.Of(attunev1.CustomerRequestSummary{
 		Id:                       summary.ID.String(),
@@ -962,6 +1104,8 @@ func summaryToProto(summary repo.Summary) *attunev1.CustomerRequestSummary {
 		RevenueCurrency:          summary.RevenueCurrency,
 		DecisionScore:            int32(summary.DecisionScore),
 		DecisionScoreExplanation: summary.DecisionScoreExplanation,
+		DecisionScoreFactors:     decisionScoreFactorsToProto(summary.DecisionScoreFactors),
+		EvidenceQuality:          evidenceQualityToProto(summary.EvidenceQuality),
 		DeliveryHealth:           deliveryHealthToProto(summary.DeliveryHealth),
 		SyncedIssueCount:         int32(summary.SyncedIssueCount),
 		StaleIssueCount:          int32(summary.StaleIssueCount),
@@ -990,6 +1134,304 @@ func summaryToProto(summary repo.Summary) *attunev1.CustomerRequestSummary {
 		out.ArchivedAt = ptrext.Of(formatTime(summary.ArchivedAt))
 	}
 	return out
+}
+
+func decisionScoreFactorsToProto(factors []repo.DecisionScoreFactor) []*attunev1.CustomerRequestDecisionScoreFactor {
+	out := make([]*attunev1.CustomerRequestDecisionScoreFactor, 0, len(factors))
+	for _, factor := range factors {
+		out = append(out, decisionScoreFactorToProto(factor))
+	}
+	return out
+}
+
+func decisionScoreFactorToProto(factor repo.DecisionScoreFactor) *attunev1.CustomerRequestDecisionScoreFactor {
+	return ptrext.Of(attunev1.CustomerRequestDecisionScoreFactor{
+		Kind:               decisionScoreFactorKindToProto(factor.Kind),
+		RawCount:           int32(factor.RawCount),
+		RawValueCents:      factor.RawValueCents,
+		Weight:             int32(factor.Weight),
+		Cap:                int32(factor.Cap),
+		UnitCents:          factor.UnitCents,
+		Contribution:       int32(factor.Contribution),
+		Capped:             factor.Capped,
+		ContributesToScore: factor.ContributesToScore,
+	})
+}
+
+func decisionScoreFactorKindToProto(kind repo.DecisionScoreFactorKind) attunev1.CustomerRequestDecisionScoreFactorKind {
+	switch kind {
+	case repo.DecisionScoreFactorPriority:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_PRIORITY
+	case repo.DecisionScoreFactorFeedback:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_FEEDBACK
+	case repo.DecisionScoreFactorCustomers:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_CUSTOMERS
+	case repo.DecisionScoreFactorAccounts:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_ACCOUNTS
+	case repo.DecisionScoreFactorVotes:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_VOTES
+	case repo.DecisionScoreFactorRevenue:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_REVENUE
+	case repo.DecisionScoreFactorDeliveryHealth:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_DELIVERY_HEALTH
+	default:
+		return attunev1.CustomerRequestDecisionScoreFactorKind_CUSTOMER_REQUEST_DECISION_SCORE_FACTOR_KIND_UNSPECIFIED
+	}
+}
+
+func evidenceQualityToProto(quality repo.EvidenceQuality) *attunev1.CustomerRequestEvidenceQuality {
+	return ptrext.Of(attunev1.CustomerRequestEvidenceQuality{
+		Score:            int32(quality.Score),
+		Confidence:       evidenceConfidenceToProto(quality.Confidence),
+		EvidenceCount:    int32(quality.EvidenceCount),
+		SourceCount:      int32(quality.SourceCount),
+		CustomerCount:    int32(quality.CustomerCount),
+		AccountCount:     int32(quality.AccountCount),
+		LatestEvidenceAt: formatTime(quality.LatestEvidenceAt),
+		Stale:            quality.Stale,
+		LowConfidence:    quality.LowConfidence,
+		GapReasons:       evidenceQualityReasonsToProto(quality.GapReasons),
+		Strengths:        evidenceQualityReasonsToProto(quality.Strengths),
+	})
+}
+
+func evidenceConfidenceToProto(confidence repo.EvidenceConfidence) attunev1.CustomerRequestEvidenceConfidence {
+	switch confidence {
+	case repo.EvidenceConfidenceHigh:
+		return attunev1.CustomerRequestEvidenceConfidence_CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_HIGH
+	case repo.EvidenceConfidenceMedium:
+		return attunev1.CustomerRequestEvidenceConfidence_CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_MEDIUM
+	case repo.EvidenceConfidenceLow:
+		return attunev1.CustomerRequestEvidenceConfidence_CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_LOW
+	default:
+		return attunev1.CustomerRequestEvidenceConfidence_CUSTOMER_REQUEST_EVIDENCE_CONFIDENCE_UNSPECIFIED
+	}
+}
+
+func evidenceQualityReasonsToProto(reasons []repo.EvidenceQualityReason) []attunev1.CustomerRequestEvidenceQualityReason {
+	out := make([]attunev1.CustomerRequestEvidenceQualityReason, 0, len(reasons))
+	for _, reason := range reasons {
+		out = append(out, evidenceQualityReasonToProto(reason))
+	}
+	return out
+}
+
+func evidenceQualityReasonToProto(reason repo.EvidenceQualityReason) attunev1.CustomerRequestEvidenceQualityReason {
+	switch reason {
+	case repo.EvidenceReasonNoSupportingFeedback:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_SUPPORTING_FEEDBACK
+	case repo.EvidenceReasonLowFeedbackVolume:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_LOW_FEEDBACK_VOLUME
+	case repo.EvidenceReasonSingleCustomer:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_CUSTOMER
+	case repo.EvidenceReasonNoAccountContext:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_ACCOUNT_CONTEXT
+	case repo.EvidenceReasonStaleEvidence:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_STALE_EVIDENCE
+	case repo.EvidenceReasonNoDeliveryLink:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_NO_DELIVERY_LINK
+	case repo.EvidenceReasonHiddenFeedback:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_HIDDEN_FEEDBACK
+	case repo.EvidenceReasonSupportingFeedback:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SUPPORTING_FEEDBACK
+	case repo.EvidenceReasonMultiCustomer:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_CUSTOMER
+	case repo.EvidenceReasonAccountContext:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_ACCOUNT_CONTEXT
+	case repo.EvidenceReasonFreshEvidence:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_FRESH_EVIDENCE
+	case repo.EvidenceReasonDeliveryLinked:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_DELIVERY_LINKED
+	case repo.EvidenceReasonSingleSource:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_SINGLE_SOURCE
+	case repo.EvidenceReasonMultiSource:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_MULTI_SOURCE
+	default:
+		return attunev1.CustomerRequestEvidenceQualityReason_CUSTOMER_REQUEST_EVIDENCE_QUALITY_REASON_UNSPECIFIED
+	}
+}
+
+func accountSummaryToProto(summary repo.AccountSummary) *attunev1.CustomerRequestAccountSummary {
+	timeline := make([]*attunev1.CustomerRequestSummary, 0, len(summary.Timeline))
+	for _, item := range summary.Timeline {
+		timeline = append(timeline, summaryToProto(item))
+	}
+	events := make([]*attunev1.CustomerRequestAccountEvent, 0, len(summary.Events))
+	for _, item := range summary.Events {
+		events = append(events, accountEventToProto(item))
+	}
+	out := ptrext.Of(attunev1.CustomerRequestAccountSummary{
+		AccountKey:               summary.AccountKey,
+		RequestCount:             int32(summary.RequestCount),
+		FeedbackCount:            int32(summary.FeedbackCount),
+		CustomerCount:            int32(summary.CustomerCount),
+		VoteCount:                int32(summary.VoteCount),
+		IssueCount:               int32(summary.IssueCount),
+		SyncedIssueCount:         int32(summary.SyncedIssueCount),
+		StaleIssueCount:          int32(summary.StaleIssueCount),
+		FailedIssueCount:         int32(summary.FailedIssueCount),
+		PendingIssueCount:        int32(summary.PendingIssueCount),
+		ManualIssueCount:         int32(summary.ManualIssueCount),
+		RevenueImpactCents:       summary.RevenueImpactCents,
+		RevenueCurrency:          summary.RevenueCurrency,
+		HighPriorityRequestCount: int32(summary.HighPriorityRequestCount),
+		ShippedRequestCount:      int32(summary.ShippedRequestCount),
+		StaleOrFailedIssueCount:  int32(summary.StaleOrFailedIssueCount),
+		AverageDecisionScore:     int32(summary.AverageDecisionScore),
+		TopDecisionScore:         int32(summary.TopDecisionScore),
+		DecisionSignals:          accountDecisionSignalsToProto(summary),
+		Timeline:                 timeline,
+		Events:                   events,
+	})
+	if summary.AccountProfile != nil {
+		out.AccountProfile = accountProfileToProto(ptrext.Indirect(summary.AccountProfile))
+	}
+	return out
+}
+
+func accountEventToProto(event repo.AccountEvent) *attunev1.CustomerRequestAccountEvent {
+	return ptrext.Of(attunev1.CustomerRequestAccountEvent{
+		Kind:             accountEventKindToProto(event.Kind),
+		RequestId:        event.RequestID.String(),
+		RequestDisplayId: event.RequestDisplayID,
+		RequestTitle:     event.RequestTitle,
+		OccurredAt:       formatTime(ptrext.Of(event.OccurredAt)),
+		ActorId:          event.ActorID,
+		SubjectDisplay:   event.SubjectDisplay,
+		Source:           event.Source,
+		Description:      event.Description,
+		FeedbackId:       event.FeedbackID,
+		IssueProvider:    event.IssueProvider,
+		IssueKey:         event.IssueKey,
+		IssueUrl:         event.IssueURL,
+		IssueSyncState:   accountEventSyncStateToProto(event.IssueSyncState),
+	})
+}
+
+func accountEventSyncStateToProto(state repo.IssueSyncState) attunev1.CustomerRequestIssueSyncState {
+	if state == "" {
+		return attunev1.CustomerRequestIssueSyncState_CUSTOMER_REQUEST_ISSUE_SYNC_STATE_UNSPECIFIED
+	}
+	return syncStateToProto(state)
+}
+
+func accountEventKindToProto(kind repo.AccountEventKind) attunev1.CustomerRequestAccountEventKind {
+	switch kind {
+	case repo.AccountEventRequestCreated:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_REQUEST_CREATED
+	case repo.AccountEventFeedbackLinked:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_FEEDBACK_LINKED
+	case repo.AccountEventCustomerLinked:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_CUSTOMER_LINKED
+	case repo.AccountEventVoteAdded:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_VOTE_ADDED
+	case repo.AccountEventIssueLinked:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_LINKED
+	case repo.AccountEventIssueSynced:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_ISSUE_SYNCED
+	case repo.AccountEventNoteAdded:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_NOTE_ADDED
+	default:
+		return attunev1.CustomerRequestAccountEventKind_CUSTOMER_REQUEST_ACCOUNT_EVENT_KIND_UNSPECIFIED
+	}
+}
+
+func accountDecisionSignalsToProto(summary repo.AccountSummary) []*attunev1.CustomerRequestAccountDecisionSignal {
+	signals := make([]*attunev1.CustomerRequestAccountDecisionSignal, 0, 5)
+	if summary.RequestCount == 0 {
+		return signals
+	}
+	if summary.StaleOrFailedIssueCount > 0 {
+		signals = append(signals, accountDecisionSignalToProto(
+			attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_DELIVERY_RISK,
+			deliveryRiskSeverity(summary),
+			summary.StaleOrFailedIssueCount,
+			0,
+			summary.StaleOrFailedIssueCount,
+		))
+	}
+	if summary.HighPriorityRequestCount > 0 {
+		signals = append(signals, accountDecisionSignalToProto(
+			attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_HIGH_PRIORITY_DEMAND,
+			highPrioritySeverity(summary),
+			summary.HighPriorityRequestCount,
+			0,
+			summary.TopDecisionScore,
+		))
+	}
+	if summary.RevenueImpactCents > 0 {
+		signals = append(signals, accountDecisionSignalToProto(
+			attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_REVENUE_IMPACT,
+			attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_INFO,
+			summary.RequestCount,
+			summary.RevenueImpactCents,
+			summary.AverageDecisionScore,
+		))
+	}
+	signals = appendEvidenceSignal(signals, summary)
+	if summary.ShippedRequestCount > 0 {
+		signals = append(signals, accountDecisionSignalToProto(
+			attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_SHIPPED_OUTCOME,
+			attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_POSITIVE,
+			summary.ShippedRequestCount,
+			0,
+			summary.ShippedRequestCount,
+		))
+	}
+	return signals
+}
+
+func appendEvidenceSignal(
+	signals []*attunev1.CustomerRequestAccountDecisionSignal,
+	summary repo.AccountSummary,
+) []*attunev1.CustomerRequestAccountDecisionSignal {
+	evidenceCount := summary.FeedbackCount + summary.CustomerCount + summary.VoteCount
+	if evidenceCount == 0 {
+		return append(signals, accountDecisionSignalToProto(
+			attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_GAP,
+			attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING,
+			summary.RequestCount,
+			0,
+			summary.RequestCount,
+		))
+	}
+	return append(signals, accountDecisionSignalToProto(
+		attunev1.CustomerRequestAccountSignalKind_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_KIND_EVIDENCE_BREADTH,
+		attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_INFO,
+		evidenceCount,
+		0,
+		summary.AverageDecisionScore,
+	))
+}
+
+func accountDecisionSignalToProto(
+	kind attunev1.CustomerRequestAccountSignalKind,
+	severity attunev1.CustomerRequestAccountSignalSeverity,
+	count int,
+	valueCents int64,
+	score int,
+) *attunev1.CustomerRequestAccountDecisionSignal {
+	return ptrext.Of(attunev1.CustomerRequestAccountDecisionSignal{
+		Kind:       kind,
+		Severity:   severity,
+		Count:      int32(count),
+		ValueCents: valueCents,
+		Score:      int32(score),
+	})
+}
+
+func deliveryRiskSeverity(summary repo.AccountSummary) attunev1.CustomerRequestAccountSignalSeverity {
+	if summary.FailedIssueCount > 0 {
+		return attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL
+	}
+	return attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING
+}
+
+func highPrioritySeverity(summary repo.AccountSummary) attunev1.CustomerRequestAccountSignalSeverity {
+	if summary.HighPriorityRequestCount >= 3 || summary.HighPriorityRequestCount == summary.RequestCount {
+		return attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_CRITICAL
+	}
+	return attunev1.CustomerRequestAccountSignalSeverity_CUSTOMER_REQUEST_ACCOUNT_SIGNAL_SEVERITY_WARNING
 }
 
 func scoringSettingsToProto(settings repo.ScoringSettings) *attunev1.CustomerRequestScoringSettings {
