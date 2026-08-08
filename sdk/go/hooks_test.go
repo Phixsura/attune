@@ -118,8 +118,8 @@ func TestRequestAutomationSurface(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, r.URL.Path+"?"+r.URL.RawQuery)
 		methods = append(methods, r.Method)
-		switch {
-		case r.Method == http.MethodGet:
+		switch r.Method {
+		case http.MethodGet:
 			_, _ = io.WriteString(w, `{"requests":[]}`)
 		default:
 			_, _ = io.WriteString(w, `{"request":{"id":"r1","title":"T","status":"CUSTOMER_REQUEST_STATUS_OPEN"}}`)
