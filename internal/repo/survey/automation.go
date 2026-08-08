@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -340,6 +341,187 @@ func (r *Repo) ClaimPendingEmailInvitations(ctx context.Context, limit int, owne
 		return nil, fmt.Errorf("claim survey email invitation rows: %w", err)
 	}
 	return items, nil
+}
+
+// PrepareInvitationDelivery establishes the final persistent eligibility
+// boundary before a claimed invitation is handed to an external email provider.
+// It uses the same contact lock as tenant-wide unsubscribe writes, so an
+// unsubscribe that commits first revokes the invitation and a worker with an
+// older claim cannot send it.
+func (r *Repo) PrepareInvitationDelivery(
+	ctx context.Context,
+	claimed Invitation,
+	owner string,
+) (Invitation, RequestRecipient, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if claimed.ContactID == nil {
+		return r.suppressMissingDeliveryContact(ctx, tx, claimed, owner)
+	}
+	contact, eligible, err := lockSurveyInvitationContact(ctx, tx, claimed.TenantID, ptrext.Indirect(claimed.ContactID))
+	if err != nil {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	invitation, found, err := lockClaimedInvitationForDelivery(ctx, tx, claimed.TenantID, claimed.ID, owner)
+	if err != nil || !found {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	if !invitationReadyForDelivery(invitation) {
+		return Invitation{}, RequestRecipient{}, false, nil
+	}
+	if invitation.ContactID == nil || ptrext.Indirect(invitation.ContactID) != ptrext.Indirect(claimed.ContactID) {
+		return suppressPreparedInvitation(ctx, tx, invitation, "missing_contact")
+	}
+	expired, err := invitationExpiredAtDatabase(ctx, tx, invitation)
+	if err != nil {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	if expired {
+		return expirePreparedInvitation(ctx, tx, invitation, owner)
+	}
+	if !eligible {
+		return suppressPreparedInvitation(ctx, tx, invitation, "contact_not_eligible")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	return invitation, contact, true, nil
+}
+
+func (r *Repo) suppressMissingDeliveryContact(
+	ctx context.Context,
+	tx pgx.Tx,
+	claimed Invitation,
+	owner string,
+) (Invitation, RequestRecipient, bool, error) {
+	invitation, found, err := lockClaimedInvitationForDelivery(ctx, tx, claimed.TenantID, claimed.ID, owner)
+	if err != nil || !found || !invitationReadyForDelivery(invitation) {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	return suppressPreparedInvitation(ctx, tx, invitation, "missing_contact")
+}
+
+func lockClaimedInvitationForDelivery(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID string,
+	id uuid.UUID,
+	owner string,
+) (Invitation, bool, error) {
+	row := tx.QueryRow(ctx, fmt.Sprintf(`
+		SELECT %s
+		FROM survey_invitations
+		WHERE tenant_id = $1
+		  AND id = $2
+		  AND claimed_by = $3
+		FOR UPDATE`, invitationColumns),
+		strings.TrimSpace(tenantID),
+		id,
+		strings.TrimSpace(owner),
+	)
+	invitation, err := scanInvitation(row)
+	if errorsIsNotFound(err) {
+		return Invitation{}, false, nil
+	}
+	if err != nil {
+		return Invitation{}, false, mapWriteError(err)
+	}
+	return invitation, true, nil
+}
+
+func invitationReadyForDelivery(invitation Invitation) bool {
+	return invitation.DistributionMode == DistributionContactEmail &&
+		(invitation.DeliveryStatus == DeliveryPending || invitation.DeliveryStatus == DeliveryDelayed) &&
+		invitation.ResponseStatus != ResponseCompleted &&
+		invitation.ResponseStatus != ResponseExpired &&
+		invitation.SuppressionStatus == SuppressionNotSuppressed &&
+		len(invitation.DeliverySecret) > 0
+}
+
+func invitationExpiredAtDatabase(ctx context.Context, tx pgx.Tx, invitation Invitation) (bool, error) {
+	var expired bool
+	err := tx.QueryRow(ctx, `
+		SELECT COALESCE(expires_at <= NOW(), FALSE)
+		FROM survey_invitations
+		WHERE tenant_id = $1 AND id = $2`,
+		strings.TrimSpace(invitation.TenantID),
+		invitation.ID,
+	).Scan(&expired) // ptrext:allow scan-target
+	if err != nil {
+		return false, mapWriteError(err)
+	}
+	return expired, nil
+}
+
+func suppressPreparedInvitation(
+	ctx context.Context,
+	tx pgx.Tx,
+	invitation Invitation,
+	reason string,
+) (Invitation, RequestRecipient, bool, error) {
+	row := tx.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE survey_invitations
+		SET delivery_status = 'not_applicable',
+		    delivery_secret = NULL,
+		    suppression_status = 'suppressed',
+		    suppression_reason = $3,
+		    claimed_at = NULL,
+		    claimed_by = ''
+		WHERE tenant_id = $1 AND id = $2
+		RETURNING %s`, invitationColumns),
+		strings.TrimSpace(invitation.TenantID),
+		invitation.ID,
+		pgxutil.Truncate(reason, 1000),
+	)
+	updated, err := scanInvitation(row)
+	if err != nil {
+		return Invitation{}, RequestRecipient{}, false, mapWriteError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	return updated, RequestRecipient{}, false, nil
+}
+
+func expirePreparedInvitation(
+	ctx context.Context,
+	tx pgx.Tx,
+	invitation Invitation,
+	owner string,
+) (Invitation, RequestRecipient, bool, error) {
+	row := tx.QueryRow(ctx, fmt.Sprintf(`
+		UPDATE survey_invitations
+		SET response_status = 'expired',
+		    delivery_status = 'not_applicable',
+		    delivery_secret = NULL,
+		    suppression_reason = 'expired_before_send',
+		    claimed_at = NULL,
+		    claimed_by = ''
+		WHERE tenant_id = $1
+		  AND id = $2
+		  AND claimed_by = $3
+		  AND response_status <> 'completed'
+		  AND expires_at <= NOW()
+		RETURNING %s`, invitationColumns),
+		strings.TrimSpace(invitation.TenantID),
+		invitation.ID,
+		strings.TrimSpace(owner),
+	)
+	updated, err := scanInvitation(row)
+	if errorsIsNotFound(err) {
+		return Invitation{}, RequestRecipient{}, false, nil
+	}
+	if err != nil {
+		return Invitation{}, RequestRecipient{}, false, mapWriteError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Invitation{}, RequestRecipient{}, false, err
+	}
+	return updated, RequestRecipient{}, false, nil
 }
 
 func claimPendingEmailInvitationsQuery() string {

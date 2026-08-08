@@ -423,6 +423,7 @@ func wireSurveyHandlers(
 func buildSurveyService(pool *pgxpool.Pool, publicBaseURL string, secrets *secretstore.TinkStore) *surveysvc.Service {
 	service := surveysvc.New(surveyrepo.New(pool), publicBaseURL)
 	service.SetSecretStore(secrets)
+	service.SetFeedbackWriter(feedback.NewFeedback(pool))
 	service.SetDeliveryTransport(notify.NewTransport(nil, notify.NoRetry()))
 	return service
 }

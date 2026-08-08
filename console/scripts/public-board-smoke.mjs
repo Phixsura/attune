@@ -4,6 +4,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants, readFileSync } from 'node:fs'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
@@ -39,9 +40,11 @@ let pgIsReadyPath = ''
 let serverPid = null
 let browser = null
 let serverLog = null
+let mailProvider = null
 
 const tenantASeed = buildSeedData()
 const tenantBSeed = buildSeedData()
+const npsSmoke = buildNPSSmokeData()
 
 try {
   log('build attune server binary')
@@ -71,6 +74,7 @@ try {
   const serverPort = await pickFreePort(dbPort)
   const baseURL = `http://127.0.0.1:${serverPort}`
   const dsn = `postgres://${dbUser}@127.0.0.1:${dbPort}/${dbName}?sslmode=disable`
+  mailProvider = await startMailProvider()
 
   log('start temporary PostgreSQL cluster')
   execFileSync(initdbPath, ['-D', pgDataDir, '-U', dbUser, '-A', 'trust', '--no-instructions'], {
@@ -124,6 +128,9 @@ console:
   bootstrap_admin:
     email: "${consoleAdmin.email}"
     password: "${consoleAdmin.password}"
+security:
+  allow_loopback_egress: true
+  allow_private_egress: true
 secrets:
   tink_keyset: |
 ${indent(keyset, 4)}
@@ -147,15 +154,33 @@ ${indent(keyset, 4)}
   log('seed public board data')
   await execPsql(dsn, buildSeedSql(tenantAId, tenantASeed))
   await execPsql(dsn, buildSeedSql(tenantBId, tenantBSeed))
+  await seedNPSAudience(baseURL, dsn, tenantAId, tenantA, tenantASeed, npsSmoke)
 
   log('launch browser')
   browser = await launchBrowser()
   await runDesktopSmoke(browser, baseURL, tenantASeed, tenantA)
   await runTenantIsolationSmoke(browser, baseURL, tenantASeed, tenantA, tenantB)
   await runMobileSmoke(browser, baseURL, tenantASeed, tenantA)
-  await runPublicSurveySmoke(browser, baseURL, dsn, tenantAId, tenantASeed)
+  const tenantAFingerprints = await runPublicSurveySmoke(
+    browser,
+    baseURL,
+    dsn,
+    tenantAId,
+    tenantASeed,
+  )
+  const tenantBFingerprints = await runPublicSurveySmoke(
+    browser,
+    baseURL,
+    dsn,
+    tenantBId,
+    tenantBSeed,
+  )
+  if (tenantAFingerprints === tenantBFingerprints) {
+    throw new Error('public survey fingerprints must be scoped to the invitation tenant')
+  }
   await verifyRoadmapApi(baseURL, tenantASeed, tenantA)
   await runConsoleSmoke(browser, baseURL, tenantA, tenantASeed)
+  await runNPSCampaignSmoke(browser, baseURL, dsn, tenantAId, npsSmoke, mailProvider)
 
   console.log(`portal + console browser smoke: ok (base=${baseURL})`)
   if (keepAlive) {
@@ -191,6 +216,7 @@ ${indent(keyset, 4)}
         }
       }
     }
+    await mailProvider?.close().catch(() => {})
     if (pgCtlPath) {
       try {
         execFileSync(pgCtlPath, ['-D', pgDataDir, '-m', 'fast', '-w', 'stop'], {
@@ -333,9 +359,163 @@ function buildSurveySeedData() {
   }
 }
 
+function buildNPSSmokeData() {
+  const key = randomUUID().replace(/-/g, '')
+  return {
+    cohortSourceId: randomUUID(),
+    cohortId: randomUUID(),
+    cohortMembershipId: randomUUID(),
+    unlinkedCohortMembershipId: randomUUID(),
+    ownerMemberId: randomUUID(),
+    contactId: '',
+    cohortName: `NPS browser cohort ${key.slice(0, 8)}`,
+    campaignName: `NPS browser campaign ${key.slice(0, 8)}`,
+    subjectKey: `nps-browser-subject-${key}`,
+    unlinkedSubjectKey: `nps-browser-unlinked-${key}`,
+    subjectHash: '',
+    recipientEmail: `nps-browser-recipient-${key.slice(0, 16)}@example.test`,
+    ownerEmail: `nps-browser-owner-${key.slice(0, 16)}@example.test`,
+    comment: `NPS browser detractor feedback ${key.slice(0, 12)}`,
+    promotedRequestTitle: `NPS browser request ${key.slice(0, 12)}`,
+    promotedRequestDescription: 'Owner-reviewed request created from NPS feedback.',
+  }
+}
+
+async function seedNPSAudience(baseURL, dsn, tenantId, tenant, data, nps) {
+  const publicSlug = data.requests[0]?.slug
+  if (!publicSlug) throw new Error('NPS smoke requires a seeded public request')
+
+  const subscribe = await fetch(
+    `${baseURL}/v1/portal/${tenant.slug}/requests/${publicSlug}/subscribe`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: nps.recipientEmail,
+        notifyMe: true,
+        notificationConsentTextVersion: 'nps-browser-smoke',
+        displayName: 'NPS browser recipient',
+        organization: 'Attune browser smoke',
+        locale: 'en',
+        timezone: 'UTC',
+      }),
+    },
+  )
+  if (!subscribe.ok) {
+    throw new Error(`NPS smoke contact subscription failed with HTTP ${subscribe.status}`)
+  }
+
+  nps.subjectHash = subjectKeyHash(tenantId, nps.subjectKey)
+  const emailHash = emailHashForSmoke(nps.recipientEmail)
+  const ownerUserID = `nps-browser-owner-${nps.ownerMemberId}`
+  await execPsql(
+    dsn,
+    `
+BEGIN;
+
+INSERT INTO tenant_members (
+  id,
+  tenant_id,
+  member_type,
+  user_id,
+  role,
+  role_source,
+  email,
+  accepted_at
+) VALUES (
+  ${sqlValue(nps.ownerMemberId)},
+  ${sqlValue(tenantId)},
+  'tenant_user',
+  ${sqlValue(ownerUserID)},
+  'member',
+  'manual',
+  ${sqlValue(nps.ownerEmail)},
+  NOW()
+);
+
+INSERT INTO cohort_sources (
+  id,
+  tenant_id,
+  provider,
+  name,
+  created_by,
+  updated_by
+) VALUES (
+  ${sqlValue(nps.cohortSourceId)},
+  ${sqlValue(tenantId)},
+  'amplitude',
+  'NPS browser smoke source',
+  'smoke',
+  'smoke'
+);
+
+INSERT INTO cohorts (
+  id,
+  tenant_id,
+  cohort_source_id,
+  external_cohort_id,
+  name,
+  member_count,
+  last_synced_at
+) VALUES (
+  ${sqlValue(nps.cohortId)},
+  ${sqlValue(tenantId)},
+  ${sqlValue(nps.cohortSourceId)},
+  'nps-browser-smoke',
+  ${sqlValue(nps.cohortName)},
+  2,
+  NOW()
+);
+
+INSERT INTO cohort_memberships (
+  id,
+  tenant_id,
+  cohort_id,
+  external_user_id,
+  email,
+  display_name
+) VALUES (
+  ${sqlValue(nps.cohortMembershipId)},
+  ${sqlValue(tenantId)},
+  ${sqlValue(nps.cohortId)},
+  ${sqlValue(nps.subjectKey)},
+  ${sqlValue(nps.recipientEmail)},
+  'NPS browser recipient'
+), (
+  ${sqlValue(nps.unlinkedCohortMembershipId)},
+  ${sqlValue(tenantId)},
+  ${sqlValue(nps.cohortId)},
+  ${sqlValue(nps.unlinkedSubjectKey)},
+  '',
+  'NPS browser excluded member'
+);
+
+UPDATE customer_notification_contacts
+SET subject_key = ${sqlValue(nps.subjectKey)},
+    subject_hash = ${sqlValue(nps.subjectHash)},
+    display_name = 'NPS browser recipient'
+WHERE tenant_id = ${sqlValue(tenantId)}
+  AND email_hash = ${sqlValue(emailHash)};
+
+COMMIT;
+`,
+  )
+
+  nps.contactId = await psqlScalar(
+    dsn,
+    `SELECT id
+       FROM customer_notification_contacts
+      WHERE tenant_id = ${sqlValue(tenantId)}
+        AND email_hash = ${sqlValue(emailHash)}
+        AND subject_key = ${sqlValue(nps.subjectKey)}`,
+  )
+  if (!nps.contactId) throw new Error('NPS smoke contact identity bridge was not seeded')
+}
+
 function buildSeedSql(tenantId, data) {
   const allRequests = [...data.requests, ...(data.hiddenRequests ?? [])]
   const survey = data.survey
+  const nextCustomerRequestNumber = Math.max(0, ...allRequests.map((request) => request.index)) + 1
 
   const requestValues = allRequests
     .map((request) =>
@@ -501,6 +681,11 @@ INSERT INTO customer_requests (
   updated_by
 ) VALUES
   ${requestValues};
+
+INSERT INTO customer_request_counters (tenant_id, next_number)
+VALUES (${sqlValue(tenantId)}, ${sqlValue(nextCustomerRequestNumber)})
+ON CONFLICT (tenant_id) DO UPDATE
+SET next_number = GREATEST(customer_request_counters.next_number, EXCLUDED.next_number);
 
 INSERT INTO public_request_profiles (
   id,
@@ -1061,6 +1246,17 @@ async function runPublicSurveySmoke(browserInstance, baseURL, dsn, tenantId, dat
     if (reviewCount !== '1') {
       throw new Error(`public survey low-score review count = ${reviewCount}, want 1`)
     }
+    const fingerprints = await psqlScalar(
+      dsn,
+      `SELECT user_agent_hash || '|' || ip_hash
+         FROM survey_responses
+        WHERE tenant_id = ${sqlValue(tenantId)}
+          AND invitation_id = ${sqlValue(survey.invitationId)}`,
+    )
+    if (!/^hmac-sha256:v1:[a-f0-9]{64}\|hmac-sha256:v1:[a-f0-9]{64}$/.test(fingerprints)) {
+      throw new Error(`public survey fingerprints are not keyed HMAC pseudonyms: ${fingerprints}`)
+    }
+    return fingerprints
   } finally {
     await context.close()
   }
@@ -1083,6 +1279,670 @@ async function assertPublicSurveyMobileRender(browserInstance, baseURL, survey) 
     await expectNoAxeViolations(page)
   } finally {
     await context.close()
+  }
+}
+
+async function runNPSCampaignSmoke(browserInstance, baseURL, dsn, tenantId, nps, provider) {
+  const context = await browserInstance.newContext({ viewport: { width: 1440, height: 1200 } })
+  const page = await context.newPage()
+
+  try {
+    await loginConsole(page, baseURL)
+    await configureNPSSender(page, baseURL, provider.url)
+
+    await page.goto(`${baseURL}/console/integrations/surveys`, { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('heading', { name: '满意度调查', exact: true })).toBeVisible()
+    await page.getByTestId('survey-name').fill(nps.campaignName)
+    await page.getByTestId('survey-type').click()
+    await page.getByRole('option', { name: 'NPS', exact: true }).click()
+
+    const cohortSelect = page.getByTestId('survey-nps-cohort')
+    const ownerSelect = page.getByTestId('survey-nps-owner')
+    await expect(page.getByTestId('survey-nps-contact-cooldown')).toHaveValue('90')
+    await expect(page.getByTestId('survey-nps-minimum-completed-responses')).toHaveValue('30')
+    await expect(page.getByTestId('survey-nps-minimum-response-rate')).toHaveValue('10')
+    await expect(cohortSelect).toBeEnabled()
+    await expect(ownerSelect).toBeEnabled()
+    await cohortSelect.click()
+    await page.getByRole('option', { name: nps.cohortName, exact: true }).click()
+    await ownerSelect.click()
+    await page.getByRole('option', { name: nps.ownerEmail, exact: true }).click()
+    await page.getByTestId('survey-nps-collection-days').fill('7')
+    await page.getByTestId('survey-nps-recipient-cap').fill('29')
+    await expect(page.getByTestId('survey-create')).toBeDisabled()
+    await expect(page.getByTestId('survey-nps-measurement-validation')).toBeVisible()
+    await page.getByTestId('survey-nps-recipient-cap').fill('30')
+    await expect(page.getByTestId('survey-create')).toBeEnabled()
+    await page.getByTestId('survey-create').click()
+
+    const campaign = page.getByRole('button', { name: nps.campaignName, exact: true })
+    await expect(campaign).toHaveCount(1, { timeout: 30_000 })
+    await expect(campaign.locator('..')).toContainText('计划运行')
+    await campaign.click()
+    const preflight = page.getByTestId('nps-launch-preflight')
+    await expect(preflight).toContainText('投递就绪')
+    await expect(preflight).toContainText('单次上限 30')
+    await expect(page.getByTestId('nps-preflight-measurement-warning')).toContainText('1')
+    await expect(page.getByTestId('nps-preflight-measurement-warning')).toContainText('30')
+    await expect(page.getByTestId('nps-preflight-exclusion-contact_missing')).toContainText(
+      '联系人缺失 · 1',
+    )
+    await expect(page.getByTestId('nps-schedule-run')).toBeEnabled()
+
+    // Exercise the cancellable boundary before the worker can materialize a
+    // ledger. The immediate run below then proves cancellation releases the
+    // campaign's single-open-run guard without leaving invitations behind.
+    const scheduledAt = dateTimeLocalOneHourFromNow()
+    const scheduleAt = page.getByTestId('nps-schedule-at')
+    await scheduleAt.fill(scheduledAt)
+    await expect(scheduleAt).toHaveAttribute('aria-describedby', 'nps-schedule-time-zone')
+    const browserTimeZone = await page.evaluate(
+      () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    )
+    await expect(page.getByTestId('nps-schedule-time-zone')).toContainText(
+      `当前浏览器时区（${browserTimeZone}）`,
+    )
+    const scheduledAtUTC = await scheduleAt.evaluate((input) => new Date(input.value).toISOString())
+    const scheduledAtYear = await scheduleAt.evaluate((input) =>
+      String(new Date(input.value).getFullYear()),
+    )
+    await expect(page.getByTestId('nps-schedule-utc-preview')).toContainText(scheduledAtUTC)
+    await page.getByTestId('nps-schedule-run').click()
+    await expect(page.getByText('已安排 NPS 运行。', { exact: true })).toBeVisible()
+    await expect(page.getByTestId('nps-campaign-runs')).toContainText(scheduledAtYear)
+    const cancelRun = page.locator('[data-testid^="nps-cancel-run-"]')
+    await expect(cancelRun).toHaveCount(1)
+    await cancelRun.click()
+    await expect(page.getByTestId('nps-cancel-run-confirm')).toBeVisible()
+    await page.getByTestId('nps-cancel-run-confirm').click()
+    await expect(page.getByText('已取消 NPS 运行。', { exact: true })).toBeVisible()
+    await expect(page.getByTestId('nps-campaign-runs')).toContainText('已取消')
+    await verifyNPSCancellation(dsn, tenantId, nps)
+
+    await page.locator('#nps-schedule-at').fill('')
+    await expect(page.getByTestId('nps-schedule-utc-preview')).toHaveCount(0)
+    await expect(page.getByTestId('nps-schedule-run')).toBeEnabled()
+    await page.getByTestId('nps-schedule-run').click()
+    await expect(page.getByTestId('nps-campaign-runs')).toContainText('第 2 次运行')
+
+    const invitation = await waitForProviderEmail(
+      provider,
+      (message) =>
+        message.payload.event_type === 'survey.invitation' &&
+        message.payload.to_email === nps.recipientEmail &&
+        message.payload.metadata?.survey?.survey_type === 'nps',
+      'NPS invitation',
+    )
+    const publicURL = invitation.payload.metadata?.survey?.public_url
+    if (typeof publicURL !== 'string' || !publicURL.startsWith(`${baseURL}/surveys/`)) {
+      throw new Error('NPS invitation did not include a valid hosted survey URL')
+    }
+
+    await runNPSPublicSurveySmoke(browserInstance, publicURL, nps)
+    await waitForProviderEmail(
+      provider,
+      (message) =>
+        message.payload.event_type === 'survey.recovery_opened' &&
+        message.payload.to_email === nps.ownerEmail,
+      'NPS detractor recovery',
+    )
+    const { feedbackID, responseID } = await verifyNPSPersistence(dsn, tenantId, nps)
+    await verifyNPSMaterializationMetric(baseURL, tenantId)
+
+    // Close the loop through the same Console action an owner uses. The later
+    // assertions prove both the durable operational facts and their run-scoped
+    // measurement evidence.
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    const activeCampaign = page.getByRole('button', { name: nps.campaignName, exact: true })
+    await expect(activeCampaign).toHaveCount(1)
+    await activeCampaign.click()
+    const recovery = await resolveNPSRecovery(page, responseID)
+    await verifyNPSRecoveryResolution(dsn, tenantId, responseID, recovery)
+
+    await expireNPSCampaignRun(dsn, tenantId, nps, 2)
+    await waitForNPSRunStatus(dsn, tenantId, nps, 2, 'closed')
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    const refreshedCampaign = page.getByRole('button', { name: nps.campaignName, exact: true })
+    await expect(refreshedCampaign).toHaveCount(1)
+    await refreshedCampaign.click()
+    const trend = page.getByTestId('nps-run-measurement-trend')
+    await expect(trend).toContainText('NPS -100')
+    await expect(trend).toContainText('1 / 1 已提交')
+    await expect(trend).toContainText('页面访问率 100% · 访问后完成率 100%')
+    const scoreDistribution = page.getByRole('list', { name: '分数分布', exact: true })
+    await expect(scoreDistribution).toBeVisible()
+    await expect(scoreDistribution.locator('li')).toHaveCount(11)
+    await expect(scoreDistribution.locator('li').first()).toContainText('0')
+    await expect(scoreDistribution.locator('li').first()).toContainText('1')
+    await expect(scoreDistribution.locator('li').last()).toContainText('10')
+    await expect(scoreDistribution.locator('li').last()).toContainText('0')
+    const measurementEvidence = page.getByTestId('survey-analytics-nps-measurement-evidence')
+    await expect(measurementEvidence).toContainText('固定规则')
+    await expect(measurementEvidence).toContainText('收集窗口7 天')
+    await expect(measurementEvidence).toContainText('单次收件人上限30')
+    await expect(measurementEvidence).toContainText('联系间隔90 天')
+    await expect(measurementEvidence).toContainText('最少已提交回复')
+    await expect(measurementEvidence).toContainText('最小收件人回复率')
+    await expect(measurementEvidence).toContainText('实际邀请 / 规划目标')
+    await expect(page.getByTestId('nps-analytics-sample-plan-shortfall')).toContainText(
+      '低于规划目标',
+    )
+    const evidenceDownloadPromise = page.waitForEvent('download')
+    await page.getByTestId('nps-export-evidence').click()
+    const evidenceDownload = await evidenceDownloadPromise
+    const evidencePath = await evidenceDownload.path()
+    if (!evidencePath) throw new Error('NPS evidence export did not produce a file')
+    const evidenceBytes = await readFile(evidencePath)
+    const evidenceCSV = evidenceBytes.toString('utf8')
+    if (
+      !evidenceCSV.includes('report_version') ||
+      !evidenceCSV.includes('score_10_count') ||
+      evidenceCSV.includes('email') ||
+      evidenceCSV.includes(nps.comment)
+    ) {
+      throw new Error('NPS evidence export is not aggregate-only')
+    }
+    const repeatedEvidenceDownloadPromise = page.waitForEvent('download')
+    await page.getByTestId('nps-export-evidence').click()
+    const repeatedEvidenceDownload = await repeatedEvidenceDownloadPromise
+    if (!(await repeatedEvidenceDownload.path())) {
+      throw new Error('repeated NPS evidence export did not produce a file')
+    }
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    const historyCampaign = page.getByRole('button', { name: nps.campaignName, exact: true })
+    await expect(historyCampaign).toHaveCount(1)
+    await historyCampaign.click()
+    const history = page.getByTestId('nps-evidence-export-history')
+    await expect(history).toBeVisible()
+    await expect(history).toContainText('保留至')
+    const historyLinks = history.locator('a[download]')
+    await expect(historyLinks).toHaveCount(2)
+    const historyHref = await historyLinks.first().getAttribute('href')
+    if (!historyHref) throw new Error('NPS evidence export history link is missing its URL')
+    const historyURL = new URL(historyHref, baseURL).href
+    const historyHTTP = await page.evaluate(async (url) => {
+      const response = await fetch(url, { credentials: 'include' })
+      const body = Array.from(new Uint8Array(await response.arrayBuffer()))
+      return {
+        status: response.status,
+        digest: response.headers.get('digest'),
+        etag: response.headers.get('etag'),
+        body,
+      }
+    }, historyURL)
+    if (historyHTTP.status !== 200) {
+      throw new Error(`NPS evidence history download failed with status ${historyHTTP.status}`)
+    }
+    const historyDownloadPromise = page.waitForEvent('download')
+    await historyLinks.first().click()
+    const historyDownload = await historyDownloadPromise
+    const historyPath = await historyDownload.path()
+    if (!historyPath) throw new Error('NPS evidence history did not produce a file')
+    const historyBytes = await readFile(historyPath)
+    const historyResponseBody = Buffer.from(historyHTTP.body)
+    if (Buffer.compare(historyResponseBody, historyBytes) !== 0) {
+      throw new Error('NPS evidence history response and downloaded bytes differ')
+    }
+    const historyDigest = `sha-256=${createHash('sha256').update(historyBytes).digest('base64')}`
+    if (historyHTTP.digest !== historyDigest || !historyHTTP.etag) {
+      throw new Error(`NPS evidence history integrity headers mismatch: ${historyHTTP.digest}`)
+    }
+    const qualification = page.locator('[data-testid^="nps-analytics-measurement-qualification-"]')
+    await expect(qualification).toHaveCount(1)
+    await expect(qualification).toContainText('方向性结果')
+    await expect(qualification).toContainText('1 / 30')
+    await expect(qualification).toContainText('100% / 10%')
+    const recoveryOutcomes = page.getByTestId('survey-analytics-nps-recovery-outcomes')
+    await expect(recoveryOutcomes).toBeVisible()
+    await expectNPSRecoveryValue(recoveryOutcomes, '明确解决', '1 / 1')
+    await expectNPSRecoveryValue(recoveryOutcomes, '已联系客户', '1 / 1')
+    await expectNPSRecoveryValue(recoveryOutcomes, '已记录根因', '1 / 1')
+    await expectNPSRecoveryValue(recoveryOutcomes, '已记录行动', '1 / 1')
+    const recoveryTimeliness = page.getByTestId('survey-analytics-nps-recovery-timeliness')
+    await expect(recoveryTimeliness).toBeVisible()
+    await expectNPSRecoveryValue(recoveryTimeliness, '首次联系按时', '1 / 1')
+    await expectNPSRecoveryValue(recoveryTimeliness, '首次终态按时', '1 / 1')
+    await expect(page.getByTestId('nps-campaign-runs')).toContainText('贬损者')
+    await assertNPSConsoleMobileRender(browserInstance, baseURL, nps)
+    const followUpConsent = page.getByText('客户允许就此反馈跟进', { exact: true })
+    await expect(followUpConsent).toHaveCount(1)
+    await expect(followUpConsent).toContainText('客户允许就此反馈跟进')
+    const feedbackLink = page.getByRole('link', { name: '查看反馈信号', exact: true })
+    await expect(feedbackLink).toHaveAttribute('href', `/console/feedback?ids=${feedbackID}`)
+    const triageResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/fb/v1/console/feedback/triage-command-center',
+    )
+    await feedbackLink.click()
+    const triage = await triageResponse
+    if (!triage.ok()) {
+      throw new Error(`feedback triage command center returned ${triage.status()}`)
+    }
+    await expect(page).toHaveURL(`${baseURL}/console/feedback?ids=${feedbackID}`)
+    const feedbackCard = page.getByRole('button', { name: new RegExp(`新反馈 #${feedbackID}`) })
+    await expect(feedbackCard).toHaveCount(1)
+    await expect(feedbackCard).toContainText(nps.comment)
+
+    // NPS feedback stays an owner-reviewed input. Exercise the exact Console
+    // promotion journey and then prove the request, evidence link, and audit
+    // event all committed together.
+    await page.getByLabel(`选择 #${feedbackID}`, { exact: true }).click()
+    await page.getByRole('button', { name: '从反馈提升', exact: true }).click()
+    await expect(page).toHaveURL(
+      new RegExp(`/console/feedback/customer-requests\\?promote_feedback_ids=%22${feedbackID}%22$`),
+    )
+    const promotionDialog = page.getByRole('dialog', { name: '从反馈提升为客户需求' })
+    await expect(promotionDialog).toBeVisible()
+    await expect(promotionDialog.locator('#customer-request-feedback-ids')).toHaveValue(feedbackID)
+    await promotionDialog.locator('#customer-request-title').fill(nps.promotedRequestTitle)
+    await promotionDialog
+      .locator('#customer-request-description')
+      .fill(nps.promotedRequestDescription)
+    await promotionDialog.getByRole('button', { name: '提升', exact: true }).click()
+    await expect(promotionDialog).toHaveCount(0)
+    await expect(page).toHaveURL(`${baseURL}/console/feedback/customer-requests`)
+    await verifyNPSFeedbackPromotion(dsn, tenantId, nps, feedbackID)
+    await expect(page.getByText(nps.promotedRequestTitle, { exact: true }).first()).toBeVisible()
+  } finally {
+    await context.close()
+  }
+}
+
+async function loginConsole(page, baseURL) {
+  await page.goto(`${baseURL}/console/login`, { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: 'Attune Console', exact: true })).toBeVisible()
+  await page.getByLabel('邮箱', { exact: true }).fill(consoleAdmin.email)
+  await page.getByLabel('密码', { exact: true }).fill(consoleAdmin.password)
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+  await expect(page).toHaveURL(/\/console\/control-tower(?:\?.*)?$/)
+}
+
+async function configureNPSSender(page, baseURL, providerURL) {
+  await page.goto(`${baseURL}/console/integrations/request-notifications`, {
+    waitUntil: 'domcontentloaded',
+  })
+  await expect(page.getByTestId('rn-sender-empty')).toBeVisible()
+  await page.getByTestId('rn-sender-from-name').fill('Attune NPS browser smoke')
+  await page.getByTestId('rn-sender-from-email').fill('nps-browser-smoke@example.test')
+  await page.getByTestId('rn-sender-reply-to').fill('nps-browser-replies@example.test')
+  await page.getByTestId('rn-sender-provider').fill('nps-browser-smoke')
+  await page.getByTestId('rn-sender-provider-url').fill(providerURL)
+  await page.getByTestId('rn-sender-save').click()
+  await expect(page.getByText('发件人已保存', { exact: true })).toBeVisible()
+  await expect(page.getByTestId('rn-sender-verify')).toBeEnabled()
+  await page.getByTestId('rn-sender-verify').click()
+  await expect(page.getByText('发件人已验证', { exact: true })).toBeVisible()
+  await expect(page.getByText('启用', { exact: true })).toBeVisible()
+}
+
+async function runNPSPublicSurveySmoke(browserInstance, publicURL, nps) {
+  const context = await browserInstance.newContext({
+    bypassCSP: true,
+    viewport: { width: 1365, height: 768 },
+  })
+  const page = await context.newPage()
+
+  try {
+    const response = await page.goto(publicURL, { waitUntil: 'domcontentloaded' })
+    assertPublicSurveyHeaders(response)
+    await expect(page).toHaveTitle('产品反馈 | Attune 调查')
+    await expect(page.getByRole('heading', { name: '产品反馈', exact: true })).toBeVisible()
+    await expect(page.getByText('您向同事推荐我们的可能性有多大？', { exact: true })).toBeVisible()
+    await expect(page.getByLabel('您给出这个评分的主要原因是什么？', { exact: true })).toBeVisible()
+    const followUpConsent = page.getByLabel('可以就这条反馈联系我', { exact: true })
+    await expect(followUpConsent).not.toBeChecked()
+    await expect(page.getByRole('radio', { name: '评分 0', exact: true })).not.toBeChecked()
+    await assertNoDocumentOverflow(page, 'NPS public survey desktop')
+    await expectNoAxeViolations(page)
+
+    await assertPublicNPSSurveyMobileRender(browserInstance, publicURL)
+
+    await page.getByRole('radio', { name: '评分 0', exact: true }).click()
+    await expect(page.getByRole('radio', { name: '评分 0', exact: true })).toBeChecked()
+    await followUpConsent.check()
+    await expect(followUpConsent).toBeChecked()
+    await page.locator('textarea').fill(nps.comment)
+    await page.getByRole('button', { name: '提交反馈', exact: true }).click()
+    const status = page.getByRole('status')
+    await expect(status).toContainText('感谢您的反馈。')
+    await expect(status).toContainText('您的回复已标记为跟进。')
+    await expect(page.getByRole('button', { name: '提交反馈', exact: true })).toHaveCount(0)
+    await assertNoDocumentOverflow(page, 'NPS public survey submitted')
+    await expectNoAxeViolations(page)
+
+    await page.goto(publicURL, { waitUntil: 'domcontentloaded' })
+    await expect(page.getByRole('status')).toHaveText('此调查已提交。')
+  } finally {
+    await context.close()
+  }
+}
+
+async function assertPublicNPSSurveyMobileRender(browserInstance, publicURL) {
+  const context = await browserInstance.newContext({
+    bypassCSP: true,
+    viewport: { width: 390, height: 844 },
+  })
+  const page = await context.newPage()
+  const scoredURL = new URL(publicURL)
+  scoredURL.searchParams.set('score', '10')
+  try {
+    const response = await page.goto(scoredURL.toString(), { waitUntil: 'domcontentloaded' })
+    assertPublicSurveyHeaders(response)
+    await expect(page.getByRole('radio', { name: '评分 10', exact: true })).toBeChecked()
+    await expect(page.getByRole('button', { name: '提交反馈', exact: true })).toBeVisible()
+    await assertNoDocumentOverflow(page, 'NPS public survey mobile')
+    await expectNoAxeViolations(page)
+  } finally {
+    await context.close()
+  }
+}
+
+async function assertNPSConsoleMobileRender(browserInstance, baseURL, nps) {
+  const context = await browserInstance.newContext({ viewport: { width: 390, height: 844 } })
+  const page = await context.newPage()
+
+  try {
+    await loginConsole(page, baseURL)
+    await page.goto(`${baseURL}/console/integrations/surveys`, { waitUntil: 'domcontentloaded' })
+
+    const campaign = page.getByRole('button', { name: nps.campaignName, exact: true })
+    await expect(campaign).toHaveCount(1)
+    await campaign.click()
+    await expect(page.getByTestId('nps-run-measurement-trend')).toContainText('NPS -100')
+    await expect(
+      page.getByRole('list', { name: '分数分布', exact: true }).locator('li'),
+    ).toHaveCount(11)
+    await expect(page.getByTestId('nps-schedule-time-zone')).toContainText('当前浏览器时区')
+    await assertNoDocumentOverflow(page, 'NPS Console mobile')
+
+    const layout = await page.locator('h1').evaluate((heading) => {
+      const content = heading.parentElement
+      const hero = heading.closest('section')
+      const metrics = Array.from(hero?.children ?? []).find((element) =>
+        element.classList.contains('border-t'),
+      )
+      if (!content || !metrics) return null
+      const contentBounds = content.getBoundingClientRect()
+      const metricsBounds = metrics.getBoundingClientRect()
+      return {
+        contentHeight: Math.round(contentBounds.height),
+        metricsGap: Math.round(metricsBounds.top - contentBounds.bottom),
+      }
+    })
+    if (!layout || layout.contentHeight > 160 || layout.metricsGap > 36) {
+      throw new Error(`NPS Console mobile hero layout = ${JSON.stringify(layout)}`)
+    }
+  } finally {
+    await context.close()
+  }
+}
+
+async function verifyNPSPersistence(dsn, tenantId, nps) {
+  const persisted = await psqlScalar(
+    dsn,
+    `SELECT sr.score::text || '|' || sr.nps_bucket || '|' || sr.follow_up_consent::text || '|' || sr.contact_id::text || '|' ||
+            lsr.owner_member_id::text || '|' || uf.source || '|' || uf.type || '|' ||
+            uf.enrichment_status || '|' || uf.content || '|' || uf.subject_key
+       FROM survey_responses sr
+       JOIN survey_response_feedback_links link
+         ON link.tenant_id = sr.tenant_id AND link.response_id = sr.id
+       JOIN user_feedback uf
+         ON uf.tenant_id = link.tenant_id AND uf.id = link.feedback_id
+       JOIN survey_low_score_reviews lsr
+         ON lsr.tenant_id = sr.tenant_id AND lsr.response_id = sr.id
+      WHERE sr.tenant_id = ${sqlValue(tenantId)}
+        AND sr.campaign_id = (
+          SELECT id FROM survey_campaigns
+           WHERE tenant_id = ${sqlValue(tenantId)}
+             AND name = ${sqlValue(nps.campaignName)}
+        )`,
+  )
+  const expected = [
+    '0',
+    'detractor',
+    'true',
+    nps.contactId,
+    nps.ownerMemberId,
+    'survey',
+    'nps',
+    'pending',
+    nps.comment,
+    nps.subjectKey,
+  ].join('|')
+  if (persisted !== expected) {
+    throw new Error(`NPS response/feedback persistence mismatch: ${persisted}`)
+  }
+
+  const fingerprints = await psqlScalar(
+    dsn,
+    `SELECT sr.user_agent_hash || '|' || sr.ip_hash
+       FROM survey_responses sr
+      WHERE sr.tenant_id = ${sqlValue(tenantId)}
+        AND sr.campaign_id = (
+          SELECT id FROM survey_campaigns
+           WHERE tenant_id = ${sqlValue(tenantId)}
+             AND name = ${sqlValue(nps.campaignName)}
+        )`,
+  )
+  if (!/^hmac-sha256:v1:[a-f0-9]{64}\|hmac-sha256:v1:[a-f0-9]{64}$/.test(fingerprints)) {
+    throw new Error(`NPS response fingerprints are not keyed HMAC pseudonyms: ${fingerprints}`)
+  }
+
+  const responseID = await psqlScalar(
+    dsn,
+    `SELECT sr.id::text
+       FROM survey_responses sr
+      WHERE sr.tenant_id = ${sqlValue(tenantId)}
+        AND sr.campaign_id = (
+          SELECT id FROM survey_campaigns
+           WHERE tenant_id = ${sqlValue(tenantId)}
+             AND name = ${sqlValue(nps.campaignName)}
+        )`,
+  )
+  if (!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(responseID)) {
+    throw new Error(`NPS response ID missing: ${responseID}`)
+  }
+
+  const recovery = await psqlScalar(
+    dsn,
+    `SELECT notification.status || '|' || notification.reason || '|' || notification.owner_member_id::text || '|' ||
+            (notification.payload->'survey'->>'follow_up_consent')
+       FROM survey_recovery_notifications notification
+       JOIN survey_responses response
+         ON response.tenant_id = notification.tenant_id AND response.id = notification.response_id
+      WHERE notification.tenant_id = ${sqlValue(tenantId)}
+        AND response.campaign_id = (
+          SELECT id FROM survey_campaigns
+           WHERE tenant_id = ${sqlValue(tenantId)}
+             AND name = ${sqlValue(nps.campaignName)}
+        )`,
+  )
+  const expectedRecovery = `delivered|nps_detractor_response|${nps.ownerMemberId}|true`
+  if (recovery !== expectedRecovery) {
+    throw new Error(`NPS recovery notification mismatch: ${recovery}`)
+  }
+
+  const feedbackID = await psqlScalar(
+    dsn,
+    `SELECT link.feedback_id::text
+       FROM survey_response_feedback_links link
+       JOIN survey_responses response
+         ON response.tenant_id = link.tenant_id AND response.id = link.response_id
+      WHERE link.tenant_id = ${sqlValue(tenantId)}
+        AND response.campaign_id = (
+          SELECT id FROM survey_campaigns
+           WHERE tenant_id = ${sqlValue(tenantId)}
+             AND name = ${sqlValue(nps.campaignName)}
+        )`,
+  )
+  if (!/^\d+$/.test(feedbackID)) {
+    throw new Error(`NPS feedback bridge ID missing: ${feedbackID}`)
+  }
+  return { feedbackID, responseID }
+}
+
+async function resolveNPSRecovery(page, responseID) {
+  const rootCause = 'Onboarding workflow gap'
+  const actionTaken = 'Recovery call completed and onboarding fix scheduled.'
+  const review = page.getByTestId(`survey-low-score-${responseID}`)
+  await expect(review).toBeVisible()
+  await review.getByTestId(`survey-low-score-status-${responseID}`).click()
+  await page.getByRole('option', { name: '已解决', exact: true }).click()
+  await review.getByTestId(`survey-low-score-root-cause-${responseID}`).fill(rootCause)
+  await review.getByTestId(`survey-low-score-action-${responseID}`).fill(actionTaken)
+  await review.getByLabel('已联系客户', { exact: true }).click()
+  await review.getByTestId(`survey-low-score-save-${responseID}`).click()
+  await expect(page.getByText('低分跟进已更新', { exact: true })).toBeVisible()
+  return { rootCause, actionTaken }
+}
+
+async function verifyNPSRecoveryResolution(dsn, tenantId, responseID, recovery) {
+  const persisted = await psqlScalar(
+    dsn,
+    `SELECT status || '|' || customer_contacted::text || '|' ||
+            (customer_contacted_at IS NOT NULL)::text || '|' ||
+            (first_terminal_at IS NOT NULL)::text || '|' ||
+            (reviewed_at IS NOT NULL)::text || '|' ||
+            root_cause || '|' || action_taken
+       FROM survey_low_score_reviews
+      WHERE tenant_id = ${sqlValue(tenantId)}
+        AND response_id = ${sqlValue(responseID)}`,
+  )
+  const expected = [
+    'resolved',
+    'true',
+    'true',
+    'true',
+    'true',
+    recovery.rootCause,
+    recovery.actionTaken,
+  ].join('|')
+  if (persisted !== expected) {
+    throw new Error(`NPS recovery resolution mismatch: ${persisted}`)
+  }
+}
+
+async function verifyNPSFeedbackPromotion(dsn, tenantId, nps, feedbackID) {
+  const persisted = await psqlScalar(
+    dsn,
+    `SELECT request.title || '|' || request.description || '|' ||
+            (SELECT COUNT(*)::text
+               FROM customer_request_feedback_links link
+              WHERE link.tenant_id = request.tenant_id
+                AND link.request_id = request.id
+                AND link.feedback_id = ${sqlValue(feedbackID)}) || '|' ||
+            (SELECT COUNT(*)::text
+               FROM audit_log audit
+              WHERE audit.tenant_id = request.tenant_id
+                AND audit.action = 'customer_request.promote_feedback'
+                AND audit.target_type = 'customer_request'
+                AND audit.target_id = request.id::text
+                AND audit.after_json @> jsonb_build_object(
+                  'feedback_ids', jsonb_build_array(${sqlValue(feedbackID)}::bigint),
+                  'feedback_count', 1
+                ))
+       FROM customer_requests request
+      WHERE request.tenant_id = ${sqlValue(tenantId)}
+        AND request.title = ${sqlValue(nps.promotedRequestTitle)}
+      ORDER BY request.created_at DESC
+      LIMIT 1`,
+  )
+  const expected = `${nps.promotedRequestTitle}|${nps.promotedRequestDescription}|1|1`
+  if (persisted !== expected) {
+    throw new Error(`NPS feedback promotion persistence mismatch: ${persisted}`)
+  }
+}
+
+async function expectNPSRecoveryValue(container, label, value) {
+  const term = container.locator('dt', { hasText: label })
+  await expect(term).toHaveCount(1)
+  await expect(term.locator('xpath=following-sibling::dd')).toHaveText(value)
+}
+
+async function verifyNPSMaterializationMetric(baseURL, tenantId) {
+  const response = await fetch(`${baseURL}/metrics`)
+  if (!response.ok) {
+    throw new Error(`NPS materialization metric scrape failed with HTTP ${response.status}`)
+  }
+  const exposition = await response.text()
+  const line = exposition
+    .split('\n')
+    .find(
+      (candidate) =>
+        candidate.startsWith('attune_survey_nps_run_materialization_total{') &&
+        candidate.includes(`tenant="${tenantId}"`) &&
+        candidate.includes('result="materialized"') &&
+        candidate.includes('reason="ok"'),
+    )
+  const value = Number(line?.slice((line?.lastIndexOf(' ') ?? -1) + 1))
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error(`NPS materialization metric missing or invalid: ${line ?? 'not found'}`)
+  }
+}
+
+async function expireNPSCampaignRun(dsn, tenantId, nps, sequence) {
+  const runID = await psqlScalar(
+    dsn,
+    `UPDATE survey_campaign_runs run
+        SET closes_at = NOW() - INTERVAL '1 second'
+      WHERE run.tenant_id = ${sqlValue(tenantId)}
+        AND run.sequence = ${sqlValue(sequence)}
+        AND run.status = 'collecting'
+        AND run.campaign_id = (
+          SELECT id FROM survey_campaigns
+           WHERE tenant_id = ${sqlValue(tenantId)}
+             AND name = ${sqlValue(nps.campaignName)}
+        )
+      RETURNING run.id`,
+  )
+  if (!runID)
+    throw new Error(`NPS run ${sequence} was not collecting when advancing its test clock`)
+}
+
+async function waitForNPSRunStatus(dsn, tenantId, nps, sequence, expectedStatus) {
+  for (let attempt = 1; attempt <= 40; attempt++) {
+    const status = await psqlScalar(
+      dsn,
+      `SELECT run.status
+         FROM survey_campaign_runs run
+        WHERE run.tenant_id = ${sqlValue(tenantId)}
+          AND run.sequence = ${sqlValue(sequence)}
+          AND run.campaign_id = (
+            SELECT id FROM survey_campaigns
+             WHERE tenant_id = ${sqlValue(tenantId)}
+               AND name = ${sqlValue(nps.campaignName)}
+          )`,
+    )
+    if (status === expectedStatus) return
+    await sleep(250)
+  }
+  throw new Error(`NPS run ${sequence} did not transition to ${expectedStatus}`)
+}
+
+async function verifyNPSCancellation(dsn, tenantId, nps) {
+  const result = await psqlScalar(
+    dsn,
+    `SELECT run.status || '|' || run.invitation_count::text || '|' ||
+            (SELECT COUNT(*)::text
+               FROM survey_invitations invitation
+              WHERE invitation.tenant_id = run.tenant_id AND invitation.run_id = run.id) || '|' ||
+            (SELECT COUNT(*)::text
+               FROM audit_log audit
+              WHERE audit.tenant_id = run.tenant_id
+                AND audit.action = 'survey.nps_run_cancel'
+                AND audit.target_id = run.id::text)
+       FROM survey_campaign_runs run
+      WHERE run.tenant_id = ${sqlValue(tenantId)}
+        AND run.campaign_id = (
+          SELECT id FROM survey_campaigns
+           WHERE tenant_id = ${sqlValue(tenantId)}
+             AND name = ${sqlValue(nps.campaignName)}
+        )
+        AND run.sequence = 1`,
+  )
+  if (result !== 'cancelled|0|0|1') {
+    throw new Error(`NPS cancellation persistence mismatch: ${result}`)
   }
 }
 
@@ -1483,6 +2343,64 @@ async function expectNoAxeViolations(page) {
   expect(violations).toEqual([])
 }
 
+async function startMailProvider() {
+  const messages = []
+  const server = createServer(async (request, response) => {
+    if (request.method !== 'POST' || request.url !== '/delivery') {
+      response.statusCode = 404
+      response.end()
+      return
+    }
+    let body = ''
+    for await (const chunk of request) {
+      body += chunk
+      if (body.length > 1024 * 1024) {
+        response.statusCode = 413
+        response.end()
+        return
+      }
+    }
+    try {
+      messages.push({ payload: JSON.parse(body) })
+      response.statusCode = 204
+      response.end()
+    } catch {
+      response.statusCode = 400
+      response.end()
+    }
+  })
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') {
+    await new Promise((resolve) => server.close(resolve))
+    throw new Error('NPS mail provider did not bind a TCP port')
+  }
+  return {
+    messages,
+    url: `http://127.0.0.1:${address.port}/delivery`,
+    close: () =>
+      new Promise((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  }
+}
+
+async function waitForProviderEmail(provider, predicate, label) {
+  for (let attempt = 1; attempt <= 160; attempt++) {
+    const message = provider.messages.find(predicate)
+    if (message) return message
+    await sleep(250)
+  }
+  const received = provider.messages.map((message) => ({
+    eventType: message.payload?.event_type,
+    toEmail: message.payload?.to_email,
+  }))
+  throw new Error(`${label} email was not delivered: ${JSON.stringify(received)}`)
+}
+
 function sqlValue(value) {
   if (value === null || value === undefined) return 'NULL'
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE'
@@ -1491,12 +2409,28 @@ function sqlValue(value) {
   return `'${String(value).replace(/'/g, "''")}'`
 }
 
+function dateTimeLocalOneHourFromNow() {
+  const value = new Date(Date.now() + 60 * 60 * 1000)
+  const part = (number) => String(number).padStart(2, '0')
+  return `${value.getFullYear()}-${part(value.getMonth() + 1)}-${part(value.getDate())}T${part(value.getHours())}:${part(value.getMinutes())}`
+}
+
 function sqlJsonb(value) {
   return `${sqlValue(JSON.stringify(value ?? {}))}::jsonb`
 }
 
 function surveyTokenHash(token) {
   return createHash('sha256').update(String(token).trim()).digest('hex')
+}
+
+function emailHashForSmoke(email) {
+  return createHash('sha256').update(String(email).trim().toLowerCase()).digest('hex')
+}
+
+function subjectKeyHash(tenantId, subjectKey) {
+  return createHash('sha256')
+    .update(`${String(tenantId).trim()}\0${String(subjectKey).trim()}`)
+    .digest('hex')
 }
 
 function raw(sql) {

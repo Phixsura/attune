@@ -15,6 +15,8 @@ func surveyTypeToRepo(value attunev1.SurveyType) string {
 		return repo.TypeCSAT
 	case attunev1.SurveyType_SURVEY_TYPE_CES:
 		return repo.TypeCES
+	case attunev1.SurveyType_SURVEY_TYPE_NPS:
+		return repo.TypeNPS
 	default:
 		return ""
 	}
@@ -26,6 +28,8 @@ func surveyTypeToProto(value string) attunev1.SurveyType {
 		return attunev1.SurveyType_SURVEY_TYPE_CSAT
 	case repo.TypeCES:
 		return attunev1.SurveyType_SURVEY_TYPE_CES
+	case repo.TypeNPS:
+		return attunev1.SurveyType_SURVEY_TYPE_NPS
 	default:
 		return attunev1.SurveyType_SURVEY_TYPE_UNSPECIFIED
 	}
@@ -80,6 +84,8 @@ func triggerEventToRepo(value attunev1.SurveyTriggerEvent) string {
 		return repo.TriggerManualLink
 	case attunev1.SurveyTriggerEvent_SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED:
 		return repo.TriggerRequestResolved
+	case attunev1.SurveyTriggerEvent_SURVEY_TRIGGER_EVENT_SCHEDULED_RUN:
+		return repo.TriggerScheduledRun
 	default:
 		return ""
 	}
@@ -95,6 +101,8 @@ func triggerEventToProto(value string) attunev1.SurveyTriggerEvent {
 		return attunev1.SurveyTriggerEvent_SURVEY_TRIGGER_EVENT_MANUAL_LINK
 	case repo.TriggerRequestResolved:
 		return attunev1.SurveyTriggerEvent_SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED
+	case repo.TriggerScheduledRun:
+		return attunev1.SurveyTriggerEvent_SURVEY_TRIGGER_EVENT_SCHEDULED_RUN
 	default:
 		return attunev1.SurveyTriggerEvent_SURVEY_TRIGGER_EVENT_UNSPECIFIED
 	}
@@ -130,6 +138,8 @@ func dedupePolicyToRepo(value attunev1.SurveyDedupePolicy) string {
 		return repo.DedupeOnePerResolution
 	case attunev1.SurveyDedupePolicy_SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER:
 		return repo.DedupeOnePerTrigger
+	case attunev1.SurveyDedupePolicy_SURVEY_DEDUPE_POLICY_ONE_PER_RUN:
+		return repo.DedupeOnePerRun
 	default:
 		return ""
 	}
@@ -143,8 +153,61 @@ func dedupePolicyToProto(value string) attunev1.SurveyDedupePolicy {
 		return attunev1.SurveyDedupePolicy_SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION
 	case repo.DedupeOnePerTrigger:
 		return attunev1.SurveyDedupePolicy_SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER
+	case repo.DedupeOnePerRun:
+		return attunev1.SurveyDedupePolicy_SURVEY_DEDUPE_POLICY_ONE_PER_RUN
 	default:
 		return attunev1.SurveyDedupePolicy_SURVEY_DEDUPE_POLICY_UNSPECIFIED
+	}
+}
+
+func npsBucketToProto(value string) attunev1.NpsBucket {
+	switch value {
+	case repo.NPSBucketDetractor:
+		return attunev1.NpsBucket_NPS_BUCKET_DETRACTOR
+	case repo.NPSBucketPassive:
+		return attunev1.NpsBucket_NPS_BUCKET_PASSIVE
+	case repo.NPSBucketPromoter:
+		return attunev1.NpsBucket_NPS_BUCKET_PROMOTER
+	default:
+		return attunev1.NpsBucket_NPS_BUCKET_UNSPECIFIED
+	}
+}
+
+func npsCampaignRunStatusToProto(value string) attunev1.NpsCampaignRunStatus {
+	switch value {
+	case repo.NPSRunScheduled:
+		return attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_SCHEDULED
+	case repo.NPSRunEvaluating:
+		return attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_EVALUATING
+	case repo.NPSRunCollecting:
+		return attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_COLLECTING
+	case repo.NPSRunClosed:
+		return attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_CLOSED
+	case repo.NPSRunFailed:
+		return attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_FAILED
+	case repo.NPSRunCancelled:
+		return attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_CANCELLED
+	default:
+		return attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_UNSPECIFIED
+	}
+}
+
+func npsMeasurementReadinessToProto(value string) attunev1.NpsMeasurementReadiness {
+	switch value {
+	case repo.NPSMeasurementPending:
+		return attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_PENDING
+	case repo.NPSMeasurementPreliminary:
+		return attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_PRELIMINARY
+	case repo.NPSMeasurementDirectional:
+		return attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_DIRECTIONAL
+	case repo.NPSMeasurementQualified:
+		return attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_QUALIFIED
+	case repo.NPSMeasurementRedacted:
+		return attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_REDACTED
+	case repo.NPSMeasurementUnavailable:
+		return attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_UNAVAILABLE
+	default:
+		return attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_UNSPECIFIED
 	}
 }
 

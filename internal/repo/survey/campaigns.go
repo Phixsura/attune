@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 const campaignColumns = `
@@ -49,6 +52,13 @@ func (r *Repo) ListCampaigns(ctx context.Context, filter CampaignFilter) ([]Camp
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list survey campaigns rows: %w", err)
 	}
+	for i := range items {
+		item, err := r.attachNPSCampaignSettings(ctx, items[i])
+		if err != nil {
+			return nil, err
+		}
+		items[i] = item
+	}
 	return items, nil
 }
 
@@ -64,10 +74,34 @@ func (r *Repo) GetCampaign(ctx context.Context, tenantID string, id uuid.UUID) (
 	if err != nil {
 		return Campaign{}, err
 	}
+	item, err = r.attachNPSCampaignSettings(ctx, item)
+	if err != nil {
+		return Campaign{}, err
+	}
 	return item, nil
 }
 
+func (r *Repo) attachNPSCampaignSettings(ctx context.Context, campaign Campaign) (Campaign, error) {
+	if campaign.SurveyType != TypeNPS {
+		return campaign, nil
+	}
+	settings, err := r.GetNPSCampaignSettings(ctx, campaign.TenantID, campaign.ID)
+	if err != nil {
+		return Campaign{}, err
+	}
+	campaign.NPSSettings = ptrext.Of(settings)
+	return campaign, nil
+}
+
 func (r *Repo) CreateCampaign(ctx context.Context, campaign Campaign) (Campaign, error) {
+	return createCampaign(ctx, r.pool, campaign)
+}
+
+type campaignWriter interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func createCampaign(ctx context.Context, db campaignWriter, campaign Campaign) (Campaign, error) {
 	triggerRaw, err := jsonObject(campaign.TriggerFilter)
 	if err != nil {
 		return Campaign{}, err
@@ -76,7 +110,7 @@ func (r *Repo) CreateCampaign(ctx context.Context, campaign Campaign) (Campaign,
 	if err != nil {
 		return Campaign{}, err
 	}
-	row := r.pool.QueryRow(ctx, fmt.Sprintf(`
+	row := db.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO survey_campaigns (
 			id, tenant_id, name, survey_type, status, trigger_event, distribution_mode,
 			dedupe_policy, trigger_filter, content, locale, content_version,
@@ -121,6 +155,10 @@ func (r *Repo) CreateCampaign(ctx context.Context, campaign Campaign) (Campaign,
 }
 
 func (r *Repo) UpdateCampaign(ctx context.Context, campaign Campaign) (Campaign, error) {
+	return updateCampaign(ctx, r.pool, campaign)
+}
+
+func updateCampaign(ctx context.Context, db campaignWriter, campaign Campaign) (Campaign, error) {
 	triggerRaw, err := jsonObject(campaign.TriggerFilter)
 	if err != nil {
 		return Campaign{}, err
@@ -129,7 +167,7 @@ func (r *Repo) UpdateCampaign(ctx context.Context, campaign Campaign) (Campaign,
 	if err != nil {
 		return Campaign{}, err
 	}
-	row := r.pool.QueryRow(ctx, fmt.Sprintf(`
+	row := db.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE survey_campaigns
 		SET name = $3,
 		    survey_type = $4,

@@ -341,6 +341,13 @@ async function handleRoute(
     await fulfillJson(route, { invitations: [consoleA11ySurveyInvitation] })
     return true
   }
+  if (
+    method === 'GET' &&
+    path.match(/^\/surveys\/campaigns\/[^/]+\/nps-runs\/[^/]+\/evidence-exports$/)
+  ) {
+    await fulfillJson(route, { exports: [] })
+    return true
+  }
   if (method === 'POST' && path.endsWith('/recipients:preview')) {
     const body = readJsonBody(route)
     diagnostics.surveyRequests.push({ method, path, body })

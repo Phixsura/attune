@@ -22,6 +22,33 @@ import (
 	repo "github.com/Phixsura/attune/internal/repo/survey"
 )
 
+func TestRecoveryNotificationEnvelopeAcceptsInitialNPSDetractorEvent(t *testing.T) {
+	t.Parallel()
+
+	responseID := uuid.New()
+	notification := repo.RecoveryNotification{
+		ID:         uuid.New(),
+		TenantID:   "tenant-1",
+		ResponseID: responseID,
+		Payload: map[string]any{
+			"event_type": surveyRecoveryOpenedEventType,
+			"event_id":   responseID.String(),
+			"tenant_id":  "tenant-1",
+		},
+	}
+
+	envelope, err := recoveryNotificationEnvelope(notification)
+	if err != nil {
+		t.Fatalf("recoveryNotificationEnvelope() error = %v", err)
+	}
+	if envelope.EventType != surveyRecoveryOpenedEventType {
+		t.Fatalf("EventType = %q, want %q", envelope.EventType, surveyRecoveryOpenedEventType)
+	}
+	if envelope.DeliveryID != notification.ID.String() {
+		t.Fatalf("DeliveryID = %q, want %q", envelope.DeliveryID, notification.ID)
+	}
+}
+
 func TestRecordWorkflowTransitionCreatesEmailInvitation(t *testing.T) {
 	restoreRandom := stubRandom()
 	defer restoreRandom()
@@ -135,6 +162,74 @@ func TestRecordReplySentSuppressesContactCooldown(t *testing.T) {
 	}
 	if store.createdInvitation.SuppressionReason != "contact_cooldown" {
 		t.Fatalf("SuppressionReason = %q", store.createdInvitation.SuppressionReason)
+	}
+}
+
+func TestRecordReplySentSuppressesContactCooldownAfterAtomicRecheck(t *testing.T) {
+	contactID := uuid.New()
+	campaignID := uuid.New()
+	store := ptrext.Of(fakeRepo{
+		campaign:              triggeredCampaign(campaignID, repo.TriggerReplySent, repo.DistributionContactEmail),
+		contactCooldownActive: true,
+		triggerContext: repo.TriggerContext{
+			TenantID:   "tenant-1",
+			FeedbackID: 42,
+			Source:     "api",
+			ContactID:  ptrext.Of(contactID),
+		},
+	})
+	service := testService(store)
+	service.SetSecretStore(fakeSecretStore{})
+
+	count, err := service.RecordReplySent(context.Background(), ReplySentInput{
+		TenantID:   "tenant-1",
+		FeedbackID: 42,
+		AttemptID:  "attempt-1",
+		ActorID:    "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("RecordReplySent() error = %v", err)
+	}
+	if count != 1 || len(store.createdInvites) != 1 {
+		t.Fatalf("created count/invitations = %d/%d, want one suppressed invitation", count, len(store.createdInvites))
+	}
+	if store.createdInvitation.SuppressionStatus != repo.SuppressionSuppressed ||
+		store.createdInvitation.SuppressionReason != "contact_cooldown" {
+		t.Fatalf("suppression = %q/%q", store.createdInvitation.SuppressionStatus, store.createdInvitation.SuppressionReason)
+	}
+}
+
+func TestRecordReplySentSuppressesContactNoLongerEligibleAfterAtomicRecheck(t *testing.T) {
+	contactID := uuid.New()
+	campaignID := uuid.New()
+	store := ptrext.Of(fakeRepo{
+		campaign:                    triggeredCampaign(campaignID, repo.TriggerReplySent, repo.DistributionContactEmail),
+		contactInvitationSkipReason: "contact_not_eligible",
+		triggerContext: repo.TriggerContext{
+			TenantID:   "tenant-1",
+			FeedbackID: 42,
+			Source:     "api",
+			ContactID:  ptrext.Of(contactID),
+		},
+	})
+	service := testService(store)
+	service.SetSecretStore(fakeSecretStore{})
+
+	count, err := service.RecordReplySent(context.Background(), ReplySentInput{
+		TenantID:   "tenant-1",
+		FeedbackID: 42,
+		AttemptID:  "attempt-1",
+		ActorID:    "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("RecordReplySent() error = %v", err)
+	}
+	if count != 1 || len(store.createdInvites) != 1 {
+		t.Fatalf("created count/invitations = %d/%d, want one suppressed invitation", count, len(store.createdInvites))
+	}
+	if store.createdInvitation.SuppressionStatus != repo.SuppressionSuppressed ||
+		store.createdInvitation.SuppressionReason != "contact_not_eligible" {
+		t.Fatalf("suppression = %q/%q", store.createdInvitation.SuppressionStatus, store.createdInvitation.SuppressionReason)
 	}
 }
 
@@ -262,6 +357,203 @@ func TestWorkerDeliversClaimedEmailInvitation(t *testing.T) {
 	if !strings.Contains(sent.String(), "customer@example.test") {
 		t.Fatalf("sent payload missing destination email: %s", sent.String())
 	}
+}
+
+func TestWorkerDeliversMaterializedNPSRunInvitation(t *testing.T) {
+	restoreRandom := stubRandom()
+	defer restoreRandom()
+
+	outbound.UnregisterForTest("email")
+	outbound.Register(stubSurveyEmailChannel{})
+	defer outbound.UnregisterForTest("email")
+
+	var sent bytes.Buffer
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		sent.Write(raw)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	secretStore := fakeSecretStore{}
+	campaignID := uuid.New()
+	runID := uuid.New()
+	contactID := uuid.New()
+	providerConfig, _ := secretStore.Encrypt([]byte(fmt.Sprintf(`{"url":%q,"secret":"provider-secret"}`, server.URL)))
+	contactEmail, _ := secretStore.Encrypt([]byte("customer@example.test"))
+	fromEmail, _ := secretStore.Encrypt([]byte("updates@example.test"))
+	replyTo, _ := secretStore.Encrypt([]byte("support@example.test"))
+	store := ptrext.Of(fakeRepo{
+		tenantSlug: "survey-e2e",
+		emailContact: repo.RequestRecipient{
+			ContactID:    contactID,
+			DisplayName:  "Customer",
+			ContactEmail: contactEmail,
+		},
+		emailSender: repo.EmailSender{
+			ID:               uuid.New(),
+			TenantID:         "tenant-1",
+			FromName:         "Attune",
+			FromEmailPayload: fromEmail,
+			ReplyToPayload:   replyTo,
+			Provider:         "webhook",
+			ProviderConfig:   providerConfig,
+		},
+	})
+	service := testService(store)
+	service.SetSecretStore(secretStore)
+	invitation := npsWorkerInvitation(t, service, campaignID, runID, contactID)
+	store.claimed = []repo.Invitation{invitation}
+	worker := NewWorker(service, notify.NewTransport(server.Client(), notify.NoRetry()))
+	worker.owner = "test-worker"
+
+	worker.ProcessOnce(context.Background())
+
+	if store.deliveredID != invitation.ID {
+		t.Fatalf("delivered ID = %s, want %s", store.deliveredID, invitation.ID)
+	}
+	if invitation.RunID == nil || ptrext.Indirect(invitation.RunID) != runID {
+		t.Fatalf("run ID = %v, want %s", invitation.RunID, runID)
+	}
+	payload := sent.String()
+	if !strings.Contains(payload, `"survey_type":"nps"`) ||
+		!strings.Contains(payload, `"score_min":0`) ||
+		!strings.Contains(payload, `"score_max":10`) {
+		t.Fatalf("sent payload missing NPS score range: %s", payload)
+	}
+	if !strings.Contains(payload, runID.String()) ||
+		!strings.Contains(payload, "How likely are you to recommend us to a colleague?") {
+		t.Fatalf("sent payload missing NPS run context: %s", payload)
+	}
+	delivery, err := service.deliverySecret(invitation.DeliverySecret)
+	if err != nil {
+		t.Fatalf("deliverySecret() error = %v", err)
+	}
+	if !strings.Contains(payload, delivery.PublicURL) {
+		t.Fatalf("sent payload missing NPS survey url: %s", payload)
+	}
+	requireNPSWorkerUnsubscribeRetry(t, service, store, payload)
+}
+
+func TestWorkerStopsBeforeSendWhenFinalEligibilityFenceRejectsClaim(t *testing.T) {
+	outbound.UnregisterForTest("email")
+	outbound.Register(stubSurveyEmailChannel{})
+	defer outbound.UnregisterForTest("email")
+
+	var sent bytes.Buffer
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		sent.Write(raw)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	secretStore := fakeSecretStore{}
+	contactID := uuid.New()
+	deliverySecret, _ := secretStore.Encrypt([]byte(`{"public_url":"https://example.test/surveys/token-final-fence"}`))
+	contactEmail, _ := secretStore.Encrypt([]byte("customer@example.test"))
+	providerConfig, _ := secretStore.Encrypt([]byte(fmt.Sprintf(`{"url":%q}`, server.URL)))
+	fromEmail, _ := secretStore.Encrypt([]byte("updates@example.test"))
+	replyTo, _ := secretStore.Encrypt([]byte("support@example.test"))
+	invitation := repo.Invitation{
+		ID:                     uuid.New(),
+		TenantID:               "tenant-1",
+		CampaignID:             uuid.New(),
+		CampaignContentVersion: 1,
+		CampaignSnapshot: map[string]any{
+			"survey_type": repo.TypeCSAT,
+			"content": map[string]any{
+				"title": "Resolution feedback", "intro": "Your feedback helps us improve.", "question": "How satisfied are you?",
+			},
+		},
+		ContactID:      ptrext.Of(contactID),
+		DeliverySecret: deliverySecret,
+	}
+	store := ptrext.Of(fakeRepo{
+		tenantSlug:          "survey-e2e",
+		claimed:             []repo.Invitation{invitation},
+		prepareRejectOnCall: 2,
+		emailContact: repo.RequestRecipient{
+			ContactID: contactID, DisplayName: "Customer", ContactEmail: contactEmail,
+		},
+		emailSender: repo.EmailSender{
+			ID: uuid.New(), TenantID: "tenant-1", FromName: "Attune", FromEmailPayload: fromEmail,
+			ReplyToPayload: replyTo, Provider: "webhook", ProviderConfig: providerConfig,
+		},
+	})
+	service := testService(store)
+	service.SetSecretStore(secretStore)
+	worker := NewWorker(service, notify.NewTransport(server.Client(), notify.NoRetry()))
+	worker.owner = "test-worker"
+
+	worker.ProcessOnce(context.Background())
+
+	if store.prepareCalls != 2 || store.deliveredID != uuid.Nil || store.failedID != uuid.Nil || sent.Len() != 0 {
+		t.Fatalf("fence/send state = calls:%d delivered:%s failed:%s payload:%q", store.prepareCalls, store.deliveredID, store.failedID, sent.String())
+	}
+}
+
+func requireNPSWorkerUnsubscribeRetry(t *testing.T, service *Service, store *fakeRepo, payload string) {
+	t.Helper()
+
+	persistedDelivery, err := service.deliverySecret(store.claimed[0].DeliverySecret)
+	if err != nil {
+		t.Fatalf("persisted deliverySecret() error = %v", err)
+	}
+	if persistedDelivery.UnsubscribeURL == "" || !strings.Contains(payload, persistedDelivery.UnsubscribeURL) {
+		t.Fatalf("sent payload missing persisted unsubscribe URL: %s", payload)
+	}
+	repeatedURL, _, err := service.invitationUnsubscribeLinks(context.Background(), store.claimed[0])
+	if err != nil {
+		t.Fatalf("retry invitationUnsubscribeLinks() error = %v", err)
+	}
+	if repeatedURL != persistedDelivery.UnsubscribeURL || store.unsubscribeWrites != 1 {
+		t.Fatalf("retry unsubscribe URL/writes = %q/%d", repeatedURL, store.unsubscribeWrites)
+	}
+}
+
+func npsWorkerInvitation(t *testing.T, service *Service, campaignID, runID, contactID uuid.UUID) repo.Invitation {
+	t.Helper()
+	campaign := repo.Campaign{
+		ID:                  campaignID,
+		TenantID:            "tenant-1",
+		Name:                "Relationship NPS",
+		SurveyType:          repo.TypeNPS,
+		Status:              repo.StatusActive,
+		TriggerEvent:        repo.TriggerScheduledRun,
+		DistributionMode:    repo.DistributionContactEmail,
+		DedupePolicy:        repo.DedupeOnePerRun,
+		Content:             defaultContent(repo.TypeNPS),
+		ContentVersion:      3,
+		Locale:              "en",
+		ExpiresAfterDays:    14,
+		LowScoreThreshold:   6,
+		SamplingPercent:     100,
+		MaxDailyInvitations: 0,
+	}
+	settings := repo.NPSCampaignSettings{
+		CampaignID:             campaignID,
+		TenantID:               "tenant-1",
+		CohortID:               uuid.New(),
+		DetractorOwnerMemberID: uuid.New(),
+		CollectionDays:         14,
+		MaximumRunRecipients:   500,
+		SampleSeed:             "abcdefghijklmnopqrstuvwx",
+	}
+	invitation, err := service.buildNPSRunInvitation(repo.NPSCampaignRun{
+		ID:                 runID,
+		TenantID:           "tenant-1",
+		CampaignID:         campaignID,
+		DefinitionSnapshot: npsRunDefinition(campaign, settings),
+		CreatedBy:          "member-1",
+	}, repo.NPSAudienceCandidate{
+		ContactID:      contactID,
+		SubjectDisplay: "Customer",
+	}, service.now())
+	if err != nil {
+		t.Fatalf("buildNPSRunInvitation() error = %v", err)
+	}
+	return invitation
 }
 
 func TestWorkerDeliversRecoveryOwnerNotification(t *testing.T) {

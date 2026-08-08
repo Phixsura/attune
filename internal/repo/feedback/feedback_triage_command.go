@@ -41,14 +41,15 @@ type FeedbackTriageLane struct {
 }
 
 type feedbackTriageLaneDefinition struct {
-	Key               string
-	Label             string
-	OwnerLane         string
-	Severity          string
-	SLAHours          int
-	Predicate         string
-	RecommendedAction string
-	FilterQuery       string
+	Key                           string
+	Label                         string
+	OwnerLane                     string
+	Severity                      string
+	SLAHours                      int
+	Predicate                     string
+	RequiresMaxEnrichmentAttempts bool
+	RecommendedAction             string
+	FilterQuery                   string
 }
 
 func (r *FeedbackRepo) FeedbackTriageCommandCenter(
@@ -112,7 +113,7 @@ func (r *FeedbackRepo) feedbackTriageLane(
 	now time.Time,
 	def feedbackTriageLaneDefinition,
 ) (FeedbackTriageLane, error) {
-	row := r.pool.QueryRow(ctx, feedbackTriageLaneSQL(def.Predicate), tenantID, now, def.SLAHours, maxEnrichmentAttempts)
+	row := r.pool.QueryRow(ctx, feedbackTriageLaneSQL(def.Predicate), feedbackTriageLaneArgs(tenantID, now, def)...)
 	lane := FeedbackTriageLane{
 		Key:               def.Key,
 		Label:             def.Label,
@@ -134,6 +135,14 @@ func (r *FeedbackRepo) feedbackTriageLane(
 		lane.NextDeadlineAt = ptrext.Of(deadline.Time)
 	}
 	return lane, nil
+}
+
+func feedbackTriageLaneArgs(tenantID string, now time.Time, def feedbackTriageLaneDefinition) []any {
+	args := []any{tenantID, now, def.SLAHours}
+	if def.RequiresMaxEnrichmentAttempts {
+		return append(args, maxEnrichmentAttempts)
+	}
+	return args
 }
 
 func feedbackTriageLaneSQL(predicate string) string {
@@ -196,14 +205,15 @@ func feedbackTriageLaneDefinitions() []feedbackTriageLaneDefinition {
 			FilterQuery:       "workflow_category=active",
 		},
 		{
-			Key:               "terminal_failures",
-			Label:             "Terminal AI failures",
-			OwnerLane:         "ai_ops",
-			Severity:          "high",
-			SLAHours:          48,
-			Predicate:         "uf.enrichment_status = 'failed' AND uf.enrichment_attempts >= $4 AND uf.enrichment_next_retry_at IS NULL",
-			RecommendedAction: "Inspect the oldest terminal failures, repair the model or prompt route, then retry only after root cause review.",
-			FilterQuery:       "terminal_failed_only=true",
+			Key:                           "terminal_failures",
+			Label:                         "Terminal AI failures",
+			OwnerLane:                     "ai_ops",
+			Severity:                      "high",
+			SLAHours:                      48,
+			Predicate:                     "uf.enrichment_status = 'failed' AND uf.enrichment_attempts >= $4 AND uf.enrichment_next_retry_at IS NULL",
+			RequiresMaxEnrichmentAttempts: true,
+			RecommendedAction:             "Inspect the oldest terminal failures, repair the model or prompt route, then retry only after root cause review.",
+			FilterQuery:                   "terminal_failed_only=true",
 		},
 		{
 			Key:               "identity_debt",

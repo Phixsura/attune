@@ -114,6 +114,7 @@ func TestHandleIdempotency_ExpiredKey(t *testing.T) {
 
 	store := newMockIdempotencyStore()
 	store.acquireErr = idempotency.ErrExpired
+	store.reacquire = true
 	svc := &service{idempotencyRepo: store}
 
 	req := &BatchRequest{
@@ -129,6 +130,7 @@ func TestHandleIdempotency_ExpiredKey(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, done)
 	require.Nil(t, resp)
+	require.True(t, store.expiredDeleted)
 }
 
 func TestHandleIdempotency_GenericAcquireError(t *testing.T) {

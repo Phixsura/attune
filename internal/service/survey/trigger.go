@@ -166,6 +166,28 @@ func (s *Service) createTriggeredInvitation(
 	if err != nil {
 		return false, err
 	}
+	if target.ContactID != nil && invitation.SuppressionStatus == repo.SuppressionNotSuppressed {
+		var cooldownSince *time.Time
+		if campaign.MinDaysBetweenContact > 0 {
+			since := s.now().UTC().Add(-time.Duration(campaign.MinDaysBetweenContact) * 24 * time.Hour)
+			cooldownSince = ptrext.Of(since)
+		}
+		_, skipReason, err := s.repo.CreateInvitationWithContactCooldown(ctx, invitation, cooldownSince)
+		if err != nil {
+			if errors.Is(mapRepoError(err), ErrConflict) {
+				return false, nil
+			}
+			return false, mapRepoError(err)
+		}
+		if skipReason == "" {
+			return true, nil
+		}
+		target.SuppressionReason = skipReason
+		invitation, err = s.buildTriggeredInvitation(campaign, target)
+		if err != nil {
+			return false, err
+		}
+	}
 	if _, err := s.repo.CreateInvitation(ctx, invitation); err != nil {
 		if errors.Is(mapRepoError(err), ErrConflict) {
 			return false, nil
@@ -258,10 +280,23 @@ func (s *Service) buildTriggeredInvitation(campaign repo.Campaign, target trigge
 }
 
 func (s *Service) encryptDeliverySecret(publicURL string) ([]byte, error) {
+	return s.encryptSurveyDeliverySecret(surveyDeliverySecret{PublicURL: publicURL})
+}
+
+func (s *Service) encryptSurveyDeliverySecret(secret surveyDeliverySecret) ([]byte, error) {
 	if s.secrets == nil {
 		return nil, ErrDisabled
 	}
-	raw, err := json.Marshal(map[string]string{"public_url": publicURL})
+	secret.PublicURL = strings.TrimSpace(secret.PublicURL)
+	secret.UnsubscribeURL = strings.TrimSpace(secret.UnsubscribeURL)
+	if secret.PublicURL == "" {
+		return nil, ErrValidation
+	}
+	if secret.UnsubscribeExpiresAt != nil {
+		expiresAt := ptrext.Indirect(secret.UnsubscribeExpiresAt).UTC()
+		secret.UnsubscribeExpiresAt = ptrext.Of(expiresAt)
+	}
+	raw, err := json.Marshal(secret)
 	if err != nil {
 		return nil, err
 	}

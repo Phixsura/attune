@@ -12,6 +12,7 @@ package secretstore
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -28,6 +29,8 @@ import (
 
 const (
 	fingerprintBytes     = 16
+	pseudonymPrefix      = "hmac-sha256:v1:"
+	pseudonymDeriveLabel = "attune:secretstore:pseudonymization-key:v1"
 	keyIDPrefixLen       = 5
 	tinkPrefix           = 0x01
 	aesGCMKeyTypeURL     = "type.googleapis.com/google.crypto.tink.AesGcmKey"
@@ -262,6 +265,41 @@ func (s *TinkStore) Keys() []KeyMetadata {
 		out = append(out, key.metadata)
 	}
 	return out
+}
+
+// Pseudonymize returns a stable, domain-separated HMAC pseudonym for a
+// non-empty value. It derives a dedicated subkey from the current primary AEAD
+// key, so callers never reuse AEAD key material directly or retain raw values.
+// A primary-key rotation intentionally begins a new correlation boundary.
+func (s *TinkStore) Pseudonymize(purpose, raw string) (string, error) {
+	purpose = strings.TrimSpace(purpose)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if purpose == "" {
+		return "", errors.New("secretstore: pseudonymization purpose is required")
+	}
+	if s == nil || s.primitive == nil {
+		return "", errors.New("secretstore: nil Tink store")
+	}
+	key, ok := s.primitive[s.primaryID]
+	if !ok {
+		return "", fmt.Errorf("secretstore: primary key_id=%s not found", keyIDString(s.primaryID))
+	}
+
+	derived := derivePseudonymizationKey(key.keyBytes, purpose)
+	mac := hmac.New(sha256.New, derived)
+	_, _ = mac.Write([]byte(raw))
+	return pseudonymPrefix + hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+func derivePseudonymizationKey(masterKey []byte, purpose string) []byte {
+	mac := hmac.New(sha256.New, masterKey)
+	_, _ = mac.Write([]byte(pseudonymDeriveLabel))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(purpose))
+	return mac.Sum(nil)
 }
 
 // Encrypt satisfies inbound.SecretStore with empty associated data.

@@ -71,8 +71,9 @@ type Store interface {
 	// Get retrieves a key by tenant and key.
 	Get(ctx context.Context, tenantID, key string) (*Key, error)
 
-	// Delete removes a key. No-op if the key does not exist.
-	Delete(ctx context.Context, tenantID, key string) error
+	// DeleteExpired removes a key only when it is still expired according to the
+	// database clock. It reports whether it removed the row.
+	DeleteExpired(ctx context.Context, tenantID, key string) (bool, error)
 
 	// CleanupExpired removes all expired keys (for periodic cleanup).
 	// Returns the number of rows deleted.

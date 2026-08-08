@@ -157,12 +157,31 @@ func TestProviderEventHelpers(t *testing.T) {
 	if got := providerEventContactSuppressionReason(ProviderEventBounced); got != "survey_provider_bounce" {
 		t.Fatalf("bounce suppression reason = %q", got)
 	}
+	for _, terminalStatus := range []string{DeliveryBounced, DeliveryComplained, DeliveryRejected, DeliveryNotApplicable} {
+		for _, eventType := range []string{
+			ProviderEventOpened,
+			ProviderEventTemporarilyDelayed,
+			ProviderEventBounced,
+			ProviderEventComplained,
+			ProviderEventRejected,
+		} {
+			if providerEventAppliesToInvitation(eventType, terminalStatus) {
+				t.Fatalf("%s event mutated terminal delivery status %q", eventType, terminalStatus)
+			}
+		}
+	}
+	if !providerEventAppliesToInvitation(ProviderEventOpened, DeliveryDelivered) {
+		t.Fatal("opened event did not apply to delivered invitation")
+	}
+	if !providerEventAppliesToInvitation(ProviderEventTemporarilyDelayed, DeliveryAccepted) {
+		t.Fatal("delayed event did not apply to accepted invitation")
+	}
 }
 
 func TestResponseListIncludesRecoveryNotificationSummary(t *testing.T) {
 	t.Parallel()
 
-	query := responseListColumns(true) + "\n" + responseInvitationJoin + "\n" + lowScoreReviewJoin(true)
+	query := responseListColumns(true) + "\n" + responseInvitationJoin + "\n" + responseFeedbackLinkJoin + "\n" + lowScoreReviewJoin(true)
 
 	assertContainsAll(
 		t,
@@ -170,6 +189,8 @@ func TestResponseListIncludesRecoveryNotificationSummary(t *testing.T) {
 		"COALESCE(srn.status, '')",
 		"survey_recovery_notifications",
 		"LEFT JOIN LATERAL",
+		"survey_response_feedback_links",
+		"srfl.feedback_id",
 		"ORDER BY srn.created_at DESC, srn.id DESC",
 		"si.recipient_snapshot",
 		"response_metadata",

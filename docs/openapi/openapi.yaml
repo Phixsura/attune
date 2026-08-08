@@ -7971,6 +7971,10 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: runId
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -8082,6 +8086,10 @@ paths:
                   schema:
                     type: string
                 - name: to
+                  in: query
+                  schema:
+                    type: string
+                - name: runId
                   in: query
                   schema:
                     type: string
@@ -8209,6 +8217,197 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/surveys/campaigns/{campaignId}/nps-preflight:
+        get:
+            tags:
+                - SurveyService
+            operationId: SurveyService_GetNpsCampaignPreflight
+            parameters:
+                - name: campaignId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NpsCampaignPreflight'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/surveys/campaigns/{campaignId}/nps-runs:
+        get:
+            tags:
+                - SurveyService
+            operationId: SurveyService_ListNpsCampaignRuns
+            parameters:
+                - name: campaignId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: beforeSequence
+                  in: query
+                  description: |-
+                    Return runs strictly older than this immutable campaign-local sequence.
+                     Omit for the newest page.
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListNpsCampaignRunsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/surveys/campaigns/{campaignId}/nps-runs/{runId}/evidence-exports:
+        get:
+            tags:
+                - SurveyService
+            operationId: SurveyService_ListNpsCampaignRunEvidenceExports
+            parameters:
+                - name: campaignId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: runId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListNpsCampaignRunEvidenceExportsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - SurveyService
+            operationId: SurveyService_CreateNpsCampaignRunEvidenceExport
+            parameters:
+                - name: campaignId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: runId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateNpsCampaignRunEvidenceExportRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NpsCampaignRunEvidenceExport'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/surveys/campaigns/{campaignId}/nps-runs/{runId}/evidence.csv:
+        get:
+            tags:
+                - SurveyService
+            operationId: SurveyService_ExportNpsCampaignRunEvidence
+            parameters:
+                - name: campaignId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: runId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        '*/*': {}
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/surveys/campaigns/{campaignId}/nps-runs/{runId}:cancel:
+        post:
+            tags:
+                - SurveyService
+            operationId: SurveyService_CancelNpsCampaignRun
+            parameters:
+                - name: campaignId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: runId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CancelNpsCampaignRunRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NpsCampaignRun'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/surveys/campaigns/{campaignId}/recipients:preview:
         post:
             tags:
@@ -8233,6 +8432,36 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/PreviewSurveyRecipientsResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/surveys/campaigns/{campaignId}:scheduleNpsRun:
+        post:
+            tags:
+                - SurveyService
+            operationId: SurveyService_ScheduleNpsCampaignRun
+            parameters:
+                - name: campaignId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ScheduleNpsCampaignRunRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/NpsCampaignRun'
                 default:
                     description: Default error response
                     content:
@@ -12697,6 +12926,19 @@ components:
                     type: string
                     description: Human-readable result message.
             description: CancelJobResponse confirms cancellation.
+        CancelNpsCampaignRunRequest:
+            required:
+                - campaignId
+                - runId
+            type: object
+            properties:
+                campaignId:
+                    type: string
+                runId:
+                    type: string
+            description: |-
+                Cancels a run before invitation materialization. A run that has started
+                 collecting must be handled through the collection lifecycle instead.
         ChangePasswordRequest:
             required:
                 - currentPassword
@@ -13573,6 +13815,19 @@ components:
                     format: int32
                 disabled:
                     type: boolean
+        CreateNpsCampaignRunEvidenceExportRequest:
+            required:
+                - campaignId
+                - runId
+                - clientRequestKey
+            type: object
+            properties:
+                campaignId:
+                    type: string
+                runId:
+                    type: string
+                clientRequestKey:
+                    type: string
         CreateOAuth2ClientRequest:
             required:
                 - name
@@ -13879,6 +14134,7 @@ components:
                         - SURVEY_TYPE_UNSPECIFIED
                         - SURVEY_TYPE_CSAT
                         - SURVEY_TYPE_CES
+                        - SURVEY_TYPE_NPS
                     type: string
                     format: enum
                 status:
@@ -13896,6 +14152,7 @@ components:
                         - SURVEY_TRIGGER_EVENT_REPLY_SENT
                         - SURVEY_TRIGGER_EVENT_MANUAL_LINK
                         - SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED
+                        - SURVEY_TRIGGER_EVENT_SCHEDULED_RUN
                     type: string
                     format: enum
                 distributionMode:
@@ -13911,6 +14168,7 @@ components:
                         - SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE
                         - SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION
                         - SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER
+                        - SURVEY_DEDUPE_POLICY_ONE_PER_RUN
                     type: string
                     format: enum
                 triggerFilter:
@@ -13941,6 +14199,8 @@ components:
                     format: int32
                 suppressAutoResolved:
                     type: boolean
+                npsSettings:
+                    $ref: '#/components/schemas/NpsCampaignSettings'
         CreateSurveyHostedLinkRequest:
             type: object
             properties:
@@ -18472,6 +18732,24 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/NotifyTarget'
+        ListNpsCampaignRunEvidenceExportsResponse:
+            type: object
+            properties:
+                exports:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/NpsCampaignRunEvidenceExport'
+        ListNpsCampaignRunsResponse:
+            type: object
+            properties:
+                runs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/NpsCampaignRun'
+                nextBeforeSequence:
+                    type: integer
+                    description: Pass this value as before_sequence to retrieve the next older page.
+                    format: int32
         ListOAuth2ClientsResponse:
             type: object
             properties:
@@ -19015,6 +19293,321 @@ components:
                 lastError:
                     type: string
             description: NotifyTarget never carries the secret — it is write-only once stored.
+        NpsCampaignPreflight:
+            type: object
+            properties:
+                campaignId:
+                    type: string
+                evaluatedCount:
+                    type: integer
+                    format: int32
+                eligibleCount:
+                    type: integer
+                    format: int32
+                excludedCount:
+                    type: integer
+                    format: int32
+                plannedInvitationCount:
+                    type: integer
+                    format: int32
+                maximumRunRecipients:
+                    type: integer
+                    format: int32
+                deliveryReady:
+                    type: boolean
+                deliveryBlocker:
+                    type: string
+                generatedAt:
+                    type: string
+                exclusionReasonDistribution:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SurveySuppressionReasonBucket'
+                    description: |-
+                        Mutually exclusive, aggregate-only reasons for excluded audience members.
+                         No recipient identifiers are exposed.
+                minimumCompletedResponses:
+                    type: integer
+                    description: Frozen operating-evidence threshold configured for this campaign.
+                    format: int32
+                plannedInvitationCountBelowMinimumCompletedResponses:
+                    type: boolean
+                    description: |-
+                        Advisory current-state condition. When true, even a submission from every
+                         currently planned invitation cannot reach minimum_completed_responses. The
+                         worker still re-evaluates the authoritative audience at schedule time.
+                recurrenceSamplingPercent:
+                    type: integer
+                    description: Target share used to size each recurring pulse. Zero means a manual run.
+                    format: int32
+                samplePlanningPopulationCount:
+                    type: integer
+                    description: Current serviceable population used for the conservative planning estimate.
+                    format: int32
+                samplePlanningRequiredCompletedResponses:
+                    type: integer
+                    format: int32
+                samplePlanningInvitationTarget:
+                    type: integer
+                    format: int32
+                samplePlanningConfidencePercent:
+                    type: integer
+                    format: int32
+                samplePlanningMarginOfErrorPercent:
+                    type: integer
+                    format: int32
+                samplePlanningExpectedResponseRatePercent:
+                    type: integer
+                    format: int32
+                plannedInvitationCountBelowSamplePlanningTarget:
+                    type: boolean
+                    description: True when the current run allocation cannot reach the planning invitation target.
+                samplePlanningTargetExceedsRecipientCap:
+                    type: boolean
+                    description: True when the planning invitation target is above the configured run cap.
+            description: |-
+                Aggregate-only launch evidence. The eventual worker evaluation remains the
+                 authoritative, immutable recipient boundary for a scheduled run.
+        NpsCampaignRun:
+            type: object
+            properties:
+                id:
+                    type: string
+                campaignId:
+                    type: string
+                sequence:
+                    type: integer
+                    format: int32
+                status:
+                    enum:
+                        - NPS_CAMPAIGN_RUN_STATUS_UNSPECIFIED
+                        - NPS_CAMPAIGN_RUN_STATUS_SCHEDULED
+                        - NPS_CAMPAIGN_RUN_STATUS_EVALUATING
+                        - NPS_CAMPAIGN_RUN_STATUS_COLLECTING
+                        - NPS_CAMPAIGN_RUN_STATUS_CLOSED
+                        - NPS_CAMPAIGN_RUN_STATUS_FAILED
+                        - NPS_CAMPAIGN_RUN_STATUS_CANCELLED
+                    type: string
+                    format: enum
+                scheduledAt:
+                    type: string
+                openedAt:
+                    type: string
+                closesAt:
+                    type: string
+                evaluatedCount:
+                    type: integer
+                    format: int32
+                eligibleCount:
+                    type: integer
+                    format: int32
+                invitationCount:
+                    type: integer
+                    format: int32
+                redactedResponseCount:
+                    type: integer
+                    format: int32
+                failureReason:
+                    type: string
+                createdAt:
+                    type: string
+                updatedAt:
+                    type: string
+                deliveredCount:
+                    type: integer
+                    format: int32
+                startedCount:
+                    type: integer
+                    description: |-
+                        A hosted survey page has been visited or a response has been submitted.
+                         Email-link scanners and prefetchers can create a visit; this is not proof
+                         of a verified human interaction.
+                    format: int32
+                completedCount:
+                    type: integer
+                    format: int32
+                responseRate:
+                    type: number
+                    description: |-
+                        Deprecated: use hosted_visit_rate. This compatibility alias is the hosted
+                         survey page-visit rate, not the submitted response rate.
+                    format: double
+                nps:
+                    type: number
+                    format: double
+                detractorCount:
+                    type: integer
+                    format: int32
+                passiveCount:
+                    type: integer
+                    format: int32
+                promoterCount:
+                    type: integer
+                    format: int32
+                completionRate:
+                    type: number
+                    description: |-
+                        Submitted responses divided by hosted survey page visits. This is a
+                         page-visit conversion proxy, not a verified-human completion rate.
+                    format: double
+                cancelledAt:
+                    type: string
+                measurementKey:
+                    type: string
+                    description: Opaque immutable-definition fingerprint used to delimit comparable trends.
+                collectionDays:
+                    type: integer
+                    description: Frozen collection window used for this run's response capability.
+                    format: int32
+                maximumRunRecipients:
+                    type: integer
+                    description: Frozen cap applied after eligibility resolution for this run.
+                    format: int32
+                contactCooldownDays:
+                    type: integer
+                    description: Frozen minimum days since a prior survey invitation required for eligibility.
+                    format: int32
+                completedResponseRate:
+                    type: number
+                    description: Submitted responses divided by invitations created for this run.
+                    format: double
+                measurementReadiness:
+                    enum:
+                        - NPS_MEASUREMENT_READINESS_UNSPECIFIED
+                        - NPS_MEASUREMENT_READINESS_PENDING
+                        - NPS_MEASUREMENT_READINESS_PRELIMINARY
+                        - NPS_MEASUREMENT_READINESS_DIRECTIONAL
+                        - NPS_MEASUREMENT_READINESS_QUALIFIED
+                        - NPS_MEASUREMENT_READINESS_REDACTED
+                        - NPS_MEASUREMENT_READINESS_UNAVAILABLE
+                    type: string
+                    format: enum
+                minimumCompletedResponses:
+                    type: integer
+                    description: Frozen operating-evidence guardrail for submitted responses.
+                    format: int32
+                minimumResponseRatePercent:
+                    type: integer
+                    description: Frozen operating-evidence guardrail for submitted response rate.
+                    format: int32
+                hostedVisitRate:
+                    type: number
+                    description: |-
+                        Hosted survey page visits divided by invitations created for this run.
+                         This can include email-link scanners and prefetchers, so it is not a
+                         human-participation or submitted-response rate.
+                    format: double
+                recurrenceSourceRunId:
+                    type: string
+                    description: The closed run that caused this automatic pulse, when applicable.
+                recurrenceSamplingPercent:
+                    type: integer
+                    description: Frozen target share used to size this recurring pulse. Zero means a manual run.
+                    format: int32
+                samplePlanningPopulationCount:
+                    type: integer
+                    description: Frozen conservative planning population observed when this run materialized.
+                    format: int32
+                samplePlanningRequiredCompletedResponses:
+                    type: integer
+                    format: int32
+                samplePlanningInvitationTarget:
+                    type: integer
+                    format: int32
+                samplePlanningConfidencePercent:
+                    type: integer
+                    format: int32
+                samplePlanningMarginOfErrorPercent:
+                    type: integer
+                    format: int32
+                samplePlanningExpectedResponseRatePercent:
+                    type: integer
+                    format: int32
+                invitationCountBelowSamplePlanningTarget:
+                    type: boolean
+                npsAvailable:
+                    type: boolean
+                    description: True when at least one current non-redacted NPS response contributes to nps.
+        NpsCampaignRunEvidenceExport:
+            type: object
+            properties:
+                id:
+                    type: string
+                campaignId:
+                    type: string
+                runId:
+                    type: string
+                reportVersion:
+                    type: string
+                generatedAt:
+                    type: string
+                artifactSha256:
+                    type: string
+                createdByType:
+                    type: string
+                createdAt:
+                    type: string
+                downloadedAt:
+                    type: string
+                downloadPath:
+                    type: string
+                expiresAt:
+                    type: string
+        NpsCampaignSettings:
+            type: object
+            properties:
+                cohortId:
+                    type: string
+                detractorOwnerMemberId:
+                    type: string
+                collectionDays:
+                    type: integer
+                    format: int32
+                maximumRunRecipients:
+                    type: integer
+                    format: int32
+                minimumCompletedResponses:
+                    type: integer
+                    description: |-
+                        Minimum currently retained submitted responses required by this campaign's
+                         operating-evidence guardrail.
+                    format: int32
+                minimumResponseRatePercent:
+                    type: integer
+                    description: Minimum submitted responses divided by invitations, expressed as a percent.
+                    format: int32
+                recurrenceIntervalDays:
+                    type: integer
+                    description: |-
+                        Optional relationship-NPS pulse cadence. Zero disables automatic runs;
+                         enabled cadences are expressed in days and must be between 30 and 365.
+                    format: int32
+                recurrenceContactCooldownDays:
+                    type: integer
+                    description: |-
+                        Minimum days between invitations to the same contact in a recurring
+                         relationship-NPS program. Defaults to 365; valid values are 30-3650.
+                    format: int32
+                recurrenceSamplingPercent:
+                    type: integer
+                    description: |-
+                        Target share of currently serviceable contacts covered by each recurring
+                         pulse. Defaults to 25%; valid values are 1-100. Manual runs ignore it.
+                    format: int32
+                samplePlanningConfidencePercent:
+                    type: integer
+                    description: |-
+                        Conservative planning confidence target. This is a response-volume
+                         planning input, not a claim of statistical significance for NPS.
+                    format: int32
+                samplePlanningMarginOfErrorPercent:
+                    type: integer
+                    description: Conservative planning margin of error target for a proportion proxy.
+                    format: int32
+                samplePlanningExpectedResponseRatePercent:
+                    type: integer
+                    description: Expected submitted-response rate used to translate completes into invites.
+                    format: int32
         OAuth2Client:
             type: object
             properties:
@@ -19586,6 +20179,7 @@ components:
                         - SURVEY_TYPE_UNSPECIFIED
                         - SURVEY_TYPE_CSAT
                         - SURVEY_TYPE_CES
+                        - SURVEY_TYPE_NPS
                     type: string
                     format: enum
                 title:
@@ -19620,6 +20214,9 @@ components:
                     format: enum
                 unsubscribeUrl:
                     type: string
+                collectsFollowUpConsent:
+                    type: boolean
+                    description: True when an NPS respondent may answer the optional follow-up question.
         PublicSurveyResponseReceipt:
             type: object
             properties:
@@ -20975,6 +21572,18 @@ components:
             properties:
                 view:
                     $ref: '#/components/schemas/SavedPublicVisibilityView'
+        ScheduleNpsCampaignRunRequest:
+            required:
+                - campaignId
+                - clientRequestKey
+            type: object
+            properties:
+                campaignId:
+                    type: string
+                clientRequestKey:
+                    type: string
+                scheduledAt:
+                    type: string
         ScopeInfo:
             type: object
             properties:
@@ -21491,6 +22100,8 @@ components:
                     type: string
                 locale:
                     type: string
+                followUpConsent:
+                    type: boolean
         SubscribePublicCustomerRequestRequest:
             required:
                 - tenantSlug
@@ -21666,6 +22277,48 @@ components:
                 rejectedDeliveryCount:
                     type: integer
                     format: int32
+                nps:
+                    type: number
+                    format: double
+                detractorCount:
+                    type: integer
+                    format: int32
+                passiveCount:
+                    type: integer
+                    format: int32
+                promoterCount:
+                    type: integer
+                    format: int32
+                redactedResponseCount:
+                    type: integer
+                    format: int32
+                startedCount:
+                    type: integer
+                    description: Hosted survey page visits can include email-link scanners and prefetchers.
+                    format: int32
+                startRate:
+                    type: number
+                    description: |-
+                        Hosted survey page visits divided by invitations. This is not a verified
+                         human-participation or submitted-response rate.
+                    format: double
+                completionRate:
+                    type: number
+                    description: |-
+                        Submitted responses divided by hosted survey page visits. This is a
+                         page-visit conversion proxy, not a verified-human completion rate.
+                    format: double
+                recoveryOutcome:
+                    $ref: '#/components/schemas/SurveyRecoveryOutcome'
+                npsAvailable:
+                    type: boolean
+                    description: True when at least one current non-redacted NPS response contributes to nps.
+                qualityFlaggedResponseCount:
+                    type: integer
+                    description: |-
+                        Count of responses with one or more explainable quality observations.
+                         This does not change score denominators.
+                    format: int32
         SurveyAnalyticsInsight:
             type: object
             properties:
@@ -21807,6 +22460,32 @@ components:
                 expiredCount:
                     type: integer
                     format: int32
+                runId:
+                    type: string
+                nps:
+                    type: number
+                    format: double
+                detractorCount:
+                    type: integer
+                    format: int32
+                passiveCount:
+                    type: integer
+                    format: int32
+                promoterCount:
+                    type: integer
+                    format: int32
+                redactedResponseCount:
+                    type: integer
+                    format: int32
+                startedCount:
+                    type: integer
+                    format: int32
+                npsAvailable:
+                    type: boolean
+                    description: True when at least one current non-redacted NPS response contributes to nps.
+                qualityFlaggedResponseCount:
+                    type: integer
+                    format: int32
         SurveyCampaign:
             type: object
             properties:
@@ -21819,6 +22498,7 @@ components:
                         - SURVEY_TYPE_UNSPECIFIED
                         - SURVEY_TYPE_CSAT
                         - SURVEY_TYPE_CES
+                        - SURVEY_TYPE_NPS
                     type: string
                     format: enum
                 status:
@@ -21836,6 +22516,7 @@ components:
                         - SURVEY_TRIGGER_EVENT_REPLY_SENT
                         - SURVEY_TRIGGER_EVENT_MANUAL_LINK
                         - SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED
+                        - SURVEY_TRIGGER_EVENT_SCHEDULED_RUN
                     type: string
                     format: enum
                 distributionMode:
@@ -21851,6 +22532,7 @@ components:
                         - SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE
                         - SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION
                         - SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER
+                        - SURVEY_DEDUPE_POLICY_ONE_PER_RUN
                     type: string
                     format: enum
                 triggerFilter:
@@ -21894,6 +22576,8 @@ components:
                     type: string
                 archivedAt:
                     type: string
+                npsSettings:
+                    $ref: '#/components/schemas/NpsCampaignSettings'
         SurveyCampaignHealth:
             type: object
             properties:
@@ -22000,6 +22684,22 @@ components:
                 recoveryOverdueRate:
                     type: number
                     format: double
+                startedCount:
+                    type: integer
+                    description: Hosted survey page visits can include email-link scanners and prefetchers.
+                    format: int32
+                startRate:
+                    type: number
+                    description: |-
+                        Hosted survey page visits divided by invitations. This is not a verified
+                         human-participation or submitted-response rate.
+                    format: double
+                completionRate:
+                    type: number
+                    description: |-
+                        Submitted responses divided by hosted survey page visits. This is a
+                         page-visit conversion proxy, not a verified-human completion rate.
+                    format: double
         SurveyInvitation:
             type: object
             properties:
@@ -22074,6 +22774,8 @@ components:
                     type: string
                 deliveryRetryable:
                     type: boolean
+                runId:
+                    type: string
         SurveyLowScoreReview:
             type: object
             properties:
@@ -22147,6 +22849,17 @@ components:
                     type: string
                 recoveryNotificationLastError:
                     type: string
+                initialDueAt:
+                    type: string
+                    description: |-
+                        The immutable target copied when the review was created. It is distinct
+                         from a later operational due-date change.
+                customerContactedAt:
+                    type: string
+                    description: The first durable record that an operator contacted the customer.
+                firstTerminalAt:
+                    type: string
+                    description: The immutable first terminal disposition used for recovery timeliness.
         SurveyRecipientPreview:
             type: object
             properties:
@@ -22237,6 +22950,52 @@ components:
                     type: string
                 actionTaken:
                     type: string
+        SurveyRecoveryOutcome:
+            type: object
+            properties:
+                reviewCount:
+                    type: integer
+                    format: int32
+                resolvedCount:
+                    type: integer
+                    format: int32
+                dismissedCount:
+                    type: integer
+                    format: int32
+                customerContactedCount:
+                    type: integer
+                    format: int32
+                rootCauseRecordedCount:
+                    type: integer
+                    format: int32
+                actionRecordedCount:
+                    type: integer
+                    format: int32
+                contactedTimelinessEvidenceCount:
+                    type: integer
+                    description: |-
+                        Counts whose immutable initial target and relevant event timestamp are
+                         both available. Historical reviews with unknown timestamps are excluded.
+                    format: int32
+                contactedOnTimeCount:
+                    type: integer
+                    format: int32
+                contactedLateCount:
+                    type: integer
+                    format: int32
+                terminalTimelinessEvidenceCount:
+                    type: integer
+                    format: int32
+                terminalOnTimeCount:
+                    type: integer
+                    format: int32
+                terminalLateCount:
+                    type: integer
+                    format: int32
+            description: |-
+                SurveyRecoveryOutcome records the durable operational work associated with
+                 low-score responses in the same analytics scope. A dismissed review remains
+                 distinct from an explicitly resolved recovery.
         SurveyRecoveryOwnerLoad:
             type: object
             properties:
@@ -22294,6 +23053,31 @@ components:
                     $ref: '#/components/schemas/SurveyLowScoreReview'
                 accountContext:
                     $ref: '#/components/schemas/SurveyAccountContext'
+                npsBucket:
+                    enum:
+                        - NPS_BUCKET_UNSPECIFIED
+                        - NPS_BUCKET_DETRACTOR
+                        - NPS_BUCKET_PASSIVE
+                        - NPS_BUCKET_PROMOTER
+                    type: string
+                    format: enum
+                feedbackId:
+                    type: string
+                followUpConsent:
+                    type: boolean
+                    description: |-
+                        A respondent's answer to the NPS follow-up question. It is distinct from
+                         their notification subscription and does not represent a legal basis.
+                qualityStatus:
+                    type: string
+                    description: |-
+                        Deterministic, privacy-safe response quality observation. Flagged
+                         responses remain included in score metrics until an operator decides how
+                         to handle them.
+                qualityReasons:
+                    type: array
+                    items:
+                        type: string
         SurveyScoreBucket:
             type: object
             properties:
@@ -23130,6 +23914,7 @@ components:
                         - SURVEY_TRIGGER_EVENT_REPLY_SENT
                         - SURVEY_TRIGGER_EVENT_MANUAL_LINK
                         - SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED
+                        - SURVEY_TRIGGER_EVENT_SCHEDULED_RUN
                     type: string
                     format: enum
                 distributionMode:
@@ -23145,6 +23930,7 @@ components:
                         - SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE
                         - SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION
                         - SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER
+                        - SURVEY_DEDUPE_POLICY_ONE_PER_RUN
                     type: string
                     format: enum
                 triggerFilter:
@@ -23175,6 +23961,8 @@ components:
                     format: int32
                 suppressAutoResolved:
                     type: boolean
+                npsSettings:
+                    $ref: '#/components/schemas/NpsCampaignSettings'
         UpdateSurveyLowScoreReviewRequest:
             type: object
             properties:

@@ -18,23 +18,25 @@ import (
 )
 
 const responseColumns = `
-	id, tenant_id, campaign_id, invitation_id, request_id, contact_id,
-	source_type, source_id, score, comment, locale, metadata,
+	id, tenant_id, campaign_id, survey_type, invitation_id, request_id, contact_id,
+	source_type, source_id, score, nps_bucket, follow_up_consent, comment, locale, metadata,
 	user_agent_hash, ip_hash, submitted_at, created_at`
 
 const qualifiedResponseColumns = `
-	sr.id, sr.tenant_id, sr.campaign_id, sr.invitation_id, sr.request_id, sr.contact_id,
-	sr.source_type, sr.source_id, sr.score, sr.comment, sr.locale, sr.metadata,
+	sr.id, sr.tenant_id, sr.campaign_id, sr.survey_type, sr.invitation_id, sr.request_id, sr.contact_id,
+	sr.source_type, sr.source_id, sr.score, sr.nps_bucket, sr.follow_up_consent, sr.comment, sr.locale, sr.metadata,
 	sr.user_agent_hash, sr.ip_hash, sr.submitted_at, sr.created_at`
+
+const qualifiedResponseFeedbackIDColumn = `srfl.feedback_id`
 
 const lowScoreReviewColumns = `
 	response_id, tenant_id, campaign_id, status, severity, owner_member_id,
-	root_cause, action_taken, customer_contacted, due_at, reviewed_at,
+	root_cause, action_taken, customer_contacted, due_at, initial_due_at, customer_contacted_at, first_terminal_at, reviewed_at,
 	updated_by, created_at, updated_at`
 
 const qualifiedLowScoreReviewColumns = `
 	lsr.response_id, lsr.tenant_id, lsr.campaign_id, lsr.status, lsr.severity, lsr.owner_member_id,
-	lsr.root_cause, lsr.action_taken, lsr.customer_contacted, lsr.due_at, lsr.reviewed_at,
+	lsr.root_cause, lsr.action_taken, lsr.customer_contacted, lsr.due_at, lsr.initial_due_at, lsr.customer_contacted_at, lsr.first_terminal_at, lsr.reviewed_at,
 	lsr.updated_by, lsr.created_at, lsr.updated_at`
 
 const qualifiedRecoveryNotificationSummaryColumns = `
@@ -45,34 +47,72 @@ const responseInvitationJoin = `
 	JOIN survey_invitations si
 	  ON si.tenant_id = sr.tenant_id AND si.id = sr.invitation_id`
 
+const responseFeedbackLinkJoin = `
+	LEFT JOIN survey_response_feedback_links srfl
+	  ON srfl.tenant_id = sr.tenant_id AND srfl.response_id = sr.id`
+
 func (r *Repo) CreateResponse(ctx context.Context, response Response, review *LowScoreReviewSeed) (Response, error) {
-	metadataRaw, err := jsonObject(response.Metadata)
-	if err != nil {
-		return Response{}, err
-	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return Response{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	item, err := createResponseTx(ctx, tx, response, review)
+	if err != nil {
+		if errors.Is(err, ErrInvitationExpired) {
+			if commitErr := tx.Commit(ctx); commitErr != nil {
+				return Response{}, commitErr
+			}
+		}
+		return Response{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Response{}, err
+	}
+	return item, nil
+}
+
+// CreateResponseTx persists a response and its review inside the caller's
+// transaction. It is used by NPS so a comment-derived feedback signal can be
+// committed with the response, never ahead of it or after it.
+func (r *Repo) CreateResponseTx(ctx context.Context, tx pgx.Tx, response Response, review *LowScoreReviewSeed) (Response, error) {
+	return createResponseTx(ctx, tx, response, review)
+}
+
+func createResponseTx(ctx context.Context, tx pgx.Tx, response Response, review *LowScoreReviewSeed) (Response, error) {
+	if err := lockResponseInvitation(ctx, tx, response); err != nil {
+		return Response{}, err
+	}
+	var err error
+	response, err = populateResponseSurveyType(ctx, tx, response)
+	if err != nil {
+		return Response{}, err
+	}
+	metadataRaw, err := jsonObject(response.Metadata)
+	if err != nil {
+		return Response{}, err
+	}
 	row := tx.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO survey_responses (
-			id, tenant_id, campaign_id, invitation_id, request_id, contact_id,
-			source_type, source_id, score, comment, locale, metadata,
+			id, tenant_id, campaign_id, survey_type, invitation_id, request_id, contact_id,
+			source_type, source_id, score, nps_bucket, follow_up_consent, comment, locale, metadata,
 			user_agent_hash, ip_hash, submitted_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 		)
 		RETURNING %s`, responseColumns),
 		response.ID,
 		strings.TrimSpace(response.TenantID),
 		response.CampaignID,
+		response.SurveyType,
 		response.InvitationID,
 		nullableUUID(response.RequestID),
 		nullableUUID(response.ContactID),
 		response.SourceType,
 		response.SourceID,
 		response.Score,
+		response.NPSBucket,
+		response.FollowUpConsent,
 		response.Comment,
 		response.Locale,
 		metadataRaw,
@@ -102,10 +142,92 @@ func (r *Repo) CreateResponse(ctx context.Context, response Response, review *Lo
 		}
 		item.Review = ptrext.Of(created)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return Response{}, err
-	}
 	return item, nil
+}
+
+// lockResponseInvitation makes the invitation deadline part of the response
+// transaction. The database clock is read after the row lock is held so a
+// request that waits across its deadline cannot be counted as a response.
+func lockResponseInvitation(ctx context.Context, tx pgx.Tx, response Response) error {
+	invitationCampaignID := ptrext.Of(uuid.Nil)
+	responseStatus := ptrext.Of("")
+	suppressionStatus := ptrext.Of("")
+	expiresAt := ptrext.Of(time.Time{})
+	hasExpiry := ptrext.Of(false)
+	campaignStatus := ptrext.Of("")
+	if err := tx.QueryRow(ctx, `
+		SELECT si.campaign_id,
+		       si.response_status,
+		       si.suppression_status,
+		       COALESCE(si.expires_at, 'epoch'::timestamptz),
+		       si.expires_at IS NOT NULL,
+		       sc.status
+		FROM survey_invitations si
+		JOIN survey_campaigns sc
+		  ON sc.tenant_id = si.tenant_id AND sc.id = si.campaign_id
+		WHERE si.tenant_id = $1 AND si.id = $2
+		FOR UPDATE OF si
+		FOR SHARE OF sc`,
+		strings.TrimSpace(response.TenantID),
+		response.InvitationID,
+	).Scan(invitationCampaignID, responseStatus, suppressionStatus, expiresAt, hasExpiry, campaignStatus); err != nil {
+		return mapNotFound(err)
+	}
+	if ptrext.Indirect(invitationCampaignID) != response.CampaignID {
+		return ErrInvalidInput
+	}
+	switch ptrext.Indirect(responseStatus) {
+	case ResponseCompleted:
+		return ErrConflict
+	case ResponseExpired:
+		return ErrInvitationExpired
+	}
+	if ptrext.Indirect(suppressionStatus) != SuppressionNotSuppressed {
+		return ErrCampaignNotActive
+	}
+	databaseNow := ptrext.Of(time.Time{})
+	if err := tx.QueryRow(ctx, "SELECT clock_timestamp()").Scan(databaseNow); err != nil {
+		return fmt.Errorf("read survey response deadline clock: %w", err)
+	}
+	if !ptrext.Indirect(hasExpiry) || ptrext.Indirect(databaseNow).Before(ptrext.Indirect(expiresAt)) {
+		if ptrext.Indirect(campaignStatus) == StatusActive {
+			return nil
+		}
+		return ErrCampaignNotActive
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE survey_invitations
+		SET response_status = 'expired',
+		    delivery_status = CASE
+		        WHEN delivery_status IN ('pending', 'delayed') THEN 'not_applicable'
+		        ELSE delivery_status
+		    END,
+		    delivery_secret = NULL,
+		    suppression_reason = 'expired',
+		    claimed_at = NULL,
+		    claimed_by = ''
+		WHERE tenant_id = $1 AND id = $2`,
+		strings.TrimSpace(response.TenantID),
+		response.InvitationID,
+	); err != nil {
+		return mapWriteError(err)
+	}
+	return ErrInvitationExpired
+}
+
+func populateResponseSurveyType(ctx context.Context, tx pgx.Tx, response Response) (Response, error) {
+	if strings.TrimSpace(response.SurveyType) != "" {
+		return response, nil
+	}
+	surveyType := ptrext.Of("")
+	if err := tx.QueryRow(ctx, `
+		SELECT survey_type
+		FROM survey_campaigns
+		WHERE tenant_id = $1 AND id = $2`, response.TenantID, response.CampaignID).Scan(surveyType); err != nil {
+		return Response{}, mapNotFound(err)
+	}
+	response.SurveyType = ptrext.Indirect(surveyType)
+	return response, nil
 }
 
 func createLowScoreReviewTx(ctx context.Context, tx pgx.Tx, response Response, seed LowScoreReviewSeed) (LowScoreReview, error) {
@@ -115,13 +237,15 @@ func createLowScoreReviewTx(ctx context.Context, tx pgx.Tx, response Response, s
 	}
 	row := tx.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO survey_low_score_reviews (
-			response_id, tenant_id, campaign_id, status, severity, due_at, updated_by
-		) VALUES ($1, $2, $3, 'open', $4, $5, $6)
+			response_id, tenant_id, campaign_id, status, severity, owner_member_id, due_at, initial_due_at, updated_by
+		) VALUES ($1, $2, $3, 'open', $4, $5, $6, $7, $8)
 		RETURNING %s`, lowScoreReviewColumns),
 		response.ID,
 		response.TenantID,
 		response.CampaignID,
 		severity,
+		nullableUUID(seed.OwnerMemberID),
+		seed.DueAt,
 		seed.DueAt,
 		strings.TrimSpace(seed.UpdatedBy),
 	)
@@ -163,7 +287,8 @@ func (r *Repo) ListResponses(ctx context.Context, filter ResponseFilter) ([]Resp
 		%s
 		%s
 		%s
-		LIMIT $%d`, responseListColumns(lowScoreOnly), responseInvitationJoin, lowScoreReviewJoin(lowScoreOnly), whereClause(where), responseListOrder(lowScoreOnly), len(args))
+		%s
+		LIMIT $%d`, responseListColumns(lowScoreOnly), responseInvitationJoin, responseFeedbackLinkJoin, lowScoreReviewJoin(lowScoreOnly), whereClause(where), responseListOrder(lowScoreOnly), len(args))
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list survey responses: %w", err)
@@ -195,9 +320,9 @@ func responseListRequiresReview(filter ResponseFilter) bool {
 
 func responseListColumns(lowScoreOnly bool) string {
 	if !lowScoreOnly {
-		return qualifiedResponseColumns + ", " + surveyResponseAccountColumns()
+		return qualifiedResponseColumns + ", " + qualifiedResponseFeedbackIDColumn + ", " + surveyResponseAccountColumns()
 	}
-	return qualifiedResponseColumns + ", " + qualifiedLowScoreReviewColumns + ", " +
+	return qualifiedResponseColumns + ", " + qualifiedResponseFeedbackIDColumn + ", " + qualifiedLowScoreReviewColumns + ", " +
 		qualifiedRecoveryNotificationSummaryColumns + ", " + surveyResponseAccountColumns()
 }
 
@@ -391,13 +516,18 @@ func activeUnblockedReviewWhere() string {
 
 func (r *Repo) GetResponseByInvitation(ctx context.Context, tenantID string, invitationID uuid.UUID) (Response, error) {
 	row := r.pool.QueryRow(ctx, fmt.Sprintf(`
-		SELECT %s
-		FROM survey_responses
-		WHERE tenant_id = $1 AND invitation_id = $2`, responseColumns),
+		SELECT %s, %s
+		FROM survey_responses sr
+		%s
+		WHERE sr.tenant_id = $1 AND sr.invitation_id = $2`,
+		qualifiedResponseColumns,
+		qualifiedResponseFeedbackIDColumn,
+		responseFeedbackLinkJoin,
+	),
 		strings.TrimSpace(tenantID),
 		invitationID,
 	)
-	item, err := scanResponse(row)
+	item, err := scanResponseWithFeedbackID(row)
 	if err != nil {
 		return Response{}, err
 	}
@@ -431,11 +561,21 @@ func (r *Repo) UpdateLowScoreReview(ctx context.Context, review LowScoreReview) 
 		    root_cause = $6,
 		    action_taken = $7,
 		    customer_contacted = $8,
+		    customer_contacted_at = CASE
+	        WHEN NOT customer_contacted AND $8 THEN COALESCE(customer_contacted_at, NOW())
+	        ELSE customer_contacted_at
+	    END,
 		    due_at = $9,
 		    reviewed_at = CASE
-		        WHEN $3 IN ('resolved', 'dismissed') THEN COALESCE(reviewed_at, NOW())
-		        ELSE reviewed_at
-		    END,
+	        WHEN $3 IN ('resolved', 'dismissed') THEN COALESCE(reviewed_at, NOW())
+	        ELSE reviewed_at
+	    END,
+		    first_terminal_at = CASE
+	        WHEN status NOT IN ('resolved', 'dismissed')
+	             AND $3 IN ('resolved', 'dismissed')
+	             AND NOT terminal_timeliness_unknown THEN COALESCE(first_terminal_at, NOW())
+	        ELSE first_terminal_at
+	    END,
 		    claimed_at = NULL,
 		    claimed_by = '',
 		    updated_by = $10
@@ -548,6 +688,7 @@ func (r *Repo) Analytics(ctx context.Context, filter AnalyticsFilter) (Analytics
 		SuppressedCount:                    invitations.SuppressedCount,
 		NotStartedCount:                    invitations.NotStartedCount,
 		OpenedCount:                        invitations.OpenedCount,
+		StartedCount:                       invitations.StartedCount,
 		ExpiredCount:                       invitations.ExpiredCount,
 		PendingDeliveryCount:               invitations.PendingDeliveryCount,
 		DelayedDeliveryCount:               invitations.DelayedDeliveryCount,
@@ -555,6 +696,7 @@ func (r *Repo) Analytics(ctx context.Context, filter AnalyticsFilter) (Analytics
 		CompletedCount:                     responses.CompletedCount,
 		LowScoreCount:                      responses.LowScoreCount,
 		PositiveScoreCount:                 responses.PositiveScoreCount,
+		QualityFlaggedResponseCount:        responses.QualityFlaggedResponseCount,
 		OpenLowScoreReviewCount:            reviews.OpenCount,
 		OverdueLowScoreReviewCount:         reviews.OverdueCount,
 		UnassignedLowScoreReviewCount:      reviews.UnassignedCount,
@@ -566,14 +708,29 @@ func (r *Repo) Analytics(ctx context.Context, filter AnalyticsFilter) (Analytics
 		PendingContactRecoveryQueueCount:   reviews.PendingContactQueueCount,
 		MissingRootCauseRecoveryQueueCount: reviews.MissingRootCauseQueueCount,
 		MissingActionRecoveryQueueCount:    reviews.MissingActionQueueCount,
+		RecoveryOutcome:                    reviews.Outcome,
 		AverageScore:                       responses.AverageScore,
 		AverageResponseSeconds:             responses.AverageResponseSeconds,
 		ScoreDistribution:                  distribution,
 		SuppressionReasons:                 suppressionReasons,
 		OwnerRecoveryLoads:                 ownerLoads,
 	}
+	npsMetrics, err := r.npsMetrics(ctx, filter)
+	if err != nil {
+		return Analytics{}, err
+	}
+	out.NPS = npsMetrics.Score
+	out.NPSAvailable = npsMetrics.Available
+	out.DetractorCount = npsMetrics.DetractorCount
+	out.PassiveCount = npsMetrics.PassiveCount
+	out.PromoterCount = npsMetrics.PromoterCount
+	out.RedactedResponseCount = npsMetrics.RedactedResponseCount
 	if out.InvitationCount > 0 {
 		out.ResponseRate = float64(out.CompletedCount) / float64(out.InvitationCount)
+		out.StartRate = float64(out.StartedCount) / float64(out.InvitationCount)
+	}
+	if out.StartedCount > 0 {
+		out.CompletionRate = float64(out.CompletedCount) / float64(out.StartedCount)
 	}
 	if out.CompletedCount > 0 {
 		out.PositiveScoreRate = float64(out.PositiveScoreCount) / float64(out.CompletedCount)
@@ -591,6 +748,11 @@ func (r *Repo) AnalyticsTrend(ctx context.Context, filter AnalyticsFilter) ([]An
 		args = append(args, ptrext.Indirect(filter.CampaignID))
 		invitationCampaignFilter = fmt.Sprintf("AND campaign_id = $%d", len(args))
 		responseCampaignFilter = fmt.Sprintf("AND sr.campaign_id = $%d", len(args))
+	}
+	if filter.RunID != nil {
+		args = append(args, ptrext.Indirect(filter.RunID))
+		invitationCampaignFilter += fmt.Sprintf(" AND run_id = $%d", len(args))
+		responseCampaignFilter += fmt.Sprintf(" AND si.run_id = $%d", len(args))
 	}
 	rows, err := r.pool.Query(ctx, analyticsTrendQuery(invitationCampaignFilter, responseCampaignFilter), args...)
 	if err != nil {
@@ -612,7 +774,15 @@ func (r *Repo) AnalyticsTrend(ctx context.Context, filter AnalyticsFilter) ([]An
 			&bucket.ResponseRate,
 			&bucket.NotStartedCount,
 			&bucket.OpenedCount,
+			&bucket.StartedCount,
 			&bucket.ExpiredCount,
+			&bucket.NPS,
+			&bucket.NPSAvailable,
+			&bucket.DetractorCount,
+			&bucket.PassiveCount,
+			&bucket.PromoterCount,
+			&bucket.RedactedResponseCount,
+			&bucket.QualityFlaggedResponseCount,
 		); err != nil {
 			return nil, err
 		}
@@ -640,7 +810,8 @@ func analyticsTrendQuery(invitationCampaignFilter string, responseCampaignFilter
 				COUNT(*) FILTER (WHERE delivery_status IN ('accepted', 'delivered')) AS delivered_count,
 				COUNT(*) FILTER (WHERE suppression_status = 'suppressed') AS suppressed_count,
 				COUNT(*) FILTER (WHERE response_status = 'not_started') AS not_started_count,
-				COUNT(*) FILTER (WHERE response_status = 'opened') AS opened_count,
+				COUNT(*) FILTER (WHERE response_status = 'opened' OR opened_at IS NOT NULL) AS opened_count,
+				COUNT(*) FILTER (WHERE response_status IN ('started', 'completed')) AS started_count,
 				COUNT(*) FILTER (WHERE response_status = 'expired') AS expired_count
 			FROM survey_invitations
 			WHERE tenant_id = $1
@@ -654,11 +825,17 @@ func analyticsTrendQuery(invitationCampaignFilter string, responseCampaignFilter
 				(sr.submitted_at AT TIME ZONE 'UTC')::date AS day,
 				COUNT(*) AS completed_count,
 				COUNT(*) FILTER (WHERE sr.score <= sc.low_score_threshold) AS low_score_count,
-				COUNT(*) FILTER (WHERE sr.score >= CASE WHEN sc.survey_type = 'ces' THEN 6 ELSE 4 END) AS positive_score_count,
-				AVG(sr.score) AS average_score
+				COUNT(*) FILTER (WHERE sr.score >= CASE WHEN sc.survey_type = 'ces' THEN 6 WHEN sc.survey_type = 'nps' THEN 9 ELSE 4 END) AS positive_score_count,
+				AVG(sr.score) AS average_score,
+				COUNT(*) FILTER (WHERE sr.survey_type = 'nps' AND sr.nps_bucket = 'detractor') AS detractor_count,
+				COUNT(*) FILTER (WHERE sr.survey_type = 'nps' AND sr.nps_bucket = 'passive') AS passive_count,
+				COUNT(*) FILTER (WHERE sr.survey_type = 'nps' AND sr.nps_bucket = 'promoter') AS promoter_count,
+				COUNT(*) FILTER (WHERE sr.metadata->>'response_quality_status' = 'flagged') AS quality_flagged_response_count
 			FROM survey_responses sr
 			JOIN survey_campaigns sc
 			  ON sc.tenant_id = sr.tenant_id AND sc.id = sr.campaign_id
+			JOIN survey_invitations si
+			  ON si.tenant_id = sr.tenant_id AND si.id = sr.invitation_id
 			WHERE sr.tenant_id = $1
 			  AND sr.submitted_at >= $2
 			  AND sr.submitted_at < $3
@@ -681,7 +858,24 @@ func analyticsTrendQuery(invitationCampaignFilter string, responseCampaignFilter
 			END,
 			COALESCE(invitation_daily.not_started_count, 0),
 			COALESCE(invitation_daily.opened_count, 0),
-			COALESCE(invitation_daily.expired_count, 0)
+			COALESCE(invitation_daily.started_count, 0),
+			COALESCE(invitation_daily.expired_count, 0),
+			CASE
+				WHEN COALESCE(response_daily.detractor_count, 0) + COALESCE(response_daily.passive_count, 0) + COALESCE(response_daily.promoter_count, 0) > 0
+					THEN 100.0 * (COALESCE(response_daily.promoter_count, 0) - COALESCE(response_daily.detractor_count, 0)) /
+						(COALESCE(response_daily.detractor_count, 0) + COALESCE(response_daily.passive_count, 0) + COALESCE(response_daily.promoter_count, 0))
+				ELSE 0
+				END,
+				CASE
+					WHEN COALESCE(response_daily.detractor_count, 0) + COALESCE(response_daily.passive_count, 0) + COALESCE(response_daily.promoter_count, 0) > 0
+						THEN TRUE
+					ELSE FALSE
+				END,
+				COALESCE(response_daily.detractor_count, 0),
+			COALESCE(response_daily.passive_count, 0),
+			COALESCE(response_daily.promoter_count, 0),
+			0,
+			COALESCE(response_daily.quality_flagged_response_count, 0)
 		FROM days
 		LEFT JOIN invitation_daily ON invitation_daily.day = days.day
 		LEFT JOIN response_daily ON response_daily.day = days.day
@@ -759,7 +953,7 @@ func analyticsSegmentsQuery(expr analyticsSegmentExpr, campaignFilter string, li
 				%s AS segment_key,
 				%s AS segment_label,
 				%s AS segment_campaign_id,
-				sc.survey_type,
+				sc.survey_type AS campaign_survey_type,
 				sc.low_score_threshold
 			FROM survey_invitations si
 			JOIN survey_campaigns sc
@@ -778,7 +972,13 @@ func analyticsSegmentsQuery(expr analyticsSegmentExpr, campaignFilter string, li
 			COUNT(*) FILTER (WHERE suppression_status = 'suppressed'),
 			COUNT(sr.id),
 			COUNT(sr.id) FILTER (WHERE sr.score <= low_score_threshold),
-			COUNT(sr.id) FILTER (WHERE sr.score >= CASE WHEN survey_type = 'ces' THEN 6 ELSE 4 END),
+			COUNT(sr.id) FILTER (
+				WHERE sr.score >= CASE
+					WHEN campaign_survey_type = 'ces' THEN 6
+					WHEN campaign_survey_type = 'nps' THEN 9
+					ELSE 4
+				END
+			),
 			COUNT(*) FILTER (WHERE response_status = 'expired'),
 			COALESCE(AVG(sr.score), 0),
 			CASE WHEN COUNT(*) > 0 THEN COUNT(sr.id)::float / COUNT(*) ELSE 0 END,
@@ -788,7 +988,13 @@ func analyticsSegmentsQuery(expr analyticsSegmentExpr, campaignFilter string, li
 			END,
 			CASE WHEN COUNT(sr.id) > 0
 				THEN (
-					COUNT(sr.id) FILTER (WHERE sr.score >= CASE WHEN survey_type = 'ces' THEN 6 ELSE 4 END)
+					COUNT(sr.id) FILTER (
+						WHERE sr.score >= CASE
+							WHEN campaign_survey_type = 'ces' THEN 6
+							WHEN campaign_survey_type = 'nps' THEN 9
+							ELSE 4
+						END
+					)
 				)::float / COUNT(sr.id)
 				ELSE 0
 			END,
@@ -857,6 +1063,9 @@ func (r *Repo) suppressionReasonDistribution(ctx context.Context, filter Analyti
 	if filter.To != nil {
 		where, args = appendFilter(where, args, "created_at < $%d", ptrext.Indirect(filter.To))
 	}
+	if filter.RunID != nil {
+		where, args = appendFilter(where, args, "run_id = $%d", ptrext.Indirect(filter.RunID))
+	}
 	query := fmt.Sprintf(`
 		SELECT COALESCE(NULLIF(BTRIM(suppression_reason), ''), 'unknown') AS reason, COUNT(*)
 		FROM survey_invitations
@@ -894,13 +1103,54 @@ type lowScoreReviewCountResult struct {
 	PendingContactQueueCount    int
 	MissingRootCauseQueueCount  int
 	MissingActionQueueCount     int
+	Outcome                     RecoveryOutcome
+}
+
+type lowScoreReviewCountScan struct {
+	reviewCount                      *int
+	resolvedCount                    *int
+	dismissedCount                   *int
+	customerContactedCount           *int
+	rootCauseRecordedCount           *int
+	actionRecordedCount              *int
+	contactedTimelinessEvidenceCount *int
+	contactedOnTimeCount             *int
+	contactedLateCount               *int
+	terminalTimelinessEvidenceCount  *int
+	terminalOnTimeCount              *int
+	terminalLateCount                *int
+	openCount                        *int
+	overdueCount                     *int
+	unassignedCount                  *int
+	criticalCount                    *int
+	pendingCustomerContactCount      *int
+	oldestOpenDueAt                  **time.Time
+	overdueQueueCount                *int
+	unassignedQueueCount             *int
+	pendingContactQueueCount         *int
+	missingRootCauseQueueCount       *int
+	missingActionQueueCount          *int
 }
 
 func (r *Repo) lowScoreReviewCounts(ctx context.Context, filter AnalyticsFilter) (lowScoreReviewCountResult, error) {
+	where, args := analyticsLowScoreReviewWhere(filter)
+	scan := newLowScoreReviewCountScan()
+	if err := r.pool.QueryRow(ctx, lowScoreReviewCountsQuery(where), args...).Scan(
+		scan.destinations()...,
+	); err != nil {
+		return lowScoreReviewCountResult{}, fmt.Errorf("survey low score review counts: %w", err)
+	}
+	return scan.result(), nil
+}
+
+func analyticsLowScoreReviewWhere(filter AnalyticsFilter) ([]string, []any) {
 	where := []string{"lsr.tenant_id = $1"}
 	args := []any{strings.TrimSpace(filter.TenantID)}
 	if filter.CampaignID != nil {
 		where, args = appendFilter(where, args, "lsr.campaign_id = $%d", ptrext.Indirect(filter.CampaignID))
+	}
+	if filter.RunID != nil {
+		where, args = appendFilter(where, args, "si.run_id = $%d", ptrext.Indirect(filter.RunID))
 	}
 	if filter.From != nil {
 		where, args = appendFilter(where, args, "sr.submitted_at >= $%d", ptrext.Indirect(filter.From))
@@ -908,13 +1158,46 @@ func (r *Repo) lowScoreReviewCounts(ctx context.Context, filter AnalyticsFilter)
 	if filter.To != nil {
 		where, args = appendFilter(where, args, "sr.submitted_at < $%d", ptrext.Indirect(filter.To))
 	}
-	overdueQueueWhere := recoveryBlockerWhere(RecoveryBlockerOverdue)
-	unassignedQueueWhere := recoveryBlockerWhere(RecoveryBlockerOwner)
-	pendingContactQueueWhere := recoveryBlockerWhere(RecoveryBlockerContact)
-	missingRootCauseQueueWhere := recoveryBlockerWhere(RecoveryBlockerRootCause)
-	missingActionQueueWhere := recoveryBlockerWhere(RecoveryBlockerAction)
-	query := fmt.Sprintf(`
+	return where, args
+}
+
+func lowScoreReviewCountsQuery(where []string) string {
+	return fmt.Sprintf(`
 			SELECT
+				COUNT(*),
+				COUNT(*) FILTER (WHERE lsr.status = 'resolved'),
+				COUNT(*) FILTER (WHERE lsr.status = 'dismissed'),
+				COUNT(*) FILTER (WHERE lsr.customer_contacted),
+				COUNT(*) FILTER (WHERE BTRIM(lsr.root_cause) <> ''),
+				COUNT(*) FILTER (WHERE BTRIM(lsr.action_taken) <> ''),
+				COUNT(*) FILTER (
+					WHERE lsr.initial_due_at IS NOT NULL
+					  AND lsr.customer_contacted_at IS NOT NULL
+				),
+				COUNT(*) FILTER (
+					WHERE lsr.initial_due_at IS NOT NULL
+					  AND lsr.customer_contacted_at IS NOT NULL
+					  AND lsr.customer_contacted_at <= lsr.initial_due_at
+				),
+				COUNT(*) FILTER (
+					WHERE lsr.initial_due_at IS NOT NULL
+					  AND lsr.customer_contacted_at IS NOT NULL
+					  AND lsr.customer_contacted_at > lsr.initial_due_at
+				),
+				COUNT(*) FILTER (
+					WHERE lsr.initial_due_at IS NOT NULL
+					  AND lsr.first_terminal_at IS NOT NULL
+				),
+				COUNT(*) FILTER (
+					WHERE lsr.initial_due_at IS NOT NULL
+					  AND lsr.first_terminal_at IS NOT NULL
+					  AND lsr.first_terminal_at <= lsr.initial_due_at
+				),
+				COUNT(*) FILTER (
+					WHERE lsr.initial_due_at IS NOT NULL
+					  AND lsr.first_terminal_at IS NOT NULL
+					  AND lsr.first_terminal_at > lsr.initial_due_at
+				),
 				COUNT(*) FILTER (WHERE lsr.status IN ('open', 'in_review')),
 				COUNT(*) FILTER (
 					WHERE lsr.status IN ('open', 'in_review')
@@ -945,29 +1228,138 @@ func (r *Repo) lowScoreReviewCounts(ctx context.Context, filter AnalyticsFilter)
 			FROM survey_low_score_reviews lsr
 			JOIN survey_responses sr
 			  ON sr.tenant_id = lsr.tenant_id AND sr.id = lsr.response_id
+			JOIN survey_invitations si
+			  ON si.tenant_id = sr.tenant_id AND si.id = sr.invitation_id
 			%s`,
-		overdueQueueWhere,
-		unassignedQueueWhere,
-		pendingContactQueueWhere,
-		missingRootCauseQueueWhere,
-		missingActionQueueWhere,
+		recoveryBlockerWhere(RecoveryBlockerOverdue),
+		recoveryBlockerWhere(RecoveryBlockerOwner),
+		recoveryBlockerWhere(RecoveryBlockerContact),
+		recoveryBlockerWhere(RecoveryBlockerRootCause),
+		recoveryBlockerWhere(RecoveryBlockerAction),
 		whereClause(where),
 	)
-	var out lowScoreReviewCountResult
-	if err := r.pool.QueryRow(ctx, query, args...).Scan(
-		&out.OpenCount,
-		&out.OverdueCount,
-		&out.UnassignedCount,
-		&out.CriticalCount,
-		&out.PendingCustomerContactCount,
-		&out.OldestOpenDueAt,
-		&out.OverdueQueueCount,
-		&out.UnassignedQueueCount,
-		&out.PendingContactQueueCount,
-		&out.MissingRootCauseQueueCount,
-		&out.MissingActionQueueCount,
-	); err != nil {
-		return lowScoreReviewCountResult{}, fmt.Errorf("survey low score review counts: %w", err)
+}
+
+func newLowScoreReviewCountScan() lowScoreReviewCountScan {
+	return lowScoreReviewCountScan{
+		reviewCount: ptrext.Of(0), resolvedCount: ptrext.Of(0), dismissedCount: ptrext.Of(0),
+		customerContactedCount: ptrext.Of(0), rootCauseRecordedCount: ptrext.Of(0), actionRecordedCount: ptrext.Of(0),
+		contactedTimelinessEvidenceCount: ptrext.Of(0), contactedOnTimeCount: ptrext.Of(0), contactedLateCount: ptrext.Of(0),
+		terminalTimelinessEvidenceCount: ptrext.Of(0), terminalOnTimeCount: ptrext.Of(0), terminalLateCount: ptrext.Of(0),
+		openCount: ptrext.Of(0), overdueCount: ptrext.Of(0), unassignedCount: ptrext.Of(0), criticalCount: ptrext.Of(0),
+		pendingCustomerContactCount: ptrext.Of(0), oldestOpenDueAt: ptrext.Of[*time.Time](nil),
+		overdueQueueCount: ptrext.Of(0), unassignedQueueCount: ptrext.Of(0), pendingContactQueueCount: ptrext.Of(0),
+		missingRootCauseQueueCount: ptrext.Of(0), missingActionQueueCount: ptrext.Of(0),
+	}
+}
+
+func (scan lowScoreReviewCountScan) destinations() []any {
+	return []any{
+		scan.reviewCount, scan.resolvedCount, scan.dismissedCount, scan.customerContactedCount,
+		scan.rootCauseRecordedCount, scan.actionRecordedCount,
+		scan.contactedTimelinessEvidenceCount, scan.contactedOnTimeCount, scan.contactedLateCount,
+		scan.terminalTimelinessEvidenceCount, scan.terminalOnTimeCount, scan.terminalLateCount,
+		scan.openCount, scan.overdueCount, scan.unassignedCount, scan.criticalCount,
+		scan.pendingCustomerContactCount, scan.oldestOpenDueAt,
+		scan.overdueQueueCount, scan.unassignedQueueCount, scan.pendingContactQueueCount,
+		scan.missingRootCauseQueueCount, scan.missingActionQueueCount,
+	}
+}
+
+func (scan lowScoreReviewCountScan) result() lowScoreReviewCountResult {
+	return lowScoreReviewCountResult{
+		OpenCount:                   ptrext.Indirect(scan.openCount),
+		OverdueCount:                ptrext.Indirect(scan.overdueCount),
+		UnassignedCount:             ptrext.Indirect(scan.unassignedCount),
+		CriticalCount:               ptrext.Indirect(scan.criticalCount),
+		PendingCustomerContactCount: ptrext.Indirect(scan.pendingCustomerContactCount),
+		OldestOpenDueAt:             ptrext.Indirect(scan.oldestOpenDueAt),
+		OverdueQueueCount:           ptrext.Indirect(scan.overdueQueueCount),
+		UnassignedQueueCount:        ptrext.Indirect(scan.unassignedQueueCount),
+		PendingContactQueueCount:    ptrext.Indirect(scan.pendingContactQueueCount),
+		MissingRootCauseQueueCount:  ptrext.Indirect(scan.missingRootCauseQueueCount),
+		MissingActionQueueCount:     ptrext.Indirect(scan.missingActionQueueCount),
+		Outcome: RecoveryOutcome{
+			ReviewCount:                      ptrext.Indirect(scan.reviewCount),
+			ResolvedCount:                    ptrext.Indirect(scan.resolvedCount),
+			DismissedCount:                   ptrext.Indirect(scan.dismissedCount),
+			CustomerContactedCount:           ptrext.Indirect(scan.customerContactedCount),
+			RootCauseRecordedCount:           ptrext.Indirect(scan.rootCauseRecordedCount),
+			ActionRecordedCount:              ptrext.Indirect(scan.actionRecordedCount),
+			ContactedTimelinessEvidenceCount: ptrext.Indirect(scan.contactedTimelinessEvidenceCount),
+			ContactedOnTimeCount:             ptrext.Indirect(scan.contactedOnTimeCount),
+			ContactedLateCount:               ptrext.Indirect(scan.contactedLateCount),
+			TerminalTimelinessEvidenceCount:  ptrext.Indirect(scan.terminalTimelinessEvidenceCount),
+			TerminalOnTimeCount:              ptrext.Indirect(scan.terminalOnTimeCount),
+			TerminalLateCount:                ptrext.Indirect(scan.terminalLateCount),
+		},
+	}
+}
+
+type npsMetricResult struct {
+	Score                 float64
+	Available             bool
+	DetractorCount        int
+	PassiveCount          int
+	PromoterCount         int
+	RedactedResponseCount int
+}
+
+func (r *Repo) npsMetrics(ctx context.Context, filter AnalyticsFilter) (npsMetricResult, error) {
+	where := []string{"sr.tenant_id = $1", "sr.survey_type = 'nps'"}
+	args := []any{strings.TrimSpace(filter.TenantID)}
+	if filter.CampaignID != nil {
+		where, args = appendFilter(where, args, "sr.campaign_id = $%d", ptrext.Indirect(filter.CampaignID))
+	}
+	if filter.From != nil {
+		where, args = appendFilter(where, args, "sr.submitted_at >= $%d", ptrext.Indirect(filter.From))
+	}
+	if filter.To != nil {
+		where, args = appendFilter(where, args, "sr.submitted_at < $%d", ptrext.Indirect(filter.To))
+	}
+	if filter.RunID != nil {
+		where, args = appendFilter(where, args, "si.run_id = $%d", ptrext.Indirect(filter.RunID))
+	}
+	var out npsMetricResult
+	err := r.pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT
+			COUNT(*) FILTER (WHERE sr.nps_bucket = 'detractor'),
+			COUNT(*) FILTER (WHERE sr.nps_bucket = 'passive'),
+			COUNT(*) FILTER (WHERE sr.nps_bucket = 'promoter')
+		FROM survey_responses sr
+		JOIN survey_invitations si
+		  ON si.tenant_id = sr.tenant_id AND si.id = sr.invitation_id
+		%s`, whereClause(where)), args...).Scan(&out.DetractorCount, &out.PassiveCount, &out.PromoterCount)
+	if err != nil {
+		return npsMetricResult{}, fmt.Errorf("survey NPS metrics: %w", err)
+	}
+	total := out.DetractorCount + out.PassiveCount + out.PromoterCount
+	if total > 0 {
+		out.Available = true
+		out.Score = 100 * float64(out.PromoterCount-out.DetractorCount) / float64(total)
+	}
+	runWhere := []string{"tenant_id = $1"}
+	runArgs := []any{strings.TrimSpace(filter.TenantID)}
+	if filter.CampaignID != nil {
+		runWhere, runArgs = appendFilter(runWhere, runArgs, "campaign_id = $%d", ptrext.Indirect(filter.CampaignID))
+	}
+	if filter.RunID != nil {
+		runWhere, runArgs = appendFilter(runWhere, runArgs, "id = $%d", ptrext.Indirect(filter.RunID))
+	}
+	// Redaction evidence is retained only at run granularity. Its analytics
+	// window therefore follows the run's immutable measurement start rather than
+	// a deleted response's submission time.
+	if filter.From != nil {
+		runWhere, runArgs = appendFilter(runWhere, runArgs, "opened_at >= $%d", ptrext.Indirect(filter.From))
+	}
+	if filter.To != nil {
+		runWhere, runArgs = appendFilter(runWhere, runArgs, "opened_at < $%d", ptrext.Indirect(filter.To))
+	}
+	if err := r.pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT COALESCE(SUM(redacted_response_count), 0)
+		FROM survey_campaign_runs
+		%s`, whereClause(runWhere)), runArgs...).Scan(&out.RedactedResponseCount); err != nil {
+		return npsMetricResult{}, fmt.Errorf("survey NPS redaction metrics: %w", err)
 	}
 	return out, nil
 }
@@ -1004,6 +1396,9 @@ func lowScoreOwnerLoadWhere(filter AnalyticsFilter) ([]string, []any) {
 	args := []any{strings.TrimSpace(filter.TenantID)}
 	if filter.CampaignID != nil {
 		where, args = appendFilter(where, args, "lsr.campaign_id = $%d", ptrext.Indirect(filter.CampaignID))
+	}
+	if filter.RunID != nil {
+		where, args = appendFilter(where, args, "si.run_id = $%d", ptrext.Indirect(filter.RunID))
 	}
 	if filter.From != nil {
 		where, args = appendFilter(where, args, "sr.submitted_at >= $%d", ptrext.Indirect(filter.From))
@@ -1043,6 +1438,8 @@ func lowScoreOwnerLoadQuery(where string) string {
 		FROM survey_low_score_reviews lsr
 		JOIN survey_responses sr
 		  ON sr.tenant_id = lsr.tenant_id AND sr.id = lsr.response_id
+		JOIN survey_invitations si
+		  ON si.tenant_id = sr.tenant_id AND si.id = sr.invitation_id
 		%s
 		GROUP BY lsr.owner_member_id
 		ORDER BY 8 DESC, 7 ASC NULLS LAST, lsr.owner_member_id ASC
@@ -1078,6 +1475,7 @@ type invitationCountResult struct {
 	SuppressedCount       int
 	NotStartedCount       int
 	OpenedCount           int
+	StartedCount          int
 	ExpiredCount          int
 	PendingDeliveryCount  int
 	DelayedDeliveryCount  int
@@ -1096,13 +1494,17 @@ func (r *Repo) invitationCounts(ctx context.Context, filter AnalyticsFilter) (in
 	if filter.To != nil {
 		where, args = appendFilter(where, args, "created_at < $%d", ptrext.Indirect(filter.To))
 	}
+	if filter.RunID != nil {
+		where, args = appendFilter(where, args, "run_id = $%d", ptrext.Indirect(filter.RunID))
+	}
 	query := fmt.Sprintf(`
 		SELECT
 			COUNT(*),
 			COUNT(*) FILTER (WHERE delivery_status IN ('accepted', 'delivered')),
 			COUNT(*) FILTER (WHERE suppression_status = 'suppressed'),
 			COUNT(*) FILTER (WHERE response_status = 'not_started'),
-			COUNT(*) FILTER (WHERE response_status = 'opened'),
+			COUNT(*) FILTER (WHERE response_status = 'opened' OR opened_at IS NOT NULL),
+			COUNT(*) FILTER (WHERE response_status IN ('started', 'completed')),
 			COUNT(*) FILTER (WHERE response_status = 'expired'),
 			COUNT(*) FILTER (WHERE delivery_status = 'pending'),
 			COUNT(*) FILTER (WHERE delivery_status = 'delayed'),
@@ -1116,6 +1518,7 @@ func (r *Repo) invitationCounts(ctx context.Context, filter AnalyticsFilter) (in
 		&out.SuppressedCount,
 		&out.NotStartedCount,
 		&out.OpenedCount,
+		&out.StartedCount,
 		&out.ExpiredCount,
 		&out.PendingDeliveryCount,
 		&out.DelayedDeliveryCount,
@@ -1127,11 +1530,12 @@ func (r *Repo) invitationCounts(ctx context.Context, filter AnalyticsFilter) (in
 }
 
 type responseCountResult struct {
-	CompletedCount         int
-	LowScoreCount          int
-	PositiveScoreCount     int
-	AverageScore           float64
-	AverageResponseSeconds float64
+	CompletedCount              int
+	LowScoreCount               int
+	PositiveScoreCount          int
+	QualityFlaggedResponseCount int
+	AverageScore                float64
+	AverageResponseSeconds      float64
 }
 
 func (r *Repo) responseCounts(ctx context.Context, filter AnalyticsFilter) (responseCountResult, error) {
@@ -1146,11 +1550,15 @@ func (r *Repo) responseCounts(ctx context.Context, filter AnalyticsFilter) (resp
 	if filter.To != nil {
 		where, args = appendFilter(where, args, "sr.submitted_at < $%d", ptrext.Indirect(filter.To))
 	}
+	if filter.RunID != nil {
+		where, args = appendFilter(where, args, "si.run_id = $%d", ptrext.Indirect(filter.RunID))
+	}
 	query := fmt.Sprintf(`
 		SELECT
 			COUNT(*),
 			COUNT(*) FILTER (WHERE sr.score <= sc.low_score_threshold),
-			COUNT(*) FILTER (WHERE sr.score >= CASE WHEN sc.survey_type = 'ces' THEN 6 ELSE 4 END),
+			COUNT(*) FILTER (WHERE sr.score >= CASE WHEN sc.survey_type = 'ces' THEN 6 WHEN sc.survey_type = 'nps' THEN 9 ELSE 4 END),
+			COUNT(*) FILTER (WHERE sr.metadata->>'response_quality_status' = 'flagged'),
 			AVG(sr.score),
 			AVG(GREATEST(EXTRACT(EPOCH FROM (sr.submitted_at - si.created_at)), 0))
 		FROM survey_responses sr
@@ -1166,6 +1574,7 @@ func (r *Repo) responseCounts(ctx context.Context, filter AnalyticsFilter) (resp
 		&out.CompletedCount,
 		&out.LowScoreCount,
 		&out.PositiveScoreCount,
+		&out.QualityFlaggedResponseCount,
 		&avg,
 		&avgResponse,
 	); err != nil {
@@ -1181,20 +1590,25 @@ func (r *Repo) responseCounts(ctx context.Context, filter AnalyticsFilter) (resp
 }
 
 func (r *Repo) scoreDistribution(ctx context.Context, filter AnalyticsFilter) ([]ScoreBucket, error) {
-	where := []string{"tenant_id = $1"}
+	where := []string{"sr.tenant_id = $1"}
 	args := []any{strings.TrimSpace(filter.TenantID)}
 	if filter.CampaignID != nil {
-		where, args = appendFilter(where, args, "campaign_id = $%d", ptrext.Indirect(filter.CampaignID))
+		where, args = appendFilter(where, args, "sr.campaign_id = $%d", ptrext.Indirect(filter.CampaignID))
 	}
 	if filter.From != nil {
-		where, args = appendFilter(where, args, "submitted_at >= $%d", ptrext.Indirect(filter.From))
+		where, args = appendFilter(where, args, "sr.submitted_at >= $%d", ptrext.Indirect(filter.From))
 	}
 	if filter.To != nil {
-		where, args = appendFilter(where, args, "submitted_at < $%d", ptrext.Indirect(filter.To))
+		where, args = appendFilter(where, args, "sr.submitted_at < $%d", ptrext.Indirect(filter.To))
+	}
+	if filter.RunID != nil {
+		where, args = appendFilter(where, args, "si.run_id = $%d", ptrext.Indirect(filter.RunID))
 	}
 	query := fmt.Sprintf(`
 		SELECT score, COUNT(*)
-		FROM survey_responses
+		FROM survey_responses sr
+		JOIN survey_invitations si
+		  ON si.tenant_id = sr.tenant_id AND si.id = sr.invitation_id
 		%s
 		GROUP BY score
 		ORDER BY score ASC`, whereClause(where))

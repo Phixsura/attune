@@ -66,8 +66,11 @@ type mockIdempotencyStore struct {
 	acquireErr     error
 	acquireResult  *idempotency.Key
 	acquireAcquire bool
+	reacquire      bool
 	completeErr    error
 	failErr        error
+	deleteErr      error
+	expiredDeleted bool
 }
 
 func newMockIdempotencyStore() *mockIdempotencyStore {
@@ -78,7 +81,11 @@ func newMockIdempotencyStore() *mockIdempotencyStore {
 
 func (m *mockIdempotencyStore) Acquire(ctx context.Context, tenantID, key string, requestHash []byte, ttl time.Duration) (*idempotency.Key, bool, error) {
 	if m.acquireErr != nil {
-		return nil, false, m.acquireErr
+		err := m.acquireErr
+		if errors.Is(err, idempotency.ErrExpired) && m.reacquire {
+			m.acquireErr = nil
+		}
+		return nil, false, err
 	}
 	if m.acquireResult != nil {
 		return m.acquireResult, m.acquireAcquire, nil
@@ -130,9 +137,13 @@ func (m *mockIdempotencyStore) Get(ctx context.Context, tenantID, key string) (*
 	return k, nil
 }
 
-func (m *mockIdempotencyStore) Delete(ctx context.Context, tenantID, key string) error {
+func (m *mockIdempotencyStore) DeleteExpired(ctx context.Context, tenantID, key string) (bool, error) {
+	m.expiredDeleted = true
+	if m.deleteErr != nil {
+		return false, m.deleteErr
+	}
 	delete(m.keys, tenantID+":"+key)
-	return nil
+	return true, nil
 }
 
 func (m *mockIdempotencyStore) CleanupExpired(ctx context.Context) (int64, error) {
@@ -614,6 +625,7 @@ func TestHandleIdempotency(t *testing.T) {
 		t.Parallel()
 		store := newMockIdempotencyStore()
 		store.acquireErr = idempotency.ErrExpired
+		store.reacquire = true
 
 		svc := &service{idempotencyRepo: store}
 
@@ -630,6 +642,7 @@ func TestHandleIdempotency(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, done)
 		require.Nil(t, resp)
+		require.True(t, store.expiredDeleted)
 	})
 
 	t.Run("generic acquire error wraps", func(t *testing.T) {

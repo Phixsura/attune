@@ -22,6 +22,7 @@ func TestSourceDisplayName(t *testing.T) {
 		{"mcp", "MCP"},
 		{"other", "Other"},
 		{"portal", "Portal"},
+		{"survey", "Survey"},
 		{"unknown", "unknown"},
 		{"custom-source", "custom-source"},
 	}
@@ -50,6 +51,7 @@ func TestIngestInput_Validate(t *testing.T) {
 		{"null byte", IngestInput{Content: "ab\x00cd", Source: "api"}, true},
 		{"unknown source", IngestInput{Content: "hi", Source: "bogus"}, true},
 		{"portal source", IngestInput{Content: "hi", Source: "portal", Type: "request"}, false},
+		{"survey source", IngestInput{Content: "hi", Source: "survey", Type: "nps"}, false},
 		{"content at cap", IngestInput{Content: strings.Repeat("a", MaxContentLen), Source: "api"}, false},
 	}
 	for _, c := range cases {

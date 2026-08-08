@@ -32,8 +32,9 @@ func TestRepoMethodsReturnPoolErrors(t *testing.T) {
 		_, err := r.Get(ctx, "tenant-1", "key-1")
 		return err
 	})
-	expectIdempotencyErr(t, "Delete", func() error {
-		return r.Delete(ctx, "tenant-1", "key-1")
+	expectIdempotencyErr(t, "DeleteExpired", func() error {
+		_, err := r.DeleteExpired(ctx, "tenant-1", "key-1")
+		return err
 	})
 	expectIdempotencyErr(t, "CleanupExpired", func() error {
 		_, err := r.CleanupExpired(ctx)

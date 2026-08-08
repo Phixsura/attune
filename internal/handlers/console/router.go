@@ -543,6 +543,7 @@ func (r *Router) mountSurveys(m chi.Router) {
 				return session.FromContext(r.Context()), nil
 			}),
 		))
+		r.mountSurveyNPSRoutes(sr)
 		sr.With(r.requireDelegatedAdminStrict).Post("/campaigns/{campaign_id}/hosted-links", dispatcher.Bind(
 			"console.SurveyHandler.CreateHostedLink",
 			dispatcher.Combine(
@@ -633,6 +634,115 @@ func (r *Router) mountSurveys(m chi.Router) {
 		))
 		r.mountSurveyInsights(sr)
 	})
+}
+
+func (r *Router) mountSurveyNPSRoutes(sr chi.Router) {
+	sr.With(r.requireDelegatedAdminStrict).Post("/campaigns/{campaign_id}:scheduleNpsRun", dispatcher.Bind(
+		"console.SurveyHandler.ScheduleNPSCampaignRun",
+		dispatcher.Combine(
+			func() *attunev1.ScheduleNpsCampaignRunRequest {
+				return ptrext.Of(attunev1.ScheduleNpsCampaignRunRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.ScheduleNpsCampaignRunRequest],
+			dispatcher.Param("campaign_id", func(req *attunev1.ScheduleNpsCampaignRunRequest, id string) {
+				req.CampaignId = id
+			}),
+		),
+		r.surveys.ScheduleNPSCampaignRun,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ScheduleNpsCampaignRunRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdminStrict).Post("/campaigns/{campaign_id}/nps-runs/{run_id}:cancel", dispatcher.Bind(
+		"console.SurveyHandler.CancelNPSCampaignRun",
+		dispatcher.Combine(
+			func() *attunev1.CancelNpsCampaignRunRequest {
+				return ptrext.Of(attunev1.CancelNpsCampaignRunRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.CancelNpsCampaignRunRequest],
+			dispatcher.Param("campaign_id", func(req *attunev1.CancelNpsCampaignRunRequest, id string) {
+				req.CampaignId = id
+			}),
+			dispatcher.Param("run_id", func(req *attunev1.CancelNpsCampaignRunRequest, id string) {
+				req.RunId = id
+			}),
+		),
+		r.surveys.CancelNPSCampaignRun,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CancelNpsCampaignRunRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/campaigns/{campaign_id}/nps-runs", dispatcher.Bind(
+		"console.SurveyHandler.ListNPSCampaignRuns",
+		dispatcher.Combine(
+			func() *attunev1.ListNpsCampaignRunsRequest {
+				return ptrext.Of(attunev1.ListNpsCampaignRunsRequest{})
+			},
+			consolesurvey.BindListNPSCampaignRuns,
+			dispatcher.Param("campaign_id", func(req *attunev1.ListNpsCampaignRunsRequest, id string) {
+				req.CampaignId = id
+			}),
+		),
+		r.surveys.ListNPSCampaignRuns,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListNpsCampaignRunsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/campaigns/{campaign_id}/nps-runs/{run_id}/evidence.csv", r.surveys.ExportNPSCampaignRunEvidence)
+	sr.With(r.requireDelegatedAdmin).Post("/campaigns/{campaign_id}/nps-runs/{run_id}/evidence-exports", dispatcher.Bind(
+		"console.SurveyHandler.CreateNPSCampaignRunEvidenceExport",
+		dispatcher.Combine(
+			func() *attunev1.CreateNpsCampaignRunEvidenceExportRequest {
+				return ptrext.Of(attunev1.CreateNpsCampaignRunEvidenceExportRequest{})
+			},
+			dispatcher.JSONBody[*attunev1.CreateNpsCampaignRunEvidenceExportRequest],
+			dispatcher.Param("campaign_id", func(req *attunev1.CreateNpsCampaignRunEvidenceExportRequest, id string) {
+				req.CampaignId = id
+			}),
+			dispatcher.Param("run_id", func(req *attunev1.CreateNpsCampaignRunEvidenceExportRequest, id string) {
+				req.RunId = id
+			}),
+		),
+		r.surveys.CreateNPSCampaignRunEvidenceExport,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.CreateNpsCampaignRunEvidenceExportRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/campaigns/{campaign_id}/nps-runs/{run_id}/evidence-exports/{export_id}.csv", r.surveys.DownloadNPSCampaignRunEvidence)
+	sr.With(r.requireDelegatedAdmin).Get("/campaigns/{campaign_id}/nps-runs/{run_id}/evidence-exports", dispatcher.Bind(
+		"console.SurveyHandler.ListNPSCampaignRunEvidenceExports",
+		dispatcher.Combine(
+			func() *attunev1.ListNpsCampaignRunEvidenceExportsRequest {
+				return ptrext.Of(attunev1.ListNpsCampaignRunEvidenceExportsRequest{})
+			},
+			consolesurvey.BindListNPSCampaignRunEvidenceExports,
+			dispatcher.Param("campaign_id", func(req *attunev1.ListNpsCampaignRunEvidenceExportsRequest, id string) {
+				req.CampaignId = id
+			}),
+			dispatcher.Param("run_id", func(req *attunev1.ListNpsCampaignRunEvidenceExportsRequest, id string) {
+				req.RunId = id
+			}),
+		),
+		r.surveys.ListNPSCampaignRunEvidenceExports,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListNpsCampaignRunEvidenceExportsRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	sr.With(r.requireDelegatedAdmin).Get("/campaigns/{campaign_id}/nps-preflight", dispatcher.Bind(
+		"console.SurveyHandler.NPSCampaignPreflight",
+		dispatcher.Path(
+			func() *attunev1.GetNpsCampaignPreflightRequest {
+				return ptrext.Of(attunev1.GetNpsCampaignPreflightRequest{})
+			},
+			dispatcher.Param("campaign_id", func(req *attunev1.GetNpsCampaignPreflightRequest, id string) {
+				req.CampaignId = id
+			}),
+		),
+		r.surveys.NPSCampaignPreflight,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetNpsCampaignPreflightRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
 }
 
 func (r *Router) mountSurveyInsights(sr chi.Router) {

@@ -83,6 +83,7 @@ test.describe('External sync provider installation browser behavior', () => {
     await expect
       .poll(() => lastProviderResourceSelection(apiMocks.providerInstallationRequests))
       .toEqual({ resourceIds: ['external-sync-provider-installation-1-resource-1'] })
+    await waitForToastNotificationsToClear(page)
     await mouseClick(page, page.getByRole('button', { name: zh.createConnection }))
 
     const connectionDialog = page.getByRole('dialog', { name: zh.connectionTitle })
@@ -146,6 +147,13 @@ test.describe('External sync provider installation browser behavior', () => {
 async function mouseClick(_page: Page, locator: Locator) {
   await expect(locator).toBeVisible()
   await locator.click()
+}
+
+async function waitForToastNotificationsToClear(page: Page) {
+  const toasts = page.locator('[data-sonner-toast]')
+  const viewport = page.viewportSize()
+  await page.mouse.move(0, Math.max(0, (viewport?.height ?? 768) - 1))
+  await expect(toasts).toHaveCount(0, { timeout: 10_000 })
 }
 
 function lastProviderResourceSelection(

@@ -267,7 +267,8 @@ function installRequestHandlers(captures: Record<string, unknown>) {
         { status: 201 },
       )
     }),
-    http.post('/fb/v1/console/request-notifications/deliveries/42:retry', () => {
+    http.post('/fb/v1/console/request-notifications/deliveries/42:retry', async () => {
+      await delay(10)
       captures.retry = '42'
       return HttpResponse.json({ ...deliveryFixture, status: 'pending' })
     }),

@@ -36,6 +36,9 @@ func TestSurveyRepoHelpersCoverBoundsAndNullableValues(t *testing.T) {
 	if uuidFromPg(pgtype.UUID{}) != nil || ptrext.Indirect(uuidFromPg(pgtype.UUID{Bytes: id, Valid: true})) != id {
 		t.Fatal("uuidFromPg did not preserve nil and valid ids")
 	}
+	if int64FromPg(pgtype.Int8{}) != nil || ptrext.Indirect(int64FromPg(pgtype.Int8{Int64: 9001, Valid: true})) != 9001 {
+		t.Fatal("int64FromPg did not preserve nil and valid ids")
+	}
 	if nextRetryAtArg(time.Time{}) != nil || nextRetryAtArg(now) != now {
 		t.Fatal("nextRetryAtArg did not preserve zero and present times")
 	}
@@ -70,6 +73,9 @@ func TestSurveyRepoHelpersCoverJSONAndErrorMapping(t *testing.T) {
 	if !errors.Is(mapWriteError(ptrext.Of(pgconn.PgError{Code: "23503"})), ErrInvalidInput) {
 		t.Fatal("mapWriteError did not map foreign-key violations")
 	}
+	if !errors.Is(mapWriteError(ptrext.Of(pgconn.PgError{Code: "23514"})), ErrInvalidInput) {
+		t.Fatal("mapWriteError did not map check violations")
+	}
 }
 
 func TestSurveyRepoScanHelpersDecodeRows(t *testing.T) {
@@ -94,8 +100,18 @@ func TestSurveyRepoScanHelpersDecodeRows(t *testing.T) {
 	response, err := scanResponseWithLowScoreReviewAndAccount(fakeSurveyRow{
 		values: responseReviewAccountRowValues(responseID, campaignID, invitationID, ptrext.Of(requestID), ptrext.Of(contactID), ptrext.Of(ownerID), now),
 	})
-	if err != nil || response.Review == nil || response.Account.AccountKey != "acct:acme" {
+	if err != nil || response.Review == nil || response.Account.AccountKey != "acct:acme" || ptrext.Indirect(response.FeedbackID) != 9001 ||
+		ptrext.Indirect(response.Review.FirstTerminalAt) != now.Add(2*time.Hour) {
 		t.Fatalf("scanResponseWithLowScoreReviewAndAccount() = %#v, %v", response, err)
+	}
+	response, err = scanResponseWithFeedbackID(fakeSurveyRow{
+		values: append(
+			responseRowValues(responseID, campaignID, invitationID, ptrext.Of(requestID), ptrext.Of(contactID), now),
+			pgtype.Int8{Int64: 9001, Valid: true},
+		),
+	})
+	if err != nil || ptrext.Indirect(response.FeedbackID) != 9001 {
+		t.Fatalf("scanResponseWithFeedbackID() = %#v, %v", response, err)
 	}
 }
 
@@ -149,6 +165,31 @@ func TestSurveyRepoCampaignAndInvitationPaths(t *testing.T) {
 	}
 }
 
+func TestSurveyRepoListCampaignsAttachesNPSSettings(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	now := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	campaignID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	cohortID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	ownerID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+	pool := ptrext.Of(fakeSurveyPool{
+		queries: []*fakeSurveyRows{{rows: [][]any{npsCampaignRowValues(campaignID, now)}}},
+		rows:    []fakeSurveyRow{{values: npsCampaignSettingsRowValues(campaignID, cohortID, ownerID, now)}},
+	})
+	repo := Repo{pool: pool}
+
+	campaigns, err := repo.ListCampaigns(ctx, CampaignFilter{TenantID: "tenant-a"})
+	if err != nil || len(campaigns) != 1 || campaigns[0].NPSSettings == nil {
+		t.Fatalf("ListCampaigns() = %#v, %v", campaigns, err)
+	}
+	settings := ptrext.Indirect(campaigns[0].NPSSettings)
+	if settings.CohortID != cohortID || settings.DetractorOwnerMemberID != ownerID ||
+		settings.MinimumCompletedResponses != 30 || settings.MinimumResponseRatePercent != 10 {
+		t.Fatalf("ListCampaigns() NPS settings = %#v", settings)
+	}
+}
+
 func TestSurveyRepoResponseAndAnalyticsPaths(t *testing.T) {
 	t.Parallel()
 
@@ -162,11 +203,25 @@ func TestSurveyRepoResponseAndAnalyticsPaths(t *testing.T) {
 	repo := Repo{pool: pool}
 
 	response, err := repo.ListResponses(ctx, ResponseFilter{TenantID: "tenant-a", LowScoreOnly: ptrext.Of(true), Limit: 2})
-	if err != nil || len(response) != 1 || response[0].Review == nil {
+	if err != nil || len(response) != 1 || response[0].Review == nil || ptrext.Indirect(response[0].FeedbackID) != 9001 {
 		t.Fatalf("ListResponses() = %#v, %v", response, err)
 	}
 	analytics, err := repo.Analytics(ctx, AnalyticsFilter{TenantID: "tenant-a", CampaignID: ptrext.Of(campaignID), From: ptrext.Of(now.Add(-time.Hour)), To: ptrext.Of(now)})
-	if err != nil || analytics.ResponseRate != 0.4 || analytics.PositiveScoreRate != 0.5 {
+	if err != nil || analytics.ResponseRate != 0.4 || analytics.PositiveScoreRate != 0.5 ||
+		analytics.RecoveryOutcome != (RecoveryOutcome{
+			ReviewCount:                      7,
+			ResolvedCount:                    2,
+			DismissedCount:                   1,
+			CustomerContactedCount:           4,
+			RootCauseRecordedCount:           5,
+			ActionRecordedCount:              6,
+			ContactedTimelinessEvidenceCount: 4,
+			ContactedOnTimeCount:             3,
+			ContactedLateCount:               1,
+			TerminalTimelinessEvidenceCount:  3,
+			TerminalOnTimeCount:              2,
+			TerminalLateCount:                1,
+		}) {
 		t.Fatalf("Analytics() = %#v, %v", analytics, err)
 	}
 	trend, err := repo.AnalyticsTrend(ctx, AnalyticsFilter{TenantID: "tenant-a", From: ptrext.Of(now.Add(-24 * time.Hour)), To: ptrext.Of(now)})
@@ -189,16 +244,23 @@ func TestSurveyRepoCreateAndUpdateResponsePaths(t *testing.T) {
 	responseID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
 	responseValues := responseRowValues(responseID, campaignID, invitationID, nil, nil, now)
 	reviewValues := reviewRowValues(responseID, campaignID, nil, now)
-	tx := ptrext.Of(fakeSurveyTx{rows: []fakeSurveyRow{{values: responseValues}, {values: reviewValues}}})
+	tx := ptrext.Of(fakeSurveyTx{rows: []fakeSurveyRow{
+		{values: []any{campaignID, ResponseNotStarted, SuppressionNotSuppressed, now.Add(time.Hour), true, StatusActive}},
+		{values: []any{now}},
+		{values: responseValues},
+		{values: reviewValues},
+	}})
 	repo := Repo{pool: ptrext.Of(fakeSurveyPool{tx: tx, rows: []fakeSurveyRow{
-		{values: responseValues}, {err: pgx.ErrNoRows}, {values: reviewValues},
+		{values: append(responseValues, pgtype.Int8{Int64: 9001, Valid: true})},
+		{err: pgx.ErrNoRows},
+		{values: reviewValues},
 	}})}
 
 	created, err := repo.CreateResponse(ctx, responseFixture(responseID, campaignID, invitationID, now), ptrext.Of(LowScoreReviewSeed{DueAt: ptrext.Of(now.Add(24 * time.Hour)), UpdatedBy: "admin-1"}))
 	if err != nil || created.Review == nil || tx.commitCount != 1 {
 		t.Fatalf("CreateResponse() = %#v, commit=%d err=%v", created, tx.commitCount, err)
 	}
-	if got, err := repo.GetResponseByInvitation(ctx, "tenant-a", invitationID); err != nil || got.ID != responseID {
+	if got, err := repo.GetResponseByInvitation(ctx, "tenant-a", invitationID); err != nil || got.ID != responseID || ptrext.Indirect(got.FeedbackID) != 9001 {
 		t.Fatalf("GetResponseByInvitation() = %#v, %v", got, err)
 	}
 	if got, err := repo.UpdateLowScoreReview(ctx, reviewFixture(responseID, campaignID, nil, now)); err != nil || got.ResponseID != responseID {
@@ -380,16 +442,18 @@ func requireSurveyCondition(t *testing.T, name string, err error, ok bool, got a
 func surveyAnalyticsPool(responseID uuid.UUID, campaignID uuid.UUID, invitationID uuid.UUID, ownerID uuid.UUID, now time.Time) *fakeSurveyPool {
 	return ptrext.Of(fakeSurveyPool{
 		rows: []fakeSurveyRow{
-			{values: []any{10, 8, 1, 2, 3, 1, 1, 1, 1}},
-			{values: []any{4, 2, 2, sql.NullFloat64{Float64: 3.5, Valid: true}, sql.NullFloat64{Float64: 120, Valid: true}}},
-			{values: []any{3, 2, 1, 1, 1, ptrext.Of(now), 1, 1, 1, 1, 1}},
+			{values: []any{10, 8, 1, 2, 3, 4, 1, 1, 1, 1}},
+			{values: []any{4, 2, 2, 0, sql.NullFloat64{Float64: 3.5, Valid: true}, sql.NullFloat64{Float64: 120, Valid: true}}},
+			{values: []any{7, 2, 1, 4, 5, 6, 4, 3, 1, 3, 2, 1, 3, 2, 1, 1, 1, ptrext.Of(now), 1, 1, 1, 1, 1}},
+			{values: []any{0, 0, 0}},
+			{values: []any{0}},
 		},
 		queries: []*fakeSurveyRows{
 			{rows: [][]any{responseReviewAccountRowValues(responseID, campaignID, invitationID, nil, nil, ptrext.Of(ownerID), now)}},
 			{rows: [][]any{{1, 2}, {5, 2}}},
 			{rows: [][]any{{"contact_cooldown", 1}}},
 			{rows: [][]any{{ownerID.String(), 2, 1, 1, 1, 1, ptrext.Of(now), 76}}},
-			{rows: [][]any{{"2026-08-02", 10, 8, 1, 4, 2, 2, 3.5, 0.4, 2, 3, 1}}},
+			{rows: [][]any{{"2026-08-02", 10, 8, 1, 4, 2, 2, 3.5, 0.4, 2, 3, 4, 1, 0.0, false, 0, 0, 0, 0, 0}}},
 			{rows: [][]any{{"campaign-1", "Post-resolution CSAT", sql.NullString{String: campaignID.String(), Valid: true}, 10, 8, 1, 4, 2, 2, 1, 3.5, 0.4, 0.5, 0.5, 0.1, 120.0, 9.0}}},
 		},
 	})
@@ -421,7 +485,7 @@ func invitationFixture(id uuid.UUID, campaignID uuid.UUID, now time.Time) Invita
 
 func responseFixture(id uuid.UUID, campaignID uuid.UUID, invitationID uuid.UUID, now time.Time) Response {
 	return Response{
-		ID: id, TenantID: " tenant-a ", CampaignID: campaignID, InvitationID: invitationID, SourceType: "request",
+		ID: id, TenantID: " tenant-a ", CampaignID: campaignID, SurveyType: TypeCSAT, InvitationID: invitationID, SourceType: "request",
 		SourceID: "CR-1", Score: 2, Comment: "Still painful", Locale: "en", Metadata: map[string]any{"account_key": "acct:acme"},
 		UserAgentHash: "ua", IPHash: "ip", SubmittedAt: now, CreatedAt: now,
 	}
@@ -431,6 +495,7 @@ func reviewFixture(responseID uuid.UUID, campaignID uuid.UUID, ownerID *uuid.UUI
 	return LowScoreReview{
 		ResponseID: responseID, TenantID: "tenant-a", CampaignID: campaignID, Status: ReviewOpen, Severity: SeverityHigh,
 		OwnerMemberID: ownerID, CustomerContacted: true, DueAt: ptrext.Of(now.Add(24 * time.Hour)),
+		InitialDueAt: ptrext.Of(now.Add(24 * time.Hour)), CustomerContactedAt: ptrext.Of(now.Add(time.Hour)),
 		UpdatedBy: "admin-1", CreatedAt: now, UpdatedAt: now,
 	}
 }
@@ -446,10 +511,22 @@ func campaignRowValues(id uuid.UUID, now time.Time) []any {
 	}
 }
 
+func npsCampaignRowValues(id uuid.UUID, now time.Time) []any {
+	values := campaignRowValues(id, now)
+	values[3] = TypeNPS
+	return values
+}
+
+func npsCampaignSettingsRowValues(campaignID uuid.UUID, cohortID uuid.UUID, ownerID uuid.UUID, now time.Time) []any {
+	return []any{
+		campaignID, "tenant-a", cohortID, ownerID, 14, 500, 30, 10, 0, 365, 25, 95, 10, 20, "nps-seed", now, now,
+	}
+}
+
 func invitationRowValues(id uuid.UUID, campaignID uuid.UUID, requestID *uuid.UUID, contactID *uuid.UUID, now time.Time) []any {
 	i := invitationFixture(id, campaignID, now)
 	return []any{
-		i.ID, i.TenantID, i.CampaignID, i.CampaignContentVersion, []byte(`{"name":"CSAT"}`), i.DedupeKey,
+		i.ID, i.TenantID, i.CampaignID, pgUUID(i.RunID), i.CampaignContentVersion, []byte(`{"name":"CSAT"}`), i.DedupeKey,
 		i.SourceType, i.SourceID, pgUUID(requestID), pgUUID(contactID), i.DistributionMode, i.TokenHash,
 		i.DeliveryStatus, i.ResponseStatus, i.SuppressionStatus, i.SuppressionReason, []byte(`{"email":"ada@example.test"}`),
 		i.DeliverySecret, i.Provider, i.ProviderMessageID, i.Attempts, i.FailureKind, i.HTTPStatus, i.LastError,
@@ -460,13 +537,14 @@ func invitationRowValues(id uuid.UUID, campaignID uuid.UUID, requestID *uuid.UUI
 
 func responseRowValues(id uuid.UUID, campaignID uuid.UUID, invitationID uuid.UUID, requestID *uuid.UUID, contactID *uuid.UUID, now time.Time) []any {
 	return []any{
-		id, "tenant-a", campaignID, invitationID, pgUUID(requestID), pgUUID(contactID), "request", "CR-1", 2,
-		"Still painful", "en", []byte(`{"account_key":"acct:acme"}`), "ua", "ip", now, now,
+		id, "tenant-a", campaignID, TypeCSAT, invitationID, pgUUID(requestID), pgUUID(contactID), "request", "CR-1", 2, "",
+		nil, "Still painful", "en", []byte(`{"account_key":"acct:acme"}`), "ua", "ip", now, now,
 	}
 }
 
 func responseReviewAccountRowValues(id uuid.UUID, campaignID uuid.UUID, invitationID uuid.UUID, requestID *uuid.UUID, contactID *uuid.UUID, ownerID *uuid.UUID, now time.Time) []any {
 	values := responseRowValues(id, campaignID, invitationID, requestID, contactID, now)
+	values = append(values, pgtype.Int8{Int64: 9001, Valid: true})
 	values = append(values, reviewRowValues(id, campaignID, ownerID, now)...)
 	values = append(values, RecoveryNotificationPending, "owner_missing", ptrext.Of(now), "")
 	return append(values, "acct:acme", "Acme Corp", "response_metadata")
@@ -475,7 +553,13 @@ func responseReviewAccountRowValues(id uuid.UUID, campaignID uuid.UUID, invitati
 func reviewRowValues(responseID uuid.UUID, campaignID uuid.UUID, ownerID *uuid.UUID, now time.Time) []any {
 	return []any{
 		responseID, "tenant-a", campaignID, ReviewOpen, SeverityHigh, pgUUID(ownerID), "billing", "credited",
-		true, ptrext.Of(now.Add(24 * time.Hour)), ptrext.Of(now), "admin-1", now, now,
+		true,
+		ptrext.Of(now.Add(24 * time.Hour)),
+		ptrext.Of(now.Add(24 * time.Hour)),
+		ptrext.Of(now.Add(time.Hour)),
+		ptrext.Of(now.Add(2 * time.Hour)),
+		ptrext.Of(now),
+		"admin-1", now, now,
 	}
 }
 
@@ -504,7 +588,7 @@ func emailSenderRowValues(id uuid.UUID) []any {
 func recoveryContextRowValues(responseID uuid.UUID, campaignID uuid.UUID, requestID uuid.UUID, ownerID uuid.UUID, now time.Time) []any {
 	return []any{
 		"tenant-a", responseID, campaignID, "Post-resolution CSAT", TypeCSAT,
-		pgUUID(ptrext.Of(requestID)), "request", "CR-1", 2, "Still painful", now,
+		pgUUID(ptrext.Of(requestID)), "request", "CR-1", 2, nil, "Still painful", now,
 		ownerID, "tenant-a", "owner@example.test", "owner@example.test",
 		ReviewOpen, SeverityHigh, ptrext.Of(now.Add(24 * time.Hour)),
 	}

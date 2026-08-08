@@ -7,10 +7,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/Phixsura/attune/internal/dispatcher"
@@ -70,6 +72,34 @@ func TestBindListSurveyResponsesRecoveryFilters(t *testing.T) {
 	}
 	if filter.AccountKey != "acct:acme" {
 		t.Fatalf("AccountKey = %q, want acct:acme", filter.AccountKey)
+	}
+}
+
+func TestBindListNPSCampaignRunsCursor(t *testing.T) {
+	t.Parallel()
+
+	req := ptrext.Of(attunev1.ListNpsCampaignRunsRequest{})
+	httpReq := httptest.NewRequest(
+		http.MethodGet,
+		"/surveys/campaigns/campaign-1/nps-runs?limit=12&before_sequence=24",
+		http.NoBody,
+	)
+	if err := BindListNPSCampaignRuns(httpReq, req); err != nil {
+		t.Fatalf("BindListNPSCampaignRuns() error = %v", err)
+	}
+	if req.GetLimit() != 12 || req.GetBeforeSequence() != 24 {
+		t.Fatalf("request = %+v, want limit 12 and cursor 24", req)
+	}
+
+	for _, target := range []string{
+		"/surveys/campaigns/campaign-1/nps-runs?before_sequence=0",
+		"/surveys/campaigns/campaign-1/nps-runs?before_sequence=-1",
+		"/surveys/campaigns/campaign-1/nps-runs?before_sequence=not-a-sequence",
+	} {
+		invalid := ptrext.Of(attunev1.ListNpsCampaignRunsRequest{})
+		if err := BindListNPSCampaignRuns(httptest.NewRequest(http.MethodGet, target, http.NoBody), invalid); err == nil {
+			t.Fatalf("BindListNPSCampaignRuns(%q) error = nil, want invalid cursor", target)
+		}
 	}
 }
 
@@ -546,9 +576,12 @@ func TestHandlerCampaignHealth(t *testing.T) {
 				PendingCount:               2,
 				DelayedCount:               1,
 				DeliveredCount:             7,
+				StartedCount:               5,
 				CompletedCount:             3,
 				SuppressedCount:            2,
 				OverdueLowScoreReviewCount: 1,
+				StartRate:                  5.0 / 12.0,
+				CompletionRate:             3.0 / 5.0,
 				ResponseRate:               0.25,
 			},
 			Checks: []svc.CampaignHealthCheck{{
@@ -584,9 +617,7 @@ func TestHandlerCampaignHealth(t *testing.T) {
 		result.Body.GetReadinessScore() != 65 {
 		t.Fatalf("health status/score = %v/%d", result.Body.GetStatus(), result.Body.GetReadinessScore())
 	}
-	if result.Body.GetFunnel().GetPendingCount() != 2 || result.Body.GetFunnel().GetResponseRate() != 0.25 {
-		t.Fatalf("health funnel = %#v", result.Body.GetFunnel())
-	}
+	requireHandlerCampaignHealthFunnel(t, result.Body.GetFunnel())
 	if got := result.Body.GetChecks()[0]; got.GetStatus() != attunev1.SurveyCampaignHealthCheckStatus_SURVEY_CAMPAIGN_HEALTH_CHECK_STATUS_FAIL ||
 		got.GetEvidence() != "blocker=email_sender_not_configured" {
 		t.Fatalf("health check = %#v", got)
@@ -594,6 +625,19 @@ func TestHandlerCampaignHealth(t *testing.T) {
 	if result.Body.GetSuppressionReasonDistribution()[0].GetReason() != "contact_cooldown" ||
 		result.Body.GetGeneratedAt() != "2026-07-30T13:00:00Z" {
 		t.Fatalf("health metadata = %#v", result.Body)
+	}
+}
+
+func requireHandlerCampaignHealthFunnel(t *testing.T, funnel *attunev1.SurveyCampaignHealthFunnel) {
+	t.Helper()
+	if funnel.GetPendingCount() != 2 || funnel.GetStartedCount() != 5 {
+		t.Fatalf("health funnel counts = %#v", funnel)
+	}
+	if funnel.GetStartRate() != 5.0/12.0 || funnel.GetCompletionRate() != 3.0/5.0 {
+		t.Fatalf("health funnel conversion rates = %#v", funnel)
+	}
+	if funnel.GetResponseRate() != 0.25 {
+		t.Fatalf("health funnel response rate = %#v", funnel)
 	}
 }
 
@@ -628,6 +672,335 @@ func TestHandlerCampaignLifecycleEndpoints(t *testing.T) {
 	requireCampaignLifecycleWrites(t, h, fake, campaignID, requestID)
 	if len(audit.events) != 4 {
 		t.Fatalf("audit events = %d, want four write events", len(audit.events))
+	}
+}
+
+func TestHandlerNPSCampaignEndpoints(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	cohortID := uuid.New()
+	ownerID := uuid.New()
+	scheduledRunID := uuid.New()
+	runID := uuid.New()
+	requestKey := uuid.New()
+	now := time.Date(2026, 8, 4, 10, 0, 0, 0, time.UTC)
+	fake := ptrext.Of(fakeSurveyService{
+		campaign: repo.Campaign{ID: campaignID, TenantID: "tenant-1", SurveyType: repo.TypeNPS},
+		npsRuns: []repo.NPSCampaignRun{{
+			ID: scheduledRunID, TenantID: "tenant-1", CampaignID: campaignID, Sequence: 1,
+			Status: repo.NPSRunScheduled, ScheduledAt: now, CreatedAt: now, UpdatedAt: now,
+		}, {
+			ID: runID, TenantID: "tenant-1", CampaignID: campaignID, Sequence: 2,
+			Status: repo.NPSRunClosed, ScheduledAt: now, InvitationCount: 12, DeliveredCount: 11,
+			StartedCount: 6, CompletedCount: 4, ResponseRate: 1.0 / 2.0, CompletionRate: 2.0 / 3.0,
+			CompletedResponseRate: 1.0 / 3.0, MinimumCompletedResponses: 4, MinimumResponseRatePercent: 10,
+			MeasurementReadiness: repo.NPSMeasurementQualified, NPS: 25, DetractorCount: 1, PassiveCount: 1,
+			PromoterCount: 2, CreatedAt: now, UpdatedAt: now,
+		}},
+		npsScheduleCreated: true,
+		npsCancelRun: repo.NPSCampaignRun{
+			ID:          scheduledRunID,
+			TenantID:    "tenant-1",
+			CampaignID:  campaignID,
+			Sequence:    1,
+			Status:      repo.NPSRunCancelled,
+			ScheduledAt: now,
+			CancelledAt: ptrext.Of(now.Add(time.Minute)),
+			CreatedAt:   now,
+			UpdatedAt:   now.Add(time.Minute),
+		},
+		npsCancelChanged: true,
+		npsPreflight: svc.NPSCampaignPreflight{
+			CampaignID:     campaignID,
+			EvaluatedCount: 42,
+			EligibleCount:  31,
+			ExcludedCount:  11,
+			ExclusionReasons: []repo.SuppressionReasonBucket{
+				{Reason: "contact_missing", Count: 4},
+				{Reason: "contact_unavailable", Count: 3},
+				{Reason: "contact_cooldown", Count: 4},
+			},
+			PlannedInvitationCount:                               24,
+			MaximumRunRecipients:                                 40,
+			MinimumCompletedResponses:                            30,
+			RecurrenceSamplingPercent:                            25,
+			SamplePlanningTargetExceedsRecipientCap:              true,
+			PlannedInvitationCountBelowMinimumCompletedResponses: true,
+			DeliveryReady:                                        true,
+			GeneratedAt:                                          now,
+		},
+	})
+	audit := ptrext.Of(fakeSurveyAudit{})
+	h := NewHandler(fake)
+	h.SetAuditLogger(audit)
+
+	requireNPSCampaignCreate(t, h, fake, cohortID, ownerID)
+	requireNPSRunScheduleAndList(t, h, fake, campaignID, requestKey, now)
+	requireNPSRunCancellation(t, h, fake, campaignID, scheduledRunID)
+	requireNPSPreflight(t, h, fake, campaignID)
+	requireNPSRunAudit(t, audit, scheduledRunID)
+}
+
+func TestHandlerNPSRunScheduleReplayDoesNotDuplicateAudit(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	runID := uuid.New()
+	fake := ptrext.Of(fakeSurveyService{
+		npsRuns: []repo.NPSCampaignRun{{
+			ID: runID, TenantID: "tenant-1", CampaignID: campaignID, Status: repo.NPSRunScheduled,
+		}},
+	})
+	audit := ptrext.Of(fakeSurveyAudit{})
+	h := NewHandler(fake)
+	h.SetAuditLogger(audit)
+
+	result, err := h.ScheduleNPSCampaignRun(surveyHandlerContext(), ptrext.Of(attunev1.ScheduleNpsCampaignRunRequest{
+		CampaignId: campaignID.String(), ClientRequestKey: uuid.New().String(),
+	}))
+	if err != nil || result.Status != http.StatusOK || result.Body.GetId() != runID.String() {
+		t.Fatalf("ScheduleNPSCampaignRun() replay = status %d body %#v err=%v", result.Status, result.Body, err)
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("replayed schedule wrote audit events: %#v", audit.events)
+	}
+}
+
+func TestHandlerNPSRunCancellationReplayDoesNotDuplicateAudit(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	runID := uuid.New()
+	now := time.Date(2026, 8, 5, 6, 0, 0, 0, time.UTC)
+	fake := ptrext.Of(fakeSurveyService{
+		npsCancelRun: repo.NPSCampaignRun{
+			ID:          runID,
+			TenantID:    "tenant-1",
+			CampaignID:  campaignID,
+			Status:      repo.NPSRunCancelled,
+			ScheduledAt: now.Add(-time.Hour),
+			CancelledAt: ptrext.Of(now),
+			CancelledBy: "user-1",
+		},
+		npsCancelChanged: false,
+	})
+	audit := ptrext.Of(fakeSurveyAudit{})
+	h := NewHandler(fake)
+	h.SetAuditLogger(audit)
+
+	result, err := h.CancelNPSCampaignRun(surveyHandlerContext(), ptrext.Of(attunev1.CancelNpsCampaignRunRequest{
+		CampaignId: campaignID.String(), RunId: runID.String(),
+	}))
+	if err != nil || result.Status != http.StatusOK || result.Body.GetId() != runID.String() {
+		t.Fatalf("CancelNPSCampaignRun() replay = status %d body %#v err=%v", result.Status, result.Body, err)
+	}
+	if len(audit.events) != 0 {
+		t.Fatalf("replayed cancellation wrote audit events: %#v", audit.events)
+	}
+}
+
+func TestHandlerNPSCampaignEndpointsMapNotFound(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	runID := uuid.New()
+	h := NewHandler(ptrext.Of(fakeSurveyService{err: svc.ErrNotFound}))
+
+	_, err := h.ScheduleNPSCampaignRun(surveyHandlerContext(), ptrext.Of(attunev1.ScheduleNpsCampaignRunRequest{
+		CampaignId: campaignID.String(), ClientRequestKey: uuid.New().String(),
+	}))
+	requireNPSNotFound(t, err)
+
+	_, err = h.CancelNPSCampaignRun(surveyHandlerContext(), ptrext.Of(attunev1.CancelNpsCampaignRunRequest{
+		CampaignId: campaignID.String(), RunId: runID.String(),
+	}))
+	requireNPSNotFound(t, err)
+
+	_, err = h.NPSCampaignPreflight(surveyHandlerContext(), ptrext.Of(attunev1.GetNpsCampaignPreflightRequest{
+		CampaignId: campaignID.String(),
+	}))
+	requireNPSNotFound(t, err)
+}
+
+func requireNPSNotFound(t *testing.T, err error) {
+	t.Helper()
+	var got *dispatcher.Error
+	if !errors.As(err, &got) || got.Status != http.StatusNotFound || got.Code != attunev1.ErrorCode_NOT_FOUND {
+		t.Fatalf("NPS endpoint error = %#v, want dispatcher 404 NOT_FOUND", err)
+	}
+}
+
+func requireNPSCampaignCreate(t *testing.T, h *Handler, fake *fakeSurveyService, cohortID, ownerID uuid.UUID) {
+	t.Helper()
+	created, err := h.CreateCampaign(surveyHandlerContext(), ptrext.Of(attunev1.CreateSurveyCampaignRequest{
+		Name:             "Relationship NPS",
+		SurveyType:       attunev1.SurveyType_SURVEY_TYPE_NPS,
+		Status:           attunev1.SurveyCampaignStatus_SURVEY_CAMPAIGN_STATUS_ACTIVE,
+		TriggerEvent:     attunev1.SurveyTriggerEvent_SURVEY_TRIGGER_EVENT_SCHEDULED_RUN,
+		DistributionMode: attunev1.SurveyDistributionMode_SURVEY_DISTRIBUTION_MODE_CONTACT_EMAIL,
+		DedupePolicy:     attunev1.SurveyDedupePolicy_SURVEY_DEDUPE_POLICY_ONE_PER_RUN,
+		Locale:           "en",
+		NpsSettings: ptrext.Of(attunev1.NpsCampaignSettings{
+			CohortId:                   cohortID.String(),
+			DetractorOwnerMemberId:     ownerID.String(),
+			CollectionDays:             14,
+			MaximumRunRecipients:       500,
+			MinimumCompletedResponses:  30,
+			MinimumResponseRatePercent: 10,
+		}),
+	}))
+	if err != nil || created.Status != http.StatusCreated || fake.campaignInput.NPSSettings == nil {
+		t.Fatalf("CreateCampaign() = status %d input %+v err=%v", created.Status, fake.campaignInput, err)
+	}
+	if got := fake.campaignInput.NPSSettings; got.CohortID != cohortID || got.DetractorOwnerMemberID != ownerID ||
+		got.MinimumCompletedResponses != 30 || got.MinimumResponseRatePercent != 10 {
+		t.Fatalf("NPS settings = %+v", got)
+	}
+	if fake.campaignInput.MinDaysBetweenContact != nil {
+		t.Fatalf("NPS cooldown default must remain unset at the handler boundary: %d", ptrext.Indirect(fake.campaignInput.MinDaysBetweenContact))
+	}
+}
+
+func requireNPSRunScheduleAndList(t *testing.T, h *Handler, fake *fakeSurveyService, campaignID, requestKey uuid.UUID, now time.Time) {
+	t.Helper()
+	scheduled, err := h.ScheduleNPSCampaignRun(surveyHandlerContext(), ptrext.Of(attunev1.ScheduleNpsCampaignRunRequest{
+		CampaignId:       campaignID.String(),
+		ClientRequestKey: requestKey.String(),
+		ScheduledAt:      ptrext.Of(now.Format(time.RFC3339)),
+	}))
+	if err != nil || scheduled.Status != http.StatusCreated || fake.npsScheduleInput.ClientRequestKey != requestKey {
+		t.Fatalf("ScheduleNPSCampaignRun() = status %d input %+v err=%v", scheduled.Status, fake.npsScheduleInput, err)
+	}
+
+	runs, err := h.ListNPSCampaignRuns(surveyHandlerContext(), ptrext.Of(attunev1.ListNpsCampaignRunsRequest{
+		CampaignId: campaignID.String(), Limit: 5,
+	}))
+	if err != nil || runs.Status != http.StatusOK || len(runs.Body.GetRuns()) != 2 ||
+		runs.Body.GetRuns()[1].GetStartedCount() != 6 || runs.Body.GetRuns()[1].GetCompletedCount() != 4 ||
+		runs.Body.GetRuns()[1].GetNps() != 25 || legacyNPSResponseRate(runs.Body.GetRuns()[1]) != 1.0/2.0 ||
+		runs.Body.GetRuns()[1].GetCompletionRate() != 2.0/3.0 ||
+		runs.Body.GetRuns()[1].GetCompletedResponseRate() != 1.0/3.0 ||
+		runs.Body.GetRuns()[1].GetMeasurementReadiness() != attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_QUALIFIED {
+		t.Fatalf("ListNPSCampaignRuns() = status %d body %#v err=%v", runs.Status, runs.Body, err)
+	}
+}
+
+func legacyNPSResponseRate(run *attunev1.NpsCampaignRun) float64 {
+	field := run.ProtoReflect().Descriptor().Fields().ByNumber(protoreflect.FieldNumber(18))
+	return run.ProtoReflect().Get(field).Float()
+}
+
+func TestHandlerListNPSCampaignRunsReturnsHistoryCursor(t *testing.T) {
+	t.Parallel()
+
+	campaignID := uuid.New()
+	fake := ptrext.Of(fakeSurveyService{
+		npsRunPage: repo.NPSCampaignRunPage{
+			Runs:               []repo.NPSCampaignRun{{ID: uuid.New(), CampaignID: campaignID, Sequence: 24}},
+			NextBeforeSequence: 24,
+		},
+	})
+	h := NewHandler(fake)
+
+	result, err := h.ListNPSCampaignRuns(surveyHandlerContext(), ptrext.Of(attunev1.ListNpsCampaignRunsRequest{
+		CampaignId:     campaignID.String(),
+		Limit:          12,
+		BeforeSequence: ptrext.Of(int32(48)),
+	}))
+	if err != nil || result.Status != http.StatusOK || result.Body.GetNextBeforeSequence() != 24 {
+		t.Fatalf("ListNPSCampaignRuns() = status %d body %#v err=%v", result.Status, result.Body, err)
+	}
+	if fake.npsRunPageLimit != 12 || fake.npsRunPageBeforeSequence != 48 {
+		t.Fatalf("page input = limit %d cursor %d, want 12 and 48", fake.npsRunPageLimit, fake.npsRunPageBeforeSequence)
+	}
+}
+
+func TestHandlerListNPSCampaignRunEvidenceExportsReturnsDownloadPath(t *testing.T) {
+	t.Parallel()
+	campaignID := uuid.New()
+	runID := uuid.New()
+	exportID := uuid.New()
+	fake := ptrext.Of(fakeSurveyService{
+		npsEvidenceExports: []repo.NPSCampaignRunEvidenceExportSummary{{
+			ID:             exportID,
+			CampaignID:     campaignID,
+			RunID:          runID,
+			ReportVersion:  "1",
+			GeneratedAt:    time.Date(2026, 8, 8, 1, 2, 3, 0, time.UTC),
+			ArtifactSHA256: "sha256:abc",
+			CreatedByType:  "admin",
+		}},
+	})
+	h := NewHandler(fake)
+
+	result, err := h.ListNPSCampaignRunEvidenceExports(surveyHandlerContext(), ptrext.Of(attunev1.ListNpsCampaignRunEvidenceExportsRequest{
+		CampaignId: campaignID.String(),
+		RunId:      runID.String(),
+		Limit:      12,
+	}))
+	if err != nil || result.Status != http.StatusOK || len(result.Body.GetExports()) != 1 {
+		t.Fatalf("ListNPSCampaignRunEvidenceExports() = status %d body %#v err=%v", result.Status, result.Body, err)
+	}
+	item := result.Body.GetExports()[0]
+	if item.GetId() != exportID.String() || item.GetReportVersion() != "1" ||
+		!strings.HasSuffix(item.GetDownloadPath(), "/"+exportID.String()+".csv") {
+		t.Fatalf("evidence export = %#v", item)
+	}
+}
+
+func requireNPSRunCancellation(t *testing.T, h *Handler, fake *fakeSurveyService, campaignID, runID uuid.UUID) {
+	t.Helper()
+	result, err := h.CancelNPSCampaignRun(surveyHandlerContext(), ptrext.Of(attunev1.CancelNpsCampaignRunRequest{
+		CampaignId: campaignID.String(),
+		RunId:      runID.String(),
+	}))
+	if err != nil || result.Status != http.StatusOK ||
+		result.Body.GetStatus() != attunev1.NpsCampaignRunStatus_NPS_CAMPAIGN_RUN_STATUS_CANCELLED ||
+		result.Body.GetCancelledAt() == "" {
+		t.Fatalf("CancelNPSCampaignRun() = status %d body %#v err=%v", result.Status, result.Body, err)
+	}
+	if fake.npsCancelInput.TenantID != "tenant-1" || fake.npsCancelInput.CampaignID != campaignID ||
+		fake.npsCancelInput.RunID != runID || fake.npsCancelInput.ActorID != "user-1" {
+		t.Fatalf("CancelNPSCampaignRun input = %+v", fake.npsCancelInput)
+	}
+}
+
+func requireNPSPreflight(t *testing.T, h *Handler, fake *fakeSurveyService, campaignID uuid.UUID) {
+	t.Helper()
+	preflight, err := h.NPSCampaignPreflight(surveyHandlerContext(), ptrext.Of(attunev1.GetNpsCampaignPreflightRequest{
+		CampaignId: campaignID.String(),
+	}))
+	if err != nil || preflight.Status != http.StatusOK || preflight.Body.GetPlannedInvitationCount() != 24 ||
+		preflight.Body.GetMinimumCompletedResponses() != 30 ||
+		preflight.Body.GetRecurrenceSamplingPercent() != 25 ||
+		!preflight.Body.GetPlannedInvitationCountBelowMinimumCompletedResponses() ||
+		!preflight.Body.GetSamplePlanningTargetExceedsRecipientCap() ||
+		preflight.Body.GetDeliveryBlocker() != "" || fake.npsPreflightTenantID != "tenant-1" ||
+		fake.npsPreflightCampaignID != campaignID {
+		t.Fatalf("NPSCampaignPreflight() = status %d body %#v input %q/%s err=%v", preflight.Status, preflight.Body, fake.npsPreflightTenantID, fake.npsPreflightCampaignID, err)
+	}
+	requireNPSPreflightExclusionReasons(t, preflight.Body)
+}
+
+func requireNPSPreflightExclusionReasons(t *testing.T, preflight *attunev1.NpsCampaignPreflight) {
+	t.Helper()
+
+	got := preflight.GetExclusionReasonDistribution()
+	if len(got) != 3 ||
+		got[0].GetReason() != "contact_missing" || got[0].GetCount() != 4 ||
+		got[1].GetReason() != "contact_unavailable" || got[1].GetCount() != 3 ||
+		got[2].GetReason() != "contact_cooldown" || got[2].GetCount() != 4 {
+		t.Fatalf("NPSCampaignPreflight exclusion reason distribution = %#v", got)
+	}
+}
+
+func requireNPSRunAudit(t *testing.T, audit *fakeSurveyAudit, scheduledRunID uuid.UUID) {
+	t.Helper()
+	if len(audit.events) != 3 || audit.events[1].Action != "survey.nps_run_schedule" ||
+		audit.events[1].TargetID != scheduledRunID.String() || audit.events[2].Action != "survey.nps_run_cancel" ||
+		audit.events[2].TargetID != scheduledRunID.String() {
+		t.Fatalf("audit events = %+v, want NPS run schedule and cancellation audits", audit.events)
 	}
 }
 
@@ -692,7 +1065,7 @@ func TestHandlerSurveyReadEndpoints(t *testing.T) {
 		invitations: []repo.Invitation{surveyHandlerInvitationFixture(invitationID, campaignID, nil, now)},
 		responses:   []repo.Response{surveyHandlerResponseFixture(responseID, campaignID, invitationID, ownerID, now)},
 		analytics:   surveyHandlerAnalyticsFixture(campaignID, ownerID, now),
-		trend:       []repo.AnalyticsTrendBucket{{Date: "2026-08-02", InvitationCount: 10, CompletedCount: 4}},
+		trend:       []repo.AnalyticsTrendBucket{{Date: "2026-08-02", InvitationCount: 10, StartedCount: 6, CompletedCount: 4}},
 		segments:    []repo.AnalyticsSegment{surveyHandlerSegmentFixture(campaignID)},
 		insights:    []svc.AnalyticsInsight{surveyHandlerInsightFixture()},
 	})
@@ -728,21 +1101,56 @@ func requireSurveyAnalyticsReadEndpoints(t *testing.T, h *Handler, fake *fakeSur
 	t.Helper()
 	from := ptrext.Of("2026-08-01T00:00:00Z")
 	to := ptrext.Of("2026-08-03T00:00:00Z")
-	analytics, err := h.Analytics(surveyHandlerContext(), ptrext.Of(attunev1.GetSurveyAnalyticsRequest{CampaignId: ptrext.Of(campaignID.String()), From: from, To: to}))
-	if err != nil || analytics.Body.GetOwnerRecoveryLoads()[0].GetOpenCount() != 2 {
+	runID := uuid.New()
+	analytics, err := h.Analytics(surveyHandlerContext(), ptrext.Of(attunev1.GetSurveyAnalyticsRequest{CampaignId: ptrext.Of(campaignID.String()), From: from, To: to, RunId: ptrext.Of(runID.String())}))
+	if err != nil {
 		t.Fatalf("Analytics() = %#v, %v", analytics.Body, err)
 	}
-	trend, err := h.AnalyticsTrend(surveyHandlerContext(), ptrext.Of(attunev1.GetSurveyAnalyticsTrendRequest{CampaignId: ptrext.Of(campaignID.String()), From: from, To: to}))
-	if err != nil || trend.Body.GetBuckets()[0].GetDate() != "2026-08-02" {
+	if analytics.Body.GetOwnerRecoveryLoads()[0].GetOpenCount() != 2 || analytics.Body.GetStartedCount() != 6 || analytics.Body.GetCompletionRate() != 2.0/3.0 {
+		t.Fatalf("Analytics() = %#v", analytics.Body)
+	}
+	if fake.analyticsFilter.RunID == nil || ptrext.Indirect(fake.analyticsFilter.RunID) != runID {
+		t.Fatalf("Analytics() filter = %#v", fake.analyticsFilter)
+	}
+	trend, err := h.AnalyticsTrend(surveyHandlerContext(), ptrext.Of(attunev1.GetSurveyAnalyticsTrendRequest{CampaignId: ptrext.Of(campaignID.String()), From: from, To: to, RunId: ptrext.Of(runID.String())}))
+	if err != nil {
 		t.Fatalf("AnalyticsTrend() = %#v, %v", trend.Body, err)
 	}
+	if trend.Body.GetBuckets()[0].GetDate() != "2026-08-02" || trend.Body.GetBuckets()[0].GetStartedCount() != 6 {
+		t.Fatalf("AnalyticsTrend() = %#v", trend.Body)
+	}
+	if fake.trendFilter.RunID == nil || ptrext.Indirect(fake.trendFilter.RunID) != runID {
+		t.Fatalf("AnalyticsTrend() filter = %#v", fake.trendFilter)
+	}
 	segments, err := h.AnalyticsSegments(surveyHandlerContext(), ptrext.Of(attunev1.GetSurveyAnalyticsSegmentsRequest{Dimension: attunev1.SurveyAnalyticsSegmentDimension_SURVEY_ANALYTICS_SEGMENT_DIMENSION_CAMPAIGN, Limit: 3}))
-	if err != nil || segments.Body.GetSegments()[0].GetCampaignId() != campaignID.String() || fake.segmentFilter.Limit != 3 {
+	if err != nil {
 		t.Fatalf("AnalyticsSegments() = %#v filter %+v err=%v", segments.Body, fake.segmentFilter, err)
 	}
+	requireSurveyAnalyticsSegmentsRead(t, segments.Body.GetSegments(), fake.segmentFilter, campaignID)
 	insights, err := h.AnalyticsInsights(surveyHandlerContext(), ptrext.Of(attunev1.GetSurveyAnalyticsInsightsRequest{Limit: 4}))
-	if err != nil || insights.Body.GetInsights()[0].GetSeverity() != attunev1.SurveyAnalyticsInsightSeverity_SURVEY_ANALYTICS_INSIGHT_SEVERITY_WARNING || fake.insightFilter.Limit != 4 {
+	if err != nil {
 		t.Fatalf("AnalyticsInsights() = %#v filter %+v err=%v", insights.Body, fake.insightFilter, err)
+	}
+	requireSurveyAnalyticsInsightsRead(t, insights.Body.GetInsights(), fake.insightFilter)
+}
+
+func requireSurveyAnalyticsSegmentsRead(t *testing.T, segments []*attunev1.SurveyAnalyticsSegment, filter repo.AnalyticsSegmentFilter, campaignID uuid.UUID) {
+	t.Helper()
+	if len(segments) != 1 || segments[0].GetCampaignId() != campaignID.String() {
+		t.Fatalf("AnalyticsSegments() = %#v", segments)
+	}
+	if filter.Limit != 3 {
+		t.Fatalf("AnalyticsSegments() filter = %+v", filter)
+	}
+}
+
+func requireSurveyAnalyticsInsightsRead(t *testing.T, insights []*attunev1.SurveyAnalyticsInsight, filter svc.AnalyticsInsightFilter) {
+	t.Helper()
+	if len(insights) != 1 || insights[0].GetSeverity() != attunev1.SurveyAnalyticsInsightSeverity_SURVEY_ANALYTICS_INSIGHT_SEVERITY_WARNING {
+		t.Fatalf("AnalyticsInsights() = %#v", insights)
+	}
+	if filter.Limit != 4 {
+		t.Fatalf("AnalyticsInsights() filter = %+v", filter)
 	}
 }
 
@@ -849,8 +1257,8 @@ func surveyHandlerReviewFixture(responseID uuid.UUID, campaignID uuid.UUID, owne
 
 func surveyHandlerAnalyticsFixture(campaignID uuid.UUID, ownerID uuid.UUID, now time.Time) repo.Analytics {
 	return repo.Analytics{
-		CampaignID: ptrext.Of(campaignID), InvitationCount: 10, DeliveredCount: 8, CompletedCount: 4,
-		LowScoreCount: 2, AverageScore: 3.5, ResponseRate: 0.4, PositiveScoreCount: 2,
+		CampaignID: ptrext.Of(campaignID), InvitationCount: 10, DeliveredCount: 8, StartedCount: 6, CompletedCount: 4,
+		LowScoreCount: 2, AverageScore: 3.5, ResponseRate: 0.4, StartRate: 0.6, CompletionRate: 2.0 / 3.0, PositiveScoreCount: 2,
 		PositiveScoreRate: 0.5, ScoreDistribution: []repo.ScoreBucket{{Score: 1, Count: 2}},
 		SuppressionReasons: []repo.SuppressionReasonBucket{{Reason: "contact_cooldown", Count: 1}},
 		OwnerRecoveryLoads: []repo.RecoveryOwnerLoad{{OwnerMemberID: ownerID, OpenCount: 2, OldestOpenDueAt: ptrext.Of(now), WorkloadScore: 76}},
@@ -904,46 +1312,64 @@ func mustStruct(t *testing.T, values map[string]any) *structpb.Struct {
 }
 
 type fakeSurveyService struct {
-	campaigns         []repo.Campaign
-	campaign          repo.Campaign
-	campaignInput     svc.CampaignInput
-	archiveTenantID   string
-	archiveCampaignID uuid.UUID
-	archiveActorID    string
-	invitations       []repo.Invitation
-	invitation        repo.Invitation
-	invitationFilter  repo.InvitationFilter
-	hostedInput       svc.HostedLinkInput
-	responses         []repo.Response
-	responseFilter    repo.ResponseFilter
-	analytics         repo.Analytics
-	analyticsFilter   repo.AnalyticsFilter
-	trend             []repo.AnalyticsTrendBucket
-	trendFilter       repo.AnalyticsFilter
-	segments          []repo.AnalyticsSegment
-	segmentFilter     repo.AnalyticsSegmentFilter
-	insights          []svc.AnalyticsInsight
-	insightFilter     svc.AnalyticsInsightFilter
-	review            repo.LowScoreReview
-	reviews           []repo.LowScoreReview
-	reviewInput       svc.ReviewInput
-	batchInput        svc.BatchReviewInput
-	assignment        svc.AssignmentResult
-	assignmentInput   svc.AssignmentInput
-	escalation        svc.EscalationResult
-	escalationInput   svc.EscalationInput
-	preview           svc.RecipientPreviewResult
-	previewInput      svc.RecipientPreviewInput
-	health            svc.CampaignHealth
-	healthTenantID    string
-	healthCampaignID  uuid.UUID
-	testEmailResult   svc.TestEmailResult
-	testEmailInput    svc.TestEmailInput
-	providerInput     svc.ProviderEventInput
-	retryTenantID     string
-	retryInvitationID uuid.UUID
-	retryActorID      string
-	err               error
+	campaigns                   []repo.Campaign
+	campaign                    repo.Campaign
+	campaignInput               svc.CampaignInput
+	npsRuns                     []repo.NPSCampaignRun
+	npsRunPage                  repo.NPSCampaignRunPage
+	npsRunPageLimit             int
+	npsRunPageBeforeSequence    int
+	npsEvidence                 svc.NPSCampaignRunEvidence
+	npsEvidenceExport           repo.NPSCampaignRunEvidenceExport
+	npsEvidenceExportReplayed   bool
+	npsEvidenceExportCalls      int
+	npsEvidenceExportRequestKey uuid.UUID
+	npsEvidenceExports          []repo.NPSCampaignRunEvidenceExportSummary
+	npsPreflight                svc.NPSCampaignPreflight
+	npsPreflightTenantID        string
+	npsPreflightCampaignID      uuid.UUID
+	npsScheduleInput            svc.ScheduleNPSCampaignRunInput
+	npsScheduleCreated          bool
+	npsCancelInput              svc.CancelNPSCampaignRunInput
+	npsCancelRun                repo.NPSCampaignRun
+	npsCancelChanged            bool
+	archiveTenantID             string
+	archiveCampaignID           uuid.UUID
+	archiveActorID              string
+	invitations                 []repo.Invitation
+	invitation                  repo.Invitation
+	invitationFilter            repo.InvitationFilter
+	hostedInput                 svc.HostedLinkInput
+	responses                   []repo.Response
+	responseFilter              repo.ResponseFilter
+	analytics                   repo.Analytics
+	analyticsFilter             repo.AnalyticsFilter
+	trend                       []repo.AnalyticsTrendBucket
+	trendFilter                 repo.AnalyticsFilter
+	segments                    []repo.AnalyticsSegment
+	segmentFilter               repo.AnalyticsSegmentFilter
+	insights                    []svc.AnalyticsInsight
+	insightFilter               svc.AnalyticsInsightFilter
+	review                      repo.LowScoreReview
+	reviews                     []repo.LowScoreReview
+	reviewInput                 svc.ReviewInput
+	batchInput                  svc.BatchReviewInput
+	assignment                  svc.AssignmentResult
+	assignmentInput             svc.AssignmentInput
+	escalation                  svc.EscalationResult
+	escalationInput             svc.EscalationInput
+	preview                     svc.RecipientPreviewResult
+	previewInput                svc.RecipientPreviewInput
+	health                      svc.CampaignHealth
+	healthTenantID              string
+	healthCampaignID            uuid.UUID
+	testEmailResult             svc.TestEmailResult
+	testEmailInput              svc.TestEmailInput
+	providerInput               svc.ProviderEventInput
+	retryTenantID               string
+	retryInvitationID           uuid.UUID
+	retryActorID                string
+	err                         error
 }
 
 func (f *fakeSurveyService) ListCampaigns(context.Context, string, string, int) ([]repo.Campaign, error) {
@@ -967,6 +1393,94 @@ func (f *fakeSurveyService) UpdateCampaign(_ context.Context, in svc.CampaignInp
 		return repo.Campaign{}, f.err
 	}
 	return f.campaign, nil
+}
+
+func (f *fakeSurveyService) ScheduleNPSCampaignRun(_ context.Context, in svc.ScheduleNPSCampaignRunInput) (repo.NPSCampaignRun, bool, error) {
+	f.npsScheduleInput = in
+	if f.err != nil {
+		return repo.NPSCampaignRun{}, false, f.err
+	}
+	if len(f.npsRuns) > 0 {
+		return f.npsRuns[0], f.npsScheduleCreated, nil
+	}
+	return repo.NPSCampaignRun{}, f.npsScheduleCreated, nil
+}
+
+func (f *fakeSurveyService) CancelNPSCampaignRun(_ context.Context, in svc.CancelNPSCampaignRunInput) (repo.NPSCampaignRun, bool, error) {
+	f.npsCancelInput = in
+	if f.err != nil {
+		return repo.NPSCampaignRun{}, false, f.err
+	}
+	return f.npsCancelRun, f.npsCancelChanged, nil
+}
+
+func (f *fakeSurveyService) ListNPSCampaignRuns(_ context.Context, _ string, _ uuid.UUID, _ int) ([]repo.NPSCampaignRun, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.npsRuns, nil
+}
+
+func (f *fakeSurveyService) ListNPSCampaignRunPage(_ context.Context, _ string, _ uuid.UUID, limit int, beforeSequence int) (repo.NPSCampaignRunPage, error) {
+	f.npsRunPageLimit = limit
+	f.npsRunPageBeforeSequence = beforeSequence
+	if f.err != nil {
+		return repo.NPSCampaignRunPage{}, f.err
+	}
+	if len(f.npsRunPage.Runs) > 0 || f.npsRunPage.NextBeforeSequence > 0 {
+		return f.npsRunPage, nil
+	}
+	return repo.NPSCampaignRunPage{Runs: f.npsRuns}, nil
+}
+
+func (f *fakeSurveyService) NPSCampaignRunEvidence(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID) (svc.NPSCampaignRunEvidence, error) {
+	if f.err != nil {
+		return svc.NPSCampaignRunEvidence{}, f.err
+	}
+	return f.npsEvidence, nil
+}
+
+func (f *fakeSurveyService) CreateNPSCampaignRunEvidenceExport(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _, _ string) (repo.NPSCampaignRunEvidenceExport, error) {
+	if f.err != nil {
+		return repo.NPSCampaignRunEvidenceExport{}, f.err
+	}
+	return f.npsEvidenceExport, nil
+}
+
+func (f *fakeSurveyService) CreateNPSCampaignRunEvidenceExportWithRequestKey(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, requestKey uuid.UUID, _, _ string) (repo.NPSCampaignRunEvidenceExport, bool, error) {
+	if f.err != nil {
+		return repo.NPSCampaignRunEvidenceExport{}, false, f.err
+	}
+	f.npsEvidenceExportCalls++
+	f.npsEvidenceExportRequestKey = requestKey
+	return f.npsEvidenceExport, f.npsEvidenceExportReplayed, nil
+}
+
+func (f *fakeSurveyService) ListNPSCampaignRunEvidenceExports(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ int) ([]repo.NPSCampaignRunEvidenceExportSummary, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.npsEvidenceExports, nil
+}
+
+func (f *fakeSurveyService) DownloadNPSCampaignRunEvidenceExport(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ uuid.UUID) (repo.NPSCampaignRunEvidenceExport, error) {
+	if f.err != nil {
+		return repo.NPSCampaignRunEvidenceExport{}, f.err
+	}
+	return f.npsEvidenceExport, nil
+}
+
+func (f *fakeSurveyService) NPSCampaignPreflight(
+	_ context.Context,
+	tenantID string,
+	campaignID uuid.UUID,
+) (svc.NPSCampaignPreflight, error) {
+	f.npsPreflightTenantID = tenantID
+	f.npsPreflightCampaignID = campaignID
+	if f.err != nil {
+		return svc.NPSCampaignPreflight{}, f.err
+	}
+	return f.npsPreflight, nil
 }
 
 func (f *fakeSurveyService) ArchiveCampaign(_ context.Context, tenantID string, id uuid.UUID, actorID string) (repo.Campaign, error) {

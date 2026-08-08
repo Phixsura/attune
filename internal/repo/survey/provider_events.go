@@ -34,13 +34,26 @@ func (r *Repo) RecordProviderEvent(ctx context.Context, input ProviderEventInput
 	if err != nil {
 		return Invitation{}, err
 	}
-	if err := insertProviderEvent(ctx, tx, input, invitation.ID, payload); err != nil {
+	inserted, err := insertProviderEvent(ctx, tx, input, invitation.ID, payload)
+	if err != nil {
 		return Invitation{}, err
+	}
+	if !inserted {
+		if err := tx.Commit(ctx); err != nil {
+			return Invitation{}, err
+		}
+		return invitation, nil
 	}
 	if err := suppressProviderEventContact(ctx, tx, input, invitation); err != nil {
 		return Invitation{}, err
 	}
-	updated, err := updateInvitationForProviderEvent(ctx, tx, input, invitation.ID)
+	updated, err := updateInvitationForProviderEvent(
+		ctx,
+		tx,
+		input,
+		invitation.ID,
+		providerEventAppliesToInvitation(input.ProviderEventType, invitation.DeliveryStatus),
+	)
 	if err != nil {
 		return Invitation{}, err
 	}
@@ -123,7 +136,7 @@ func insertProviderEvent(
 	input ProviderEventInput,
 	invitationID uuid.UUID,
 	payload []byte,
-) error {
+) (bool, error) {
 	query := `
 		INSERT INTO survey_provider_events (
 			tenant_id, invitation_id, provider, provider_event_type,
@@ -137,7 +150,7 @@ func insertProviderEvent(
 		WHERE provider_event_key <> ''
 		DO NOTHING`
 	}
-	_, err := tx.Exec(ctx, query,
+	commandTag, err := tx.Exec(ctx, query,
 		input.TenantID,
 		invitationID,
 		input.Provider,
@@ -148,9 +161,9 @@ func insertProviderEvent(
 		input.OccurredAt,
 	)
 	if err != nil {
-		return mapWriteError(err)
+		return false, mapWriteError(err)
 	}
-	return nil
+	return commandTag.RowsAffected() == 1, nil
 }
 
 func suppressProviderEventContact(
@@ -179,12 +192,31 @@ func suppressProviderEventContact(
 			     updated_at = NOW()
 			 WHERE tenant_id = $1 AND id = $2
 			 RETURNING id
+		), revoked_survey_invitations AS (
+			UPDATE survey_invitations
+			 SET delivery_status = 'not_applicable',
+			     delivery_secret = NULL,
+			     suppression_status = 'suppressed',
+			     suppression_reason = CASE
+			       WHEN $3 = 'bounced' THEN 'provider_bounce_contact'
+			       ELSE 'provider_complaint_contact'
+			     END,
+			     claimed_at = NULL,
+			     claimed_by = ''
+			 WHERE tenant_id = $1
+			   AND contact_id IN (SELECT id FROM updated_contact)
+			   AND distribution_mode = 'contact_email'
+			   AND delivery_status IN ('pending', 'delayed')
+			   AND response_status <> 'completed'
+			   AND suppression_status = 'not_suppressed'
+		), updated_subscriptions AS (
+			UPDATE customer_request_subscriptions
+			 SET status = 'suppressed',
+			     updated_at = NOW()
+			 WHERE tenant_id = $1
+			   AND contact_id IN (SELECT id FROM updated_contact)
 		)
-		UPDATE customer_request_subscriptions
-		 SET status = 'suppressed',
-		     updated_at = NOW()
-		 WHERE tenant_id = $1
-		   AND contact_id IN (SELECT id FROM updated_contact)`,
+		SELECT 1`,
 		input.TenantID,
 		ptrext.Indirect(invitation.ContactID),
 		input.ProviderEventType,
@@ -202,46 +234,50 @@ func updateInvitationForProviderEvent(
 	tx pgx.Tx,
 	input ProviderEventInput,
 	invitationID uuid.UUID,
+	apply bool,
 ) (Invitation, error) {
 	row := tx.QueryRow(ctx, fmt.Sprintf(`
 		UPDATE survey_invitations
-		 SET provider = CASE WHEN $3 <> '' THEN $3 ELSE provider END,
-		     provider_message_id = CASE WHEN $4 <> '' THEN $4 ELSE provider_message_id END,
+		 SET provider = CASE WHEN $11 AND $3 <> '' THEN $3 ELSE provider END,
+		     provider_message_id = CASE WHEN $11 AND $4 <> '' THEN $4 ELSE provider_message_id END,
 		     delivery_status = `+providerEventDeliveryStatusSQL()+`,
 		     response_status = CASE
-		       WHEN $5 = 'opened' AND response_status = 'not_started' THEN 'opened'
+		       WHEN $11 AND $5 = 'opened' AND response_status = 'not_started' THEN 'opened'
 		       ELSE response_status
 		     END,
 		     suppression_status = CASE
-		       WHEN $5 IN ('bounced', 'complained', 'rejected')
+		       WHEN $11 AND $5 IN ('bounced', 'complained', 'rejected')
 		        AND response_status <> 'completed' THEN 'suppressed'
 		       ELSE suppression_status
 		     END,
 		     suppression_reason = CASE
-		       WHEN $5 IN ('bounced', 'complained', 'rejected')
+		       WHEN $11 AND $5 IN ('bounced', 'complained', 'rejected')
 		        AND response_status <> 'completed' THEN $8
 		       ELSE suppression_reason
 		     END,
-		     delivery_secret = NULL,
+		     delivery_secret = CASE WHEN $11 THEN NULL ELSE delivery_secret END,
 		     failure_kind = CASE
-		       WHEN $6 <> '' THEN $6
-		       WHEN $9 THEN ''
+		       WHEN $11 AND $6 <> '' THEN $6
+		       WHEN $11 AND $9 THEN ''
 		       ELSE failure_kind
 		     END,
-		     http_status = CASE WHEN $6 <> '' THEN NULL ELSE http_status END,
+		     http_status = CASE
+		       WHEN $11 AND $6 <> '' THEN NULL
+		       ELSE http_status
+		     END,
 		     last_error = CASE
-		       WHEN $7 <> '' THEN $7
-		       WHEN $9 THEN ''
+		       WHEN $11 AND $7 <> '' THEN $7
+		       WHEN $11 AND $9 THEN ''
 		       ELSE last_error
 		     END,
-		     claimed_at = NULL,
-		     claimed_by = '',
+		     claimed_at = CASE WHEN $11 THEN NULL ELSE claimed_at END,
+		     claimed_by = CASE WHEN $11 THEN '' ELSE claimed_by END,
 		     delivered_at = CASE
-		       WHEN $5 IN ('delivered', 'opened') THEN COALESCE(delivered_at, $10)
+		       WHEN $11 AND $5 IN ('delivered', 'opened') THEN COALESCE(delivered_at, $10)
 		       ELSE delivered_at
 		     END,
 		     opened_at = CASE
-		       WHEN $5 = 'opened' THEN COALESCE(opened_at, $10)
+		       WHEN $11 AND $5 = 'opened' THEN COALESCE(opened_at, $10)
 		       ELSE opened_at
 		     END
 		 WHERE tenant_id = $1 AND id = $2
@@ -256,6 +292,7 @@ func updateInvitationForProviderEvent(
 		providerEventInvitationSuppressionReason(input.ProviderEventType),
 		providerEventClearsFailure(input.ProviderEventType),
 		input.OccurredAt,
+		apply,
 	)
 	item, err := scanInvitation(row)
 	if err != nil {
@@ -266,15 +303,37 @@ func updateInvitationForProviderEvent(
 
 func providerEventDeliveryStatusSQL() string {
 	return `CASE
-		       WHEN $5 = 'accepted'
+		       WHEN $11 AND $5 = 'accepted'
 		        AND delivery_status IN ('pending', 'delayed') THEN 'accepted'
-		       WHEN $5 IN ('delivered', 'opened')
+		       WHEN $11 AND $5 IN ('delivered', 'opened')
 		        AND delivery_status NOT IN ('bounced', 'complained', 'rejected', 'not_applicable') THEN 'delivered'
-		       WHEN $5 = 'temporarily_delayed'
-		        AND delivery_status NOT IN ('bounced', 'complained', 'rejected', 'not_applicable') THEN 'delayed'
-		       WHEN $5 IN ('bounced', 'complained', 'rejected') THEN $5
+		       WHEN $11 AND $5 = 'temporarily_delayed'
+		        AND delivery_status IN ('pending', 'accepted', 'delayed') THEN 'delayed'
+		       WHEN $11 AND $5 IN ('bounced', 'complained', 'rejected') THEN $5
 		       ELSE delivery_status
 		     END`
+}
+
+func providerEventAppliesToInvitation(eventType, deliveryStatus string) bool {
+	switch eventType {
+	case ProviderEventAccepted:
+		return deliveryStatus == DeliveryPending || deliveryStatus == DeliveryDelayed
+	case ProviderEventDelivered, ProviderEventOpened:
+		return !providerDeliveryStatusTerminal(deliveryStatus)
+	case ProviderEventTemporarilyDelayed:
+		return deliveryStatus == DeliveryPending || deliveryStatus == DeliveryAccepted || deliveryStatus == DeliveryDelayed
+	case ProviderEventBounced, ProviderEventComplained, ProviderEventRejected:
+		return !providerDeliveryStatusTerminal(deliveryStatus)
+	default:
+		return true
+	}
+}
+
+func providerDeliveryStatusTerminal(value string) bool {
+	return value == DeliveryBounced ||
+		value == DeliveryComplained ||
+		value == DeliveryRejected ||
+		value == DeliveryNotApplicable
 }
 
 func providerEventSuppressesContact(eventType string) bool {

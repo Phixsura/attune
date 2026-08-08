@@ -15,12 +15,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/Phixsura/attune/internal/domain"
+	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	surveyrepo "github.com/Phixsura/attune/internal/repo/survey"
 	surveysvc "github.com/Phixsura/attune/internal/service/survey"
 )
-
-const surveyPageFormLimitBytes = 64 * 1024
 
 var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doctype html>
 <html lang="{{.Locale}}">
@@ -29,7 +29,7 @@ var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doct
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <meta name="color-scheme" content="light">
-  <title>{{.Title}} | Attune survey</title>
+  <title>{{.Title}} | {{.Copy.TitleSuffix}}</title>
   <style>
     :root {
       color-scheme: light;
@@ -202,6 +202,28 @@ var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doct
       font-size: 0.95rem;
       font-weight: 650;
     }
+    .consent {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .consent input {
+      width: 18px;
+      height: 18px;
+      margin: 2px 0 0;
+      accent-color: var(--accent);
+    }
+    .consent label {
+      font-size: 0.95rem;
+      font-weight: 650;
+    }
+    .consent p {
+      margin: 5px 0 0;
+    }
     textarea, button {
       font: inherit;
     }
@@ -278,7 +300,7 @@ var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doct
       {{if .Intro}}<p class="lede">{{.Intro}}</p>{{end}}
       <div class="meta">
         <span class="pill">{{.ScaleLabel}}</span>
-        {{if .ExpiresAtLabel}}<span class="pill">Open until {{.ExpiresAtLabel}}</span>{{end}}
+        {{if .ExpiresAtLabel}}<span class="pill">{{.Copy.OpenUntil}} {{.ExpiresAtLabel}}</span>{{end}}
       </div>
     </section>
 
@@ -290,7 +312,7 @@ var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doct
         <form method="post" action="{{.SubmitURL}}">
           <input type="hidden" name="locale" value="{{.Locale}}">
           <div class="trap" aria-hidden="true">
-            <label for="survey-company-website">Company website</label>
+            <label for="survey-company-website">{{.Copy.HoneypotLabel}}</label>
             <input id="survey-company-website" type="text" name="company_website" tabindex="-1" autocomplete="off">
           </div>
           <fieldset>
@@ -298,7 +320,7 @@ var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doct
             <div class="score-grid">
               {{range .ScoreOptions}}
               <label class="score-option">
-                <input type="radio" name="score" value="{{.Value}}" required aria-label="Score {{.Value}}" {{if .Checked}}checked{{end}}>
+                <input type="radio" name="score" value="{{.Value}}" required aria-label="{{$.Copy.ScoreLabel}} {{.Value}}" {{if .Checked}}checked{{end}}>
                 <span>{{.Value}}</span>
               </label>
               {{end}}
@@ -314,16 +336,26 @@ var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doct
             <textarea id="survey-comment" name="comment" maxlength="5000"></textarea>
           </div>
 
+          {{if .CollectsFollowUpConsent}}
+          <div class="consent">
+            <input id="survey-follow-up-consent" type="checkbox" name="follow_up_consent" value="true">
+            <div>
+              <label for="survey-follow-up-consent">{{.Copy.FollowUpConsentLabel}}</label>
+              <p class="hint">{{.Copy.FollowUpConsentHint}}</p>
+            </div>
+          </div>
+          {{end}}
+
           <div class="footer">
-            <p class="hint">Your response is tied to this invitation link.</p>
-            <button class="button" type="submit">Submit feedback</button>
+            <p class="hint">{{.Copy.ResponseLinkHint}}</p>
+            <button class="button" type="submit">{{.Copy.SubmitLabel}}</button>
           </div>
         </form>
         {{else if .ThankYou}}
         <p class="hint">{{.ThankYou}}</p>
         {{end}}
         {{if .UnsubscribeURL}}
-        <p class="privacy"><a href="{{.UnsubscribeURL}}" rel="nofollow">Unsubscribe from future survey emails</a></p>
+        <p class="privacy"><a href="{{.UnsubscribeURL}}" rel="nofollow">{{.Copy.UnsubscribeLabel}}</a></p>
         {{end}}
       </div>
     </section>
@@ -332,24 +364,45 @@ var surveyPageTemplate = template.Must(template.New("survey-page").Parse(`<!doct
 </html>`))
 
 type surveyPageData struct {
-	Title            string
-	Intro            string
-	Question         string
-	CommentPrompt    string
-	ThankYou         string
-	Locale           string
-	SubmitURL        string
-	SurveyTypeLabel  string
-	ScaleLabel       string
-	ScaleLowLabel    string
-	ScaleHighLabel   string
-	ScoreColumnCount int
-	ScoreOptions     []surveyPageScoreOption
-	ExpiresAtLabel   string
-	UnsubscribeURL   string
-	CanSubmit        bool
-	Message          string
-	MessageKind      string
+	Title                   string
+	Intro                   string
+	Question                string
+	CommentPrompt           string
+	ThankYou                string
+	Locale                  string
+	SubmitURL               string
+	SurveyTypeLabel         string
+	ScaleLabel              string
+	ScaleLowLabel           string
+	ScaleHighLabel          string
+	ScoreColumnCount        int
+	ScoreOptions            []surveyPageScoreOption
+	ExpiresAtLabel          string
+	UnsubscribeURL          string
+	CollectsFollowUpConsent bool
+	CanSubmit               bool
+	Message                 string
+	MessageKind             string
+	Copy                    surveyPageCopy
+}
+
+// lint-artifacts:allow localized respondent-page copy.
+type surveyPageCopy struct {
+	TitleSuffix          string
+	OpenUntil            string
+	HoneypotLabel        string
+	ScoreLabel           string
+	ResponseLinkHint     string
+	SubmitLabel          string
+	UnsubscribeLabel     string
+	ResponseReadError    string
+	ChooseScore          string
+	ChooseScaleScore     string
+	AlreadySubmitted     string
+	DefaultThankYou      string
+	LowScoreFollowup     string
+	FollowUpConsentLabel string
+	FollowUpConsentHint  string
 }
 
 type surveyPageScoreOption struct {
@@ -358,9 +411,10 @@ type surveyPageScoreOption struct {
 }
 
 type surveyPageSubmission struct {
-	Score   int
-	Comment string
-	Locale  string
+	Score           int
+	Comment         string
+	Locale          string
+	FollowUpConsent *bool
 }
 
 func (h *Handler) SurveyPage(w http.ResponseWriter, r *http.Request) {
@@ -386,13 +440,13 @@ func (h *Handler) SubmitSurveyPageResponse(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	token := surveyTokenFromRequest(r)
-	data, status, err := h.surveyPageData(r.Context(), token, 0)
+	data, status, err := h.surveyPageData(r.Context(), token, nil)
 	if err != nil {
 		renderSurveyPageError(w, status, surveyPageErrorMessage(err))
 		return
 	}
 	if !data.CanSubmit {
-		renderSurveyPageMessage(w, http.StatusOK, data, "success", "This survey has already been submitted.")
+		renderSurveyPageMessage(w, http.StatusOK, data, "success", data.Copy.AlreadySubmitted)
 		return
 	}
 	submission, ok := surveyPageSubmissionFromRequest(w, r, data)
@@ -400,13 +454,25 @@ func (h *Handler) SubmitSurveyPageResponse(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	data = surveyPageDataWithSelectedScore(data, submission.Score)
+	fingerprints, err := h.surveys.FingerprintPublicResponse(
+		r.Context(),
+		token,
+		userAgentFromRequest(r),
+		nethardening.ClientIPDefault(r),
+	)
+	if err != nil {
+		h.renderSurveyPageSubmitError(r.Context(), w, token, data, err)
+		return
+	}
 	_, lowScore, thankYou, err := h.surveys.SubmitPublicResponse(r.Context(), surveysvc.PublicSubmitInput{
-		Token:         token,
-		Score:         submission.Score,
-		Comment:       submission.Comment,
-		Locale:        submission.Locale,
-		UserAgentHash: surveysvc.HashValue(userAgentFromRequest(r)),
-		IPHash:        surveysvc.HashValue(r.RemoteAddr),
+		Token:           token,
+		Score:           submission.Score,
+		Comment:         submission.Comment,
+		Locale:          submission.Locale,
+		FollowUpConsent: submission.FollowUpConsent,
+		UserAgentHash:   fingerprints.UserAgentHash,
+		IPHash:          fingerprints.IPHash,
+		QualityFlags:    fingerprints.QualityFlags,
 	})
 	if err != nil {
 		h.renderSurveyPageSubmitError(r.Context(), w, token, data, err)
@@ -420,9 +486,9 @@ func surveyPageSubmissionFromRequest(
 	r *http.Request,
 	data surveyPageData,
 ) (surveyPageSubmission, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, surveyPageFormLimitBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, publicSurveySubmissionBodyLimitBytes)
 	if err := r.ParseForm(); err != nil {
-		renderSurveyPageMessage(w, http.StatusBadRequest, data, "error", "The survey response could not be read.")
+		renderSurveyPageMessage(w, http.StatusBadRequest, data, "error", data.Copy.ResponseReadError)
 		return surveyPageSubmission{}, false
 	}
 	if surveyPageHoneypotFilled(r) {
@@ -435,19 +501,27 @@ func surveyPageSubmissionFromRequest(
 		return surveyPageSubmission{}, false
 	}
 	return surveyPageSubmission{
-		Score:   score,
-		Comment: r.FormValue("comment"),
-		Locale:  r.FormValue("locale"),
+		Score:           score,
+		Comment:         r.FormValue("comment"),
+		Locale:          r.FormValue("locale"),
+		FollowUpConsent: surveyPageFollowUpConsent(r, data),
 	}, true
+}
+
+func surveyPageFollowUpConsent(r *http.Request, data surveyPageData) *bool {
+	if !data.CollectsFollowUpConsent {
+		return nil
+	}
+	return ptrext.Of(strings.EqualFold(strings.TrimSpace(r.FormValue("follow_up_consent")), "true"))
 }
 
 func surveyPageScoreFromRequest(r *http.Request, data surveyPageData) (int, string, bool) {
 	score, err := strconv.Atoi(strings.TrimSpace(r.FormValue("score")))
 	if err != nil {
-		return 0, "Choose a score before submitting.", false
+		return 0, data.Copy.ChooseScore, false
 	}
 	if !surveyPageScoreAllowed(data.ScoreOptions, score) {
-		return 0, "Choose a score from the survey scale.", false
+		return 0, data.Copy.ChooseScaleScore, false
 	}
 	return score, "", true
 }
@@ -456,11 +530,11 @@ func renderSurveyPageSuccess(w http.ResponseWriter, data surveyPageData, lowScor
 	data.CanSubmit = false
 	data.ThankYou = strings.TrimSpace(thankYou)
 	if data.ThankYou == "" {
-		data.ThankYou = "Thanks for your feedback."
+		data.ThankYou = data.Copy.DefaultThankYou
 	}
 	data.Message = data.ThankYou
 	if lowScore {
-		data.Message = data.ThankYou + " Your response has been flagged for review."
+		data.Message = data.ThankYou + " " + data.Copy.LowScoreFollowup
 	}
 	data.MessageKind = "success"
 	if err := surveyPageExecuteTemplate(w, http.StatusOK, data); err != nil {
@@ -480,10 +554,10 @@ func (h *Handler) renderSurveyPageSubmitError(
 	err error,
 ) {
 	if errors.Is(err, surveysvc.ErrConflict) {
-		if refreshed, _, loadErr := h.surveyPageData(ctx, token, 0); loadErr == nil {
+		if refreshed, _, loadErr := h.surveyPageData(ctx, token, nil); loadErr == nil {
 			data = refreshed
 		}
-		renderSurveyPageMessage(w, http.StatusOK, data, "success", "This survey has already been submitted.")
+		renderSurveyPageMessage(w, http.StatusOK, data, "success", data.Copy.AlreadySubmitted)
 		return
 	}
 	renderSurveyPageMessage(w, surveyPageStatus(err), data, "error", surveyPageErrorMessage(err))
@@ -500,7 +574,7 @@ func renderSurveyPageMessage(w http.ResponseWriter, status int, data surveyPageD
 	}
 }
 
-func (h *Handler) surveyPageData(ctx context.Context, token string, selectedScore int) (surveyPageData, int, error) {
+func (h *Handler) surveyPageData(ctx context.Context, token string, selectedScore *int) (surveyPageData, int, error) {
 	result, err := h.surveys.GetPublicSurvey(ctx, token)
 	if err != nil {
 		return surveyPageData{}, surveyPageStatus(err), err
@@ -508,11 +582,18 @@ func (h *Handler) surveyPageData(ctx context.Context, token string, selectedScor
 	return surveyPageDataFromPublicSurvey(token, result, selectedScore), http.StatusOK, nil
 }
 
-func surveyPageDataFromPublicSurvey(token string, result surveyrepo.PublicSurvey, selectedScore int) surveyPageData {
+func surveyPageDataFromPublicSurvey(token string, result surveyrepo.PublicSurvey, selectedScore *int) surveyPageData {
+	if result.Campaign.SurveyType == surveyrepo.TypeNPS {
+		result.Campaign.Locale = domain.CanonicalNPSLocale(result.Campaign.Locale)
+	}
+	pageCopy := surveyPageCopyForLocale(result.Campaign.Locale)
 	minScore, maxScore := surveysvc.ScoreRange(result.Campaign.SurveyType)
 	options := make([]surveyPageScoreOption, 0, maxScore-minScore+1)
 	for score := minScore; score <= maxScore; score++ {
-		options = append(options, surveyPageScoreOption{Value: score, Checked: score == selectedScore})
+		options = append(options, surveyPageScoreOption{
+			Value:   score,
+			Checked: selectedScore != nil && score == ptrext.Indirect(selectedScore),
+		})
 	}
 	title := publicSurveyText(result.Campaign.Content, "title")
 	if strings.TrimSpace(title) == "" {
@@ -529,35 +610,37 @@ func surveyPageDataFromPublicSurvey(token string, result surveyrepo.PublicSurvey
 	}
 	thankYou := publicSurveyText(result.Campaign.Content, "thank_you")
 	if strings.TrimSpace(thankYou) == "" {
-		thankYou = "Thanks for your feedback."
+		thankYou = pageCopy.DefaultThankYou
 	}
 	responseStatus := result.Invitation.ResponseStatus
 	if result.Response != nil {
 		responseStatus = surveyrepo.ResponseCompleted
 	}
 	data := surveyPageData{
-		Title:            title,
-		Intro:            intro,
-		Question:         question,
-		CommentPrompt:    commentPrompt,
-		ThankYou:         thankYou,
-		Locale:           strings.TrimSpace(result.Campaign.Locale),
-		SubmitURL:        "/surveys/" + url.PathEscape(token) + "/responses",
-		SurveyTypeLabel:  surveyPageTypeLabel(result.Campaign.SurveyType),
-		ScaleLabel:       strconv.Itoa(minScore) + "-" + strconv.Itoa(maxScore),
-		ScaleLowLabel:    surveyPageLowLabel(result.Campaign.SurveyType),
-		ScaleHighLabel:   surveyPageHighLabel(result.Campaign.SurveyType),
-		ScoreColumnCount: maxScore - minScore + 1,
-		ScoreOptions:     options,
-		ExpiresAtLabel:   surveyPageDateLabel(result.Invitation.ExpiresAt),
-		UnsubscribeURL:   strings.TrimSpace(result.UnsubscribeURL),
-		CanSubmit:        responseStatus != surveyrepo.ResponseCompleted,
+		Title:                   title,
+		Intro:                   intro,
+		Question:                question,
+		CommentPrompt:           commentPrompt,
+		ThankYou:                thankYou,
+		Locale:                  strings.TrimSpace(result.Campaign.Locale),
+		SubmitURL:               "/surveys/" + url.PathEscape(token) + "/responses",
+		SurveyTypeLabel:         surveyPageTypeLabel(result.Campaign.SurveyType, result.Campaign.Locale),
+		ScaleLabel:              strconv.Itoa(minScore) + "-" + strconv.Itoa(maxScore),
+		ScaleLowLabel:           surveyPageLowLabel(result.Campaign.SurveyType, result.Campaign.Locale),
+		ScaleHighLabel:          surveyPageHighLabel(result.Campaign.SurveyType, result.Campaign.Locale),
+		ScoreColumnCount:        maxScore - minScore + 1,
+		ScoreOptions:            options,
+		ExpiresAtLabel:          surveyPageDateLabel(result.Invitation.ExpiresAt, result.Campaign.Locale),
+		UnsubscribeURL:          strings.TrimSpace(result.UnsubscribeURL),
+		CollectsFollowUpConsent: result.Campaign.SurveyType == surveyrepo.TypeNPS,
+		CanSubmit:               responseStatus != surveyrepo.ResponseCompleted,
+		Copy:                    pageCopy,
 	}
 	if strings.TrimSpace(data.Locale) == "" {
 		data.Locale = "en"
 	}
 	if !data.CanSubmit {
-		data.Message = "This survey has already been submitted."
+		data.Message = data.Copy.AlreadySubmitted
 		data.MessageKind = "success"
 	}
 	return data
@@ -600,6 +683,7 @@ func renderSurveyPageError(w http.ResponseWriter, status int, message string) {
 		ScoreColumnCount: 1,
 		Message:          message,
 		MessageKind:      "error",
+		Copy:             surveyPageCopyForLocale("en"),
 	}
 	if err := surveyPageExecuteTemplate(w, status, data); err != nil {
 		http.Error(w, "survey render failed", http.StatusInternalServerError)
@@ -610,15 +694,19 @@ func surveyTokenFromRequest(r *http.Request) string {
 	return strings.TrimSpace(chi.URLParam(r, "token"))
 }
 
-func surveyScoreQuery(r *http.Request) int {
+func surveyScoreQuery(r *http.Request) *int {
 	if r == nil {
-		return 0
+		return nil
 	}
-	score, err := strconv.Atoi(strings.TrimSpace(r.URL.Query().Get("score")))
+	raw := strings.TrimSpace(r.URL.Query().Get("score"))
+	if raw == "" {
+		return nil
+	}
+	score, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0
+		return nil
 	}
-	return score
+	return ptrext.Of(score)
 }
 
 func surveyPageStatus(err error) int {
@@ -651,30 +739,70 @@ func surveyPageErrorMessage(err error) string {
 	}
 }
 
-func surveyPageTypeLabel(value string) string {
+// lint-artifacts:allow localized respondent-page labels.
+func surveyPageTypeLabel(value string, locale string) string {
+	if isChineseSurveyLocale(locale) {
+		if value == surveyrepo.TypeNPS {
+			return "净推荐值调查" // lint-artifacts:allow localized respondent-page label.
+		}
+		if value == surveyrepo.TypeCES {
+			return "客户费力度调查" // lint-artifacts:allow localized respondent-page label.
+		}
+		return "客户满意度调查" // lint-artifacts:allow localized respondent-page label.
+	}
+	if value == surveyrepo.TypeNPS {
+		return "Net Promoter Score"
+	}
 	if value == surveyrepo.TypeCES {
 		return "Effort survey"
 	}
 	return "Satisfaction survey"
 }
 
-func surveyPageLowLabel(value string) string {
+func surveyPageLowLabel(value string, locale string) string {
+	if isChineseSurveyLocale(locale) {
+		if value == surveyrepo.TypeNPS {
+			return "完全不可能" // lint-artifacts:allow localized respondent-page label.
+		}
+		if value == surveyrepo.TypeCES {
+			return "非常困难" // lint-artifacts:allow localized respondent-page label.
+		}
+		return "非常不满意" // lint-artifacts:allow localized respondent-page label.
+	}
+	if value == surveyrepo.TypeNPS {
+		return "Not at all likely"
+	}
 	if value == surveyrepo.TypeCES {
 		return "Very difficult"
 	}
 	return "Very dissatisfied"
 }
 
-func surveyPageHighLabel(value string) string {
+func surveyPageHighLabel(value string, locale string) string {
+	if isChineseSurveyLocale(locale) {
+		if value == surveyrepo.TypeNPS {
+			return "非常可能" // lint-artifacts:allow localized respondent-page label.
+		}
+		if value == surveyrepo.TypeCES {
+			return "非常容易" // lint-artifacts:allow localized respondent-page label.
+		}
+		return "非常满意" // lint-artifacts:allow localized respondent-page label.
+	}
+	if value == surveyrepo.TypeNPS {
+		return "Extremely likely"
+	}
 	if value == surveyrepo.TypeCES {
 		return "Very easy"
 	}
 	return "Very satisfied"
 }
 
-func surveyPageDateLabel(t *time.Time) string {
+func surveyPageDateLabel(t *time.Time, locale string) string {
 	if t == nil {
 		return ""
+	}
+	if isChineseSurveyLocale(locale) {
+		return ptrext.Indirect(t).UTC().Format("2006-01-02")
 	}
 	return ptrext.Indirect(t).UTC().Format("Jan 2, 2006")
 }

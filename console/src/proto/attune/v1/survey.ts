@@ -5,6 +5,7 @@
 // source: attune/v1/survey.proto
 
 /* eslint-disable */
+import { type HttpBody } from "../../google/api/httpbody";
 
 export const protobufPackage = "attune.v1";
 
@@ -12,6 +13,7 @@ export enum SurveyType {
   SURVEY_TYPE_UNSPECIFIED = "SURVEY_TYPE_UNSPECIFIED",
   SURVEY_TYPE_CSAT = "SURVEY_TYPE_CSAT",
   SURVEY_TYPE_CES = "SURVEY_TYPE_CES",
+  SURVEY_TYPE_NPS = "SURVEY_TYPE_NPS",
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
@@ -29,6 +31,7 @@ export enum SurveyTriggerEvent {
   SURVEY_TRIGGER_EVENT_REPLY_SENT = "SURVEY_TRIGGER_EVENT_REPLY_SENT",
   SURVEY_TRIGGER_EVENT_MANUAL_LINK = "SURVEY_TRIGGER_EVENT_MANUAL_LINK",
   SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED = "SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED",
+  SURVEY_TRIGGER_EVENT_SCHEDULED_RUN = "SURVEY_TRIGGER_EVENT_SCHEDULED_RUN",
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
@@ -44,6 +47,41 @@ export enum SurveyDedupePolicy {
   SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE = "SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE",
   SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION = "SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION",
   SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER = "SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER",
+  SURVEY_DEDUPE_POLICY_ONE_PER_RUN = "SURVEY_DEDUPE_POLICY_ONE_PER_RUN",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum NpsBucket {
+  NPS_BUCKET_UNSPECIFIED = "NPS_BUCKET_UNSPECIFIED",
+  NPS_BUCKET_DETRACTOR = "NPS_BUCKET_DETRACTOR",
+  NPS_BUCKET_PASSIVE = "NPS_BUCKET_PASSIVE",
+  NPS_BUCKET_PROMOTER = "NPS_BUCKET_PROMOTER",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+export enum NpsCampaignRunStatus {
+  NPS_CAMPAIGN_RUN_STATUS_UNSPECIFIED = "NPS_CAMPAIGN_RUN_STATUS_UNSPECIFIED",
+  NPS_CAMPAIGN_RUN_STATUS_SCHEDULED = "NPS_CAMPAIGN_RUN_STATUS_SCHEDULED",
+  NPS_CAMPAIGN_RUN_STATUS_EVALUATING = "NPS_CAMPAIGN_RUN_STATUS_EVALUATING",
+  NPS_CAMPAIGN_RUN_STATUS_COLLECTING = "NPS_CAMPAIGN_RUN_STATUS_COLLECTING",
+  NPS_CAMPAIGN_RUN_STATUS_CLOSED = "NPS_CAMPAIGN_RUN_STATUS_CLOSED",
+  NPS_CAMPAIGN_RUN_STATUS_FAILED = "NPS_CAMPAIGN_RUN_STATUS_FAILED",
+  NPS_CAMPAIGN_RUN_STATUS_CANCELLED = "NPS_CAMPAIGN_RUN_STATUS_CANCELLED",
+  UNRECOGNIZED = "UNRECOGNIZED",
+}
+
+/**
+ * An operator-facing interpretation of a run's frozen evidence thresholds.
+ * It is not a claim of statistical significance or population representation.
+ */
+export enum NpsMeasurementReadiness {
+  NPS_MEASUREMENT_READINESS_UNSPECIFIED = "NPS_MEASUREMENT_READINESS_UNSPECIFIED",
+  NPS_MEASUREMENT_READINESS_PENDING = "NPS_MEASUREMENT_READINESS_PENDING",
+  NPS_MEASUREMENT_READINESS_PRELIMINARY = "NPS_MEASUREMENT_READINESS_PRELIMINARY",
+  NPS_MEASUREMENT_READINESS_DIRECTIONAL = "NPS_MEASUREMENT_READINESS_DIRECTIONAL",
+  NPS_MEASUREMENT_READINESS_QUALIFIED = "NPS_MEASUREMENT_READINESS_QUALIFIED",
+  NPS_MEASUREMENT_READINESS_REDACTED = "NPS_MEASUREMENT_READINESS_REDACTED",
+  NPS_MEASUREMENT_READINESS_UNAVAILABLE = "NPS_MEASUREMENT_READINESS_UNAVAILABLE",
   UNRECOGNIZED = "UNRECOGNIZED",
 }
 
@@ -172,6 +210,51 @@ export interface SurveyCampaign {
   createdAt: string;
   updatedAt: string;
   archivedAt?: string | undefined;
+  npsSettings?: NpsCampaignSettings | undefined;
+}
+
+export interface NpsCampaignSettings {
+  cohortId: string;
+  detractorOwnerMemberId: string;
+  collectionDays: number;
+  maximumRunRecipients: number;
+  /**
+   * Minimum currently retained submitted responses required by this campaign's
+   * operating-evidence guardrail.
+   */
+  minimumCompletedResponses: number;
+  /** Minimum submitted responses divided by invitations, expressed as a percent. */
+  minimumResponseRatePercent: number;
+  /**
+   * Optional relationship-NPS pulse cadence. Zero disables automatic runs;
+   * enabled cadences are expressed in days and must be between 30 and 365.
+   */
+  recurrenceIntervalDays?:
+    | number
+    | undefined;
+  /**
+   * Minimum days between invitations to the same contact in a recurring
+   * relationship-NPS program. Defaults to 365; valid values are 30-3650.
+   */
+  recurrenceContactCooldownDays?:
+    | number
+    | undefined;
+  /**
+   * Target share of currently serviceable contacts covered by each recurring
+   * pulse. Defaults to 25%; valid values are 1-100. Manual runs ignore it.
+   */
+  recurrenceSamplingPercent?:
+    | number
+    | undefined;
+  /**
+   * Conservative planning confidence target. This is a response-volume
+   * planning input, not a claim of statistical significance for NPS.
+   */
+  samplePlanningConfidencePercent: number;
+  /** Conservative planning margin of error target for a proportion proxy. */
+  samplePlanningMarginOfErrorPercent: number;
+  /** Expected submitted-response rate used to translate completes into invites. */
+  samplePlanningExpectedResponseRatePercent: number;
 }
 
 export interface ListSurveyCampaignsRequest {
@@ -201,6 +284,7 @@ export interface CreateSurveyCampaignRequest {
   requireRecentCustomerActivity?: boolean | undefined;
   recentActivityDays?: number | undefined;
   suppressAutoResolved?: boolean | undefined;
+  npsSettings?: NpsCampaignSettings | undefined;
 }
 
 export interface UpdateSurveyCampaignRequest {
@@ -221,10 +305,204 @@ export interface UpdateSurveyCampaignRequest {
   requireRecentCustomerActivity?: boolean | undefined;
   recentActivityDays?: number | undefined;
   suppressAutoResolved?: boolean | undefined;
+  npsSettings?: NpsCampaignSettings | undefined;
 }
 
 export interface ArchiveSurveyCampaignRequest {
   id: string;
+}
+
+export interface ScheduleNpsCampaignRunRequest {
+  campaignId: string;
+  clientRequestKey: string;
+  scheduledAt?: string | undefined;
+}
+
+/**
+ * Cancels a run before invitation materialization. A run that has started
+ * collecting must be handled through the collection lifecycle instead.
+ */
+export interface CancelNpsCampaignRunRequest {
+  campaignId: string;
+  runId: string;
+}
+
+export interface ListNpsCampaignRunsRequest {
+  campaignId: string;
+  limit: number;
+  /**
+   * Return runs strictly older than this immutable campaign-local sequence.
+   * Omit for the newest page.
+   */
+  beforeSequence?: number | undefined;
+}
+
+export interface ListNpsCampaignRunsResponse {
+  runs: NpsCampaignRun[];
+  /** Pass this value as before_sequence to retrieve the next older page. */
+  nextBeforeSequence?: number | undefined;
+}
+
+export interface ExportNpsCampaignRunEvidenceRequest {
+  campaignId: string;
+  runId: string;
+}
+
+export interface CreateNpsCampaignRunEvidenceExportRequest {
+  campaignId: string;
+  runId: string;
+  clientRequestKey: string;
+}
+
+export interface ListNpsCampaignRunEvidenceExportsRequest {
+  campaignId: string;
+  runId: string;
+  limit: number;
+}
+
+export interface ListNpsCampaignRunEvidenceExportsResponse {
+  exports: NpsCampaignRunEvidenceExport[];
+}
+
+export interface NpsCampaignRunEvidenceExport {
+  id: string;
+  campaignId: string;
+  runId: string;
+  reportVersion: string;
+  generatedAt: string;
+  artifactSha256: string;
+  createdByType: string;
+  createdAt: string;
+  downloadedAt?: string | undefined;
+  downloadPath: string;
+  expiresAt?: string | undefined;
+}
+
+export interface GetNpsCampaignPreflightRequest {
+  campaignId: string;
+}
+
+/**
+ * Aggregate-only launch evidence. The eventual worker evaluation remains the
+ * authoritative, immutable recipient boundary for a scheduled run.
+ */
+export interface NpsCampaignPreflight {
+  campaignId: string;
+  evaluatedCount: number;
+  eligibleCount: number;
+  excludedCount: number;
+  plannedInvitationCount: number;
+  maximumRunRecipients: number;
+  deliveryReady: boolean;
+  deliveryBlocker: string;
+  generatedAt: string;
+  /**
+   * Mutually exclusive, aggregate-only reasons for excluded audience members.
+   * No recipient identifiers are exposed.
+   */
+  exclusionReasonDistribution: SurveySuppressionReasonBucket[];
+  /** Frozen operating-evidence threshold configured for this campaign. */
+  minimumCompletedResponses: number;
+  /**
+   * Advisory current-state condition. When true, even a submission from every
+   * currently planned invitation cannot reach minimum_completed_responses. The
+   * worker still re-evaluates the authoritative audience at schedule time.
+   */
+  plannedInvitationCountBelowMinimumCompletedResponses: boolean;
+  /** Target share used to size each recurring pulse. Zero means a manual run. */
+  recurrenceSamplingPercent: number;
+  /** Current serviceable population used for the conservative planning estimate. */
+  samplePlanningPopulationCount: number;
+  samplePlanningRequiredCompletedResponses: number;
+  samplePlanningInvitationTarget: number;
+  samplePlanningConfidencePercent: number;
+  samplePlanningMarginOfErrorPercent: number;
+  samplePlanningExpectedResponseRatePercent: number;
+  /** True when the current run allocation cannot reach the planning invitation target. */
+  plannedInvitationCountBelowSamplePlanningTarget: boolean;
+  /** True when the planning invitation target is above the configured run cap. */
+  samplePlanningTargetExceedsRecipientCap: boolean;
+}
+
+export interface NpsCampaignRun {
+  id: string;
+  campaignId: string;
+  sequence: number;
+  status: NpsCampaignRunStatus;
+  scheduledAt: string;
+  openedAt?: string | undefined;
+  closesAt?: string | undefined;
+  evaluatedCount: number;
+  eligibleCount: number;
+  invitationCount: number;
+  redactedResponseCount: number;
+  failureReason: string;
+  createdAt: string;
+  updatedAt: string;
+  deliveredCount: number;
+  /**
+   * A hosted survey page has been visited or a response has been submitted.
+   * Email-link scanners and prefetchers can create a visit; this is not proof
+   * of a verified human interaction.
+   */
+  startedCount: number;
+  completedCount: number;
+  /**
+   * Deprecated: use hosted_visit_rate. This compatibility alias is the hosted
+   * survey page-visit rate, not the submitted response rate.
+   *
+   * @deprecated
+   */
+  responseRate: number;
+  nps: number;
+  detractorCount: number;
+  passiveCount: number;
+  promoterCount: number;
+  /**
+   * Submitted responses divided by hosted survey page visits. This is a
+   * page-visit conversion proxy, not a verified-human completion rate.
+   */
+  completionRate: number;
+  cancelledAt?:
+    | string
+    | undefined;
+  /** Opaque immutable-definition fingerprint used to delimit comparable trends. */
+  measurementKey: string;
+  /** Frozen collection window used for this run's response capability. */
+  collectionDays: number;
+  /** Frozen cap applied after eligibility resolution for this run. */
+  maximumRunRecipients: number;
+  /** Frozen minimum days since a prior survey invitation required for eligibility. */
+  contactCooldownDays: number;
+  /** Submitted responses divided by invitations created for this run. */
+  completedResponseRate: number;
+  measurementReadiness: NpsMeasurementReadiness;
+  /** Frozen operating-evidence guardrail for submitted responses. */
+  minimumCompletedResponses: number;
+  /** Frozen operating-evidence guardrail for submitted response rate. */
+  minimumResponseRatePercent: number;
+  /**
+   * Hosted survey page visits divided by invitations created for this run.
+   * This can include email-link scanners and prefetchers, so it is not a
+   * human-participation or submitted-response rate.
+   */
+  hostedVisitRate: number;
+  /** The closed run that caused this automatic pulse, when applicable. */
+  recurrenceSourceRunId?:
+    | string
+    | undefined;
+  /** Frozen target share used to size this recurring pulse. Zero means a manual run. */
+  recurrenceSamplingPercent: number;
+  /** Frozen conservative planning population observed when this run materialized. */
+  samplePlanningPopulationCount: number;
+  samplePlanningRequiredCompletedResponses: number;
+  samplePlanningInvitationTarget: number;
+  samplePlanningConfidencePercent: number;
+  samplePlanningMarginOfErrorPercent: number;
+  samplePlanningExpectedResponseRatePercent: number;
+  invitationCountBelowSamplePlanningTarget: boolean;
+  /** True when at least one current non-redacted NPS response contributes to nps. */
+  npsAvailable: boolean;
 }
 
 export interface CreateSurveyHostedLinkRequest {
@@ -315,6 +593,18 @@ export interface SurveyCampaignHealthFunnel {
   suppressionRate: number;
   expiredRate: number;
   recoveryOverdueRate: number;
+  /** Hosted survey page visits can include email-link scanners and prefetchers. */
+  startedCount: number;
+  /**
+   * Hosted survey page visits divided by invitations. This is not a verified
+   * human-participation or submitted-response rate.
+   */
+  startRate: number;
+  /**
+   * Submitted responses divided by hosted survey page visits. This is a
+   * page-visit conversion proxy, not a verified-human completion rate.
+   */
+  completionRate: number;
 }
 
 export interface SurveyCampaignHealthCheck {
@@ -358,6 +648,7 @@ export interface SurveyInvitation {
   createdAt: string;
   updatedAt: string;
   deliveryRetryable: boolean;
+  runId?: string | undefined;
 }
 
 export interface ListSurveyInvitationsRequest {
@@ -390,6 +681,24 @@ export interface SurveyResponse {
   submittedAt: string;
   lowScoreReview?: SurveyLowScoreReview | undefined;
   accountContext?: SurveyAccountContext | undefined;
+  npsBucket: NpsBucket;
+  feedbackId?:
+    | string
+    | undefined;
+  /**
+   * A respondent's answer to the NPS follow-up question. It is distinct from
+   * their notification subscription and does not represent a legal basis.
+   */
+  followUpConsent?:
+    | boolean
+    | undefined;
+  /**
+   * Deterministic, privacy-safe response quality observation. Flagged
+   * responses remain included in score metrics until an operator decides how
+   * to handle them.
+   */
+  qualityStatus: string;
+  qualityReasons: string[];
 }
 
 /**
@@ -440,6 +749,19 @@ export interface SurveyLowScoreReview {
   recoveryNotificationReason: string;
   recoveryNotificationDeliveredAt?: string | undefined;
   recoveryNotificationLastError: string;
+  /**
+   * The immutable target copied when the review was created. It is distinct
+   * from a later operational due-date change.
+   */
+  initialDueAt?:
+    | string
+    | undefined;
+  /** The first durable record that an operator contacted the customer. */
+  customerContactedAt?:
+    | string
+    | undefined;
+  /** The immutable first terminal disposition used for recovery timeliness. */
+  firstTerminalAt?: string | undefined;
 }
 
 export interface UpdateSurveyLowScoreReviewRequest {
@@ -518,6 +840,7 @@ export interface GetSurveyAnalyticsRequest {
   campaignId?: string | undefined;
   from?: string | undefined;
   to?: string | undefined;
+  runId?: string | undefined;
 }
 
 export interface SurveyAnalytics {
@@ -552,6 +875,57 @@ export interface SurveyAnalytics {
   pendingDeliveryCount: number;
   delayedDeliveryCount: number;
   rejectedDeliveryCount: number;
+  nps: number;
+  detractorCount: number;
+  passiveCount: number;
+  promoterCount: number;
+  redactedResponseCount: number;
+  /** Hosted survey page visits can include email-link scanners and prefetchers. */
+  startedCount: number;
+  /**
+   * Hosted survey page visits divided by invitations. This is not a verified
+   * human-participation or submitted-response rate.
+   */
+  startRate: number;
+  /**
+   * Submitted responses divided by hosted survey page visits. This is a
+   * page-visit conversion proxy, not a verified-human completion rate.
+   */
+  completionRate: number;
+  recoveryOutcome?:
+    | SurveyRecoveryOutcome
+    | undefined;
+  /** True when at least one current non-redacted NPS response contributes to nps. */
+  npsAvailable: boolean;
+  /**
+   * Count of responses with one or more explainable quality observations.
+   * This does not change score denominators.
+   */
+  qualityFlaggedResponseCount: number;
+}
+
+/**
+ * SurveyRecoveryOutcome records the durable operational work associated with
+ * low-score responses in the same analytics scope. A dismissed review remains
+ * distinct from an explicitly resolved recovery.
+ */
+export interface SurveyRecoveryOutcome {
+  reviewCount: number;
+  resolvedCount: number;
+  dismissedCount: number;
+  customerContactedCount: number;
+  rootCauseRecordedCount: number;
+  actionRecordedCount: number;
+  /**
+   * Counts whose immutable initial target and relevant event timestamp are
+   * both available. Historical reviews with unknown timestamps are excluded.
+   */
+  contactedTimelinessEvidenceCount: number;
+  contactedOnTimeCount: number;
+  contactedLateCount: number;
+  terminalTimelinessEvidenceCount: number;
+  terminalOnTimeCount: number;
+  terminalLateCount: number;
 }
 
 export interface SurveyRecoveryOwnerLoad {
@@ -569,6 +943,7 @@ export interface GetSurveyAnalyticsTrendRequest {
   campaignId?: string | undefined;
   from?: string | undefined;
   to?: string | undefined;
+  runId?: string | undefined;
 }
 
 export interface GetSurveyAnalyticsTrendResponse {
@@ -588,6 +963,16 @@ export interface SurveyAnalyticsTrendBucket {
   notStartedCount: number;
   openedCount: number;
   expiredCount: number;
+  runId?: string | undefined;
+  nps: number;
+  detractorCount: number;
+  passiveCount: number;
+  promoterCount: number;
+  redactedResponseCount: number;
+  startedCount: number;
+  /** True when at least one current non-redacted NPS response contributes to nps. */
+  npsAvailable: boolean;
+  qualityFlaggedResponseCount: number;
 }
 
 export interface GetSurveyAnalyticsSegmentsRequest {
@@ -673,7 +1058,11 @@ export interface PublicSurvey {
   maxScore: number;
   expiresAt?: string | undefined;
   responseStatus: SurveyResponseStatus;
-  unsubscribeUrl?: string | undefined;
+  unsubscribeUrl?:
+    | string
+    | undefined;
+  /** True when an NPS respondent may answer the optional follow-up question. */
+  collectsFollowUpConsent: boolean;
 }
 
 export interface GetPublicSurveyRequest {
@@ -685,6 +1074,7 @@ export interface SubmitPublicSurveyResponseRequest {
   score: number;
   comment: string;
   locale: string;
+  followUpConsent?: boolean | undefined;
 }
 
 export interface PublicSurveyResponseReceipt {
@@ -698,6 +1088,17 @@ export interface SurveyService {
   CreateSurveyCampaign(request: CreateSurveyCampaignRequest): Promise<SurveyCampaign>;
   UpdateSurveyCampaign(request: UpdateSurveyCampaignRequest): Promise<SurveyCampaign>;
   ArchiveSurveyCampaign(request: ArchiveSurveyCampaignRequest): Promise<SurveyCampaign>;
+  ScheduleNpsCampaignRun(request: ScheduleNpsCampaignRunRequest): Promise<NpsCampaignRun>;
+  CancelNpsCampaignRun(request: CancelNpsCampaignRunRequest): Promise<NpsCampaignRun>;
+  ListNpsCampaignRuns(request: ListNpsCampaignRunsRequest): Promise<ListNpsCampaignRunsResponse>;
+  ExportNpsCampaignRunEvidence(request: ExportNpsCampaignRunEvidenceRequest): Promise<HttpBody>;
+  CreateNpsCampaignRunEvidenceExport(
+    request: CreateNpsCampaignRunEvidenceExportRequest,
+  ): Promise<NpsCampaignRunEvidenceExport>;
+  ListNpsCampaignRunEvidenceExports(
+    request: ListNpsCampaignRunEvidenceExportsRequest,
+  ): Promise<ListNpsCampaignRunEvidenceExportsResponse>;
+  GetNpsCampaignPreflight(request: GetNpsCampaignPreflightRequest): Promise<NpsCampaignPreflight>;
   CreateSurveyHostedLink(request: CreateSurveyHostedLinkRequest): Promise<SurveyInvitation>;
   PreviewSurveyRecipients(request: PreviewSurveyRecipientsRequest): Promise<PreviewSurveyRecipientsResponse>;
   SendSurveyTestEmail(request: SendSurveyTestEmailRequest): Promise<SendSurveyTestEmailResponse>;

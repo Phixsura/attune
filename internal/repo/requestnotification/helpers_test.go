@@ -419,13 +419,16 @@ func TestUnsubscribeTokenHelpersUseRequestAndTenantScopes(t *testing.T) {
 		t.Fatalf("subscription = %+v execIdx=%d", sub, tx.execIdx)
 	}
 
-	tenantTx := ptrext.Of(eventTx{rows: []pgx.Row{scanRow{
-		uuid.New(), "tenant-1",
-		pgtype.UUID{},
-		contactID,
-		SubscriptionScopeTenantUpdates, SourceManual,
-		"unsubscribed", ptrext.Of(now), now, now,
-	}}})
+	tenantTx := ptrext.Of(eventTx{rows: []pgx.Row{
+		scanRow{contactID},
+		scanRow{
+			uuid.New(), "tenant-1",
+			pgtype.UUID{},
+			contactID,
+			SubscriptionScopeTenantUpdates, SourceManual,
+			"unsubscribed", ptrext.Of(now), now, now,
+		},
+	}})
 	tenantSub, err := unsubscribeSubscriptions(ctx, tenantTx, UnsubscribeToken{
 		ID:        uuid.New(),
 		TenantID:  "tenant-1",

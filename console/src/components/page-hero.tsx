@@ -19,7 +19,7 @@ export function PageHero({
   return (
     <section className={cn('space-y-4', className)}>
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1 basis-[260px]">
+        <div className="min-w-0 flex-1 sm:basis-[260px]">
           {eyebrow && <div className="text-xs font-medium text-muted-foreground">{eyebrow}</div>}
           <h1 className="mt-1 break-words text-2xl font-semibold tracking-tight text-foreground">
             {title}

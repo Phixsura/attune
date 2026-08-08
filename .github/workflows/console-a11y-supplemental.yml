@@ -33,4 +33,4 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vite build
       - run: pnpm exec playwright install --with-deps firefox webkit
-      - run: pnpm test:e2e:a11y:supplemental:ci
+      - run: ATTUNE_CONSOLE_E2E_PREBUILT=1 pnpm test:e2e:a11y:supplemental:ci

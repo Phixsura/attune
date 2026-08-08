@@ -3,8 +3,10 @@
 package survey
 
 import (
+	"strconv"
 	"strings"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	repo "github.com/Phixsura/attune/internal/repo/survey"
 )
@@ -21,7 +23,15 @@ func normalizeContent(surveyType string, content map[string]any) map[string]any 
 	return out
 }
 
-func defaultContent(surveyType string) map[string]any {
+func defaultContent(surveyType string, locales ...string) map[string]any {
+	if surveyType == repo.TypeNPS {
+		locale := ""
+		if len(locales) > 0 {
+			locale = locales[0]
+		}
+		content, _ := npsContentForRevision(locale, domain.CurrentNPSContentRevision)
+		return content
+	}
 	if surveyType == repo.TypeCES {
 		return map[string]any{
 			"title":          "Resolution feedback",
@@ -40,6 +50,34 @@ func defaultContent(surveyType string) map[string]any {
 	}
 }
 
+func npsContentForRevision(locale, revision string) (map[string]any, bool) {
+	content, ok := domain.CanonicalNPSContentForRevision(locale, revision)
+	if !ok {
+		return nil, false
+	}
+	return map[string]any{
+		"title":          content.Title,
+		"intro":          content.Intro,
+		"question":       content.Question,
+		"comment_prompt": content.CommentPrompt,
+		"thank_you":      content.ThankYou,
+	}, true
+}
+
+func npsContentRevisionFor(locale string, content map[string]any) string {
+	revision, ok := domain.NPSContentRevisionFor(locale, domain.NPSContent{
+		Title:         snapshotString(content, "title"),
+		Intro:         snapshotString(content, "intro"),
+		Question:      snapshotString(content, "question"),
+		CommentPrompt: snapshotString(content, "comment_prompt"),
+		ThankYou:      snapshotString(content, "thank_you"),
+	})
+	if !ok {
+		return domain.CurrentNPSContentRevision
+	}
+	return revision
+}
+
 func publicText(content map[string]any, key string) string {
 	value, ok := content[key].(string)
 	if !ok {
@@ -49,7 +87,7 @@ func publicText(content map[string]any, key string) string {
 }
 
 func campaignSnapshot(c repo.Campaign) map[string]any {
-	return map[string]any{
+	snapshot := map[string]any{
 		"campaign_id":                      c.ID.String(),
 		"name":                             c.Name,
 		"survey_type":                      c.SurveyType,
@@ -68,6 +106,59 @@ func campaignSnapshot(c repo.Campaign) map[string]any {
 		"recent_activity_days":             c.RecentActivityDays,
 		"suppress_auto_resolved":           c.SuppressAutoResolved,
 	}
+	if c.SurveyType == repo.TypeNPS {
+		snapshot["nps_content_revision"] = npsContentRevisionFor(c.Locale, c.Content)
+	}
+	return snapshot
+}
+
+// campaignFromInvitationSnapshot returns the definition promised to a recipient.
+// The current campaign remains the authority for whether the invitation is active.
+func campaignFromInvitationSnapshot(current repo.Campaign, invitation repo.Invitation) (repo.Campaign, error) {
+	if current.SurveyType == repo.TypeNPS {
+		current.Locale = domain.CanonicalNPSLocale(current.Locale)
+		content, ok := npsContentForRevision(current.Locale, npsContentRevisionFor(current.Locale, current.Content))
+		if !ok {
+			return repo.Campaign{}, ErrDisabled
+		}
+		current.Content = content
+	}
+	snapshot := invitation.CampaignSnapshot
+	surveyType := normalizeSurveyType(snapshotString(snapshot, "survey_type"))
+	content := nestedMap(snapshot, "content")
+	lowScoreThreshold, ok := invitationSnapshotInt(snapshot, "low_score_threshold")
+	if surveyType == "" || len(content) == 0 || !ok || validateLowScoreThreshold(surveyType, lowScoreThreshold) != nil {
+		return current, nil
+	}
+
+	result := current
+	if name := snapshotString(snapshot, "name"); name != "" {
+		result.Name = name
+	}
+	result.SurveyType = surveyType
+	result.Content = normalizeObject(content)
+	result.Locale = normalizedLocale(snapshotString(snapshot, "locale"), current.Locale)
+	if result.SurveyType == repo.TypeNPS {
+		result.Locale = domain.CanonicalNPSLocale(result.Locale)
+		revision := snapshotString(snapshot, "nps_content_revision")
+		if revision == "" {
+			revision = npsContentRevisionFor(result.Locale, content)
+		}
+		canonicalContent, ok := npsContentForRevision(result.Locale, revision)
+		if !ok {
+			return repo.Campaign{}, ErrDisabled
+		}
+		result.Content = canonicalContent
+	}
+	result.ContentVersion = invitation.CampaignContentVersion
+	result.LowScoreThreshold = lowScoreThreshold
+	return result, nil
+}
+
+func invitationSnapshotInt(snapshot map[string]any, key string) (int, bool) {
+	value := snapshotString(snapshot, key)
+	parsed, err := strconv.Atoi(value)
+	return parsed, err == nil
 }
 
 func normalizeObject(value map[string]any) map[string]any {
@@ -144,6 +235,9 @@ func validateLowScoreThreshold(surveyType string, threshold int) error {
 }
 
 func ScoreRange(surveyType string) (int, int) {
+	if surveyType == repo.TypeNPS {
+		return 0, 10
+	}
 	if surveyType == repo.TypeCES {
 		return 1, 7
 	}

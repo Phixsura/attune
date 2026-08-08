@@ -94,6 +94,13 @@ func uuidFromPg(value pgtype.UUID) *uuid.UUID {
 	return ptrext.Of(id)
 }
 
+func int64FromPg(value pgtype.Int8) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	return ptrext.Of(value.Int64)
+}
+
 func nextRetryAtArg(value time.Time) any {
 	if value.IsZero() {
 		return nil
@@ -159,12 +166,14 @@ func scanInvitation(row pgx.Row) (Invitation, error) {
 	var i Invitation
 	var campaignRaw []byte
 	var recipientRaw []byte
+	var runID pgtype.UUID
 	var requestID pgtype.UUID
 	var contactID pgtype.UUID
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.CampaignID,
+		&runID,
 		&i.CampaignContentVersion,
 		&campaignRaw,
 		&i.DedupeKey,
@@ -208,6 +217,7 @@ func scanInvitation(row pgx.Row) (Invitation, error) {
 	if err != nil {
 		return Invitation{}, err
 	}
+	i.RunID = uuidFromPg(runID)
 	i.RequestID = uuidFromPg(requestID)
 	i.ContactID = uuidFromPg(contactID)
 	i.CampaignSnapshot = campaignSnapshot
@@ -216,27 +226,30 @@ func scanInvitation(row pgx.Row) (Invitation, error) {
 }
 
 func scanResponse(row pgx.Row) (Response, error) {
-	var r Response
+	var response Response
 	var metadataRaw []byte
 	var requestID pgtype.UUID
 	var contactID pgtype.UUID
 	err := row.Scan(
-		&r.ID,
-		&r.TenantID,
-		&r.CampaignID,
-		&r.InvitationID,
+		&response.ID,
+		&response.TenantID,
+		&response.CampaignID,
+		&response.SurveyType,
+		&response.InvitationID,
 		&requestID,
 		&contactID,
-		&r.SourceType,
-		&r.SourceID,
-		&r.Score,
-		&r.Comment,
-		&r.Locale,
+		&response.SourceType,
+		&response.SourceID,
+		&response.Score,
+		&response.NPSBucket,
+		&response.FollowUpConsent,
+		&response.Comment,
+		&response.Locale,
 		&metadataRaw,
-		&r.UserAgentHash,
-		&r.IPHash,
-		&r.SubmittedAt,
-		&r.CreatedAt,
+		&response.UserAgentHash,
+		&response.IPHash,
+		&response.SubmittedAt,
+		&response.CreatedAt,
 	)
 	if err != nil {
 		return Response{}, mapNotFound(err)
@@ -245,37 +258,84 @@ func scanResponse(row pgx.Row) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	r.RequestID = uuidFromPg(requestID)
-	r.ContactID = uuidFromPg(contactID)
-	r.Metadata = metadata
-	return r, nil
+	response.RequestID = uuidFromPg(requestID)
+	response.ContactID = uuidFromPg(contactID)
+	response.Metadata = metadata
+	return response, nil
+}
+
+func scanResponseWithFeedbackID(row pgx.Row) (Response, error) {
+	var response Response
+	var metadataRaw []byte
+	var requestID pgtype.UUID
+	var contactID pgtype.UUID
+	var feedbackID pgtype.Int8
+	err := row.Scan(
+		&response.ID,
+		&response.TenantID,
+		&response.CampaignID,
+		&response.SurveyType,
+		&response.InvitationID,
+		&requestID,
+		&contactID,
+		&response.SourceType,
+		&response.SourceID,
+		&response.Score,
+		&response.NPSBucket,
+		&response.FollowUpConsent,
+		&response.Comment,
+		&response.Locale,
+		&metadataRaw,
+		&response.UserAgentHash,
+		&response.IPHash,
+		&response.SubmittedAt,
+		&response.CreatedAt,
+		&feedbackID,
+	)
+	if err != nil {
+		return Response{}, mapNotFound(err)
+	}
+	metadata, err := decodeObject(metadataRaw)
+	if err != nil {
+		return Response{}, err
+	}
+	response.RequestID = uuidFromPg(requestID)
+	response.ContactID = uuidFromPg(contactID)
+	response.Metadata = metadata
+	response.FeedbackID = int64FromPg(feedbackID)
+	return response, nil
 }
 
 func scanResponseWithAccount(row pgx.Row) (Response, error) {
-	var r Response
+	var response Response
 	var metadataRaw []byte
 	var requestID pgtype.UUID
 	var contactID pgtype.UUID
+	var feedbackID pgtype.Int8
 	err := row.Scan(
-		&r.ID,
-		&r.TenantID,
-		&r.CampaignID,
-		&r.InvitationID,
+		&response.ID,
+		&response.TenantID,
+		&response.CampaignID,
+		&response.SurveyType,
+		&response.InvitationID,
 		&requestID,
 		&contactID,
-		&r.SourceType,
-		&r.SourceID,
-		&r.Score,
-		&r.Comment,
-		&r.Locale,
+		&response.SourceType,
+		&response.SourceID,
+		&response.Score,
+		&response.NPSBucket,
+		&response.FollowUpConsent,
+		&response.Comment,
+		&response.Locale,
 		&metadataRaw,
-		&r.UserAgentHash,
-		&r.IPHash,
-		&r.SubmittedAt,
-		&r.CreatedAt,
-		&r.Account.AccountKey,
-		&r.Account.AccountDisplay,
-		&r.Account.Source,
+		&response.UserAgentHash,
+		&response.IPHash,
+		&response.SubmittedAt,
+		&response.CreatedAt,
+		&feedbackID,
+		&response.Account.AccountKey,
+		&response.Account.AccountDisplay,
+		&response.Account.Source,
 	)
 	if err != nil {
 		return Response{}, mapNotFound(err)
@@ -284,10 +344,11 @@ func scanResponseWithAccount(row pgx.Row) (Response, error) {
 	if err != nil {
 		return Response{}, err
 	}
-	r.RequestID = uuidFromPg(requestID)
-	r.ContactID = uuidFromPg(contactID)
-	r.Metadata = metadata
-	return r, nil
+	response.RequestID = uuidFromPg(requestID)
+	response.ContactID = uuidFromPg(contactID)
+	response.Metadata = metadata
+	response.FeedbackID = int64FromPg(feedbackID)
+	return response, nil
 }
 
 func scanResponseWithLowScoreReviewAndAccount(row pgx.Row) (Response, error) {
@@ -296,17 +357,21 @@ func scanResponseWithLowScoreReviewAndAccount(row pgx.Row) (Response, error) {
 	var metadataRaw []byte
 	var requestID pgtype.UUID
 	var contactID pgtype.UUID
+	var feedbackID pgtype.Int8
 	var ownerMemberID pgtype.UUID
 	err := row.Scan(
 		&response.ID,
 		&response.TenantID,
 		&response.CampaignID,
+		&response.SurveyType,
 		&response.InvitationID,
 		&requestID,
 		&contactID,
 		&response.SourceType,
 		&response.SourceID,
 		&response.Score,
+		&response.NPSBucket,
+		&response.FollowUpConsent,
 		&response.Comment,
 		&response.Locale,
 		&metadataRaw,
@@ -314,6 +379,7 @@ func scanResponseWithLowScoreReviewAndAccount(row pgx.Row) (Response, error) {
 		&response.IPHash,
 		&response.SubmittedAt,
 		&response.CreatedAt,
+		&feedbackID,
 		&review.ResponseID,
 		&review.TenantID,
 		&review.CampaignID,
@@ -324,6 +390,9 @@ func scanResponseWithLowScoreReviewAndAccount(row pgx.Row) (Response, error) {
 		&review.ActionTaken,
 		&review.CustomerContacted,
 		&review.DueAt,
+		&review.InitialDueAt,
+		&review.CustomerContactedAt,
+		&review.FirstTerminalAt,
 		&review.ReviewedAt,
 		&review.UpdatedBy,
 		&review.CreatedAt,
@@ -346,6 +415,7 @@ func scanResponseWithLowScoreReviewAndAccount(row pgx.Row) (Response, error) {
 	response.RequestID = uuidFromPg(requestID)
 	response.ContactID = uuidFromPg(contactID)
 	response.Metadata = metadata
+	response.FeedbackID = int64FromPg(feedbackID)
 	review.OwnerMemberID = uuidFromPg(ownerMemberID)
 	response.Review = ptrext.Of(review)
 	return response, nil
@@ -365,6 +435,9 @@ func scanLowScoreReview(row pgx.Row) (LowScoreReview, error) {
 		&r.ActionTaken,
 		&r.CustomerContacted,
 		&r.DueAt,
+		&r.InitialDueAt,
+		&r.CustomerContactedAt,
+		&r.FirstTerminalAt,
 		&r.ReviewedAt,
 		&r.UpdatedBy,
 		&r.CreatedAt,

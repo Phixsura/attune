@@ -621,14 +621,16 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 		return nil, fmt.Errorf("load gdpr delete request: %w", err)
 	}
 
-	// Cohort memberships: see Delete() comment.
-	if _, err := tx.Exec(ctx, `DELETE FROM cohort_memberships WHERE tenant_id = $1 AND external_user_id = $2`, tenantID, subjectKey); err != nil {
-		return nil, fmt.Errorf("delete cohort memberships: %w", err)
-	}
-
 	info, err := subjectInfoTx(ctx, tx, tenantID, subjectKey)
 	if err != nil {
 		return nil, err
+	}
+
+	// Match Delete's contact-then-membership lock order. Survey materialization
+	// takes the same contact lock before validating cohort membership, so a
+	// scheduled erasure cannot deadlock with a claimed NPS run.
+	if _, err := tx.Exec(ctx, `DELETE FROM cohort_memberships WHERE tenant_id = $1 AND external_user_id = $2`, tenantID, subjectKey); err != nil {
+		return nil, fmt.Errorf("delete cohort memberships: %w", err)
 	}
 	counts, err := deleteLockedSubject(ctx, tx, tenantID, info)
 	if err != nil {
@@ -646,6 +648,13 @@ func (r *Repo) ExecuteDeleteRequest(ctx context.Context, requestID string) (*Del
 }
 
 func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, info *subjectMetadata) (Counts, error) {
+	// A public response holds a row lock on its invitation while it writes the
+	// response and any derived feedback. Take the same invitation locks before
+	// counting redactions so a response can neither commit between the count and
+	// deletion nor survive an erase transaction through a stale statement snapshot.
+	if err := lockSubjectSurveyInvitations(ctx, tx, tenantID, info); err != nil {
+		return Counts{}, err
+	}
 	counts, err := countLockedSubject(ctx, tx, tenantID, info)
 	if err != nil {
 		return Counts{}, err
@@ -679,6 +688,29 @@ func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, info *
 	counts.CustomerLinkCount = linkCount
 	counts.VoteCount = voteCount
 	return counts, nil
+}
+
+func lockSubjectSurveyInvitations(ctx context.Context, tx pgx.Tx, tenantID string, info *subjectMetadata) error {
+	rows, err := tx.Query(ctx, `
+		SELECT si.id
+		FROM survey_invitations si
+		WHERE si.tenant_id = $1 AND `+subjectSurveyInvitationClause(2, 3, 4)+`
+		FOR UPDATE`,
+		tenantID,
+		info.feedbackIDTexts,
+		info.subjectKey,
+		info.subjectHashes,
+	)
+	if err != nil {
+		return fmt.Errorf("lock survey invitations: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("lock survey invitations rows: %w", err)
+	}
+	return nil
 }
 
 // anonymizeCustomerRequestSubject scrubs the subject's identity from
@@ -808,6 +840,9 @@ func countLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, info *s
 
 func deleteSurveySubjectRows(ctx context.Context, tx pgx.Tx, tenantID string, info *subjectMetadata) error {
 	args := []any{tenantID, info.feedbackIDTexts, info.subjectKey, info.subjectHashes}
+	if _, err := tx.Exec(ctx, incrementNPSRunRedactionCountsSQL(), args...); err != nil {
+		return fmt.Errorf("record survey campaign run redactions: %w", err)
+	}
 	for _, stmt := range []struct {
 		name string
 		sql  string
@@ -823,6 +858,27 @@ func deleteSurveySubjectRows(ctx context.Context, tx pgx.Tx, tenantID string, in
 		}
 	}
 	return nil
+}
+
+// incrementNPSRunRedactionCountsSQL preserves the aggregate interpretation of
+// a completed NPS run after GDPR removes an individual's response and its
+// feedback bridge through the response foreign key cascade.
+func incrementNPSRunRedactionCountsSQL() string {
+	return subjectSurveyInvitationCTE() + `,
+	redacted_runs AS (
+		SELECT si.run_id, COUNT(*) AS response_count
+		FROM survey_responses sr
+		JOIN subject_invitations si ON si.id = sr.invitation_id
+		WHERE sr.tenant_id = $1
+		  AND sr.survey_type = 'nps'
+		  AND si.run_id IS NOT NULL
+		GROUP BY si.run_id
+	)
+	UPDATE survey_campaign_runs run
+	SET redacted_response_count = run.redacted_response_count + redacted_runs.response_count
+	FROM redacted_runs
+	WHERE run.tenant_id = $1
+	  AND run.id = redacted_runs.run_id`
 }
 
 func subjectSurveyInvitationClause(feedbackIDsArg, subjectKeyArg, subjectHashesArg int) string {
@@ -847,7 +903,7 @@ func subjectSurveyInvitationClause(feedbackIDsArg, subjectKeyArg, subjectHashesA
 
 func subjectSurveyInvitationCTE() string {
 	return `WITH subject_invitations AS (
-		SELECT si.id
+		SELECT si.id, si.run_id
 		FROM survey_invitations si
 		WHERE si.tenant_id = $1 AND ` + subjectSurveyInvitationClause(2, 3, 4) + `
 	)`
@@ -916,27 +972,50 @@ type queryer interface {
 func subjectInfoTx(ctx context.Context, q queryer, tenantID, subjectKey string) (*subjectMetadata, error) {
 	subjectFilter := subjectMatchClause(2)
 	rows, err := q.Query(ctx, `
-		SELECT id, COALESCE(NULLIF(subject_display, ''), subject_key), subject_hash
-		FROM user_feedback
-		WHERE tenant_id = $1 AND `+subjectFilter+`
-		ORDER BY id
-		FOR UPDATE`, tenantID, subjectKey)
+		WITH matching_feedback AS (
+			SELECT id AS feedback_id,
+			       COALESCE(NULLIF(subject_display, ''), subject_key) AS subject_display,
+			       subject_hash
+			FROM user_feedback
+			WHERE tenant_id = $1 AND `+subjectFilter+`
+			FOR UPDATE
+		), matching_contacts AS (
+			SELECT 0::BIGINT AS feedback_id,
+			       COALESCE(NULLIF(display_name, ''), subject_key) AS subject_display,
+			       subject_hash
+			FROM customer_notification_contacts
+			WHERE tenant_id = $1
+			  AND subject_key <> ''
+			  AND subject_key = $2
+			FOR UPDATE
+		)
+		SELECT feedback_id, subject_display, subject_hash
+		FROM (
+			SELECT feedback_id, subject_display, subject_hash FROM matching_feedback
+			UNION ALL
+			SELECT feedback_id, subject_display, subject_hash FROM matching_contacts
+		) subject_rows
+		ORDER BY CASE WHEN feedback_id = 0 THEN 1 ELSE 0 END, feedback_id`, tenantID, subjectKey)
 	if err != nil {
-		return nil, fmt.Errorf("query subject feedback ids: %w", err)
+		return nil, fmt.Errorf("query subject identity rows: %w", err)
 	}
 	defer rows.Close()
 
 	info := ptrext.Of(subjectMetadata{})
 	info.subjectKey = strings.TrimSpace(subjectKey)
+	found := false
 	for rows.Next() {
+		found = true
 		var id int64
 		var subjectDisplay string
 		var subjectHash string
 		if err := rows.Scan(&id, &subjectDisplay, &subjectHash); err != nil {
 			return nil, fmt.Errorf("scan subject feedback ids: %w", err)
 		}
-		info.feedbackIDs = append(info.feedbackIDs, id)
-		info.feedbackIDTexts = append(info.feedbackIDTexts, fmt.Sprintf("%d", id))
+		if id > 0 {
+			info.feedbackIDs = append(info.feedbackIDs, id)
+			info.feedbackIDTexts = append(info.feedbackIDTexts, fmt.Sprintf("%d", id))
+		}
 		info.subjectHashes = appendUniqueNonEmpty(info.subjectHashes, subjectHash)
 		if info.subjectDisplay == "" {
 			info.subjectDisplay = subjectDisplay
@@ -945,8 +1024,11 @@ func subjectInfoTx(ctx context.Context, q queryer, tenantID, subjectKey string) 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate subject feedback ids: %w", err)
 	}
-	if len(info.feedbackIDs) == 0 {
+	if !found {
 		return nil, ErrSubjectNotFound
+	}
+	if info.subjectDisplay == "" {
+		info.subjectDisplay = info.subjectKey
 	}
 	return info, nil
 }

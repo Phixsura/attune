@@ -283,6 +283,24 @@ func TestSubjectInfoTxReturnsFirstDisplayAndIDs(t *testing.T) {
 	}
 }
 
+func TestSubjectInfoTxRecognizesContactOnlySubject(t *testing.T) {
+	t.Parallel()
+	rows := ptrext.Of(fakeRows{rows: [][]any{{int64(0), "NPS Ada", "sha256:nps-ada"}}})
+	info, err := subjectInfoTx(context.Background(), fakeQueryer{rows: rows}, "tenant-1", "customer:nps-ada")
+	if err != nil {
+		t.Fatalf("subjectInfoTx() err = %v", err)
+	}
+	if info.subjectDisplay != "NPS Ada" {
+		t.Fatalf("subjectDisplay = %q, want NPS Ada", info.subjectDisplay)
+	}
+	if len(info.feedbackIDs) != 0 || len(info.feedbackIDTexts) != 0 {
+		t.Fatalf("contact-only subject has feedback IDs: %#v / %#v", info.feedbackIDs, info.feedbackIDTexts)
+	}
+	if !reflect.DeepEqual(info.subjectHashes, []string{"sha256:nps-ada"}) {
+		t.Fatalf("subjectHashes = %#v", info.subjectHashes)
+	}
+}
+
 func TestSubjectSurveyInvitationClauseMatchesAnchorsAndContacts(t *testing.T) {
 	t.Parallel()
 	clause := subjectSurveyInvitationClause(2, 3, 4)
@@ -301,6 +319,21 @@ func TestSubjectSurveyInvitationClauseMatchesAnchorsAndContacts(t *testing.T) {
 	}
 }
 
+func TestSubjectInfoTxRecognizesLegacyFeedbackWithoutIdentityColumns(t *testing.T) {
+	t.Parallel()
+	rows := ptrext.Of(fakeRows{rows: [][]any{{int64(42), "", ""}}})
+	info, err := subjectInfoTx(context.Background(), fakeQueryer{rows: rows}, "tenant-1", "legacy@example.com")
+	if err != nil {
+		t.Fatalf("subjectInfoTx() err = %v", err)
+	}
+	if info.subjectDisplay != "legacy@example.com" {
+		t.Fatalf("subjectDisplay = %q, want legacy@example.com", info.subjectDisplay)
+	}
+	if len(info.feedbackIDs) != 1 || info.feedbackIDs[0] != 42 {
+		t.Fatalf("feedbackIDs = %#v, want [42]", info.feedbackIDs)
+	}
+}
+
 func TestSubjectInfoTxReturnsNotFound(t *testing.T) {
 	t.Parallel()
 	_, err := subjectInfoTx(context.Background(), fakeQueryer{rows: ptrext.Of(fakeRows{})}, "tenant-1", "missing")
@@ -312,7 +345,7 @@ func TestSubjectInfoTxReturnsNotFound(t *testing.T) {
 func TestSubjectInfoTxReturnsWrappedErrors(t *testing.T) {
 	t.Parallel()
 	_, err := subjectInfoTx(context.Background(), fakeQueryer{err: errors.New("query failed")}, "tenant-1", "missing")
-	if err == nil || err.Error() != "query subject feedback ids: query failed" {
+	if err == nil || err.Error() != "query subject identity rows: query failed" {
 		t.Fatalf("subjectInfoTx() err = %v", err)
 	}
 }

@@ -1,5 +1,5 @@
 import { HttpResponse, http } from 'msw'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CustomerRequestsPage } from '@/features/customer-requests/components/customer-requests-page'
 import {
   CustomerRequestAccountEventKind,
@@ -740,6 +740,7 @@ describe('CustomerRequestsPage', () => {
 
   it('posts selected feedback ids when promoting feedback', async () => {
     let payload: Record<string, unknown> | undefined
+    const onPromoteClose = vi.fn()
     mockList({ requests: [] })
     server.use(
       http.post(`${baseURL}:promote-feedback`, async ({ request }) => {
@@ -749,7 +750,10 @@ describe('CustomerRequestsPage', () => {
     )
 
     const { user } = renderWithProviders(
-      <CustomerRequestsPage initialPromoteFeedbackIDs={['101', '102']} />,
+      <CustomerRequestsPage
+        initialPromoteFeedbackIDs={['101', '102']}
+        onPromoteClose={onPromoteClose}
+      />,
     )
 
     const dialog = await screen.findByRole('dialog')
@@ -765,6 +769,7 @@ describe('CustomerRequestsPage', () => {
       priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_NONE,
     })
     expect(payload?.idempotencyKey).toEqual(expect.stringMatching(/^cr_[A-Za-z0-9_-]+$/))
+    await waitFor(() => expect(onPromoteClose).toHaveBeenCalledTimes(1))
   })
 
   it('keeps the promote dialog open when promoting feedback fails', async () => {
@@ -787,6 +792,26 @@ describe('CustomerRequestsPage', () => {
 
     await waitFor(() => expect(attempts).toBe(1))
     expect(screen.getByRole('dialog', { name: '从反馈提升为客户需求' })).toBeInTheDocument()
+  })
+
+  it('does not open a promotion deep link for a read-only operator', async () => {
+    const onPromoteClose = vi.fn()
+    server.use(
+      http.get('/fb/v1/console/me', () =>
+        HttpResponse.json({
+          ...defaultMe,
+          user: { ...defaultMe.user, role: 'viewer' },
+        }),
+      ),
+    )
+    mockList({ requests: [] })
+
+    renderWithProviders(
+      <CustomerRequestsPage initialPromoteFeedbackIDs={['101']} onPromoteClose={onPromoteClose} />,
+    )
+
+    await waitFor(() => expect(onPromoteClose).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('dialog', { name: '从反馈提升为客户需求' })).not.toBeInTheDocument()
   })
 
   it('filters the list by feedback id when opened from a feedback context', async () => {

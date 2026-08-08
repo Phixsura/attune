@@ -150,15 +150,15 @@ public-board-smoke: ## Browser runtime smoke — temporary local stack, Console 
 
 control-tower-smoke: ## Browser release smoke — production Console bundle and Control Tower closed-loop Chromium coverage.
 	cd console && $(PNPM) --ignore-workspace build
-	cd console && $(PNPM) --ignore-workspace run test:e2e:control-tower
+	cd console && ATTUNE_CONSOLE_E2E_PREBUILT=1 $(PNPM) --ignore-workspace run test:e2e:control-tower
 
 console-browser-smoke: ## Browser release smoke — production Console bundle and full Console Chromium accessibility/reflow coverage.
 	cd console && $(PNPM) --ignore-workspace build
-	cd console && $(PNPM) --ignore-workspace run test:e2e:a11y
+	cd console && ATTUNE_CONSOLE_E2E_PREBUILT=1 $(PNPM) --ignore-workspace run test:e2e:a11y
 
 console-browser-supplemental-smoke: ## Browser release smoke — production Console bundle and Firefox/WebKit accessibility/reflow coverage.
 	cd console && $(PNPM) --ignore-workspace build
-	cd console && $(PNPM) --ignore-workspace run test:e2e:a11y:supplemental:ci
+	cd console && ATTUNE_CONSOLE_E2E_PREBUILT=1 $(PNPM) --ignore-workspace run test:e2e:a11y:supplemental:ci
 
 runtime-smoke: ## Build the production image and boot it against throwaway pgvector Postgres.
 	ATTUNE_RUNTIME_SMOKE_IMAGE="$(ATTUNE_RUNTIME_SMOKE_IMAGE)" \

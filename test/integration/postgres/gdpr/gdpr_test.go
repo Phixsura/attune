@@ -848,10 +848,10 @@ func insertSurveyResponse(
 ) error {
 	_, err := pool.Exec(ctx, `
 		INSERT INTO survey_responses (
-			id, tenant_id, campaign_id, invitation_id, source_type, source_id,
+			id, tenant_id, campaign_id, survey_type, invitation_id, source_type, source_id,
 			score, comment, locale, metadata, user_agent_hash, ip_hash
 			) VALUES (
-				$1, $2, $3, $4, 'reply_sent', $5::bigint::text, 2, $6, 'en',
+				$1, $2, $3, 'csat', $4, 'reply_sent', $5::bigint::text, 2, $6, 'en',
 			'{"surface":"gdpr-test"}'::jsonb, 'sha256:ua', 'sha256:ip'
 		)`,
 		responseID, tenantID, campaignID, invitationID, feedbackID, comment,

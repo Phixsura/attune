@@ -99,6 +99,133 @@ func TestOwnerRecoveryLoadToProto(t *testing.T) {
 	}
 }
 
+func TestAnalyticsToProtoIncludesRecoveryOutcome(t *testing.T) {
+	t.Parallel()
+
+	got := analyticsToProto(repo.Analytics{RecoveryOutcome: repo.RecoveryOutcome{
+		ReviewCount:                      8,
+		ResolvedCount:                    3,
+		DismissedCount:                   1,
+		CustomerContactedCount:           5,
+		RootCauseRecordedCount:           4,
+		ActionRecordedCount:              6,
+		ContactedTimelinessEvidenceCount: 5,
+		ContactedOnTimeCount:             3,
+		ContactedLateCount:               2,
+		TerminalTimelinessEvidenceCount:  4,
+		TerminalOnTimeCount:              1,
+		TerminalLateCount:                3,
+	}}).GetRecoveryOutcome()
+
+	if got.GetReviewCount() != 8 || got.GetResolvedCount() != 3 || got.GetDismissedCount() != 1 ||
+		got.GetCustomerContactedCount() != 5 || got.GetRootCauseRecordedCount() != 4 ||
+		got.GetActionRecordedCount() != 6 || got.GetContactedTimelinessEvidenceCount() != 5 ||
+		got.GetContactedOnTimeCount() != 3 || got.GetContactedLateCount() != 2 ||
+		got.GetTerminalTimelinessEvidenceCount() != 4 || got.GetTerminalOnTimeCount() != 1 ||
+		got.GetTerminalLateCount() != 3 {
+		t.Fatalf("recovery outcome proto = %#v", got)
+	}
+}
+
+func TestAnalyticsProtoIncludesNPSAvailability(t *testing.T) {
+	t.Parallel()
+
+	analytics := analyticsToProto(repo.Analytics{NPS: 25, NPSAvailable: true})
+	if !analytics.GetNpsAvailable() || analytics.GetNps() != 25 {
+		t.Fatalf("analytics NPS = %v/%v, want available/25", analytics.GetNps(), analytics.GetNpsAvailable())
+	}
+
+	trend := analyticsTrendToProto([]repo.AnalyticsTrendBucket{{NPS: -50, NPSAvailable: true}}).GetBuckets()[0]
+	if !trend.GetNpsAvailable() || trend.GetNps() != -50 {
+		t.Fatalf("trend NPS = %v/%v, want available/-50", trend.GetNps(), trend.GetNpsAvailable())
+	}
+}
+
+func TestAnalyticsProtoIncludesResponseQualityCount(t *testing.T) {
+	t.Parallel()
+
+	analytics := analyticsToProto(repo.Analytics{QualityFlaggedResponseCount: 3})
+	if analytics.GetQualityFlaggedResponseCount() != 3 {
+		t.Fatalf("quality flagged response count = %d, want 3", analytics.GetQualityFlaggedResponseCount())
+	}
+	trend := analyticsTrendToProto([]repo.AnalyticsTrendBucket{{QualityFlaggedResponseCount: 2}}).GetBuckets()[0]
+	if trend.GetQualityFlaggedResponseCount() != 2 {
+		t.Fatalf("trend quality flagged response count = %d, want 2", trend.GetQualityFlaggedResponseCount())
+	}
+}
+
+func TestReviewToProtoKeepsTimelinessEvidenceSeparateFromReviewedAt(t *testing.T) {
+	t.Parallel()
+
+	firstTerminalAt := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
+	reviewedAt := firstTerminalAt.Add(time.Hour)
+	got := reviewToProto(repo.LowScoreReview{
+		ResponseID:      uuid.New(),
+		Status:          repo.ReviewResolved,
+		Severity:        repo.SeverityHigh,
+		FirstTerminalAt: ptrext.Of(firstTerminalAt),
+		ReviewedAt:      ptrext.Of(reviewedAt),
+	})
+
+	if got.GetFirstTerminalAt() != firstTerminalAt.Format(time.RFC3339) ||
+		got.GetReviewedAt() != reviewedAt.Format(time.RFC3339) {
+		t.Fatalf("review timing fields = %#v, want independent terminal and review timestamps", got)
+	}
+}
+
+func TestNPSCampaignRunToProtoIncludesFrozenMeasurementDefinition(t *testing.T) {
+	t.Parallel()
+
+	item := npsCampaignRunToProto(repo.NPSCampaignRun{
+		ID:                                        uuid.New(),
+		CampaignID:                                uuid.New(),
+		MeasurementKey:                            "nps:v2:opaque-definition",
+		CollectionDays:                            14,
+		MaximumRunRecipients:                      500,
+		ContactCooldownDays:                       90,
+		RecurrenceSamplingPercent:                 25,
+		MinimumCompletedResponses:                 30,
+		MinimumResponseRatePercent:                10,
+		SamplePlanningPopulationCount:             100,
+		SamplePlanningRequiredCompletedResponses:  49,
+		SamplePlanningInvitationTarget:            245,
+		SamplePlanningConfidencePercent:           95,
+		SamplePlanningMarginOfErrorPercent:        10,
+		SamplePlanningExpectedResponseRatePercent: 20,
+		InvitationCountBelowSamplePlanningTarget:  true,
+		HostedVisitRate:                           0.4,
+		CompletedResponseRate:                     0.2,
+		MeasurementReadiness:                      repo.NPSMeasurementQualified,
+		NPSAvailable:                              true,
+	})
+	if item.GetMeasurementKey() != "nps:v2:opaque-definition" {
+		t.Fatalf("MeasurementKey = %q", item.GetMeasurementKey())
+	}
+	for name, values := range map[string][2]any{
+		"collection days":          {item.GetCollectionDays(), int32(14)},
+		"recipient cap":            {item.GetMaximumRunRecipients(), int32(500)},
+		"contact cooldown":         {item.GetContactCooldownDays(), int32(90)},
+		"recurrence sampling":      {item.GetRecurrenceSamplingPercent(), int32(25)},
+		"minimum completed":        {item.GetMinimumCompletedResponses(), int32(30)},
+		"minimum response rate":    {item.GetMinimumResponseRatePercent(), int32(10)},
+		"sample population":        {item.GetSamplePlanningPopulationCount(), int32(100)},
+		"sample required":          {item.GetSamplePlanningRequiredCompletedResponses(), int32(49)},
+		"sample invitation target": {item.GetSamplePlanningInvitationTarget(), int32(245)},
+		"sample confidence":        {item.GetSamplePlanningConfidencePercent(), int32(95)},
+		"sample margin of error":   {item.GetSamplePlanningMarginOfErrorPercent(), int32(10)},
+		"sample response rate":     {item.GetSamplePlanningExpectedResponseRatePercent(), int32(20)},
+		"sample target shortfall":  {item.GetInvitationCountBelowSamplePlanningTarget(), true},
+		"hosted visit rate":        {item.GetHostedVisitRate(), 0.4},
+		"completed response rate":  {item.GetCompletedResponseRate(), 0.2},
+		"measurement readiness":    {item.GetMeasurementReadiness(), attunev1.NpsMeasurementReadiness_NPS_MEASUREMENT_READINESS_QUALIFIED},
+		"NPS availability":         {item.GetNpsAvailable(), true},
+	} {
+		if values[0] != values[1] {
+			t.Fatalf("%s = %v, want %v", name, values[0], values[1])
+		}
+	}
+}
+
 func TestSurveyEnumMappingsCoverKnownAndUnknownValues(t *testing.T) {
 	t.Parallel()
 
@@ -208,13 +335,15 @@ func TestResponseToProtoIncludesSurveyAccountContext(t *testing.T) {
 	campaignID := uuid.New()
 	invitationID := uuid.New()
 	got := responseToProto(repo.Response{
-		ID:           responseID,
-		CampaignID:   campaignID,
-		InvitationID: invitationID,
-		SourceType:   "feedback",
-		SourceID:     "101",
-		Score:        2,
-		SubmittedAt:  time.Date(2026, 7, 31, 9, 0, 0, 0, time.UTC),
+		ID:              responseID,
+		CampaignID:      campaignID,
+		InvitationID:    invitationID,
+		SourceType:      "feedback",
+		SourceID:        "101",
+		Score:           2,
+		FeedbackID:      ptrext.Of(int64(9001)),
+		FollowUpConsent: ptrext.Of(true),
+		SubmittedAt:     time.Date(2026, 7, 31, 9, 0, 0, 0, time.UTC),
 		Account: repo.AccountContext{
 			AccountKey:     " acct:acme ",
 			AccountDisplay: " Acme Corp ",
@@ -226,6 +355,30 @@ func TestResponseToProtoIncludesSurveyAccountContext(t *testing.T) {
 		got.GetAccountContext().GetAccountDisplay() != "Acme Corp" ||
 		got.GetAccountContext().GetSource() != "recipient_snapshot" {
 		t.Fatalf("account context = %#v, want trimmed Acme context", got.GetAccountContext())
+	}
+	if got.FollowUpConsent == nil || !got.GetFollowUpConsent() {
+		t.Fatalf("FollowUpConsent = %#v, want true", got.FollowUpConsent)
+	}
+	if got.FeedbackId == nil || got.GetFeedbackId() != "9001" {
+		t.Fatalf("FeedbackId = %#v, want 9001", got.FeedbackId)
+	}
+}
+
+func TestResponseToProtoIncludesQualityObservation(t *testing.T) {
+	t.Parallel()
+
+	got := responseToProto(repo.Response{
+		ID:           uuid.New(),
+		CampaignID:   uuid.New(),
+		InvitationID: uuid.New(),
+		Metadata: map[string]any{
+			"response_quality_status":  "flagged",
+			"response_quality_reasons": []any{"automated_client", "submitted_too_quickly"},
+		},
+	})
+	if got.QualityStatus != repo.ResponseQualityStatusFlagged ||
+		len(got.QualityReasons) != 2 || got.QualityReasons[0] != "automated_client" {
+		t.Fatalf("quality observation = %#v/%#v", got.QualityStatus, got.QualityReasons)
 	}
 }
 

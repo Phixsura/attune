@@ -267,9 +267,9 @@ func (f *fakeAPIKeyIdempotencyStore) Get(context.Context, string, string) (*idem
 	return f.key, nil
 }
 
-func (f *fakeAPIKeyIdempotencyStore) Delete(context.Context, string, string) error {
+func (f *fakeAPIKeyIdempotencyStore) DeleteExpired(context.Context, string, string) (bool, error) {
 	f.deleteCalls++
-	return nil
+	return true, nil
 }
 
 func (f *fakeAPIKeyIdempotencyStore) CleanupExpired(context.Context) (int64, error) {

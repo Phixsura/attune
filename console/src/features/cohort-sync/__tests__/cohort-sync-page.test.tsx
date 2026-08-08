@@ -48,6 +48,23 @@ const sourceFixture = {
   updatedAt: '2026-07-28T00:00:00Z',
 }
 
+const cohortFixture = {
+  id: 'cohort-1',
+  cohortSourceId: 'src-1',
+  externalCohortId: 'enterprise-customers',
+  name: 'Enterprise customers',
+  description: 'Customers on enterprise plans',
+  staleTtlDays: 7,
+  memberCount: 42,
+  enabled: true,
+  lastSyncedAt: '2026-07-28T00:00:00Z',
+  lastError: '',
+  createdAt: '2026-07-28T00:00:00Z',
+  updatedAt: '2026-07-28T00:00:00Z',
+  sourceName: 'My Amplitude',
+  sourceProvider: 'amplitude',
+}
+
 const withSourceHandlers = [
   http.get('/fb/v1/console/cohort-sync/sources', () =>
     HttpResponse.json({ sources: [sourceFixture] }),
@@ -60,6 +77,24 @@ const withSourceHandlers = [
       errorSources: 0,
       cohortCount: 0,
       totalActiveMembers: 0,
+    }),
+  ),
+]
+
+const withCohortHandlers = [
+  http.get('/fb/v1/console/cohort-sync/sources', () =>
+    HttpResponse.json({ sources: [sourceFixture] }),
+  ),
+  http.get('/fb/v1/console/cohort-sync/cohorts', () =>
+    HttpResponse.json({ cohorts: [cohortFixture] }),
+  ),
+  http.get('/fb/v1/console/cohort-sync/health', () =>
+    HttpResponse.json({
+      sourceCount: 1,
+      activeSources: 1,
+      errorSources: 0,
+      cohortCount: 1,
+      totalActiveMembers: 42,
     }),
   ),
 ]
@@ -94,6 +129,16 @@ describe('CohortSyncPage', () => {
       expect(screen.getByText('My Amplitude')).toBeInTheDocument()
     })
     expect(screen.getByText('amplitude')).toBeInTheDocument()
+  })
+
+  it('renders populated source and cohort tables with tooltip context', async () => {
+    server.use(...withCohortHandlers)
+    renderWithProviders(<CohortSyncPage />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Enterprise customers')).toBeInTheDocument()
+    })
+    expect(screen.getByText('42')).toBeInTheDocument()
   })
 
   it('creates source and shows toast on success', async () => {

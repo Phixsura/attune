@@ -4,6 +4,7 @@ package attune.v1;
 
 import "google/api/annotations.proto";
 import "google/api/field_behavior.proto";
+import "google/api/httpbody.proto";
 import "google/protobuf/struct.proto";
 
 service SurveyService {
@@ -27,6 +28,40 @@ service SurveyService {
       post: "/fb/v1/console/surveys/campaigns/{id}:archive"
       body: "*"
     };
+  }
+  rpc ScheduleNpsCampaignRun(ScheduleNpsCampaignRunRequest) returns (NpsCampaignRun) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}:scheduleNpsRun"
+      body: "*"
+    };
+  }
+  rpc CancelNpsCampaignRun(CancelNpsCampaignRunRequest) returns (NpsCampaignRun) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}:cancel"
+      body: "*"
+    };
+  }
+  rpc ListNpsCampaignRuns(ListNpsCampaignRunsRequest) returns (ListNpsCampaignRunsResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs"};
+  }
+  rpc ExportNpsCampaignRunEvidence(ExportNpsCampaignRunEvidenceRequest) returns (google.api.HttpBody) {
+    option (google.api.http) = {
+      get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}/evidence.csv"
+    };
+  }
+  rpc CreateNpsCampaignRunEvidenceExport(CreateNpsCampaignRunEvidenceExportRequest) returns (NpsCampaignRunEvidenceExport) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}/evidence-exports"
+      body: "*"
+    };
+  }
+  rpc ListNpsCampaignRunEvidenceExports(ListNpsCampaignRunEvidenceExportsRequest) returns (ListNpsCampaignRunEvidenceExportsResponse) {
+    option (google.api.http) = {
+      get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-runs/{run_id}/evidence-exports"
+    };
+  }
+  rpc GetNpsCampaignPreflight(GetNpsCampaignPreflightRequest) returns (NpsCampaignPreflight) {
+    option (google.api.http) = {get: "/fb/v1/console/surveys/campaigns/{campaign_id}/nps-preflight"};
   }
   rpc CreateSurveyHostedLink(CreateSurveyHostedLinkRequest) returns (SurveyInvitation) {
     option (google.api.http) = {
@@ -121,6 +156,7 @@ enum SurveyType {
   SURVEY_TYPE_UNSPECIFIED = 0;
   SURVEY_TYPE_CSAT = 1;
   SURVEY_TYPE_CES = 2;
+  SURVEY_TYPE_NPS = 3;
 }
 
 enum SurveyCampaignStatus {
@@ -136,6 +172,7 @@ enum SurveyTriggerEvent {
   SURVEY_TRIGGER_EVENT_REPLY_SENT = 2;
   SURVEY_TRIGGER_EVENT_MANUAL_LINK = 3;
   SURVEY_TRIGGER_EVENT_REQUEST_RESOLVED = 4;
+  SURVEY_TRIGGER_EVENT_SCHEDULED_RUN = 5;
 }
 
 enum SurveyDistributionMode {
@@ -149,6 +186,36 @@ enum SurveyDedupePolicy {
   SURVEY_DEDUPE_POLICY_ONE_PER_SOURCE = 1;
   SURVEY_DEDUPE_POLICY_ONE_PER_RESOLUTION = 2;
   SURVEY_DEDUPE_POLICY_ONE_PER_TRIGGER = 3;
+  SURVEY_DEDUPE_POLICY_ONE_PER_RUN = 4;
+}
+
+enum NpsBucket {
+  NPS_BUCKET_UNSPECIFIED = 0;
+  NPS_BUCKET_DETRACTOR = 1;
+  NPS_BUCKET_PASSIVE = 2;
+  NPS_BUCKET_PROMOTER = 3;
+}
+
+enum NpsCampaignRunStatus {
+  NPS_CAMPAIGN_RUN_STATUS_UNSPECIFIED = 0;
+  NPS_CAMPAIGN_RUN_STATUS_SCHEDULED = 1;
+  NPS_CAMPAIGN_RUN_STATUS_EVALUATING = 2;
+  NPS_CAMPAIGN_RUN_STATUS_COLLECTING = 4;
+  NPS_CAMPAIGN_RUN_STATUS_CLOSED = 5;
+  NPS_CAMPAIGN_RUN_STATUS_FAILED = 6;
+  NPS_CAMPAIGN_RUN_STATUS_CANCELLED = 7;
+}
+
+// An operator-facing interpretation of a run's frozen evidence thresholds.
+// It is not a claim of statistical significance or population representation.
+enum NpsMeasurementReadiness {
+  NPS_MEASUREMENT_READINESS_UNSPECIFIED = 0;
+  NPS_MEASUREMENT_READINESS_PENDING = 1;
+  NPS_MEASUREMENT_READINESS_PRELIMINARY = 2;
+  NPS_MEASUREMENT_READINESS_DIRECTIONAL = 3;
+  NPS_MEASUREMENT_READINESS_QUALIFIED = 4;
+  NPS_MEASUREMENT_READINESS_REDACTED = 5;
+  NPS_MEASUREMENT_READINESS_UNAVAILABLE = 6;
 }
 
 enum SurveyDeliveryStatus {
@@ -265,6 +332,35 @@ message SurveyCampaign {
   string created_at = 22;
   string updated_at = 23;
   optional string archived_at = 24;
+  optional NpsCampaignSettings nps_settings = 25;
+}
+
+message NpsCampaignSettings {
+  string cohort_id = 1;
+  string detractor_owner_member_id = 2;
+  int32 collection_days = 3;
+  int32 maximum_run_recipients = 4;
+  // Minimum currently retained submitted responses required by this campaign's
+  // operating-evidence guardrail.
+  int32 minimum_completed_responses = 5;
+  // Minimum submitted responses divided by invitations, expressed as a percent.
+  int32 minimum_response_rate_percent = 6;
+  // Optional relationship-NPS pulse cadence. Zero disables automatic runs;
+  // enabled cadences are expressed in days and must be between 30 and 365.
+  optional int32 recurrence_interval_days = 7;
+  // Minimum days between invitations to the same contact in a recurring
+  // relationship-NPS program. Defaults to 365; valid values are 30-3650.
+  optional int32 recurrence_contact_cooldown_days = 8;
+  // Target share of currently serviceable contacts covered by each recurring
+  // pulse. Defaults to 25%; valid values are 1-100. Manual runs ignore it.
+  optional int32 recurrence_sampling_percent = 9;
+  // Conservative planning confidence target. This is a response-volume
+  // planning input, not a claim of statistical significance for NPS.
+  int32 sample_planning_confidence_percent = 10;
+  // Conservative planning margin of error target for a proportion proxy.
+  int32 sample_planning_margin_of_error_percent = 11;
+  // Expected submitted-response rate used to translate completes into invites.
+  int32 sample_planning_expected_response_rate_percent = 12;
 }
 
 message ListSurveyCampaignsRequest {
@@ -294,6 +390,7 @@ message CreateSurveyCampaignRequest {
   optional bool require_recent_customer_activity = 15;
   optional int32 recent_activity_days = 16;
   optional bool suppress_auto_resolved = 17;
+  optional NpsCampaignSettings nps_settings = 18;
 }
 
 message UpdateSurveyCampaignRequest {
@@ -314,10 +411,180 @@ message UpdateSurveyCampaignRequest {
   optional bool require_recent_customer_activity = 15;
   optional int32 recent_activity_days = 16;
   optional bool suppress_auto_resolved = 17;
+  optional NpsCampaignSettings nps_settings = 18;
 }
 
 message ArchiveSurveyCampaignRequest {
   string id = 1;
+}
+
+message ScheduleNpsCampaignRunRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string client_request_key = 2 [(google.api.field_behavior) = REQUIRED];
+  optional string scheduled_at = 3;
+}
+
+// Cancels a run before invitation materialization. A run that has started
+// collecting must be handled through the collection lifecycle instead.
+message CancelNpsCampaignRunRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ListNpsCampaignRunsRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  int32 limit = 2;
+  // Return runs strictly older than this immutable campaign-local sequence.
+  // Omit for the newest page.
+  optional int32 before_sequence = 3;
+}
+
+message ListNpsCampaignRunsResponse {
+  repeated NpsCampaignRun runs = 1;
+  // Pass this value as before_sequence to retrieve the next older page.
+  optional int32 next_before_sequence = 2;
+}
+
+message ExportNpsCampaignRunEvidenceRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+}
+
+message CreateNpsCampaignRunEvidenceExportRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+  string client_request_key = 3 [(google.api.field_behavior) = REQUIRED];
+}
+
+message ListNpsCampaignRunEvidenceExportsRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+  string run_id = 2 [(google.api.field_behavior) = REQUIRED];
+  int32 limit = 3;
+}
+
+message ListNpsCampaignRunEvidenceExportsResponse {
+  repeated NpsCampaignRunEvidenceExport exports = 1;
+}
+
+message NpsCampaignRunEvidenceExport {
+  string id = 1;
+  string campaign_id = 2;
+  string run_id = 3;
+  string report_version = 4;
+  string generated_at = 5;
+  string artifact_sha256 = 6;
+  string created_by_type = 7;
+  string created_at = 8;
+  optional string downloaded_at = 9;
+  string download_path = 10;
+  optional string expires_at = 11;
+}
+
+message GetNpsCampaignPreflightRequest {
+  string campaign_id = 1 [(google.api.field_behavior) = REQUIRED];
+}
+
+// Aggregate-only launch evidence. The eventual worker evaluation remains the
+// authoritative, immutable recipient boundary for a scheduled run.
+message NpsCampaignPreflight {
+  string campaign_id = 1;
+  int32 evaluated_count = 2;
+  int32 eligible_count = 3;
+  int32 excluded_count = 4;
+  int32 planned_invitation_count = 5;
+  int32 maximum_run_recipients = 6;
+  bool delivery_ready = 7;
+  string delivery_blocker = 8;
+  string generated_at = 9;
+  // Mutually exclusive, aggregate-only reasons for excluded audience members.
+  // No recipient identifiers are exposed.
+  repeated SurveySuppressionReasonBucket exclusion_reason_distribution = 10;
+  // Frozen operating-evidence threshold configured for this campaign.
+  int32 minimum_completed_responses = 11;
+  // Advisory current-state condition. When true, even a submission from every
+  // currently planned invitation cannot reach minimum_completed_responses. The
+  // worker still re-evaluates the authoritative audience at schedule time.
+  bool planned_invitation_count_below_minimum_completed_responses = 12;
+  // Target share used to size each recurring pulse. Zero means a manual run.
+  int32 recurrence_sampling_percent = 13;
+  // Current serviceable population used for the conservative planning estimate.
+  int32 sample_planning_population_count = 14;
+  int32 sample_planning_required_completed_responses = 15;
+  int32 sample_planning_invitation_target = 16;
+  int32 sample_planning_confidence_percent = 17;
+  int32 sample_planning_margin_of_error_percent = 18;
+  int32 sample_planning_expected_response_rate_percent = 19;
+  // True when the current run allocation cannot reach the planning invitation target.
+  bool planned_invitation_count_below_sample_planning_target = 20;
+  // True when the planning invitation target is above the configured run cap.
+  bool sample_planning_target_exceeds_recipient_cap = 21;
+}
+
+message NpsCampaignRun {
+  string id = 1;
+  string campaign_id = 2;
+  int32 sequence = 3;
+  NpsCampaignRunStatus status = 4;
+  string scheduled_at = 5;
+  optional string opened_at = 6;
+  optional string closes_at = 7;
+  int32 evaluated_count = 8;
+  int32 eligible_count = 9;
+  int32 invitation_count = 10;
+  int32 redacted_response_count = 11;
+  string failure_reason = 12;
+  string created_at = 13;
+  string updated_at = 14;
+  int32 delivered_count = 15;
+  // A hosted survey page has been visited or a response has been submitted.
+  // Email-link scanners and prefetchers can create a visit; this is not proof
+  // of a verified human interaction.
+  int32 started_count = 16;
+  int32 completed_count = 17;
+  // Deprecated: use hosted_visit_rate. This compatibility alias is the hosted
+  // survey page-visit rate, not the submitted response rate.
+  double response_rate = 18 [deprecated = true];
+  double nps = 19;
+  int32 detractor_count = 20;
+  int32 passive_count = 21;
+  int32 promoter_count = 22;
+  // Submitted responses divided by hosted survey page visits. This is a
+  // page-visit conversion proxy, not a verified-human completion rate.
+  double completion_rate = 23;
+  optional string cancelled_at = 24;
+  // Opaque immutable-definition fingerprint used to delimit comparable trends.
+  string measurement_key = 25;
+  // Frozen collection window used for this run's response capability.
+  int32 collection_days = 26;
+  // Frozen cap applied after eligibility resolution for this run.
+  int32 maximum_run_recipients = 27;
+  // Frozen minimum days since a prior survey invitation required for eligibility.
+  int32 contact_cooldown_days = 28;
+  // Submitted responses divided by invitations created for this run.
+  double completed_response_rate = 29;
+  NpsMeasurementReadiness measurement_readiness = 30;
+  // Frozen operating-evidence guardrail for submitted responses.
+  int32 minimum_completed_responses = 31;
+  // Frozen operating-evidence guardrail for submitted response rate.
+  int32 minimum_response_rate_percent = 32;
+  // Hosted survey page visits divided by invitations created for this run.
+  // This can include email-link scanners and prefetchers, so it is not a
+  // human-participation or submitted-response rate.
+  double hosted_visit_rate = 33;
+  // The closed run that caused this automatic pulse, when applicable.
+  optional string recurrence_source_run_id = 34;
+  // Frozen target share used to size this recurring pulse. Zero means a manual run.
+  int32 recurrence_sampling_percent = 35;
+  // Frozen conservative planning population observed when this run materialized.
+  int32 sample_planning_population_count = 36;
+  int32 sample_planning_required_completed_responses = 37;
+  int32 sample_planning_invitation_target = 38;
+  int32 sample_planning_confidence_percent = 39;
+  int32 sample_planning_margin_of_error_percent = 40;
+	int32 sample_planning_expected_response_rate_percent = 41;
+	bool invitation_count_below_sample_planning_target = 42;
+	// True when at least one current non-redacted NPS response contributes to nps.
+	bool nps_available = 43;
 }
 
 message CreateSurveyHostedLinkRequest {
@@ -408,6 +675,14 @@ message SurveyCampaignHealthFunnel {
   double suppression_rate = 16;
   double expired_rate = 17;
   double recovery_overdue_rate = 18;
+  // Hosted survey page visits can include email-link scanners and prefetchers.
+  int32 started_count = 19;
+  // Hosted survey page visits divided by invitations. This is not a verified
+  // human-participation or submitted-response rate.
+  double start_rate = 20;
+  // Submitted responses divided by hosted survey page visits. This is a
+  // page-visit conversion proxy, not a verified-human completion rate.
+  double completion_rate = 21;
 }
 
 message SurveyCampaignHealthCheck {
@@ -451,6 +726,7 @@ message SurveyInvitation {
   string created_at = 19;
   string updated_at = 20;
   bool delivery_retryable = 21;
+  optional string run_id = 22;
 }
 
 message ListSurveyInvitationsRequest {
@@ -483,6 +759,16 @@ message SurveyResponse {
   string submitted_at = 12;
   optional SurveyLowScoreReview low_score_review = 13;
   optional SurveyAccountContext account_context = 14;
+  NpsBucket nps_bucket = 15;
+  optional string feedback_id = 16;
+  // A respondent's answer to the NPS follow-up question. It is distinct from
+  // their notification subscription and does not represent a legal basis.
+  optional bool follow_up_consent = 17;
+  // Deterministic, privacy-safe response quality observation. Flagged
+  // responses remain included in score metrics until an operator decides how
+  // to handle them.
+  string quality_status = 18;
+  repeated string quality_reasons = 19;
 }
 
 // SurveyAccountContext normalizes account/company hints attached to a survey
@@ -531,6 +817,13 @@ message SurveyLowScoreReview {
   string recovery_notification_reason = 18;
   optional string recovery_notification_delivered_at = 19;
   string recovery_notification_last_error = 20;
+  // The immutable target copied when the review was created. It is distinct
+  // from a later operational due-date change.
+  optional string initial_due_at = 21;
+  // The first durable record that an operator contacted the customer.
+  optional string customer_contacted_at = 22;
+  // The immutable first terminal disposition used for recovery timeliness.
+  optional string first_terminal_at = 23;
 }
 
 message UpdateSurveyLowScoreReviewRequest {
@@ -609,6 +902,7 @@ message GetSurveyAnalyticsRequest {
   optional string campaign_id = 1;
   optional string from = 2;
   optional string to = 3;
+  optional string run_id = 4;
 }
 
 message SurveyAnalytics {
@@ -643,6 +937,45 @@ message SurveyAnalytics {
   int32 pending_delivery_count = 29;
   int32 delayed_delivery_count = 30;
   int32 rejected_delivery_count = 31;
+  double nps = 32;
+  int32 detractor_count = 33;
+  int32 passive_count = 34;
+  int32 promoter_count = 35;
+  int32 redacted_response_count = 36;
+  // Hosted survey page visits can include email-link scanners and prefetchers.
+  int32 started_count = 37;
+  // Hosted survey page visits divided by invitations. This is not a verified
+  // human-participation or submitted-response rate.
+  double start_rate = 38;
+  // Submitted responses divided by hosted survey page visits. This is a
+  // page-visit conversion proxy, not a verified-human completion rate.
+  double completion_rate = 39;
+	SurveyRecoveryOutcome recovery_outcome = 40;
+	// True when at least one current non-redacted NPS response contributes to nps.
+	bool nps_available = 41;
+	// Count of responses with one or more explainable quality observations.
+	// This does not change score denominators.
+	int32 quality_flagged_response_count = 42;
+}
+
+// SurveyRecoveryOutcome records the durable operational work associated with
+// low-score responses in the same analytics scope. A dismissed review remains
+// distinct from an explicitly resolved recovery.
+message SurveyRecoveryOutcome {
+  int32 review_count = 1;
+  int32 resolved_count = 2;
+  int32 dismissed_count = 3;
+  int32 customer_contacted_count = 4;
+  int32 root_cause_recorded_count = 5;
+  int32 action_recorded_count = 6;
+  // Counts whose immutable initial target and relevant event timestamp are
+  // both available. Historical reviews with unknown timestamps are excluded.
+  int32 contacted_timeliness_evidence_count = 7;
+  int32 contacted_on_time_count = 8;
+  int32 contacted_late_count = 9;
+  int32 terminal_timeliness_evidence_count = 10;
+  int32 terminal_on_time_count = 11;
+  int32 terminal_late_count = 12;
 }
 
 message SurveyRecoveryOwnerLoad {
@@ -660,6 +993,7 @@ message GetSurveyAnalyticsTrendRequest {
   optional string campaign_id = 1;
   optional string from = 2;
   optional string to = 3;
+  optional string run_id = 4;
 }
 
 message GetSurveyAnalyticsTrendResponse {
@@ -679,6 +1013,16 @@ message SurveyAnalyticsTrendBucket {
   int32 not_started_count = 10;
   int32 opened_count = 11;
   int32 expired_count = 12;
+  optional string run_id = 13;
+  double nps = 14;
+  int32 detractor_count = 15;
+  int32 passive_count = 16;
+  int32 promoter_count = 17;
+	int32 redacted_response_count = 18;
+	int32 started_count = 19;
+	// True when at least one current non-redacted NPS response contributes to nps.
+	bool nps_available = 20;
+	int32 quality_flagged_response_count = 21;
 }
 
 message GetSurveyAnalyticsSegmentsRequest {
@@ -765,6 +1109,8 @@ message PublicSurvey {
   optional string expires_at = 12;
   SurveyResponseStatus response_status = 13;
   optional string unsubscribe_url = 14;
+  // True when an NPS respondent may answer the optional follow-up question.
+  bool collects_follow_up_consent = 15;
 }
 
 message GetPublicSurveyRequest {
@@ -776,6 +1122,7 @@ message SubmitPublicSurveyResponseRequest {
   int32 score = 2 [(google.api.field_behavior) = REQUIRED];
   string comment = 3;
   string locale = 4;
+  optional bool follow_up_consent = 5;
 }
 
 message PublicSurveyResponseReceipt {

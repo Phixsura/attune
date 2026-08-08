@@ -5,6 +5,8 @@ const host = '127.0.0.1'
 const origin = `http://${host}:${port}`
 const browserChannel = process.env.ATTUNE_CONSOLE_E2E_CHANNEL
 const executablePath = process.env.ATTUNE_CONSOLE_E2E_EXECUTABLE_PATH
+const usePrebuiltConsole = process.env.ATTUNE_CONSOLE_E2E_PREBUILT === '1'
+const reuseExistingServer = process.env.ATTUNE_CONSOLE_E2E_REUSE_SERVER === '1'
 const includeSupplementalProjects = process.env.ATTUNE_CONSOLE_E2E_SUPPLEMENTAL === '1'
 const supplementalProjectFilter = new Set(
   (process.env.ATTUNE_CONSOLE_E2E_SUPPLEMENTAL_PROJECTS ?? 'edge,firefox,webkit')
@@ -82,9 +84,11 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   webServer: {
-    command: `pnpm exec vite preview --host ${host} --port ${port} --strictPort`,
+    command: usePrebuiltConsole
+      ? `pnpm exec vite preview --host ${host} --port ${port} --strictPort`
+      : `pnpm exec vite build && pnpm exec vite preview --host ${host} --port ${port} --strictPort`,
     url: `${origin}/console/`,
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer,
     timeout: 60_000,
   },
   use: {
