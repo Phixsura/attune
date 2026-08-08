@@ -124,3 +124,37 @@ func TestAddNoteAutomation_PublicValidation400(t *testing.T) {
 		t.Fatalf("empty public note: want 400, got %v", err)
 	}
 }
+
+func TestAutomationDelegates_NotConfigured501(t *testing.T) {
+	// The automation surface delegates to the console handlers; with no
+	// service wired every route must fail closed (501), not panic.
+	h := NewHandler(nil)
+	ctx := automationCtx()
+
+	if _, err := h.ListAutomation(ctx, ptrext.Of(attunev1.ListRequestsAutomationRequest{})); err == nil {
+		t.Fatal("ListAutomation without service must error")
+	}
+	if _, err := h.CreateAutomation(ctx, ptrext.Of(attunev1.CreateRequestAutomationRequest{
+		Title: "T", IdempotencyKey: "automation-t-1",
+	})); err == nil {
+		t.Fatal("CreateAutomation without service must error")
+	}
+	if _, err := h.UpdateAutomation(ctx, ptrext.Of(attunev1.UpdateRequestAutomationRequest{
+		Id: uuid.NewString(),
+	})); err == nil {
+		t.Fatal("UpdateAutomation without service must error")
+	}
+}
+
+func TestPublicNoteError_NotFound404(t *testing.T) {
+	pc := ptrext.Of(fakePublicCommenter{err: publicvisibilitysvc.ErrNotFound})
+	h := NewHandler(nil)
+	h.SetPublicCommenter(pc)
+	_, err := h.AddNoteAutomation(automationCtx(), ptrext.Of(attunev1.AddRequestNoteAutomationRequest{
+		Id: uuid.NewString(), Body: "x", Visibility: NoteVisibilityPublic,
+	}))
+	var de *dispatcher.Error
+	if !errors.As(err, &de) || de.Status != http.StatusNotFound {
+		t.Fatalf("want 404 for missing request, got %v", err)
+	}
+}

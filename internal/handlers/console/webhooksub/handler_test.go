@@ -15,6 +15,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	repo "github.com/Phixsura/attune/internal/repo/webhooksub"
+	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
 )
 
 type fakeSubRepo struct {
@@ -305,4 +306,40 @@ type fixedSampleSource struct{ payloads [][]byte }
 
 func (f fixedSampleSource) RecentEnvelopes(_ context.Context, _, _ string, _ int) ([][]byte, error) {
 	return f.payloads, nil
+}
+
+type recordingAudit struct{ events []auditlogsvc.Event }
+
+func (r *recordingAudit) Record(_ context.Context, e auditlogsvc.Event) error {
+	r.events = append(r.events, e)
+	return nil
+}
+
+func TestAudit_RecordedOnCreateAndDelete(t *testing.T) {
+	f := newFakeSubRepo()
+	h := NewHandler(f, nil)
+	rec := ptrext.Of(recordingAudit{})
+	h.SetAuditLogger(rec)
+
+	res, err := h.Create(reqCtx("t1"), ptrext.Of(attunev1.CreateWebhookSubscriptionRequest{
+		TargetUrl: "https://hooks.zapier.com/audit", EventTypes: []string{"feedback.created"},
+	}))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := h.Delete(reqCtx("t1"), ptrext.Of(attunev1.DeleteWebhookSubscriptionRequest{Id: res.Body.Id})); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if len(rec.events) != 2 {
+		t.Fatalf("audit events: got %d want 2", len(rec.events))
+	}
+	if rec.events[0].Action != "webhook_subscription.create" || rec.events[1].Action != "webhook_subscription.delete" {
+		t.Fatalf("actions: %s, %s", rec.events[0].Action, rec.events[1].Action)
+	}
+	// full URL may embed capability tokens — audit must carry only the host
+	after, _ := rec.events[0].After.(map[string]any)
+	if after["target_host"] != "hooks.zapier.com" {
+		t.Errorf("audit target_host: %v", after["target_host"])
+	}
 }
