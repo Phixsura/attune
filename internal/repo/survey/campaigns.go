@@ -47,14 +47,17 @@ func (r *Repo) ListCampaigns(ctx context.Context, filter CampaignFilter) ([]Camp
 		if err != nil {
 			return nil, err
 		}
-		item, err = r.attachNPSCampaignSettings(ctx, item)
-		if err != nil {
-			return nil, err
-		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list survey campaigns rows: %w", err)
+	}
+	for i := range items {
+		item, err := r.attachNPSCampaignSettings(ctx, items[i])
+		if err != nil {
+			return nil, err
+		}
+		items[i] = item
 	}
 	return items, nil
 }

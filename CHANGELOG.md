@@ -178,6 +178,10 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ### Fixed
 
+- Avoid holding a PostgreSQL campaign-list rows cursor while loading per-campaign
+  NPS settings, preventing low-connection pools from deadlocking after an NPS
+  campaign is created (#236).
+
 - Bound frozen NPS run-definition integer parsing to the signed 32-bit proto
   range before Console serialization, rejecting oversized or undersized values
   instead of relying on architecture-dependent integer conversion (#236).
