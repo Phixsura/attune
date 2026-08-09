@@ -10455,6 +10455,245 @@ paths:
                             description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
                             schema:
                                 type: string
+    /v1/hooks:
+        get:
+            tags:
+                - WebhookSubscriptionService
+            description: GET /v1/hooks
+            operationId: WebhookSubscriptionService_ListWebhookSubscriptions
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListWebhookSubscriptionsResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+            parameters:
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+        post:
+            tags:
+                - WebhookSubscriptionService
+            description: POST /v1/hooks (201)
+            operationId: WebhookSubscriptionService_CreateWebhookSubscription
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateWebhookSubscriptionRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WebhookSubscription'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+            parameters:
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+    /v1/hooks/samples/{eventType}:
+        get:
+            tags:
+                - WebhookSubscriptionService
+            description: |-
+                GET /v1/hooks/samples/{event_type} — recent real events (or a canned
+                 static sample when the tenant has none), reverse-chronological, each
+                 item schema-identical to the live webhook payload. Serves as the
+                 Zapier performList endpoint.
+            operationId: WebhookSubscriptionService_ListWebhookSamples
+            parameters:
+                - name: eventType
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListWebhookSamplesResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/hooks/{id}:
+        delete:
+            tags:
+                - WebhookSubscriptionService
+            description: DELETE /v1/hooks/{id} (204)
+            operationId: WebhookSubscriptionService_DeleteWebhookSubscription
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DeleteWebhookSubscriptionResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
     /v1/mcp/clients:
         get:
             tags:
@@ -11879,6 +12118,294 @@ paths:
                             description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
                             schema:
                                 type: string
+    /v1/requests:
+        get:
+            tags:
+                - CustomerRequestAutomationService
+            description: GET /v1/requests
+            operationId: CustomerRequestAutomationService_ListRequestsAutomation
+            parameters:
+                - name: q
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                            - CUSTOMER_REQUEST_STATUS_OPEN
+                            - CUSTOMER_REQUEST_STATUS_PLANNED
+                            - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                            - CUSTOMER_REQUEST_STATUS_SHIPPED
+                            - CUSTOMER_REQUEST_STATUS_CANCELLED
+                        type: string
+                        format: enum
+                - name: priority
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        enum:
+                            - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                            - CUSTOMER_REQUEST_PRIORITY_NONE
+                            - CUSTOMER_REQUEST_PRIORITY_LOW
+                            - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                            - CUSTOMER_REQUEST_PRIORITY_HIGH
+                            - CUSTOMER_REQUEST_PRIORITY_URGENT
+                        type: string
+                        format: enum
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: cursor
+                  in: query
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListCustomerRequestsResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+        post:
+            tags:
+                - CustomerRequestAutomationService
+            description: POST /v1/requests (201)
+            operationId: CustomerRequestAutomationService_CreateRequestAutomation
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/CreateRequestAutomationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+            parameters:
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+    /v1/requests/{id}:
+        patch:
+            tags:
+                - CustomerRequestAutomationService
+            description: PATCH /v1/requests/{id}
+            operationId: CustomerRequestAutomationService_UpdateRequestAutomation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateRequestAutomationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+    /v1/requests/{id}/notes:
+        post:
+            tags:
+                - CustomerRequestAutomationService
+            description: POST /v1/requests/{id}/notes (201)
+            operationId: CustomerRequestAutomationService_AddRequestNoteAutomation
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Attune-Api-Version
+                  in: header
+                  required: false
+                  description: Optional request header that pins attune's date-based public API contract. Omit it to use the server's current default. Unsupported values return the shared ErrorResponse envelope with BAD_REQUEST.
+                  schema:
+                    type: string
+                    example: "2026-06-28"
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/AddRequestNoteAutomationRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CustomerRequestDetail'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+                    headers:
+                        X-Attune-Api-Version:
+                            description: Effective attune API version used to process the request. Echoes the caller-supplied X-Attune-Api-Version value or the server default when omitted.
+                            schema:
+                                type: string
+                                example: "2026-06-28"
+                        Deprecation:
+                            description: Present when the selected API version is deprecated but still supported. Value follows the HTTP Deprecation header syntax.
+                            schema:
+                                type: string
+                        Sunset:
+                            description: Present when the selected API version has a scheduled removal date. Value is an HTTP-date.
+                            schema:
+                                type: string
     /v1/surveys/{token}:
         get:
             tags:
@@ -12114,6 +12641,21 @@ components:
             properties:
                 tag:
                     $ref: '#/components/schemas/Tag'
+        AddRequestNoteAutomationRequest:
+            required:
+                - id
+                - body
+            type: object
+            properties:
+                id:
+                    type: string
+                body:
+                    type: string
+                visibility:
+                    type: string
+                    description: |-
+                        internal (default) -> collaboration note; public -> portal comment
+                         routed through the standard moderation pipeline.
         Any:
             type: object
             properties:
@@ -13962,6 +14504,38 @@ components:
                     format: enum
                 acknowledgement:
                     type: string
+        CreateRequestAutomationRequest:
+            required:
+                - title
+                - idempotencyKey
+            type: object
+            properties:
+                title:
+                    type: string
+                description:
+                    type: string
+                status:
+                    enum:
+                        - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                        - CUSTOMER_REQUEST_STATUS_OPEN
+                        - CUSTOMER_REQUEST_STATUS_PLANNED
+                        - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                        - CUSTOMER_REQUEST_STATUS_SHIPPED
+                        - CUSTOMER_REQUEST_STATUS_CANCELLED
+                    type: string
+                    format: enum
+                priority:
+                    enum:
+                        - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_PRIORITY_NONE
+                        - CUSTOMER_REQUEST_PRIORITY_LOW
+                        - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                        - CUSTOMER_REQUEST_PRIORITY_HIGH
+                        - CUSTOMER_REQUEST_PRIORITY_URGENT
+                    type: string
+                    format: enum
+                idempotencyKey:
+                    type: string
         CreateRequestNotificationWebhookTargetRequest:
             required:
                 - name
@@ -14250,6 +14824,22 @@ components:
                 maxUses:
                     type: integer
                     format: int32
+        CreateWebhookSubscriptionRequest:
+            required:
+                - targetUrl
+                - eventTypes
+            type: object
+            properties:
+                targetUrl:
+                    type: string
+                eventTypes:
+                    type: array
+                    items:
+                        type: string
+                secret:
+                    type: string
+                consumer:
+                    type: string
         CustomerRequestAccountDecisionSignal:
             type: object
             properties:
@@ -15329,6 +15919,9 @@ components:
             type: object
             properties: {}
         DeleteServiceAccountResponse:
+            type: object
+            properties: {}
+        DeleteWebhookSubscriptionResponse:
             type: object
             properties: {}
         DigestSubscription:
@@ -18917,6 +19510,23 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/WorkflowTransition'
+        ListWebhookSamplesResponse:
+            type: object
+            properties:
+                samples:
+                    type: array
+                    items:
+                        type: object
+            description: |-
+                Samples are envelope objects returned as raw JSON structs so the envelope
+                 (built by the delivery pipeline) stays the single source of truth.
+        ListWebhookSubscriptionsResponse:
+            type: object
+            properties:
+                subscriptions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/WebhookSubscription'
         LoginRequest:
             required:
                 - email
@@ -23798,6 +24408,37 @@ components:
                     type: string
                 expectedRevision:
                     type: string
+        UpdateRequestAutomationRequest:
+            required:
+                - id
+            type: object
+            properties:
+                id:
+                    type: string
+                title:
+                    type: string
+                description:
+                    type: string
+                status:
+                    enum:
+                        - CUSTOMER_REQUEST_STATUS_UNSPECIFIED
+                        - CUSTOMER_REQUEST_STATUS_OPEN
+                        - CUSTOMER_REQUEST_STATUS_PLANNED
+                        - CUSTOMER_REQUEST_STATUS_IN_PROGRESS
+                        - CUSTOMER_REQUEST_STATUS_SHIPPED
+                        - CUSTOMER_REQUEST_STATUS_CANCELLED
+                    type: string
+                    format: enum
+                priority:
+                    enum:
+                        - CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED
+                        - CUSTOMER_REQUEST_PRIORITY_NONE
+                        - CUSTOMER_REQUEST_PRIORITY_LOW
+                        - CUSTOMER_REQUEST_PRIORITY_MEDIUM
+                        - CUSTOMER_REQUEST_PRIORITY_HIGH
+                        - CUSTOMER_REQUEST_PRIORITY_URGENT
+                    type: string
+                    format: enum
         UpdateRequestNotificationSettingsRequest:
             type: object
             properties:
@@ -24157,6 +24798,8 @@ components:
                 rateLimitRpm:
                     type: integer
                     format: int32
+                tenantDisplayName:
+                    type: string
         VerifyGdprStepUpRequest:
             type: object
             properties:
@@ -24195,6 +24838,28 @@ components:
                  is lowercase-hex-encoded; signature is HMAC-SHA256(secret_raw_bytes,
                  "<X-Attune-Timestamp>.<body>") (spec §Webhook adapter). The
                  signature header is hex-encoded (e.g. "sha256=ab12…").
+        WebhookSubscription:
+            type: object
+            properties:
+                id:
+                    type: string
+                targetUrl:
+                    type: string
+                eventTypes:
+                    type: array
+                    items:
+                        type: string
+                status:
+                    type: string
+                disabledReason:
+                    type: string
+                consumer:
+                    type: string
+                createdAt:
+                    type: string
+            description: |-
+                WebhookSubscription never carries the secret — it is write-only once
+                 stored (same rule as NotifyTarget).
         WorkflowState:
             type: object
             properties:
@@ -24323,6 +24988,11 @@ tags:
       description: |-
         CohortSyncService manages tenant-scoped cohort source connections,
          cohort definitions, and sync run history.
+    - name: CustomerRequestAutomationService
+      description: |-
+        CustomerRequestAutomationService is the API-key automation surface for
+         customer requests (#234) — scope requests:read / requests:write. It reuses
+         the console message shapes; only the note rpc differs (visibility routing).
     - name: CustomerRequestService
     - name: DigestSubscriptionService
       description: |-
@@ -24399,4 +25069,11 @@ tags:
       description: SystemService publishes console-only platform health and release context.
     - name: UsageService
       description: UsageService serves the console usage dashboard.
+    - name: WebhookSubscriptionService
+      description: |-
+        WebhookSubscriptionService manages automation webhook subscriptions
+         (e.g. Zapier REST hooks) over API-key auth, scope hooks:manage.
+         One subscription per consumer hook; event_types filters the append-only
+         automation event vocabulary (feedback.created, feedback.urgent,
+         request.created, request.status_changed).
     - name: WorkflowService

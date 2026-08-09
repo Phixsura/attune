@@ -19,6 +19,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 type fakeAPIKeyDetailStore struct {
@@ -97,4 +98,40 @@ func TestAuthVerifyHandlerVerifyRepoError(t *testing.T) {
 	require.True(t, errors.As(err, &de))
 	require.Equal(t, http.StatusInternalServerError, de.Status)
 	require.Equal(t, attunev1.ErrorCode_INTERNAL, de.Code)
+}
+
+type fakeTenantNameStore struct {
+	t   *tenant.Tenant
+	err error
+}
+
+func (s *fakeTenantNameStore) GetByID(_ context.Context, _ string) (*tenant.Tenant, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.t, nil
+}
+
+func TestAuthVerifyHandlerTenantDisplayName(t *testing.T) {
+	keyID := uuid.MustParse("11111111-1111-4111-8111-111111111111")
+	store := ptrext.Of(fakeAPIKeyDetailStore{row: ptrext.Of(apikeyrepo.APIKeyListRow{
+		ID: keyID, KeyPrefix: "ak_live_123", Label: "zapier",
+	})})
+	h := ptrext.Of(AuthVerifyHandler{repo: store})
+	h.SetTenantStore(ptrext.Of(fakeTenantNameStore{t: ptrext.Of(tenant.Tenant{Name: "Acme Inc"})}))
+	ctx := ptrext.Of(dispatcher.RequestContext[*apikey.AuthCtx]{
+		Context: context.Background(),
+		Auth:    ptrext.Of(apikey.AuthCtx{TenantID: "tenant-1", KeyID: keyID}),
+	})
+
+	result, err := h.Verify(ctx, ptrext.Of(attunev1.VerifyApiKeyRequest{}))
+	require.NoError(t, err)
+	require.Equal(t, "Acme Inc", result.Body.GetTenantDisplayName())
+
+	// tenant lookup failure is best-effort — verify still succeeds, label empty
+	h2 := ptrext.Of(AuthVerifyHandler{repo: store})
+	h2.SetTenantStore(ptrext.Of(fakeTenantNameStore{err: errors.New("boom")}))
+	result2, err := h2.Verify(ctx, ptrext.Of(attunev1.VerifyApiKeyRequest{}))
+	require.NoError(t, err)
+	require.Empty(t, result2.Body.GetTenantDisplayName())
 }

@@ -203,6 +203,8 @@ var validActions = map[string]struct{}{
 	"tag.archive":                                     {},
 	"tag.create":                                      {},
 	"tag.update":                                      {},
+	"webhook_subscription.create":                     {},
+	"webhook_subscription.delete":                     {},
 	"workflow_seed_defaults.run":                      {},
 	"workflow_state.archive":                          {},
 	"workflow_state.create":                           {},

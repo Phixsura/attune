@@ -468,6 +468,23 @@ jobs:
             ( cd "$ex" && pnpm install --no-frozen-lockfile && pnpm exec tsc --noEmit )
           done
 
+  # ── Zapier app (integrations/zapier, #234): nock-mocked integration tests ───
+  zapier-app:
+    needs: changes
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/zapier
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm test
+
   # ── Go SDK (github.com/Phixsura/attune/sdk/go, #36): fmt, vet, test, build ───
   # A separate nested module with a Go 1.26.5 floor — setup-go reads sdk/go/go.mod
   # so this verifies the SDK compiles on its advertised minimum. Its wire types
@@ -1018,7 +1035,7 @@ jobs:
 
   # ── Required-check aggregator (the ONLY job to mark "required") ─────────────
   ci-gate:
-    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-artifacts, lint-migrations, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, public-board-smoke, sdk-node, sdk-go, changelog, maturity-contract, docker-build, compose-config, helm-chart, proto]
+    needs: [changes, go-checks, integration-postgres, integration-layout, golangci-lint, lint-slog, lint-artifacts, lint-migrations, lint-rawptr, lint-errorcode, lizard, jscpd, govulncheck, console, public-board-smoke, sdk-node, sdk-go, zapier-app, changelog, maturity-contract, docker-build, compose-config, helm-chart, proto]
     if: always()
     runs-on: ubuntu-latest
     steps:

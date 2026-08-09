@@ -31,6 +31,7 @@ const drainTimeout = 30 * time.Second
 type OutboxWorker struct {
 	outbox    outboxStore
 	targets   notifyTargetStore
+	subs      subscriptionStore // automation webhook subscriptions (#234); nil → subscription rows go dead
 	transport *notify.Transport
 
 	// owner uniquely identifies this worker instance so claim renewal
@@ -214,6 +215,12 @@ func (w *OutboxWorker) processRow(ctx context.Context, row outboxrepo.OutboxRow)
 	const where = "service.OutboxWorker.processRow"
 	logext.Infof(ctx, "[%s] start,id:%d,tenant:%s,dest_type:%s,audience:%s,attempts:%d",
 		where, row.ID, row.TenantID, row.DestinationType, row.Audience, row.Attempts)
+	if row.DestinationType == DestSubscriptionWebhook {
+		// Automation subscriptions resolve against webhook_subscriptions,
+		// not tenant_notify_targets — separate path (subscription_target.go).
+		w.processSubscriptionRow(ctx, row)
+		return
+	}
 	if outbound.LookupEvent(row.DestinationType) == nil {
 		w.markDead(ctx, row, "unsupported destination_type "+row.DestinationType,
 			notify.KindTerminal, 0)

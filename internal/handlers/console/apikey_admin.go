@@ -17,11 +17,14 @@ import (
 	"github.com/Phixsura/attune/internal/domain"
 	consoleauditevidence "github.com/Phixsura/attune/internal/handlers/console/auditevidence"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
+	consolecustomerrequest "github.com/Phixsura/attune/internal/handlers/console/customerrequest"
 	consolegdpr "github.com/Phixsura/attune/internal/handlers/console/gdpr"
 	"github.com/Phixsura/attune/internal/handlers/console/internal/session"
 	consolemcpclient "github.com/Phixsura/attune/internal/handlers/console/mcpclient"
 	consoleoutbox "github.com/Phixsura/attune/internal/handlers/console/outbox"
 	consoletag "github.com/Phixsura/attune/internal/handlers/console/tag"
+	consoletagassignment "github.com/Phixsura/attune/internal/handlers/console/tagassignment"
+	consolewebhooksub "github.com/Phixsura/attune/internal/handlers/console/webhooksub"
 	consoleworkflow "github.com/Phixsura/attune/internal/handlers/console/workflow"
 	"github.com/Phixsura/attune/internal/infra/apikey"
 	"github.com/Phixsura/attune/internal/infra/ratelimit"
@@ -30,16 +33,22 @@ import (
 	"github.com/Phixsura/attune/internal/repo/admin"
 	aerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
+	customerrequestrepo "github.com/Phixsura/attune/internal/repo/customerrequest"
 	feedbackauditrepo "github.com/Phixsura/attune/internal/repo/feedbackaudit"
 	feedbacktagrepo "github.com/Phixsura/attune/internal/repo/feedbacktag"
+	feedbacktagassignmentrepo "github.com/Phixsura/attune/internal/repo/feedbacktagassignment"
 	gdprrepo "github.com/Phixsura/attune/internal/repo/gdpr"
 	"github.com/Phixsura/attune/internal/repo/idempotency"
 	mcprepo "github.com/Phixsura/attune/internal/repo/mcp"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
+	publicvisibilityrepo "github.com/Phixsura/attune/internal/repo/publicvisibility"
+	webhooksubrepo "github.com/Phixsura/attune/internal/repo/webhooksub"
 	workflowstaterepo "github.com/Phixsura/attune/internal/repo/workflowstate"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
+	customerrequestsvc "github.com/Phixsura/attune/internal/service/customerrequest"
 	gdprsvc "github.com/Phixsura/attune/internal/service/gdpr"
+	publicvisibilitysvc "github.com/Phixsura/attune/internal/service/publicvisibility"
 	workflowsvc "github.com/Phixsura/attune/internal/service/workflow"
 )
 
@@ -160,6 +169,25 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 	mcpClients.SetAuditLogger(audit)
 	mcpClients.SetConnectionProfile(opts.MCPPublicBaseURL, opts.MCPOAuthIssuer)
 
+	hooks := consolewebhooksub.NewHandler(
+		webhooksubrepo.New(pool),
+		outboxSampleSource{repo: outboxrepo.NewOutbox(pool)},
+	)
+	hooks.SetAuditLogger(audit)
+
+	// Customer-request automation surface (#234): same service wiring as the
+	// console handler (idempotency, audit, automation event sink) so both
+	// surfaces behave identically.
+	requestsSvc := customerrequestsvc.New(customerrequestrepo.New(pool), idempotencyStore, audit)
+	requestsSvc.SetAutomationSink(webhooksubrepo.New(pool), outboxrepo.NewOutbox(pool))
+	requests := consolecustomerrequest.NewHandler(requestsSvc)
+	pvSvc := publicvisibilitysvc.New(publicvisibilityrepo.New(pool), audit)
+	requests.SetPublicCommenter(pvSvc)
+
+	tagAssignments := consoletagassignment.NewHandler(
+		feedbacktagrepo.New(pool), feedbacktagassignmentrepo.New(pool),
+	)
+
 	r.Group(func(g chi.Router) {
 		g.Use(apikey.MiddlewareWithProxies(apiKeys, trustedProxyHops))
 		g.Use(perKeyLimiter.Middleware)
@@ -170,7 +198,20 @@ func MountAPIKeyAdminRoutes(r chi.Router, pool *pgxpool.Pool, apiKeys apikey.Ver
 		mountAPIKeyGDPR(g, gdpr, withAPIKeyIdempotency(idempotencyStore))
 		mountAPIKeyOutbox(g, outbox, withAPIKeyIdempotency(idempotencyStore))
 		mountAPIKeyMCPClients(g, mcpClients, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyHooks(g, hooks, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyRequests(g, requests, withAPIKeyIdempotency(idempotencyStore))
+		mountAPIKeyTagAssignments(g, tagAssignments)
 	})
+}
+
+// outboxSampleSource adapts the outbox repo to the samples handler: stored
+// payloads are schema-identical to live deliveries by construction.
+type outboxSampleSource struct {
+	repo *outboxrepo.OutboxRepo
+}
+
+func (s outboxSampleSource) RecentEnvelopes(ctx context.Context, tenantID, eventType string, limit int) ([][]byte, error) {
+	return s.repo.RecentPayloadsByEventType(ctx, tenantID, eventType, limit)
 }
 
 func mountAPIKeyTags(g chi.Router, tags *consoletag.Handler, idem func(http.Handler) http.Handler) {

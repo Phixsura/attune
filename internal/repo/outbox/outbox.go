@@ -99,12 +99,14 @@ func (r *OutboxRepo) Insert(
 ) (int64, error) {
 	const where = "repo.OutboxRepo.Insert"
 	var id int64
+	// NULLIF: request-automation events (#234) carry no feedback row —
+	// FeedbackID 0 maps to NULL so the FK constraint stays intact.
 	err := tx.QueryRow(
 		ctx, `
 		INSERT INTO notify_outbox
 		 (feedback_id, tenant_id, destination_type, destination_target,
 		 audience, payload, status, trace_id)
-		VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7)
+		VALUES (NULLIF($1, 0), $2, $3, $4, $5, $6, 'pending', $7)
 		RETURNING id`,
 		row.FeedbackID, row.TenantID, row.DestinationType,
 		row.DestinationTarget, row.Audience, row.Payload, row.TraceID,
@@ -146,7 +148,7 @@ func (r *OutboxRepo) ClaimBatch(ctx context.Context, n int, owner string) ([]Out
 		 LIMIT $1
 		 FOR UPDATE SKIP LOCKED
 		 )
-		 RETURNING id, feedback_id, tenant_id, destination_type,
+		 RETURNING id, COALESCE(feedback_id, 0), tenant_id, destination_type,
 		 destination_target, audience, payload, status,
 		 attempts, trace_id, COALESCE(last_error, '')`,
 		n, owner)
@@ -358,7 +360,7 @@ func (r *OutboxRepo) DeadCount(ctx context.Context) (int64, error) {
 // deadCols is the shared SELECT list for the dead-queue display rows. Note:
 // payload is intentionally omitted — the list view doesn't need the full
 // envelope, only the metadata.
-const deadCols = `id, feedback_id, tenant_id, destination_type, destination_target,
+const deadCols = `id, COALESCE(feedback_id, 0), tenant_id, destination_type, destination_target,
 	audience, status, attempts, trace_id,
 	COALESCE(last_error, ''), COALESCE(dead_reason, ''), COALESCE(failure_kind, ''),
 	http_status, next_retry_at, created_at, delivered_at, claimed_at,
@@ -548,4 +550,37 @@ func nullInt(n int) any {
 		return nil
 	}
 	return n
+}
+
+// RecentPayloadsByEventType returns the newest stored envelope payloads for
+// one tenant + event type, newest first. Powers the automation performList
+// samples endpoint (#234): stored payloads are schema-identical to live
+// deliveries by construction (the worker POSTs them verbatim).
+func (r *OutboxRepo) RecentPayloadsByEventType(
+	ctx context.Context,
+	tenantID, eventType string,
+	limit int,
+) ([][]byte, error) {
+	const where = "repo.OutboxRepo.RecentPayloadsByEventType"
+	rows, err := r.pool.Query(ctx, `
+		SELECT payload FROM notify_outbox
+		 WHERE tenant_id = $1
+		 AND payload->>'event_type' = $2
+		 ORDER BY id DESC
+		 LIMIT $3`, tenantID, eventType, limit)
+	if err != nil {
+		logext.Errorf(ctx, "[%s] query failed,tenant:%s,event:%s,err:%+v",
+			where, tenantID, eventType, err.Error())
+		return nil, fmt.Errorf("recent payloads: %w", err)
+	}
+	defer rows.Close()
+	var out [][]byte
+	for rows.Next() {
+		var p []byte
+		if err := rows.Scan(&p); err != nil { // ptrext:allow scan-out-param
+			return nil, fmt.Errorf("scan payload: %w", err)
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }

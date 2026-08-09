@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Phixsura/attune/internal/domain"
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -99,6 +100,10 @@ type Service struct {
 	notifications notificationSink
 	issueCreates  issueCreateRunStore
 	surveys       surveySink
+
+	// Automation-surface event emission (#234); nil = no-op.
+	automationSubs   automationSubLister
+	automationOutbox automationOutbox
 }
 
 // requestRepo is the repo surface the service consumes — an interface so
@@ -531,6 +536,11 @@ func (s *Service) Update(ctx context.Context, in UpdateInput) (*Detail, error) {
 	if s.notifications != nil && beforeSummary.Status != afterSummary.Status {
 		if err := s.notifications.RecordStatusChangeTx(ctx, tx, normalized.TenantID, normalized.ID,
 			string(beforeSummary.Status), string(afterSummary.Status), normalized.Actor); err != nil {
+			return nil, err
+		}
+	}
+	if eventType, prevStatus, changed := statusChangeEvent(beforeSummary, afterSummary); changed {
+		if err := s.emitRequestEventTx(ctx, tx, afterSummary, eventType, prevStatus); err != nil {
 			return nil, err
 		}
 	}
@@ -1181,6 +1191,10 @@ func (s *Service) createInTransaction(ctx context.Context, in CreateInput, actio
 		createAuditSummary(action, ptrext.Indirect(created)), after); err != nil {
 		return nil, err
 	}
+	if err := s.emitRequestEventTx(ctx, tx, ptrext.Indirect(created),
+		domain.EventRequestCreated, ""); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -1233,6 +1247,10 @@ func (s *Service) promoteInTransaction(ctx context.Context, in PromoteInput) (*D
 	}
 	if err := s.recordAuditTx(ctx, tx, in.Actor, "customer_request.promote_feedback", auditSummary,
 		"Promoted feedback to customer request", after); err != nil {
+		return nil, err
+	}
+	if err := s.emitRequestEventTx(ctx, tx, ptrext.Indirect(created),
+		domain.EventRequestCreated, ""); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

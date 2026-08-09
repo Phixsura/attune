@@ -58,6 +58,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 	"github.com/Phixsura/attune/internal/repo/tenant"
+	"github.com/Phixsura/attune/internal/repo/webhooksub"
 	"github.com/Phixsura/attune/internal/restoredrill"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
@@ -100,6 +101,7 @@ type runtimeServices struct {
 	tenantRepo       *tenant.TenantRepo
 	notifyTargetRepo *notifytarget.NotifyTargetRepo
 	outboxRepo       *outboxrepo.OutboxRepo
+	webhookSubRepo   *webhooksub.Repo
 	enricher         *enrich.Enricher
 	enrichRunner     *enrich.Runner
 	enrichRuntime    *enrichruntimesvc.Service
@@ -263,10 +265,12 @@ func startRuntimeWorkers(
 	// Outbox wiring: enricher writes raw-webhook rows in same tx as MarkDone
 	// (at-least-once); a background worker drains them.
 	runtimeDeps.enricher.SetOutbox(runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo)
+	runtimeDeps.enricher.SetSubscriptions(runtimeDeps.webhookSubRepo)
 	outboxWorker := outbox.NewOutboxWorker(
 		runtimeDeps.outboxRepo, runtimeDeps.notifyTargetRepo,
 		notify.NewTransport(nil, notify.DefaultRetry()),
 	)
+	outboxWorker.SetSubscriptionStore(runtimeDeps.webhookSubRepo)
 	safego(ctx, "outbox", func() { outboxWorker.Run(ctx) })
 
 	externalSyncService := externalsyncsvc.New(externalsyncrepo.New(pool), secrets)
@@ -330,6 +334,7 @@ func setupRuntimeServices(
 	tenantRepo := tenant.NewTenant(pool)
 	notifyTargetRepo := notifytarget.NewNotifyTarget(pool)
 	outboxRepo := outboxrepo.NewOutbox(pool)
+	webhookSubRepo := webhooksub.New(pool)
 	enricher := enrich.NewEnricher(feedbackRepo, llm, "")
 	enricher.SetSourceSet(srcSet)
 	enrichRunner := enrich.NewRunner(feedbackRepo, enricher, enrich.RunnerConfig{
@@ -365,6 +370,7 @@ func setupRuntimeServices(
 		tenantRepo:       tenantRepo,
 		notifyTargetRepo: notifyTargetRepo,
 		outboxRepo:       outboxRepo,
+		webhookSubRepo:   webhookSubRepo,
 		enricher:         enricher,
 		enrichRunner:     enrichRunner,
 		enrichRuntime:    enrichRuntime,

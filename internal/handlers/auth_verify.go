@@ -12,15 +12,29 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	attunev1 "github.com/Phixsura/attune/internal/proto/attune/v1"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 )
 
 // AuthVerifyHandler handles GET /v1/auth/verify.
 type AuthVerifyHandler struct {
-	repo apiKeyDetailStore
+	repo    apiKeyDetailStore
+	tenants tenantNameStore
 }
 
 type apiKeyDetailStore interface {
 	GetByID(ctx context.Context, tenantID string, id uuid.UUID) (*apikeyrepo.APIKeyListRow, error)
+}
+
+// tenantNameStore resolves the workspace display name for the connection
+// label automation consumers show (e.g. Zapier — #234).
+type tenantNameStore interface {
+	GetByID(ctx context.Context, id string) (*tenant.Tenant, error)
+}
+
+// SetTenantStore wires the tenant display-name lookup. Unset → the
+// tenant_display_name field stays empty (additive, older callers unaffected).
+func (h *AuthVerifyHandler) SetTenantStore(tenants tenantNameStore) {
+	h.tenants = tenants
 }
 
 // NewAuthVerifyHandler creates a new AuthVerifyHandler.
@@ -52,6 +66,12 @@ func (h *AuthVerifyHandler) Verify(ctx *dispatcher.RequestContext[*apikey.AuthCt
 		Label:     row.Label,
 		Scopes:    scopeStrs,
 	})
+	if h.tenants != nil {
+		// Best-effort: the connection label is a nicety, not a gate.
+		if t, err := h.tenants.GetByID(ctx, auth.TenantID); err == nil && t != nil {
+			resp.TenantDisplayName = t.Name
+		}
+	}
 	if row.ExpiresAt != nil {
 		resp.ExpiresAt = ptrext.Of(row.ExpiresAt.UTC().Format(time.RFC3339))
 	}
