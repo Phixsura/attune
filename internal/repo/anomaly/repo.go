@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
@@ -35,9 +37,18 @@ func AllSliceTypes() []string {
 	return []string{SliceTotal, SliceSource, SliceDimension, SliceCluster, SliceCohort, SliceCustom}
 }
 
+// dbPool is the pgxpool.Pool surface the repo consumes — an interface so
+// unit tests can drive transaction and query paths without Postgres.
+type dbPool interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 // Repo holds the connection pool for all anomaly persistence.
 type Repo struct {
-	pool *pgxpool.Pool
+	pool dbPool
 }
 
 // New wires the repo onto a pgx pool.
