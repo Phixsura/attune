@@ -184,7 +184,6 @@ export const consoleNavItems: ConsoleNavItem[] = [
     labelKey: 'anomalies.config.title',
     path: '/configuration/anomaly-detection',
     permission: 'usage:view',
-    settingsAliases: ['anomaly-detection'],
   },
   {
     group: 'configuration',
