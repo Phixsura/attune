@@ -201,6 +201,26 @@ func renderMarkdown(view DigestView) string {
 		fmt.Fprintf(&b, "\n+%d unclustered\n", res.Stats.Unclustered)
 	}
 
+	b.WriteString(renderMarkdownAnomalies(res.Anomalies))
+
+	return b.String()
+}
+
+// renderMarkdownAnomalies renders the optional anomaly section (#237).
+func renderMarkdownAnomalies(anomalies []AnomalySummary) string {
+	if len(anomalies) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Anomalies\n")
+	for _, a := range anomalies {
+		marker := "SPIKE"
+		if a.Direction == "drop" {
+			marker = "DROP"
+		}
+		fmt.Fprintf(&b, "- [%s] %s: observed %d vs expected %.0f\n",
+			marker, a.SliceDisplay, a.Observed, a.ExpectedMed)
+	}
 	return b.String()
 }
 

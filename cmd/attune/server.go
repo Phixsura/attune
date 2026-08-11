@@ -726,6 +726,7 @@ func startAuditEvidenceWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL
 func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LLMClient, consoleBaseURL string) {
 	embedRepo := embeddingrepo.NewTaskRepo(pool)
 	agg := digestsvc.NewClusterAggregator(embedRepo, feedback.NewFeedback(pool), embedRepo, llm)
+	agg.SetAnomalyReader(digestAnomalyReader{repo: anomalyrepo.New(pool)})
 	worker := digestsvc.NewWorker(
 		digestsubrepo.New(pool),
 		digestrunrepo.New(pool),
@@ -736,6 +737,28 @@ func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LL
 		consoleBaseURL,
 	)
 	safego(ctx, "digest", func() { worker.Run(ctx) })
+}
+
+// digestAnomalyReader adapts the anomaly repo to the digest aggregator's
+// optional anomaly-section interface (#237).
+type digestAnomalyReader struct{ repo *anomalyrepo.Repo }
+
+func (r digestAnomalyReader) OpenDigestAnomalies(ctx context.Context, tenantID string, from, to time.Time) ([]digestsvc.AnomalySummary, error) {
+	rows, err := r.repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]digestsvc.AnomalySummary, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, digestsvc.AnomalySummary{
+			SliceDisplay: row.SliceDisplay,
+			Direction:    row.Direction,
+			Observed:     row.Observed,
+			ExpectedMed:  row.ExpectedMed,
+			EventID:      row.EventID,
+		})
+	}
+	return out, nil
 }
 
 // anomalyEnrichReader adapts the tenant repo to the anomaly worker's

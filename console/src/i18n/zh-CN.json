@@ -7656,6 +7656,25 @@
       "window": "时间窗 {{from}} – {{to}}",
       "view": "查看 {{n}} 条样本反馈",
       "none": "未捕获样本反馈"
+    },
+    "config": {
+      "title": "异常检测",
+      "subtitle": "对每日反馈量做尖峰/断流检测。默认值即安全值；只有希望收到更多告警时才调高灵敏度。",
+      "enabled": "启用检测",
+      "sensitivity": "灵敏度",
+      "sensitivity_high": "高",
+      "sensitivity_medium": "中",
+      "sensitivity_low": "低",
+      "min_count": "触发所需的最小日量",
+      "settle_delay": "沉降延迟（日界后小时数）",
+      "notify_mode": "通知方式",
+      "notify_immediate": "即时",
+      "notify_digest": "并入日报",
+      "notify_off": "关闭",
+      "saved": "配置已保存",
+      "custom_slices": "自定义切片",
+      "custom_slices_hint": "监控特定组合（如 source=zendesk 且 severity=critical），最多 20 条。",
+      "no_custom_slices": "未配置自定义切片"
     }
   }
 }

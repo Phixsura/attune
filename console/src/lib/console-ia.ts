@@ -180,6 +180,14 @@ export const consoleNavItems: ConsoleNavItem[] = [
   },
   {
     group: 'configuration',
+    icon: TriangleAlert,
+    labelKey: 'anomalies.config.title',
+    path: '/configuration/anomaly-detection',
+    permission: 'usage:view',
+    settingsAliases: ['anomaly-detection'],
+  },
+  {
+    group: 'configuration',
     icon: Workflow,
     labelKey: 'settings.areas.workflow.title',
     path: '/configuration/workflow',

@@ -216,3 +216,39 @@ func (r *Repo) RetractEvent(ctx context.Context, tenantID string, id uuid.UUID) 
 	}
 	return nil
 }
+
+// DigestAnomaly is the digest-facing projection of one open event.
+type DigestAnomaly struct {
+	SliceDisplay string
+	Direction    string
+	Observed     int64
+	ExpectedMed  float64
+	EventID      string
+}
+
+// OpenDigestAnomaliesInWindow lists open events whose last bucket falls in
+// [from, to) — the digest section source.
+func (r *Repo) OpenDigestAnomaliesInWindow(
+	ctx context.Context, tenantID string, from, to time.Time,
+) ([]DigestAnomaly, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT slice_display, direction, observed, expected_med, id::text
+		FROM anomaly_events
+		WHERE tenant_id = $1 AND status = 'open'
+		  AND last_bucket_date >= $2::date AND last_bucket_date < $3::date
+		ORDER BY ABS(z_score) DESC
+		LIMIT 10`, tenantID, dateStr(from), dateStr(to))
+	if err != nil {
+		return nil, fmt.Errorf("anomaly digest window: %w", err)
+	}
+	defer rows.Close()
+	var out []DigestAnomaly
+	for rows.Next() {
+		var d DigestAnomaly
+		if err := rows.Scan(&d.SliceDisplay, &d.Direction, &d.Observed, &d.ExpectedMed, &d.EventID); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
