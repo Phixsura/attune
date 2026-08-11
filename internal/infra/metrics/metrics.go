@@ -1169,6 +1169,73 @@ var AuditEvidenceExportSizeBytes = prometheus.NewHistogramVec(
 	[]string{"tenant"},
 )
 
+// AnomalyRollupDuration tracks one tenant's rollup recompute wall time.
+var AnomalyRollupDuration = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Name:    "attune_anomaly_rollup_duration_seconds",
+		Help:    "Per-tenant feedback volume rollup recompute latency.",
+		Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10},
+	},
+	[]string{"tenant"},
+)
+
+// AnomalyDetectSlicesTotal counts slices judged by the detector.
+var AnomalyDetectSlicesTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_anomaly_detect_slices_total",
+		Help: "Number of slice series evaluated by the anomaly detector.",
+	},
+	[]string{"tenant"},
+)
+
+// AnomalyEventsCreatedTotal counts NEW anomaly events by direction.
+var AnomalyEventsCreatedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_anomaly_events_created_total",
+		Help: "Number of newly opened anomaly events.",
+	},
+	[]string{"tenant", "direction"},
+)
+
+// AnomalyNotifyFailuresTotal counts failed anomaly notification deliveries
+// (after transport retries; detection itself is never blocked).
+var AnomalyNotifyFailuresTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_anomaly_notify_failures_total",
+		Help: "Number of anomaly notifications that failed to deliver.",
+	},
+	[]string{"tenant"},
+)
+
+// AnomalyWorkerLagSeconds reports the age of the oldest settled bucket not
+// yet judged, per tenant — the detection freshness signal.
+var AnomalyWorkerLagSeconds = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "attune_anomaly_worker_lag_seconds",
+		Help: "Age of the oldest settled, unjudged anomaly bucket.",
+	},
+	[]string{"tenant"},
+)
+
+// AnomalyBackfillPendingTenants gauges tenants still awaiting their 90-day
+// rollup backfill after enablement or a config change.
+var AnomalyBackfillPendingTenants = prometheus.NewGauge(
+	prometheus.GaugeOpts{
+		Name: "attune_anomaly_backfill_pending_tenants",
+		Help: "Tenants whose anomaly rollup backfill has not completed.",
+	},
+)
+
+// AnomalySlicesTruncatedTotal counts slices dropped by runtime caps (the
+// per-tick 1000-slice ceiling or the per-dimension value cap).
+var AnomalySlicesTruncatedTotal = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "attune_anomaly_slices_truncated_total",
+		Help: "Slices dropped by anomaly detection runtime caps.",
+	},
+	[]string{"tenant", "reason"},
+)
+
 // RefreshQueueDepth resets a per-tenant queue-depth gauge and re-sets each
 // tenant's outstanding count. The Reset matters: callers pass only tenants that
 // still have outstanding tasks, so a drained tenant drops out — without the
@@ -1186,6 +1253,13 @@ func RefreshQueueDepth(g *prometheus.GaugeVec, depths map[string]int64) {
 // (observability/README.md). Add a metric here AND to that reference together.
 var allMetrics = []prometheus.Collector{
 	IngestTotal,
+	AnomalyRollupDuration,
+	AnomalyDetectSlicesTotal,
+	AnomalyEventsCreatedTotal,
+	AnomalyNotifyFailuresTotal,
+	AnomalyWorkerLagSeconds,
+	AnomalyBackfillPendingTenants,
+	AnomalySlicesTruncatedTotal,
 	EnrichDuration,
 	EnrichAttrsDroppedTotal,
 	EnrichSuggestedAttrsTotal,
@@ -1311,6 +1385,13 @@ func RegisteredMetricNames() []string {
 func registeredMetricNamesCore() []string {
 	return []string{
 		"attune_ingest_total",
+		"attune_anomaly_rollup_duration_seconds",
+		"attune_anomaly_detect_slices_total",
+		"attune_anomaly_events_created_total",
+		"attune_anomaly_notify_failures_total",
+		"attune_anomaly_worker_lag_seconds",
+		"attune_anomaly_backfill_pending_tenants",
+		"attune_anomaly_slices_truncated_total",
 		"attune_enrich_duration_seconds",
 		"attune_enrich_attrs_dropped_total",
 		"attune_enrich_suggested_attrs_total",

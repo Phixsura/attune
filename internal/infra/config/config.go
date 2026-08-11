@@ -55,6 +55,7 @@ type Config struct {
 	Database      DatabaseConfig
 	Migrations    MigrationsConfig
 	Enricher      EnricherConfig
+	Anomaly       AnomalyConfig
 	Workers       WorkersConfig
 	Audit         AuditConfig
 	AuditEvidence AuditEvidenceConfig
@@ -82,6 +83,8 @@ type Config struct {
 	EnricherBatchWindow     time.Duration
 	EnricherLLMMaxQPS       float64
 	EnricherLLMBurst        int
+	AnomalyInterval         time.Duration
+	AnomalyBackfillPerTick  int
 	ConsoleSessionKey       string
 	ConsoleBaseURL          string
 	SlackAPIBaseURL         string
@@ -139,6 +142,12 @@ type EnricherConfig struct {
 	BatchWindow string  `yaml:"batch_window"`
 	LLMMaxQPS   float64 `yaml:"llm_max_qps"`
 	LLMBurst    int     `yaml:"llm_burst"`
+}
+
+// AnomalyConfig tunes the anomaly detection worker (#237).
+type AnomalyConfig struct {
+	Interval               string `yaml:"interval"`
+	BackfillTenantsPerTick int    `yaml:"backfill_tenants_per_tick"`
 }
 
 // WorkersConfig holds background worker tuning parameters.
@@ -276,6 +285,7 @@ type yamlConfig struct {
 	Database       DatabaseConfig      `yaml:"database"`
 	Migrations     MigrationsConfig    `yaml:"migrations"`
 	Enricher       EnricherConfig      `yaml:"enricher"`
+	Anomaly        AnomalyConfig       `yaml:"anomaly"`
 	Audit          AuditConfig         `yaml:"audit"`
 	AuditEvidence  AuditEvidenceConfig `yaml:"audit_evidence"`
 	GDPR           GDPRConfig          `yaml:"gdpr"`
@@ -420,7 +430,23 @@ func (c *Config) parseEnricherFields() error {
 	c.EnricherBatchWindow = batchWindow
 	c.EnricherLLMMaxQPS = c.Enricher.LLMMaxQPS
 	c.EnricherLLMBurst = c.Enricher.LLMBurst
+	anomalyInterval, err := time.ParseDuration(c.Anomaly.Interval)
+	if err != nil {
+		return fmt.Errorf("anomaly.interval: %w", err)
+	}
+	c.AnomalyInterval = anomalyInterval
+	c.AnomalyBackfillPerTick = c.Anomaly.BackfillTenantsPerTick
 	return nil
+}
+
+// applyAnomalyDefaults fills the anomaly worker knobs (#237).
+func (c *Config) applyAnomalyDefaults() {
+	if c.Anomaly.Interval == "" {
+		c.Anomaly.Interval = DefaultAnomalyInterval.String()
+	}
+	if c.Anomaly.BackfillTenantsPerTick == 0 {
+		c.Anomaly.BackfillTenantsPerTick = DefaultAnomalyBackfillPerTick
+	}
 }
 
 func (c *Config) parseAuditFields() error {
@@ -566,6 +592,7 @@ func (c *Config) applyDefaults() {
 	if c.Enricher.Interval == "" {
 		c.Enricher.Interval = DefaultEnricherInterval.String()
 	}
+	c.applyAnomalyDefaults()
 	if c.Enricher.Batch == 0 {
 		c.Enricher.Batch = DefaultEnricherBatch
 	}

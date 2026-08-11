@@ -30,6 +30,13 @@ exposition plus the portable assets in this directory.
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `attune_ingest_total` | counter | `tenant`, `source`, `result` | ingest API requests |
+| `attune_anomaly_rollup_duration_seconds` | histogram | `tenant` | per-tenant feedback volume rollup recompute latency (#237) |
+| `attune_anomaly_detect_slices_total` | counter | `tenant` | slice series evaluated by the anomaly detector (#237) |
+| `attune_anomaly_events_created_total` | counter | `tenant`, `direction` | newly opened anomaly events (#237) |
+| `attune_anomaly_notify_failures_total` | counter | `tenant` | anomaly notifications that failed to deliver (#237) |
+| `attune_anomaly_worker_lag_seconds` | gauge | `tenant` | age of the oldest settled, unjudged anomaly bucket (#237) |
+| `attune_anomaly_backfill_pending_tenants` | gauge | — | tenants whose anomaly rollup backfill has not completed (#237) |
+| `attune_anomaly_slices_truncated_total` | counter | `tenant`, `reason` | slices dropped by anomaly detection runtime caps (#237) |
 | `attune_enrich_duration_seconds` | histogram | `tenant`, `dims_mode`, `result` | end-to-end AI enrichment latency |
 | `attune_enrich_attrs_dropped_total` | counter | `tenant`, `dim` | per-dim attr values removed by whitelist filter (#10 → E3) |
 | `attune_enrich_suggested_attrs_total` | counter | `tenant`, `dim` | enrich rows with off-list attr suggestions per dim (#10 → E3) |

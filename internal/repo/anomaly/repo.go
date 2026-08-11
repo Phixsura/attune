@@ -7,8 +7,10 @@
 package anomaly
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,3 +100,34 @@ func civilDate(t time.Time, loc *time.Location) time.Time {
 // dateStr renders a civil date as the YYYY-MM-DD literal Postgres DATE
 // columns expect.
 func dateStr(t time.Time) string { return t.Format("2006-01-02") }
+
+// TenantRef is the minimal tenant projection the worker iterates.
+type TenantRef struct {
+	ID       string
+	Timezone string
+}
+
+// ActiveTenantsWithFeedback lists active tenants that received feedback in
+// the last sinceDays — the worker's attention set.
+func (r *Repo) ActiveTenantsWithFeedback(ctx context.Context, sinceDays int) ([]TenantRef, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT t.id, t.timezone FROM tenants t
+		WHERE t.is_active AND EXISTS (
+		  SELECT 1 FROM user_feedback f
+		  WHERE f.tenant_id = t.id
+		    AND f.created_at > NOW() - ($1 || ' days')::interval)
+		ORDER BY t.id`, fmt.Sprintf("%d", sinceDays))
+	if err != nil {
+		return nil, fmt.Errorf("anomaly active tenants: %w", err)
+	}
+	defer rows.Close()
+	var out []TenantRef
+	for rows.Next() {
+		var t TenantRef
+		if err := rows.Scan(&t.ID, &t.Timezone); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
