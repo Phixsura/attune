@@ -466,3 +466,101 @@ func (r *Repo) CleanupRetention(ctx context.Context, bucketDays, runDays int) er
 	}
 	return nil
 }
+
+// GroupByAxis describes one contribution grouping axis over the anomalous
+// slice's feedback: by source, or by one single-valued dimension.
+type GroupByAxis struct {
+	Field string // "source" | "dimension"
+	Name  string // dimension machine key when Field=="dimension"
+}
+
+// GroupCountRow is one grouping value's observed day-count plus its
+// per-baseline-date counts for median computation service-side.
+type GroupCountRow struct {
+	Value    string
+	Observed int64
+	// BaselineCounts holds this value's count on each requested baseline
+	// date, zero-filled, in input order.
+	BaselineCounts []int64
+}
+
+// GroupCountsByAxis returns, for the feedback matching sliceWhere on date,
+// counts grouped by the axis, plus the same grouping over each baseline
+// date. slice filtering reuses the custom-condition compiler so any slice
+// family can be re-expressed as conditions by the caller.
+func (r *Repo) GroupCountsByAxis(
+	ctx context.Context, tenantID string, loc *time.Location,
+	sliceConds []CustomCondition, axis GroupByAxis,
+	date time.Time, baselineDates []time.Time,
+) ([]GroupCountRow, error) {
+	dates := append([]time.Time{date}, baselineDates...)
+	byValue := make(map[string]*GroupCountRow)
+	for idx, d := range dates {
+		counts, err := r.groupCountsOneDay(ctx, tenantID, loc, sliceConds, axis, d)
+		if err != nil {
+			return nil, err
+		}
+		for value, c := range counts {
+			row, ok := byValue[value]
+			if !ok {
+				row = ptrext.Of(GroupCountRow{
+					Value:          value,
+					BaselineCounts: make([]int64, len(baselineDates)),
+				})
+				byValue[value] = row
+			}
+			if idx == 0 {
+				row.Observed = c
+			} else {
+				row.BaselineCounts[idx-1] = c
+			}
+		}
+	}
+	out := make([]GroupCountRow, 0, len(byValue))
+	for _, row := range byValue {
+		out = append(out, ptrext.Indirect(row))
+	}
+	return out, nil
+}
+
+// groupCountsOneDay aggregates one civil day of the filtered feedback by
+// the grouping axis.
+func (r *Repo) groupCountsOneDay(
+	ctx context.Context, tenantID string, loc *time.Location,
+	sliceConds []CustomCondition, axis GroupByAxis, day time.Time,
+) (map[string]int64, error) {
+	fromUTC := civilDate(day, loc).UTC()
+	toUTC := civilDate(day, loc).AddDate(0, 0, 1).UTC()
+
+	groupExpr := "f.source"
+	args := []any{tenantID, fromUTC, toUTC}
+	n := 4
+	if axis.Field == "dimension" {
+		groupExpr = fmt.Sprintf("f.enriched_attrs ->> $%d", n)
+		args = append(args, axis.Name)
+		n++
+	}
+	where, condArgs := compileCustomConditions(sliceConds, n)
+	args = append(args, condArgs...)
+
+	query := `
+		SELECT ` + groupExpr + ` AS v, COUNT(*)
+		FROM user_feedback f
+		WHERE f.tenant_id=$1 AND f.created_at>=$2 AND f.created_at<$3` + where + `
+		GROUP BY v HAVING ` + groupExpr + ` IS NOT NULL`
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("anomaly group counts: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]int64)
+	for rows.Next() {
+		var v string
+		var c int64
+		if err := rows.Scan(&v, &c); err != nil {
+			return nil, err
+		}
+		out[v] = c
+	}
+	return out, rows.Err()
+}
