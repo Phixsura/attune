@@ -35,6 +35,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	anomalyrepo "github.com/Phixsura/attune/internal/repo/anomaly"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -459,6 +460,9 @@ func configureConsoleRouter(
 	cohortSyncSvc *cohortsyncservice.Service,
 ) chi.Router {
 	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
+	anomalyHandler := console.NewAnomalyHandler(anomalyrepo.New(pool), tenantRepo)
+	anomalyHandler.SetAuditLogger(auditLogSvc)
+	router.SetAnomalyHandler(anomalyHandler)
 	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets, cohortSyncSvc)
 	return router.Mount()
 }
