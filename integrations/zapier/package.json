@@ -1,0 +1,21 @@
+{
+  "name": "attune-zapier",
+  "version": "0.1.0",
+  "description": "Zapier integration for attune — triggers on feedback and customer-request events, actions for feedback, requests, tags, and notes.",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "validate": "zapier validate"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "zapier-platform-core": "^17.0.0"
+  },
+  "devDependencies": {
+    "nock": "^14.0.0",
+    "zapier-platform-cli": "^17.0.0"
+  }
+}

@@ -6,7 +6,7 @@ import "errors"
 // Format: "resource:action" (e.g., "feedback:read").
 type Scope string
 
-// Scope constants — 28 total.
+// Scope constants — 34 total.
 const (
 	// Core resources
 	ScopeIngestWrite   Scope = "ingest:write"
@@ -52,6 +52,13 @@ const (
 	ScopeMCPWrite       Scope = "mcp:write"
 	ScopeMCPIngest      Scope = "mcp:ingest"
 	ScopeMCPClientAdmin Scope = "mcpclient:admin"
+
+	// Automation surface (#234) — webhook subscriptions + customer requests
+	// over API-key auth. All enforced via RequireExplicitScope (no legacy
+	// empty-scope grant).
+	ScopeHooksManage   Scope = "hooks:manage"
+	ScopeRequestsRead  Scope = "requests:read"
+	ScopeRequestsWrite Scope = "requests:write"
 )
 
 // AllScopes is the complete set of valid scopes.
@@ -70,6 +77,7 @@ var AllScopes = []Scope{
 	ScopeGDPRRead, ScopeGDPRExport, ScopeGDPRDelete, ScopeGDPRAdmin,
 	ScopeMembersAdmin, ScopeAPIKeyAdmin,
 	ScopeMCPRead, ScopeMCPWrite, ScopeMCPIngest, ScopeMCPClientAdmin,
+	ScopeHooksManage, ScopeRequestsRead, ScopeRequestsWrite,
 }
 
 // scopeHierarchy defines implicit scope grants: write implies read.
@@ -87,6 +95,7 @@ var scopeHierarchy = map[Scope][]Scope{
 	ScopeGDPRDelete:    {ScopeGDPRRead},
 	ScopeGDPRAdmin:     {ScopeGDPRRead, ScopeGDPRExport, ScopeGDPRDelete},
 	ScopeMCPWrite:      {ScopeMCPRead},
+	ScopeRequestsWrite: {ScopeRequestsRead},
 }
 
 // validScopes is a set for O(1) lookup.

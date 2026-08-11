@@ -40,6 +40,9 @@ var scopeDescriptions = map[domain.Scope]string{
 	domain.ScopeMCPWrite:       "Write MCP tool data",
 	domain.ScopeMCPIngest:      "Submit MCP feedback ingest events",
 	domain.ScopeMCPClientAdmin: "Manage MCP OAuth clients and governance policies",
+	domain.ScopeHooksManage:    "Manage automation webhook subscriptions (e.g. Zapier)",
+	domain.ScopeRequestsRead:   "View customer requests",
+	domain.ScopeRequestsWrite:  "Create and update customer requests, statuses, and notes",
 }
 
 // ListScopes returns all available scopes with metadata.
@@ -92,6 +95,8 @@ func getImplies(s domain.Scope) []string {
 		return []string{string(domain.ScopeGDPRRead)}
 	case domain.ScopeGDPRDelete:
 		return []string{string(domain.ScopeGDPRRead)}
+	case domain.ScopeRequestsWrite:
+		return []string{string(domain.ScopeRequestsRead)}
 	case domain.ScopeGDPRAdmin:
 		return []string{
 			string(domain.ScopeGDPRRead),

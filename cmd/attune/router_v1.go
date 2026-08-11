@@ -25,6 +25,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/admin"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	externalsyncrepo "github.com/Phixsura/attune/internal/repo/externalsync"
+	"github.com/Phixsura/attune/internal/repo/tenant"
 	apikeysvc "github.com/Phixsura/attune/internal/service/apikey"
 	cohortsyncservice "github.com/Phixsura/attune/internal/service/cohortsync"
 	externalsyncsvc "github.com/Phixsura/attune/internal/service/externalsync"
@@ -304,6 +305,7 @@ func mountV1ApiKeyRoutes(
 			r.Use(apikey.MiddlewareWithProxies(apiKeys, cfg.Security.TrustedProxyHops))
 			r.Use(rateLimiter.Middleware)
 			authVerify := handlers.NewAuthVerifyHandler(apikeyrepo.NewAPIKey(pool))
+			authVerify.SetTenantStore(tenant.NewTenant(pool))
 			r.Get("/auth/verify", dispatcher.Bind(
 				"handlers.AuthVerifyHandler.Verify",
 				dispatcher.Custom(func() *attunev1.VerifyApiKeyRequest { return ptrext.Of(attunev1.VerifyApiKeyRequest{}) }, nil),

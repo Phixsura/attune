@@ -193,6 +193,26 @@ const created = await client.createMCPClient({
   scopes: ['mcp:read'],
 })
 await client.getMCPClient(created.client!.id)
+
+// Webhook subscriptions (hooks:manage) — Zapier-style REST hooks
+const sub = await client.createWebhookSubscription({
+  targetUrl: 'https://hooks.example.com/attune',
+  eventTypes: ['feedback.created', 'request.status_changed'],
+  secret: '',
+  consumer: 'generic',
+})
+const { samples } = await client.listWebhookSamples('feedback.created')
+await client.deleteWebhookSubscription(sub.id)
+
+// Customer requests (requests:read / requests:write)
+const { requests } = await client.listRequests({ limit: 10 })
+const detail = await client.createRequest({
+  title: 'Add dark mode',
+  idempotencyKey: 'recipe-42-dark-mode',
+  status: CustomerRequestStatus.CUSTOMER_REQUEST_STATUS_UNSPECIFIED,
+  priority: CustomerRequestPriority.CUSTOMER_REQUEST_PRIORITY_UNSPECIFIED,
+})
+await client.addRequestNote({ id: detail.request!.id, body: 'From a Zap', visibility: 'internal' })
 ```
 
 `updateTag` / `updateWorkflowState` are **replace-semantics**: send the full

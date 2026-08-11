@@ -87,102 +87,6 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   new explicit `hosted_visit_rate`, because email security scanners and link
   prefetchers can load a hosted survey without a verified human response (#236).
 
-### Added
-
-- Add an auditable, aggregate-only CSV export for one immutable NPS run. The
-  report includes the run definition fingerprint, denominator chain, delivery
-  and submission rates, qualification thresholds, sample-planning evidence, and
-  the complete 0-10 distribution, while excluding comments, emails, contacts,
-  and respondent identifiers. Each export is persisted as a versioned,
-  immutable artifact with creator, timestamp, and SHA-256 history; operators
-  can list and re-download the exact same bytes without recomputing a live
-  ledger. Creation and download each record a tenant-scoped audit event, and
-  the response exposes a standard body digest plus a matching strong ETag for
-  independent verification (#236).
-
-- Enforce NPS evidence export content-addressing in PostgreSQL and on
-  repository reads so a tampered artifact fails closed instead of being served
-  with a misleading audit digest (#236).
-
-- Make NPS evidence creation an explicit, idempotent POST contract with a
-  client request key. Retries replay the original artifact and return `200 OK`
-  without a duplicate creation audit event; new artifacts return `201 Created`.
-  Persisted exports now carry a 30-day retention deadline, expose it in the
-  Console history, reject expired downloads with `410 Gone`, and are removed in
-  bounded background cleanup batches after expiry while their audit events stay
-  available for governance review (#236).
-
-- Immutable initial-target, first-contact, and first-terminal timestamps for
-  low-score recovery, with run-scoped NPS evidence for on-time versus late
-  customer contact and terminal disposition. Historical records without a
-  trustworthy timestamp are excluded from the timeliness denominator and cannot
-  gain inferred evidence through later edits or reopening (#236).
-
-- Run-scoped NPS recovery-outcome evidence beside each selected measurement,
-  showing review, resolution, dismissal, customer-contact, root-cause, and
-  action-record counts without treating dismissed work as a resolved customer
-  recovery (#236).
-
-- NPS low-score recovery cards now link a comment's durable feedback signal to
-  its exact, ID-scoped Feedback workbench view, preserving the existing human
-  customer-request promotion flow (#236).
-
-- Hosted NPS responses can record an optional, response-specific follow-up
-  permission. The result is carried through the public contract, durable
-  recovery notification, and Console low-score workflow while remaining
-  distinct from the contact's subscription state. The recovery queue also
-  distinguishes an explicit refusal from historical replies where this answer
-  was never recorded (#236).
-
-- NPS campaigns now define frozen operating-evidence thresholds for submitted
-  responses and submitted-response rate. Each run reports whether its current
-  result is preliminary, directional, qualified for that campaign's threshold,
-  incomplete after redaction, or unavailable without claiming statistical
-  significance (#236).
-
-- Canonical English and Simplified-Chinese NPS respondent content and hosted
-  response-page controls. Changing an NPS campaign locale now creates a new
-  content version, while previously delivered links retain their original
-  localized snapshot (#236).
-
-- Operators can cancel a scheduled or evaluating NPS run before its invitation
-  ledger materializes. Cancellation is idempotent, records the acting operator,
-  and is fenced against concurrent workers so it never reports success after
-  invitations are committed (#236).
-
-- NPS campaign runs with selectable cohort-backed, consented email recipients,
-  immediate or future scheduling, hosted score and comment collection,
-  profile-linked feedback signals, and Console distribution and trend analytics
-  (#236).
-
-- Privacy-safe NPS launch preflight with current aggregate cohort, eligible,
-  excluded, and capped invitation counts plus delivery-readiness evidence;
-  recipients remain undisclosed and are still frozen by the worker at run time
-  (#236).
-
-- NPS launch preflight now warns when its current capped invitation estimate
-  cannot reach the campaign's frozen minimum submitted-response threshold, even
-  with perfect completion. The advisory remains non-blocking because the worker
-  re-evaluates the audience at scheduling time (#236).
-
-- Run-level NPS measurement history with per-run delivery, completion,
-  response-rate, promoter, passive, and detractor evidence, so response timing
-  within a collection window cannot be mistaken for a change in NPS (#236).
-
-- Explicit run-level NPS hosted-page visit (`started / invitations`) and
-  page-visit conversion (`completed / started`) metrics, with hosted-survey
-  visits and completed responses retained in the started audience so the
-  collection funnel remains auditable after a respondent submits (#236).
-
-- Per-tenant NPS run-materialization telemetry with bounded lifecycle and
-  failure reasons, surfaced in the Operations dashboard for worker triage
-  without exposing raw provider or database errors (#236).
-
-- NPS measurement evidence beside each selected score, including the immutable
-  run's eligible audience, invitations, submitted responses, recipient coverage,
-  and submission coverage without implying population-level statistical
-  significance (#236).
-
 ### Fixed
 
 - Avoid holding a PostgreSQL campaign-list rows cursor while loading per-campaign
@@ -1268,6 +1172,124 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
   state, keeping feedback tag assignment accessible in browser axe checks.
 
 ### Added
+
+- Zapier connector + unified webhook subscription API (#234):
+  - **Subscription layer**: new `webhook_subscriptions` table and
+    `POST/GET/DELETE /v1/hooks` (scope `hooks:manage`, explicit) implementing
+    the Zapier REST-hook contract — one subscription per Zap, append-only
+    event vocabulary (`feedback.created`, `feedback.urgent`,
+    `request.created`, `request.status_changed`), per-subscription HMAC
+    secrets, HTTP 410 auto-disable, 25-per-tenant cap, and
+    `GET /v1/hooks/samples/{event_type}` returning envelopes
+    schema-identical to live deliveries (performList).
+  - **Events**: `request.created` / `request.status_changed` enqueue in the
+    same transaction as the write; feedback events fan out from the
+    enricher alongside the legacy notify targets; delivery reuses the
+    notify outbox worker (at-least-once, backoff, dead queue).
+  - **Automation API**: customer requests over API keys — `GET/POST
+    /v1/requests`, `PATCH /v1/requests/{id}` (status), `POST
+    /v1/requests/{id}/notes` (internal note or moderated public portal
+    comment) with new `requests:read` / `requests:write` scopes; tag
+    assignment `POST /v1/feedback/{id}/tags` (`tags:write`);
+    `tenant_display_name` on `GET /v1/auth/verify` for connection labels.
+  - **SDKs**: Go + Node methods for hooks and request automation.
+  - **Zapier app**: in-repo Zapier Platform CLI project
+    (`integrations/zapier/`) with 4 instant triggers, 4 actions, and
+    integration tests runnable against mocks or a live local API.
+
+- Add an auditable, aggregate-only CSV export for one immutable NPS run. The
+  report includes the run definition fingerprint, denominator chain, delivery
+  and submission rates, qualification thresholds, sample-planning evidence, and
+  the complete 0-10 distribution, while excluding comments, emails, contacts,
+  and respondent identifiers. Each export is persisted as a versioned,
+  immutable artifact with creator, timestamp, and SHA-256 history; operators
+  can list and re-download the exact same bytes without recomputing a live
+  ledger. Creation and download each record a tenant-scoped audit event, and
+  the response exposes a standard body digest plus a matching strong ETag for
+  independent verification (#236).
+
+- Enforce NPS evidence export content-addressing in PostgreSQL and on
+  repository reads so a tampered artifact fails closed instead of being served
+  with a misleading audit digest (#236).
+
+- Make NPS evidence creation an explicit, idempotent POST contract with a
+  client request key. Retries replay the original artifact and return `200 OK`
+  without a duplicate creation audit event; new artifacts return `201 Created`.
+  Persisted exports now carry a 30-day retention deadline, expose it in the
+  Console history, reject expired downloads with `410 Gone`, and are removed in
+  bounded background cleanup batches after expiry while their audit events stay
+  available for governance review (#236).
+
+- Immutable initial-target, first-contact, and first-terminal timestamps for
+  low-score recovery, with run-scoped NPS evidence for on-time versus late
+  customer contact and terminal disposition. Historical records without a
+  trustworthy timestamp are excluded from the timeliness denominator and cannot
+  gain inferred evidence through later edits or reopening (#236).
+
+- Run-scoped NPS recovery-outcome evidence beside each selected measurement,
+  showing review, resolution, dismissal, customer-contact, root-cause, and
+  action-record counts without treating dismissed work as a resolved customer
+  recovery (#236).
+
+- NPS low-score recovery cards now link a comment's durable feedback signal to
+  its exact, ID-scoped Feedback workbench view, preserving the existing human
+  customer-request promotion flow (#236).
+
+- Hosted NPS responses can record an optional, response-specific follow-up
+  permission. The result is carried through the public contract, durable
+  recovery notification, and Console low-score workflow while remaining
+  distinct from the contact's subscription state. The recovery queue also
+  distinguishes an explicit refusal from historical replies where this answer
+  was never recorded (#236).
+
+- NPS campaigns now define frozen operating-evidence thresholds for submitted
+  responses and submitted-response rate. Each run reports whether its current
+  result is preliminary, directional, qualified for that campaign's threshold,
+  incomplete after redaction, or unavailable without claiming statistical
+  significance (#236).
+
+- Canonical English and Simplified-Chinese NPS respondent content and hosted
+  response-page controls. Changing an NPS campaign locale now creates a new
+  content version, while previously delivered links retain their original
+  localized snapshot (#236).
+
+- Operators can cancel a scheduled or evaluating NPS run before its invitation
+  ledger materializes. Cancellation is idempotent, records the acting operator,
+  and is fenced against concurrent workers so it never reports success after
+  invitations are committed (#236).
+
+- NPS campaign runs with selectable cohort-backed, consented email recipients,
+  immediate or future scheduling, hosted score and comment collection,
+  profile-linked feedback signals, and Console distribution and trend analytics
+  (#236).
+
+- Privacy-safe NPS launch preflight with current aggregate cohort, eligible,
+  excluded, and capped invitation counts plus delivery-readiness evidence;
+  recipients remain undisclosed and are still frozen by the worker at run time
+  (#236).
+
+- NPS launch preflight now warns when its current capped invitation estimate
+  cannot reach the campaign's frozen minimum submitted-response threshold, even
+  with perfect completion. The advisory remains non-blocking because the worker
+  re-evaluates the audience at scheduling time (#236).
+
+- Run-level NPS measurement history with per-run delivery, completion,
+  response-rate, promoter, passive, and detractor evidence, so response timing
+  within a collection window cannot be mistaken for a change in NPS (#236).
+
+- Explicit run-level NPS hosted-page visit (`started / invitations`) and
+  page-visit conversion (`completed / started`) metrics, with hosted-survey
+  visits and completed responses retained in the started audience so the
+  collection funnel remains auditable after a respondent submits (#236).
+
+- Per-tenant NPS run-materialization telemetry with bounded lifecycle and
+  failure reasons, surfaced in the Operations dashboard for worker triage
+  without exposing raw provider or database errors (#236).
+
+- NPS measurement evidence beside each selected score, including the immutable
+  run's eligible audience, invitations, submitted responses, recipient coverage,
+  and submission coverage without implying population-level statistical
+  significance (#236).
 
 - **Jira bidirectional issue sync.**
   Added the Jira `issue` provider, webhook receiver, and connection flow so

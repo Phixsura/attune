@@ -670,11 +670,13 @@ func deleteLockedSubject(ctx context.Context, tx pgx.Tx, tenantID string, info *
 	if _, err := tx.Exec(ctx, `DELETE FROM llm_audit WHERE feedback_id = ANY($1)`, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete llm_audit rows: %w", err)
 	}
-	// notify_outbox.feedback_id is a NOT NULL FK with no ON DELETE action and
-	// its payload JSONB holds the feedback content verbatim. Purge it before
-	// user_feedback, or the erasure aborts on an FK violation (and would leave
-	// PII behind even if it didn't). feedback_tag_assignments + feedback_audit_log
-	// cascade on the user_feedback delete; llm_audit + notify_outbox do not.
+	// notify_outbox.feedback_id is an FK with no ON DELETE action (nullable
+	// since migration 123 — request-automation events carry no feedback row,
+	// and those NULL rows hold no feedback PII) and its payload JSONB holds
+	// the feedback content verbatim. Purge it before user_feedback, or the
+	// erasure aborts on an FK violation (and would leave PII behind even if
+	// it didn't). feedback_tag_assignments + feedback_audit_log cascade on
+	// the user_feedback delete; llm_audit + notify_outbox do not.
 	if _, err := tx.Exec(ctx, `DELETE FROM notify_outbox WHERE feedback_id = ANY($1)`, feedbackIDs); err != nil {
 		return Counts{}, fmt.Errorf("delete notify_outbox rows: %w", err)
 	}

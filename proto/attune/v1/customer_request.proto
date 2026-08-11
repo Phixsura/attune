@@ -836,3 +836,66 @@ message RecordCustomerRequestIssueSyncRequest {
   optional string external_updated_at = 7;
   optional string sync_error = 8;
 }
+
+// CustomerRequestAutomationService is the API-key automation surface for
+// customer requests (#234) — scope requests:read / requests:write. It reuses
+// the console message shapes; only the note rpc differs (visibility routing).
+service CustomerRequestAutomationService {
+  // GET /v1/requests
+  rpc ListRequestsAutomation(ListRequestsAutomationRequest) returns (ListCustomerRequestsResponse) {
+    option (google.api.http) = {get: "/v1/requests"};
+  }
+  // POST /v1/requests (201)
+  rpc CreateRequestAutomation(CreateRequestAutomationRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/v1/requests"
+      body: "*"
+    };
+  }
+  // PATCH /v1/requests/{id}
+  rpc UpdateRequestAutomation(UpdateRequestAutomationRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      patch: "/v1/requests/{id}"
+      body: "*"
+    };
+  }
+  // POST /v1/requests/{id}/notes (201)
+  rpc AddRequestNoteAutomation(AddRequestNoteAutomationRequest) returns (CustomerRequestDetail) {
+    option (google.api.http) = {
+      post: "/v1/requests/{id}/notes"
+      body: "*"
+    };
+  }
+}
+
+message AddRequestNoteAutomationRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  string body = 2 [(google.api.field_behavior) = REQUIRED];
+  // internal (default) -> collaboration note; public -> portal comment
+  // routed through the standard moderation pipeline.
+  string visibility = 3;
+}
+
+message ListRequestsAutomationRequest {
+  string q = 1;
+  repeated CustomerRequestStatus status = 2;
+  repeated CustomerRequestPriority priority = 3;
+  optional int32 limit = 4;
+  optional string cursor = 5;
+}
+
+message CreateRequestAutomationRequest {
+  string title = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string description = 2;
+  CustomerRequestStatus status = 3;
+  CustomerRequestPriority priority = 4;
+  string idempotency_key = 5 [(google.api.field_behavior) = REQUIRED];
+}
+
+message UpdateRequestAutomationRequest {
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+  optional string title = 2;
+  optional string description = 3;
+  optional CustomerRequestStatus status = 4;
+  optional CustomerRequestPriority priority = 5;
+}

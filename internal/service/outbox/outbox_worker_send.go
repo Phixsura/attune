@@ -5,14 +5,12 @@ package outbox
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/Phixsura/attune/internal/notify"
 	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/logext"
-	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
 	outboxrepo "github.com/Phixsura/attune/internal/repo/outbox"
 )
@@ -54,27 +52,10 @@ func (w *OutboxWorker) sendByDestType(
 	return w.transport.Send(ctx, label, rendered.Build, wrapCheck(rendered.Check, row))
 }
 
-// unmarshalEnvelope converts the outbox payload JSON into an outbound.Envelope.
-// The outbox format uses "delivered_at" and nests tenant_id inside feedback;
-// Envelope expects "timestamp" and top-level "tenant_id". We fix up after unmarshal.
+// unmarshalEnvelope converts the outbox payload JSON into an outbound.Envelope
+// (delegates to the canonical stored-payload mapping in internal/outbound).
 func unmarshalEnvelope(payload []byte) (*outbound.Envelope, error) {
-	var env outbound.Envelope
-	if err := json.Unmarshal(payload, &env); err != nil { // ptrext:allow unmarshal-out-param
-		return nil, err
-	}
-	if env.Timestamp == "" {
-		var raw struct {
-			DeliveredAt string `json:"delivered_at"`
-		}
-		_ = json.Unmarshal(payload, &raw) // ptrext:allow unmarshal-out-param
-		env.Timestamp = raw.DeliveredAt
-	}
-	if env.TenantID == "" {
-		if tid, ok := env.Feedback["tenant_id"].(string); ok {
-			env.TenantID = tid
-		}
-	}
-	return ptrext.Of(env), nil
+	return outbound.FromStoredPayload(payload, "")
 }
 
 // toOutboundTarget converts a repo NotifyTarget to an outbound.Target.

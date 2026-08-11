@@ -288,3 +288,39 @@ func TestSelectOutboxTargets_MultiChannelFanout(t *testing.T) {
 		t.Errorf("all four outbox dest types should route, got %d", len(got))
 	}
 }
+
+func TestBuildOutboxEnvelope_EventTypeParameter(t *testing.T) {
+	base, err := buildOutboxEnvelopeTyped(sampleSnapshot(true), "trace-abc", "API client", domain.EventFeedbackEnriched)
+	if err != nil {
+		t.Fatalf("build enriched: %v", err)
+	}
+	legacy, err := buildOutboxEnvelope(sampleSnapshot(true), "trace-abc", "API client")
+	if err != nil {
+		t.Fatalf("build legacy: %v", err)
+	}
+	if string(base) != string(legacy) {
+		t.Fatalf("legacy path must be byte-identical:\n%s\n%s", legacy, base)
+	}
+
+	urgent, err := buildOutboxEnvelopeTyped(sampleSnapshot(true), "trace-abc", "API client", domain.EventFeedbackUrgent)
+	if err != nil {
+		t.Fatalf("build urgent: %v", err)
+	}
+	var a, b map[string]any
+	if err := json.Unmarshal(base, &a); err != nil {
+		t.Fatalf("decode base: %v", err)
+	}
+	if err := json.Unmarshal(urgent, &b); err != nil {
+		t.Fatalf("decode urgent: %v", err)
+	}
+	if b["event_type"] != "feedback.urgent" {
+		t.Fatalf("event_type: %v", b["event_type"])
+	}
+	// only event_type differs
+	a["event_type"] = b["event_type"]
+	aj, _ := json.Marshal(a)
+	bj, _ := json.Marshal(b)
+	if string(aj) != string(bj) {
+		t.Fatalf("envelopes must differ only in event_type:\n%s\n%s", aj, bj)
+	}
+}

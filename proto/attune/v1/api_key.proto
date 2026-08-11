@@ -311,6 +311,7 @@ message VerifyApiKeyResponse {
   repeated string scopes = 4;           // granted scopes
   optional string expires_at = 5;       // RFC3339, null = never
   optional int32 rate_limit_rpm = 6;    // per-key limit, null = global
+  string tenant_display_name = 7;       // workspace name — connection label for automation consumers (e.g. Zapier)
 }
 
 message ApiKey {

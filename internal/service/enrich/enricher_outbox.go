@@ -28,9 +28,11 @@ func (e *Enricher) persistEnriched(
 	run *feedback.SemanticExtractionRun,
 ) error {
 	const where = "service.Enricher.persistEnriched"
-	// Fast path: skip transaction if no semantic run, no outbox, AND no embedding task.
-	// Must check embeddingTask too, otherwise embedding clustering is silently skipped.
-	if run == nil && (e.outbox == nil || e.targets == nil) && e.embeddingTask == nil && e.draftTask == nil {
+	// Fast path: skip transaction if no semantic run, no outbox consumer
+	// (neither notify targets nor automation subscriptions), AND no
+	// embedding/draft task. Must check embeddingTask too, otherwise
+	// embedding clustering is silently skipped.
+	if run == nil && (e.outbox == nil || (e.targets == nil && e.subs == nil)) && e.embeddingTask == nil && e.draftTask == nil {
 		return e.repo.MarkDone(ctx, s.ID, enriched, feedback.EnrichmentMetadata{
 			Language:      s.Language,
 			DisplayLocale: s.DisplayLocale,
@@ -47,6 +49,9 @@ type outboxPlan struct {
 	traceID string
 	targets []notifytarget.NotifyTarget
 	payload []byte
+	// subscriptionRows are pre-built automation-subscription rows (#234) —
+	// one per (subscription, event) pair, envelope already typed.
+	subscriptionRows []outboxrepo.OutboxRow
 }
 
 func (e *Enricher) buildOutboxPlan(
@@ -57,22 +62,29 @@ func (e *Enricher) buildOutboxPlan(
 	// Look up active destinations BEFORE opening tx — list query
 	// doesn't need atomicity with the UPDATE/INSERT.
 	plan := outboxPlan{traceID: extractTraceID(ctx)}
-	if e.outbox == nil || e.targets == nil {
+	if e.outbox == nil {
 		return plan, nil
 	}
-	allTargets, err := e.targets.ListActiveByTenant(ctx, s.TenantID)
-	if err != nil {
-		logext.Errorf(ctx, "[%s] list notify targets failed,tenant_id:%s,err:%+v",
-			where, s.TenantID, err.Error())
-		return outboxPlan{}, fmt.Errorf("list notify targets: %w", err)
+	if e.targets != nil {
+		allTargets, err := e.targets.ListActiveByTenant(ctx, s.TenantID)
+		if err != nil {
+			logext.Errorf(ctx, "[%s] list notify targets failed,tenant_id:%s,err:%+v",
+				where, s.TenantID, err.Error())
+			return outboxPlan{}, fmt.Errorf("list notify targets: %w", err)
+		}
+		plan.targets = selectOutboxTargets(allTargets, s)
+		plan.payload, err = buildOutboxEnvelope(s, plan.traceID, e.sourceDisplay(s.Source))
+		if err != nil {
+			logext.Errorf(ctx, "[%s] build envelope failed,feedback_id:%d,err:%+v",
+				where, s.ID, err.Error())
+			return outboxPlan{}, fmt.Errorf("build outbox envelope: %w", err)
+		}
 	}
-	plan.targets = selectOutboxTargets(allTargets, s)
-	plan.payload, err = buildOutboxEnvelope(s, plan.traceID, e.sourceDisplay(s.Source))
+	subRows, err := e.planSubscriptionRows(ctx, s, plan.traceID)
 	if err != nil {
-		logext.Errorf(ctx, "[%s] build envelope failed,feedback_id:%d,err:%+v",
-			where, s.ID, err.Error())
-		return outboxPlan{}, fmt.Errorf("build outbox envelope: %w", err)
+		return outboxPlan{}, err
 	}
+	plan.subscriptionRows = subRows
 	return plan, nil
 }
 
@@ -117,10 +129,10 @@ func (e *Enricher) persistEnrichedTx(
 			where, s.ID, err.Error())
 		return fmt.Errorf("commit enrich tx: %w", err)
 	}
-	if len(plan.targets) > 0 {
+	if len(plan.targets) > 0 || len(plan.subscriptionRows) > 0 {
 		logext.Infof(ctx,
-			"[%s] outbox rows queued,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,count:%d",
-			where, plan.traceID, s.TenantID, s.ID, len(plan.targets))
+			"[%s] outbox rows queued,inbound_trace_id:%s,tenant_id:%s,feedback_id:%d,count:%d,subscription_count:%d",
+			where, plan.traceID, s.TenantID, s.ID, len(plan.targets), len(plan.subscriptionRows))
 	}
 	return nil
 }
@@ -163,6 +175,13 @@ func (e *Enricher) insertOutboxRows(
 			logext.Errorf(ctx, "[%s] outbox insert failed,feedback_id:%d,dest_type:%s,err:%+v",
 				where, s.ID, t.DestinationType, err.Error())
 			return fmt.Errorf("queue outbox: %w", err)
+		}
+	}
+	for _, row := range plan.subscriptionRows {
+		if _, err := e.outbox.Insert(ctx, tx, row); err != nil {
+			logext.Errorf(ctx, "[%s] subscription outbox insert failed,feedback_id:%d,subscription:%s,err:%+v",
+				where, s.ID, row.DestinationTarget, err.Error())
+			return fmt.Errorf("queue subscription outbox: %w", err)
 		}
 	}
 	return nil
@@ -363,6 +382,13 @@ func extractTraceID(ctx context.Context) string {
 // (old in-flight rows). Validation happens at ingest only — never re-validate
 // s.Source here against the live set.
 func buildOutboxEnvelope(s domain.Snapshot, traceID, sourceDisplay string) ([]byte, error) {
+	return buildOutboxEnvelopeTyped(s, traceID, sourceDisplay, domain.EventFeedbackEnriched)
+}
+
+// buildOutboxEnvelopeTyped is buildOutboxEnvelope with an explicit event_type
+// — the automation subscription fan-out (#234) emits the same envelope shape
+// under feedback.created / feedback.urgent.
+func buildOutboxEnvelopeTyped(s domain.Snapshot, traceID, sourceDisplay, eventType string) ([]byte, error) {
 	type enrichedOut struct {
 		Title            string         `json:"title"`
 		DisplayTitle     string         `json:"display_title,omitempty"`
@@ -399,7 +425,7 @@ func buildOutboxEnvelope(s domain.Snapshot, traceID, sourceDisplay string) ([]by
 	}
 	env := envelopeOut{
 		Version:     "2", // E3 metadata-driven dims: enriched = {title, attrs, is_urgent, rationale}
-		EventType:   "feedback.enriched",
+		EventType:   eventType,
 		DeliveredAt: at,
 		TraceID:     traceID,
 		Feedback: feedbackOut{
