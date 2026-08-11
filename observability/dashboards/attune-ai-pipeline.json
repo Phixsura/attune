@@ -1059,6 +1059,132 @@
         },
         "orientation": "horizontal"
       }
+    },
+    {
+      "id": 24,
+      "type": "row",
+      "title": "Anomaly detection",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 79
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "Anomaly worker health",
+      "description": "Rollup latency p95, slices judged, worker lag, and pending backfills for the anomaly \u0026 spike detection worker (#237). Growing lag means settled buckets are not being judged on time.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 80
+      },
+      "targets": [
+        {
+          "expr": "(histogram_quantile(0.95, sum by (le) (rate(attune_anomaly_rollup_duration_seconds_bucket{tenant=~\"$tenant\"}[$__rate_interval])))) or vector(0)",
+          "legendFormat": "rollup p95",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum(rate(attune_anomaly_detect_slices_total{tenant=~\"$tenant\"}[$__rate_interval]))) or vector(0)",
+          "legendFormat": "slices judged",
+          "refId": "B"
+        },
+        {
+          "expr": "(max(attune_anomaly_worker_lag_seconds{tenant=~\"$tenant\"})) or vector(0)",
+          "legendFormat": "worker lag (s)",
+          "refId": "C"
+        },
+        {
+          "expr": "(attune_anomaly_backfill_pending_tenants) or vector(0)",
+          "legendFormat": "pending backfills",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "timeseries",
+      "title": "Anomaly outcomes",
+      "description": "New anomaly events by direction, notification failures, and slices dropped by runtime caps. Sustained truncation means a tenant's slice set outgrew the per-tick ceiling.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 80
+      },
+      "targets": [
+        {
+          "expr": "((sum by (direction) (increase(attune_anomaly_events_created_total{tenant=~\"$tenant\"}[$__range]))) or vector(0)) or vector(0)",
+          "legendFormat": "events / {{direction}}",
+          "refId": "A"
+        },
+        {
+          "expr": "((sum(increase(attune_anomaly_notify_failures_total{tenant=~\"$tenant\"}[$__range]))) or vector(0)) or vector(0)",
+          "legendFormat": "notify failures",
+          "refId": "B"
+        },
+        {
+          "expr": "((sum by (reason) (increase(attune_anomaly_slices_truncated_total{tenant=~\"$tenant\"}[$__range]))) or vector(0)) or vector(0)",
+          "legendFormat": "truncated / {{reason}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "axisSoftMax": 1,
+            "axisSoftMin": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "noValue": "0",
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
     }
   ]
 }
