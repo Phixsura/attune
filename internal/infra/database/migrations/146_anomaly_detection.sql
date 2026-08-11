@@ -307,6 +307,8 @@ ALTER TABLE audit_log ADD CONSTRAINT chk_audit_action_value
         'tag.archive',
         'tag.create',
         'tag.update',
+        'webhook_subscription.create',
+        'webhook_subscription.delete',
         'workflow_seed_defaults.run',
         'workflow_state.archive',
         'workflow_state.create',
