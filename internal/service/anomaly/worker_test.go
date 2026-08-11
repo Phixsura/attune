@@ -33,13 +33,20 @@ type fakeRepo struct {
 	retracted      []uuid.UUID
 	backfilledVer  int
 	doneDates      []string
+	customSlices   []anomalyrepo.StoredCustomSlice
+	disabled       []uuid.UUID
+	failTenantID   string
+	refuseClaims   bool
 }
 
 func (f *fakeRepo) ActiveTenantsWithFeedback(context.Context, int) ([]anomalyrepo.TenantRef, error) {
 	return f.tenants, nil
 }
 
-func (f *fakeRepo) GetConfig(context.Context, string) (anomalyrepo.Config, error) {
+func (f *fakeRepo) GetConfig(_ context.Context, tenantID string) (anomalyrepo.Config, error) {
+	if f.failTenantID != "" && tenantID == f.failTenantID {
+		return anomalyrepo.Config{}, errBoom
+	}
 	return f.config, nil
 }
 
@@ -49,10 +56,13 @@ func (f *fakeRepo) MarkBackfilled(_ context.Context, _ string, v int) error {
 }
 
 func (f *fakeRepo) ListCustomSlices(context.Context, string) ([]anomalyrepo.StoredCustomSlice, error) {
-	return nil, nil
+	return f.customSlices, nil
 }
 
-func (f *fakeRepo) DisableCustomSlice(context.Context, string, uuid.UUID, string) error { return nil }
+func (f *fakeRepo) DisableCustomSlice(_ context.Context, _ string, id uuid.UUID, _ string) error {
+	f.disabled = append(f.disabled, id)
+	return nil
+}
 
 func (f *fakeRepo) RecomputeWindow(_ context.Context, opts anomalyrepo.RecomputeOpts) error {
 	f.recomputeCalls = append(f.recomputeCalls, opts)
@@ -77,6 +87,9 @@ func (f *fakeRepo) UnclaimedSettledDates(_ context.Context, _ string, candidates
 }
 
 func (f *fakeRepo) ClaimRun(_ context.Context, _ string, date time.Time, _ string, _ time.Duration) (bool, error) {
+	if f.refuseClaims {
+		return false, nil
+	}
 	f.claimedDates = append(f.claimedDates, date.Format("2006-01-02"))
 	return true, nil
 }
