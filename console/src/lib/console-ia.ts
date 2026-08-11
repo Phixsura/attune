@@ -140,6 +140,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     permission: 'usage:view',
   },
   {
+    group: 'analytics',
+    icon: TriangleAlert,
+    labelKey: 'nav.anomalies',
+    path: '/analytics/anomalies',
+    permission: 'usage:view',
+  },
+  {
     group: 'configuration',
     icon: Settings2,
     labelKey: 'settings.areas.classification.title',

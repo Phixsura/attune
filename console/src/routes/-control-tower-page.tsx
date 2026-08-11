@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { anomaliesQuery } from '@/features/anomalies/api/anomalies'
 import {
   type ClassificationQuality,
   classificationQualityQuery,
@@ -293,6 +294,7 @@ export function ControlTowerPage() {
   const qualityActions = useQuery(controlTowerQueries[2])
   const cohortHealth = useQuery(controlTowerQueries[3])
   const feedbackStats = useQuery(controlTowerQueries[4])
+  const openAnomalies = useQuery(anomaliesQuery({ limit: 100, status: 'open' }))
   const me = useQuery(meQuery())
   const role = me.data?.user?.role as Role | undefined
   const canReadSurveyAnalytics = roleCanReadSurveyAnalytics(role)
@@ -355,6 +357,11 @@ export function ControlTowerPage() {
               label={t('control_tower.hero.active_risks')}
               value={String(model.risks.length)}
               tone={model.risks.length > 0 ? 'urgent' : 'default'}
+            />
+            <PageHeroMetric
+              label={t('control_tower.hero.open_anomalies', '开放异常')}
+              value={String(openAnomalies.data?.length ?? 0)}
+              tone={(openAnomalies.data?.length ?? 0) > 0 ? 'urgent' : 'default'}
             />
             <PageHeroMetric
               label={t('control_tower.hero.classification_events')}

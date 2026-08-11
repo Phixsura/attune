@@ -142,7 +142,8 @@
     "system_readiness": "系统就绪",
     "reliability": "可靠性总览",
     "security": "安全设置",
-    "cohort_sync": "人群同步"
+    "cohort_sync": "人群同步",
+    "anomalies": "异常检测"
   },
   "surveys": {
     "title": "满意度调查",
@@ -7629,6 +7630,32 @@
       "hint_timeout": "→ 提供商 API 响应超时，请稍后重试",
       "hint_rate_limit": "→ 触发了速率限制，请降低同步频率",
       "hint_empty_snapshot": "→ 提供商返回空数据，请检查 cohort 在提供商侧是否正常"
+    }
+  },
+  "anomalies": {
+    "title": "异常检测",
+    "empty": "未检测到异常 — 反馈量与基线一致。",
+    "tabs": {
+      "open": "进行中",
+      "resolved": "已恢复",
+      "all": "全部"
+    },
+    "card": {
+      "observed": "观测 {{observed}}，预期 {{med}}（{{low}}–{{high}}）",
+      "ongoing": "持续 {{days}} 天"
+    },
+    "status": {
+      "retracted": "数据修正后已撤销"
+    },
+    "contribution": {
+      "title": "主要来源",
+      "spread": "分布广泛 — 无集中来源"
+    },
+    "evidence": {
+      "title": "证据",
+      "window": "时间窗 {{from}} – {{to}}",
+      "view": "查看 {{n}} 条样本反馈",
+      "none": "未捕获样本反馈"
     }
   }
 }
