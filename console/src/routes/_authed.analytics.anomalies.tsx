@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -42,12 +42,13 @@ export function AnomaliesPage() {
   const navigate = Route.useNavigate()
   const status = search.status ?? 'open'
   const { data: events, isLoading } = useQuery(anomaliesQuery({ status }))
-  const [selectedId, setSelectedId] = useState<string | undefined>(search.event)
-
   const selected = useMemo(
-    () => events?.find((e) => e.eventId === (selectedId ?? search.event)) ?? events?.[0],
-    [events, selectedId, search.event],
+    () => events?.find((e) => e.eventId === search.event) ?? events?.[0],
+    [events, search.event],
   )
+  const selectEvent = (eventId: string) => {
+    void navigate({ search: (prev: AnomaliesSearch) => ({ ...prev, event: eventId }) })
+  }
 
   return (
     <div className="space-y-4 p-4" data-testid="anomalies-page">
@@ -86,7 +87,7 @@ export function AnomaliesPage() {
               <AnomalyCard
                 event={event}
                 key={event.eventId}
-                onSelect={(e) => setSelectedId(e.eventId)}
+                onSelect={(e) => selectEvent(e.eventId)}
                 selected={selected?.eventId === event.eventId}
               />
             ))}
@@ -143,6 +144,7 @@ function AnomalyDetail({ event }: { event: AnomalyEvent }) {
               <Link
                 className="text-primary underline-offset-2 hover:underline"
                 data-testid="evidence-link"
+                search={{ ids: evidence.feedbackIds.join(',') }}
                 to="/feedback"
               >
                 {t('anomalies.evidence.view', 'View {{n}} sample feedback items', {

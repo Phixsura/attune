@@ -164,3 +164,44 @@ func TestCustomSlicesFromProtoEdges(t *testing.T) {
 		t.Fatal(">10 values must fail")
 	}
 }
+
+// fakeDigestChecker reports a fixed subscription state.
+type fakeDigestChecker struct{ has bool }
+
+func (f fakeDigestChecker) GetByTenant(context.Context, string) (bool, error) {
+	return f.has, nil
+}
+
+func TestUpdateAnomalyConfigDigestWarning(t *testing.T) {
+	store := ptrext.Of(fakeStore{cfg: anomalyrepo.DefaultConfig("t1")})
+	h := NewHandler(store, fakeTenants{})
+	h.SetDigestChecker(fakeDigestChecker{has: false})
+
+	cfg := validProtoConfig()
+	cfg.NotifyMode = "digest"
+	res, err := h.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{Config: cfg}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Body.Warning == "" {
+		t.Fatal("digest mode without a subscription must return the advisory warning")
+	}
+
+	// With a subscription (or immediate mode): no warning.
+	h.SetDigestChecker(fakeDigestChecker{has: true})
+	res, err = h.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{Config: cfg}))
+	if err != nil || res.Body.Warning != "" {
+		t.Fatalf("subscribed tenant must not be warned: %q %v", res.Body.Warning, err)
+	}
+}
+
+func TestUpdateAnomalyConfigSeriesCap(t *testing.T) {
+	store := ptrext.Of(fakeStore{cfg: anomalyrepo.DefaultConfig("t1"), sliceKeyCount: 501})
+	h := NewHandler(store, fakeTenants{})
+
+	_, err := h.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{Config: validProtoConfig()}))
+	wantValidation(t, err, attunev1.ErrorCode_VALIDATION)
+	if len(store.upserts) != 0 {
+		t.Fatal("over-cap config must not persist")
+	}
+}

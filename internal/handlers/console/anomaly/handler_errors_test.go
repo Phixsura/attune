@@ -29,6 +29,10 @@ func (downStore) FilterLiveFeedbackIDs(context.Context, string, []int64) ([]int6
 	return nil, errStore
 }
 
+func (downStore) CountRecentSliceKeys(context.Context, string, int) (int, error) {
+	return 0, errStore
+}
+
 func (downStore) GetEvent(context.Context, string, uuid.UUID) (*anomalyrepo.Event, error) {
 	return nil, errStore
 }

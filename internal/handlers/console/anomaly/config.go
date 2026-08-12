@@ -27,6 +27,20 @@ type auditRecorder interface {
 // SetAuditLogger attaches the audit recorder (optional; nil = no audit).
 func (h *Handler) SetAuditLogger(audit auditRecorder) { h.audit = audit }
 
+// digestSubscriptionChecker reports whether a tenant has a digest
+// subscription; wired from cmd (optional — nil skips the advisory).
+type digestSubscriptionChecker interface {
+	GetByTenant(ctx context.Context, tenantID string) (bool, error)
+}
+
+// SetDigestChecker attaches the digest-subscription advisory source.
+func (h *Handler) SetDigestChecker(c digestSubscriptionChecker) { h.digest = c }
+
+// maxConfiguredSeries caps how many distinct slice keys a tenant's enabled
+// configuration may produce (spec §9): beyond it detection quality and
+// notification noise degrade, so the update is rejected outright.
+const maxConfiguredSeries = 500
+
 // GetAnomalyConfig returns the tenant config with custom slices.
 func (h *Handler) GetAnomalyConfig(
 	ctx *dispatcher.RequestContext[*session.AuthCtx],
@@ -61,6 +75,11 @@ func (h *Handler) UpdateAnomalyConfig(
 		return dispatcher.Fail[*attunev1.UpdateAnomalyConfigResponse](
 			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
+	if count, err := h.store.CountRecentSliceKeys(ctx, ctx.Auth.TenantID, 30); err == nil && count > maxConfiguredSeries {
+		return dispatcher.Fail[*attunev1.UpdateAnomalyConfigResponse](
+			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION,
+			fmt.Sprintf("configuration produces %d monitored series over the last 30 days (max %d) — disable slice types or remove custom slices", count, maxConfiguredSeries))
+	}
 	if err := h.store.UpsertConfig(ctx, cfg, ctx.Auth.UserID); err != nil {
 		logext.Errorf(ctx, "[%s] upsert failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.UpdateAnomalyConfigResponse](
@@ -79,7 +98,8 @@ func (h *Handler) UpdateAnomalyConfig(
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to reload anomaly config")
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.UpdateAnomalyConfigResponse{
-		Config: configToProto(saved, savedSlices),
+		Config:  configToProto(saved, savedSlices),
+		Warning: h.digestModeWarning(ctx, ctx.Auth.TenantID, cfg.NotifyMode),
 	}))
 }
 
@@ -123,6 +143,19 @@ func (h *Handler) recordAudit(
 		Summary:    "anomaly detection configuration updated",
 		After:      after,
 	})
+}
+
+// digestModeWarning returns the spec §9 advisory: digest notify mode with
+// no digest subscription silently delivers nothing, so warn (never fail).
+func (h *Handler) digestModeWarning(ctx context.Context, tenantID, notifyMode string) string {
+	if notifyMode != anomalyrepo.NotifyDigest || h.digest == nil {
+		return ""
+	}
+	has, err := h.digest.GetByTenant(ctx, tenantID)
+	if err != nil || has {
+		return ""
+	}
+	return "notify_mode is digest but no digest subscription exists — anomaly notifications will not be delivered until one is configured"
 }
 
 // ── proto ⇄ repo mapping + validation ────────────────────────────────────

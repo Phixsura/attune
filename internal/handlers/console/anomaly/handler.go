@@ -41,6 +41,7 @@ const (
 type store interface {
 	ListEventsBySliceType(ctx context.Context, tenantID, status, sliceType string, limit int) ([]anomalyrepo.Event, error)
 	FilterLiveFeedbackIDs(ctx context.Context, tenantID string, ids []int64) ([]int64, error)
+	CountRecentSliceKeys(ctx context.Context, tenantID string, days int) (int, error)
 	GetEvent(ctx context.Context, tenantID string, id uuid.UUID) (*anomalyrepo.Event, error)
 	BaselineCounts(ctx context.Context, tenantID, sliceType, sliceKey string, dates []time.Time) ([]int64, error)
 	GetConfig(ctx context.Context, tenantID string) (anomalyrepo.Config, error)
@@ -59,6 +60,7 @@ type Handler struct {
 	store   store
 	tenants tenantReader
 	audit   auditRecorder
+	digest  digestSubscriptionChecker
 }
 
 // NewHandler wires the anomaly console handler.

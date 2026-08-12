@@ -19,11 +19,12 @@ import (
 )
 
 type fakeStore struct {
-	events  []anomalyrepo.Event
-	cfg     anomalyrepo.Config
-	slices  []anomalyrepo.StoredCustomSlice
-	upserts []anomalyrepo.Config
-	counts  map[string]int64
+	events        []anomalyrepo.Event
+	cfg           anomalyrepo.Config
+	slices        []anomalyrepo.StoredCustomSlice
+	upserts       []anomalyrepo.Config
+	counts        map[string]int64
+	sliceKeyCount int
 }
 
 func (f *fakeStore) ListEventsBySliceType(_ context.Context, _, status, sliceType string, _ int) ([]anomalyrepo.Event, error) {
@@ -38,6 +39,10 @@ func (f *fakeStore) ListEventsBySliceType(_ context.Context, _, status, sliceTyp
 
 func (f *fakeStore) FilterLiveFeedbackIDs(_ context.Context, _ string, ids []int64) ([]int64, error) {
 	return ids, nil // handler tests treat all sample ids as live
+}
+
+func (f *fakeStore) CountRecentSliceKeys(context.Context, string, int) (int, error) {
+	return f.sliceKeyCount, nil
 }
 
 func (f *fakeStore) GetEvent(_ context.Context, _ string, id uuid.UUID) (*anomalyrepo.Event, error) {

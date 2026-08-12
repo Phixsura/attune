@@ -187,3 +187,18 @@ func (r *Repo) DisableCustomSlice(ctx context.Context, tenantID string, id uuid.
 	}
 	return nil
 }
+
+// CountRecentSliceKeys counts distinct monitored series over the trailing
+// window — the configuration-time guard against series explosions.
+func (r *Repo) CountRecentSliceKeys(ctx context.Context, tenantID string, days int) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT (slice_type, slice_key))
+		FROM feedback_volume_buckets
+		WHERE tenant_id = $1 AND bucket_date > CURRENT_DATE - $2::int`,
+		tenantID, days).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("anomaly count slice keys: %w", err)
+	}
+	return n, nil
+}

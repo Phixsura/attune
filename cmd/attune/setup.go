@@ -464,6 +464,7 @@ func configureConsoleRouter(
 	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
 	anomalyHandler := console.NewAnomalyHandler(anomalyrepo.New(pool), tenantRepo)
 	anomalyHandler.SetAuditLogger(auditLogSvc)
+	anomalyHandler.SetDigestChecker(anomalyDigestChecker{repo: digestsubrepo.New(pool)})
 	router.SetAnomalyHandler(anomalyHandler)
 	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets, cohortSyncSvc)
 	return router.Mount()
@@ -814,4 +815,19 @@ func newInboundHandler(
 		h.SetSyncTrigger(mgr.TriggerSync)
 	}
 	return h
+}
+
+// anomalyDigestChecker adapts the digest subscription repo to the anomaly
+// config handler's has-subscription advisory check (#237).
+type anomalyDigestChecker struct{ repo *digestsubrepo.Repo }
+
+func (c anomalyDigestChecker) GetByTenant(ctx context.Context, tenantID string) (bool, error) {
+	sub, err := c.repo.GetByTenant(ctx, tenantID)
+	if errors.Is(err, digestsubrepo.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return sub.Enabled, nil
 }
