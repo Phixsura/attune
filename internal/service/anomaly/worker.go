@@ -333,7 +333,10 @@ func (w *Worker) detectSettled(
 	} else {
 		metrics.AnomalyWorkerLagSeconds.WithLabelValues(tenantID).Set(0)
 	}
-	for _, date := range free {
+	for _, raw := range free {
+		// Dates from the runs table are DB scans (UTC midnights): normalize
+		// to loc-midnight before any baseline math.
+		date := civilDateIn(raw, loc)
 		claimed, err := w.repo.ClaimRun(ctx, tenantID, date, w.owner, staleClaim)
 		if err != nil || !claimed {
 			continue
@@ -645,12 +648,14 @@ func (w *Worker) reconcile(
 	return nil
 }
 
-// judgeDate re-runs the detector for one event's slice on one date.
+// judgeDate re-runs the detector for one event's slice on one date. date
+// may be a DB-scanned DATE value; it is normalized before baseline math.
 func (w *Worker) judgeDate(
 	ctx context.Context, tenantID string, loc *time.Location,
 	event anomalyrepo.Event, detCfg DetectorConfig, date time.Time,
 ) (bool, error) {
-	baseline := baselineDates(civilMidnight(date, loc), loc)
+	date = civilDateIn(date, loc)
+	baseline := baselineDates(date, loc)
 	counts, err := w.repo.BaselineCounts(ctx, tenantID, event.SliceType, event.SliceKey, baseline)
 	if err != nil {
 		return false, err
@@ -674,7 +679,7 @@ func (w *Worker) quietStreak(
 	event anomalyrepo.Event, detCfg DetectorConfig, now time.Time, cfg anomalyrepo.Config,
 ) int {
 	streak := 0
-	day := civilMidnight(event.LastBucketDate, loc)
+	day := civilDateIn(event.LastBucketDate, loc) // DB-scanned DATE value
 	for i := 1; i <= resolveQuietBuckets; i++ {
 		d := day.AddDate(0, 0, i)
 		settleAt := d.AddDate(0, 0, 1).Add(time.Duration(cfg.SettleDelayHours) * time.Hour)
@@ -692,10 +697,23 @@ func (w *Worker) quietStreak(
 
 // ── civil-time helpers (pure; digest schedule.go idiom) ──────────────────
 
-// civilMidnight normalizes t to midnight of its civil date in loc.
+// civilMidnight normalizes an INSTANT t to midnight of its civil date in
+// loc. Only correct for real instants (time.Now()); never use it on a
+// date VALUE — see civilDateIn.
 func civilMidnight(t time.Time, loc *time.Location) time.Time {
 	lt := t.In(loc)
 	return time.Date(lt.Year(), lt.Month(), lt.Day(), 0, 0, 0, 0, loc)
+}
+
+// civilDateIn normalizes a date VALUE to midnight in loc by reading the
+// calendar date in t's OWN location. pgx scans DATE columns as UTC
+// midnights; converting those through loc (civilMidnight) shifts the date
+// back one day for negative-offset zones (the Americas), misaligning the
+// same-weekday baseline. Reading t.Date() keeps the intended calendar day
+// for both representations (UTC-midnight DB scans and loc-midnight values).
+func civilDateIn(t time.Time, loc *time.Location) time.Time {
+	y, m, d := t.Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, loc)
 }
 
 // settledDates lists recompute-window dates whose bucket has closed and
@@ -722,9 +740,10 @@ func settledSet(now time.Time, loc *time.Location, settleDelayHours int) map[str
 	return out
 }
 
-// baselineDates returns the 8 same-weekday dates preceding date.
+// baselineDates returns the 8 same-weekday dates preceding date. date is
+// treated as a date VALUE (see civilDateIn), never converted across zones.
 func baselineDates(date time.Time, loc *time.Location) []time.Time {
-	day := civilMidnight(date, loc)
+	day := civilDateIn(date, loc)
 	out := make([]time.Time, 0, baselineWeeks)
 	for week := baselineWeeks; week >= 1; week-- {
 		out = append(out, day.AddDate(0, 0, -7*week))

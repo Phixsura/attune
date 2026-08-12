@@ -341,3 +341,28 @@ func TestWorkerResolvesStaleEventAfterDowntime(t *testing.T) {
 		t.Fatal("out-of-window events must never be retracted (buckets are frozen; that would mislabel config drift as data correction)")
 	}
 }
+
+// TestWorkerNegativeOffsetTimezoneBaselines is the regression for DB-date
+// normalization: pgx scans DATE columns as UTC midnights; converting those
+// through a negative-offset zone (the Americas) used to shift the calendar
+// date back one day and misalign every same-weekday baseline.
+func TestWorkerNegativeOffsetTimezoneBaselines(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "America/New_York"}}, config: baseConfig()})
+	repo.counts = map[string]int64{}
+	// Baselines keyed by the CORRECT calendar dates (same weekday as Aug 9).
+	target := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	for week := 1; week <= 8; week++ {
+		repo.counts["total|"+target.AddDate(0, 0, -7*week).Format("2006-01-02")] = 12
+	}
+	repo.counts["total|2026-08-09"] = 40
+	repo.slices = []anomalyrepo.SliceRef{{Type: "total", Key: "total", Display: "All feedback"}}
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	// Aug 10 23:00 UTC = Aug 10 19:00 New York → Aug 9 is settled locally.
+	w.ProcessOnce(context.Background(), time.Date(2026, 8, 10, 23, 0, 0, 0, time.UTC))
+
+	if len(repo.newEventIDs) != 1 {
+		t.Fatalf("negative-offset tz must not shift baseline dates; events=%d hits=%d",
+			len(repo.newEventIDs), len(repo.hits))
+	}
+}
