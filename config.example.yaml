@@ -136,3 +136,7 @@ security:
 #     audience: all          # pool | radar | all
 #     url: https://discord.com/api/webhooks/123/abc
 custom_webhooks: []
+
+anomaly:
+  interval: "1h"
+  backfill_tenants_per_tick: 10

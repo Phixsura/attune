@@ -14,6 +14,11 @@ const (
 	// DefaultEnricherInterval controls the background polling cadence.
 	DefaultEnricherInterval = 30 * time.Second
 
+	// DefaultAnomalyInterval is the anomaly detection worker tick (#237).
+	DefaultAnomalyInterval = time.Hour
+	// DefaultAnomalyBackfillPerTick caps 90-day rollup backfills per tick.
+	DefaultAnomalyBackfillPerTick = 10
+
 	// DefaultEnricherQueueLen bounds the in-process enrichment submission queue.
 	DefaultEnricherQueueLen = 1000
 

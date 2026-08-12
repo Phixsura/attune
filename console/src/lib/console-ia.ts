@@ -140,6 +140,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     permission: 'usage:view',
   },
   {
+    group: 'analytics',
+    icon: TriangleAlert,
+    labelKey: 'nav.anomalies',
+    path: '/analytics/anomalies',
+    permission: 'usage:view',
+  },
+  {
     group: 'configuration',
     icon: Settings2,
     labelKey: 'settings.areas.classification.title',
@@ -170,6 +177,13 @@ export const consoleNavItems: ConsoleNavItem[] = [
     path: '/configuration/tags',
     permission: 'settings:tags:view',
     settingsAliases: ['tags'],
+  },
+  {
+    group: 'configuration',
+    icon: TriangleAlert,
+    labelKey: 'anomalies.config.title',
+    path: '/configuration/anomaly-detection',
+    permission: 'usage:view',
   },
   {
     group: 'configuration',

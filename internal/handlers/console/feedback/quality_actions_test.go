@@ -241,7 +241,15 @@ func TestQualityActionUpdateValidation(t *testing.T) {
 		ActionKey: "Bad Key",
 		Signal:    "zero_result",
 	}))
-	require.EqualError(t, err, "action_key must be 1-120 chars using lowercase letters, numbers, dot, colon, underscore, or dash")
+	require.EqualError(t, err, "action_key must be 1-120 chars using lowercase letters, numbers, dot, colon, equals, underscore, or dash")
+
+	// Anomaly dimension keys carry '=' (#237): "anomaly:dim:severity=<hash>"
+	// must validate or the Console cannot acknowledge dimension anomalies.
+	_, err = qualityActionUpdateFromRequest(auth, ptrext.Of(attunev1.UpdateQualityActionRequest{
+		ActionKey: "anomaly:dim:severity=1a2b3c4d",
+		Signal:    "anomaly_detection",
+	}))
+	require.NoError(t, err)
 
 	_, err = qualityActionUpdateFromRequest(auth, ptrext.Of(attunev1.UpdateQualityActionRequest{
 		ActionKey:    "search.zero_result",

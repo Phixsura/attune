@@ -1,0 +1,138 @@
+syntax = "proto3";
+
+package attune.v1;
+
+import "google/api/annotations.proto";
+
+// AnomalyService exposes detected feedback-volume anomalies, their series
+// context and evidence, and the per-tenant detection configuration (#237).
+service AnomalyService {
+  rpc ListAnomalies(ListAnomaliesRequest) returns (ListAnomaliesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/anomalies"};
+  }
+
+  rpc GetAnomalySeries(GetAnomalySeriesRequest) returns (GetAnomalySeriesResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/anomalies/series"};
+  }
+
+  rpc GetAnomalyEvidence(GetAnomalyEvidenceRequest) returns (GetAnomalyEvidenceResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/anomalies/{event_id}/evidence"};
+  }
+
+  rpc GetAnomalyConfig(GetAnomalyConfigRequest) returns (GetAnomalyConfigResponse) {
+    option (google.api.http) = {get: "/fb/v1/console/anomaly-config"};
+  }
+
+  rpc UpdateAnomalyConfig(UpdateAnomalyConfigRequest) returns (UpdateAnomalyConfigResponse) {
+    option (google.api.http) = {
+      post: "/fb/v1/console/anomaly-config"
+      body: "*"
+    };
+  }
+}
+
+// AnomalyEvent is one detected spike or drop with lifecycle state.
+message AnomalyEvent {
+  string event_id = 1;
+  string slice_type = 2; // total | source | dimension | cluster | cohort | custom
+  string slice_key = 3;
+  string slice_display = 4;
+  string direction = 5; // spike | drop
+  string first_bucket_date = 6; // YYYY-MM-DD (tenant-local civil date)
+  string last_bucket_date = 7;
+  int64 observed = 8;
+  double expected_med = 9;
+  double expected_low = 10;
+  double expected_high = 11;
+  double z_score = 12;
+  string status = 13; // open | resolved | retracted
+  string created_at = 14; // RFC3339
+  string resolved_at = 15; // RFC3339, empty when unresolved
+}
+
+message ListAnomaliesRequest {
+  string status = 1; // open | resolved | retracted | "" = all
+  string slice_type = 2; // filter, "" = all
+  optional int32 limit = 3;
+}
+
+message ListAnomaliesResponse {
+  repeated AnomalyEvent events = 1;
+}
+
+// SeriesPoint is one day of a slice's series with the detector's expected
+// band replayed by the same pure function the worker uses.
+message SeriesPoint {
+  string date = 1; // YYYY-MM-DD
+  int64 count = 2;
+  double expected_med = 3;
+  double expected_low = 4;
+  double expected_high = 5;
+  bool is_anomalous = 6;
+  bool insufficient = 7; // baseline too short to judge
+}
+
+message GetAnomalySeriesRequest {
+  string slice_type = 1;
+  string slice_key = 2;
+  optional int32 days = 3; // 1..180, default 90
+}
+
+message GetAnomalySeriesResponse {
+  repeated SeriesPoint points = 1;
+  string slice_display = 2;
+}
+
+// ContributionEntry attributes a share of the deviation to one grouping
+// value: share = (obs_v - exp_v) / (obs_total - exp_total).
+message ContributionEntry {
+  string dim = 1;
+  string value = 2;
+  double share = 3;
+}
+
+message GetAnomalyEvidenceRequest {
+  string event_id = 1;
+}
+
+message GetAnomalyEvidenceResponse {
+  repeated ContributionEntry contributions = 1;
+  bool spread = 2; // deviation broadly distributed, no concentrated origin
+  repeated int64 feedback_ids = 3; // live sample ids for drilldown
+}
+
+// AnomalyCustomSlice is an operator-defined monitored slice.
+message AnomalyCustomSlice {
+  string id = 1;
+  string name = 2;
+  string definition_json = 3; // {"conditions":[{field,name?,values[]}]} conjunction
+  bool enabled = 4;
+  string last_error = 5; // non-empty when auto-disabled as invalid
+}
+
+// AnomalyConfig is the per-tenant detection configuration.
+message AnomalyConfig {
+  string sensitivity = 1; // high | medium | low
+  int32 min_count = 2;
+  int32 settle_delay_hours = 3;
+  repeated string enabled_slice_types = 4;
+  repeated string drop_enabled_slice_types = 5;
+  string notify_mode = 6; // immediate | digest | off
+  bool detection_enabled = 7;
+  repeated AnomalyCustomSlice custom_slices = 8;
+}
+
+message GetAnomalyConfigRequest {}
+
+message GetAnomalyConfigResponse {
+  AnomalyConfig config = 1;
+}
+
+message UpdateAnomalyConfigRequest {
+  AnomalyConfig config = 1;
+}
+
+message UpdateAnomalyConfigResponse {
+  AnomalyConfig config = 1;
+  string warning = 2; // non-fatal validation advisory (e.g. digest mode without a digest subscription)
+}

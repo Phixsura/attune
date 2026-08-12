@@ -35,6 +35,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/logext"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	anomalyrepo "github.com/Phixsura/attune/internal/repo/anomaly"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -461,6 +462,10 @@ func configureConsoleRouter(
 	cohortSyncSvc *cohortsyncservice.Service,
 ) chi.Router {
 	router.SetQualityActionHandler(console.NewQualityActionHandler(feedbackRepo))
+	anomalyHandler := console.NewAnomalyHandler(anomalyrepo.New(pool), tenantRepo)
+	anomalyHandler.SetAuditLogger(auditLogSvc)
+	anomalyHandler.SetDigestChecker(anomalyDigestChecker{repo: digestsubrepo.New(pool)})
+	router.SetAnomalyHandler(anomalyHandler)
 	attachOptionalHandlers(router, pool, cfg, settingsRepo, auditLogSvc, signer, tenantRepo, adminRepo, secrets, cohortSyncSvc)
 	return router.Mount()
 }
@@ -810,4 +815,25 @@ func newInboundHandler(
 		h.SetSyncTrigger(mgr.TriggerSync)
 	}
 	return h
+}
+
+// digestSubReader is the slice of the digest subscription repo the anomaly
+// advisory check consumes.
+type digestSubReader interface {
+	GetByTenant(ctx context.Context, tenantID string) (*digestsubrepo.Subscription, error)
+}
+
+// anomalyDigestChecker adapts the digest subscription repo to the anomaly
+// config handler's has-subscription advisory check (#237).
+type anomalyDigestChecker struct{ repo digestSubReader }
+
+func (c anomalyDigestChecker) GetByTenant(ctx context.Context, tenantID string) (bool, error) {
+	sub, err := c.repo.GetByTenant(ctx, tenantID)
+	if errors.Is(err, digestsubrepo.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return sub.Enabled, nil
 }

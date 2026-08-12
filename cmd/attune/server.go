@@ -42,6 +42,7 @@ import (
 	"github.com/Phixsura/attune/internal/pkg/nethardening"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	"github.com/Phixsura/attune/internal/repo/admin"
+	anomalyrepo "github.com/Phixsura/attune/internal/repo/anomaly"
 	apikeyrepo "github.com/Phixsura/attune/internal/repo/apikey"
 	auditevidencerepo "github.com/Phixsura/attune/internal/repo/auditevidence"
 	auditlogrepo "github.com/Phixsura/attune/internal/repo/auditlog"
@@ -60,6 +61,7 @@ import (
 	"github.com/Phixsura/attune/internal/repo/tenant"
 	"github.com/Phixsura/attune/internal/repo/webhooksub"
 	"github.com/Phixsura/attune/internal/restoredrill"
+	anomalysvc "github.com/Phixsura/attune/internal/service/anomaly"
 	"github.com/Phixsura/attune/internal/service/apikey"
 	auditevidencesvc "github.com/Phixsura/attune/internal/service/auditevidence"
 	auditlogsvc "github.com/Phixsura/attune/internal/service/auditlog"
@@ -292,6 +294,7 @@ func startRuntimeWorkers(
 
 	bjw := startBackgroundWorkers(ctx, pool, runtimeDeps.enricher, runtimeDeps.rawLLM, runtimeDeps.llm, runtimeDeps.feedbackRepo, secrets,
 		cfg.ConsoleBaseURL, cfg.GDPRExportTTL, cfg.AuditEvidenceExportTTL, cfg.AuditEvidenceSigningKey)
+	startAnomalyWorker(ctx, pool, cfg.ConsoleBaseURL, cfg.AnomalyInterval, cfg.AnomalyBackfillPerTick)
 	return runtimeWorkerResult{batchJobWorker: bjw, cohortSyncService: cohortSyncService}
 }
 
@@ -729,6 +732,7 @@ func startAuditEvidenceWorker(ctx context.Context, pool *pgxpool.Pool, exportTTL
 func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LLMClient, consoleBaseURL string) {
 	embedRepo := embeddingrepo.NewTaskRepo(pool)
 	agg := digestsvc.NewClusterAggregator(embedRepo, feedback.NewFeedback(pool), embedRepo, llm)
+	agg.SetAnomalyReader(digestAnomalyReader{repo: anomalyrepo.New(pool)})
 	worker := digestsvc.NewWorker(
 		digestsubrepo.New(pool),
 		digestrunrepo.New(pool),
@@ -739,6 +743,68 @@ func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LL
 		consoleBaseURL,
 	)
 	safego(ctx, "digest", func() { worker.Run(ctx) })
+}
+
+// digestAnomalyRepo is the slice of the anomaly repo the digest adapter
+// consumes (an interface so the mapping is unit-testable).
+type digestAnomalyRepo interface {
+	OpenDigestAnomaliesInWindow(ctx context.Context, tenantID string, from, to time.Time) ([]anomalyrepo.DigestAnomaly, error)
+}
+
+// digestAnomalyReader adapts the anomaly repo to the digest aggregator's
+// optional anomaly-section interface (#237).
+type digestAnomalyReader struct{ repo digestAnomalyRepo }
+
+func (r digestAnomalyReader) OpenDigestAnomalies(ctx context.Context, tenantID string, from, to time.Time) ([]digestsvc.AnomalySummary, error) {
+	rows, err := r.repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]digestsvc.AnomalySummary, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, digestsvc.AnomalySummary{
+			SliceDisplay: row.SliceDisplay,
+			Direction:    row.Direction,
+			Observed:     row.Observed,
+			ExpectedMed:  row.ExpectedMed,
+			EventID:      row.EventID,
+		})
+	}
+	return out, nil
+}
+
+// enrichConfigRepo is the slice of the tenant repo the anomaly adapter
+// consumes.
+type enrichConfigRepo interface {
+	GetEnrichConfig(ctx context.Context, tenantID string) (tenant.EnrichConfig, error)
+}
+
+// anomalyEnrichReader adapts the tenant repo to the anomaly worker's
+// dimension-set view.
+type anomalyEnrichReader struct{ repo enrichConfigRepo }
+
+func (r anomalyEnrichReader) GetEnrichConfig(ctx context.Context, tenantID string) (anomalysvc.EnrichConfigView, error) {
+	cfg, err := r.repo.GetEnrichConfig(ctx, tenantID)
+	if err != nil {
+		return anomalysvc.EnrichConfigView{}, err
+	}
+	return anomalysvc.EnrichConfigView{Dimensions: cfg.Dimensions}, nil
+}
+
+// startAnomalyWorker wires the anomaly & spike detection worker (#237):
+// hourly rollup recompute over feedback volume slices, same-weekday robust
+// detection, quality-action + notification fan-out.
+func startAnomalyWorker(ctx context.Context, pool *pgxpool.Pool, consoleBaseURL string, interval time.Duration, backfillPerTick int) {
+	worker := anomalysvc.NewWorker(
+		anomalyrepo.New(pool),
+		feedback.NewFeedback(pool),
+		notifytarget.NewNotifyTarget(pool),
+		anomalyEnrichReader{repo: tenant.NewTenant(pool)},
+		notify.NewTransport(nil, notify.DefaultRetry()),
+		consoleBaseURL,
+	)
+	worker.Configure(interval, backfillPerTick)
+	safego(ctx, "anomaly", func() { worker.Run(ctx) })
 }
 
 // runQueueDepthRefresher feeds a per-tenant queue-depth gauge on a 30s tick — a

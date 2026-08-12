@@ -709,3 +709,33 @@ groups:
           dashboard_url: "/d/attune-operations/attune-operations"
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attunecohortsyncwebhookerrors"
           action: "Check webhook handler logs for auth failures, parse errors, or provider misconfiguration. Verify the source credentials and provider webhook URL."
+
+  - name: attune.alerts.anomaly
+    rules:
+      - alert: AttuneAnomalyWorkerLagHigh
+        expr: max(attune_anomaly_worker_lag_seconds) > 172800
+        for: 1h
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Anomaly detection is more than 2 days behind"
+          description: "The oldest settled, unjudged anomaly bucket is {{ $value | humanizeDuration }} old. Spikes and drops in that window are going unreported."
+          dashboard: "Attune AI Pipeline"
+          dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneanomalyworkerlaghigh"
+          action: "Check the anomaly worker is running (attune_worker_panics_total{worker='anomaly'} and process logs), then look for failed detection runs in anomaly_detection_runs (status='failed') and slow rollups on the AI Pipeline dashboard."
+
+      - alert: AttuneAnomalyNotifyFailures
+        expr: sum(rate(attune_anomaly_notify_failures_total[5m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: attune
+        annotations:
+          summary: "Anomaly alert delivery is failing"
+          description: "Anomaly webhook/chat notifications have been failing for 15+ minutes. Events remain visible in Console, but operators are not being paged."
+          dashboard: "Attune AI Pipeline"
+          dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline"
+          runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneanomalynotifyfailures"
+          action: "Group attune_anomaly_notify_failures_total by tenant, then verify that tenant's radar-audience notify target URL and secret. lark/slack targets reject foreign payload shapes — confirm the destination type matches the actual webhook."

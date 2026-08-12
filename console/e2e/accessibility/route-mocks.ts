@@ -725,6 +725,29 @@ async function handleRoute(
     await fulfillJson(route, { actions: clone(state.qualityActions) })
     return true
   }
+  if (method === 'GET' && path === '/anomalies') {
+    await fulfillJson(route, { events: [] })
+    return true
+  }
+  if (method === 'GET' && path === '/anomalies/series') {
+    await fulfillJson(route, { points: [], sliceDisplay: '' })
+    return true
+  }
+  if (method === 'GET' && path === '/anomaly-config') {
+    await fulfillJson(route, {
+      config: {
+        sensitivity: 'medium',
+        minCount: 10,
+        settleDelayHours: 3,
+        enabledSliceTypes: ['total', 'source', 'dimension', 'cluster', 'cohort', 'custom'],
+        dropEnabledSliceTypes: ['total', 'source', 'dimension', 'cohort', 'custom'],
+        notifyMode: 'immediate',
+        detectionEnabled: true,
+        customSlices: [],
+      },
+    })
+    return true
+  }
   if (method === 'POST' && path === '/quality-actions/update') {
     const body = readJsonBody(route) as Partial<QualityAction> | null
     const actionKey = body?.actionKey?.trim()

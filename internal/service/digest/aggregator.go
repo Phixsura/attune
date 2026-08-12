@@ -43,6 +43,24 @@ type Result struct {
 	Stats  feedback.DigestWindowStats
 	Themes []Theme
 	Items  []feedback.DigestFeedbackRow // populated for the themeless tier
+	// Anomalies lists open anomaly events in the window for tenants whose
+	// anomaly notify_mode is "digest" (#237). Empty when the reader is not
+	// wired or nothing is open.
+	Anomalies []AnomalySummary
+}
+
+// AnomalySummary is the digest-facing projection of one anomaly event.
+type AnomalySummary struct {
+	SliceDisplay string  `json:"slice_display"`
+	Direction    string  `json:"direction"` // spike | drop
+	Observed     int64   `json:"observed"`
+	ExpectedMed  float64 `json:"expected_med"`
+	EventID      string  `json:"event_id"`
+}
+
+// anomalyReader is the optional slice of the anomaly repo the digest reads.
+type anomalyReader interface {
+	OpenDigestAnomalies(ctx context.Context, tenantID string, from, to time.Time) ([]AnomalySummary, error)
 }
 
 const (
@@ -75,10 +93,14 @@ type themeNamer interface {
 
 // Aggregator turns a tenant's yesterday window into a digest Result.
 type Aggregator struct {
-	clusters clusterReader
-	feedback feedbackReader
-	namer    themeNamer
+	clusters  clusterReader
+	feedback  feedbackReader
+	namer     themeNamer
+	anomalies anomalyReader // optional; nil = no anomaly section
 }
+
+// SetAnomalyReader wires the optional anomaly section source (#237).
+func (a *Aggregator) SetAnomalyReader(r anomalyReader) { a.anomalies = r }
 
 // NewAggregator wires an aggregator from its readers + the theme namer.
 func NewAggregator(clusters clusterReader, fb feedbackReader, namer themeNamer) *Aggregator {
@@ -102,17 +124,23 @@ func (a *Aggregator) Aggregate(ctx context.Context, in AggInput, from, to time.T
 		return Result{}, err
 	}
 	if stats.Enriched == 0 {
-		if !in.SendOnEmpty {
+		// The anomaly section is independent of theme volume (#237): a
+		// tenant with zero enriched feedback in-window can still have an
+		// open DROP anomaly — the volume collapsing is exactly why the
+		// window is empty. Anomalies therefore override the skip: without
+		// this, digest-mode tenants would never hear about a dead stream.
+		anomalies := a.windowAnomalies(ctx, in.TenantID, from, to)
+		if !in.SendOnEmpty && len(anomalies) == 0 {
 			return Result{Tier: TierSkip, Stats: stats}, nil
 		}
-		return Result{Tier: TierThemeless, Stats: stats}, nil
+		return Result{Tier: TierThemeless, Stats: stats, Anomalies: anomalies}, nil
 	}
 	if stats.Enriched < in.LLMMin {
 		items, err := a.feedback.EnrichedInWindow(ctx, in.TenantID, from, to, themelessLimit)
 		if err != nil {
 			return Result{}, err
 		}
-		return Result{Tier: TierThemeless, Stats: stats, Items: items}, nil
+		return Result{Tier: TierThemeless, Stats: stats, Items: items, Anomalies: a.windowAnomalies(ctx, in.TenantID, from, to)}, nil
 	}
 	themes, err := a.themes(ctx, in, from, to)
 	if err != nil {
@@ -130,9 +158,24 @@ func (a *Aggregator) Aggregate(ctx context.Context, in AggInput, from, to time.T
 		if err != nil {
 			return Result{}, err
 		}
-		return Result{Tier: TierThemeless, Stats: stats, Items: items}, nil
+		return Result{Tier: TierThemeless, Stats: stats, Items: items, Anomalies: a.windowAnomalies(ctx, in.TenantID, from, to)}, nil
 	}
-	return Result{Tier: TierThemed, Stats: stats, Themes: themes}, nil
+	return Result{Tier: TierThemed, Stats: stats, Themes: themes, Anomalies: a.windowAnomalies(ctx, in.TenantID, from, to)}, nil
+}
+
+// windowAnomalies reads open anomaly events for the digest window;
+// best-effort — a read failure never sinks the digest.
+func (a *Aggregator) windowAnomalies(ctx context.Context, tenantID string, from, to time.Time) []AnomalySummary {
+	if a.anomalies == nil {
+		return nil
+	}
+	out, err := a.anomalies.OpenDigestAnomalies(ctx, tenantID, from, to)
+	if err != nil {
+		logext.Warnf(ctx, "[service.digest.Aggregator.windowAnomalies] read failed,tenant_id:%s,err:%+v",
+			tenantID, err.Error())
+		return nil
+	}
+	return out
 }
 
 // themes prefers the #114 cluster path when clustering is enabled and produced

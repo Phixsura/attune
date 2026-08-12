@@ -1,0 +1,126 @@
+# Anomaly & Spike Detection
+
+attune detects sudden changes (spikes and drops) in feedback volume so
+operators act on unusual activity without writing queries (#237).
+
+## What is monitored
+
+Every hour, a background worker rolls daily feedback counts into
+per-slice time series and judges each settled day against its own history:
+
+| Slice | Series |
+|---|---|
+| `total` | all feedback per day |
+| `source` | per source channel (api, web, zendesk, …) |
+| `dimension` | per taxonomy value of each configured single/multi dimension (severity=critical, kind=bug, …) |
+| `cluster` | per HDBSCAN cluster with ≥ `min_count` items that day (spike-only by default) |
+| `cohort` | per synced cohort (active memberships) |
+| `custom` | operator-defined conjunctions, e.g. source=zendesk AND severity=critical |
+
+## How detection works
+
+For each slice and day, the detector compares the observed count to the
+**same weekday over the past 8 weeks** (this neutralizes weekly
+seasonality without any model fitting):
+
+```
+med   = median(baseline)
+sigma = max(MAD/0.6745, sqrt(med), 1)     # Poisson noise floor
+z     = (observed − med) / sigma
+spike ⇐ z ≥ threshold AND observed ≥ max(min_count, 2·med)
+drop  ⇐ z ≤ −threshold AND med ≥ 5
+```
+
+- The `2·med` multiplier guard absorbs steady growth so a healthy trend
+  never alerts.
+- A dead stream (observed 0 with a live baseline) fires a drop.
+- Fewer than 4 baseline points → no judgment (cold start is silent).
+- The detector is a pure function; the Console series chart replays the
+  same function, so chart bands and alerts always agree.
+
+## Lifecycle
+
+```
+open ──2 consecutive quiet settled days──▶ resolved (automatic)
+open ──same-direction hit──▶ open ("ongoing N days"; no re-notification)
+open/resolved ──recompute clears the breach──▶ retracted (data correction)
+```
+
+Each **new** event also upserts a control-tower quality action
+(`action_key = anomaly:<slice>`, signal `anomaly_detection`) — the human
+ledger; it is never auto-resolved.
+
+## Configuration (Console → Configuration → Anomaly detection)
+
+| Knob | Default | Notes |
+|---|---|---|
+| Sensitivity | medium (z ≥ 2.5) | high = 2.0 (more alerts), low = 3.0 (fewer) |
+| min_count | 10 | absolute observed floor for spikes; 0 disables the guard |
+| settle_delay_hours | 3 | wait after day close before judging (late-arriving data) |
+| enabled slice types | all | drop detection excludes `cluster` by default (reclustering reassigns ids) |
+| notify_mode | immediate | `digest` folds new events into the daily digest; `off` keeps Console-only. In digest mode, open anomalies force the digest to send even on a window with zero feedback — a collapsed stream is exactly the drop worth hearing about |
+| custom slices | none | ≤20, each 1–3 AND-ed conditions over source / dimension / cohort |
+
+Zero configuration is safe: defaults apply to every active tenant.
+
+Switching `notify_mode` mid-flight is safe in both directions: events
+delivered (or intentionally skipped) under the old mode are stamped, so
+a switch to `immediate` never replays history. One benign overlap: an
+event webhooked under `immediate` that is still open when you switch to
+`digest` appears once in the next digest — the digest reports open
+state, not deliveries.
+
+## Notifications
+
+Immediate mode delivers to the tenant's `radar`-audience notify targets.
+`raw-webhook` targets receive the JSON contract below; `lark`, `slack`,
+`discord`, `github-issue`, and `email` targets are rendered natively by
+the outbound adapter framework (cards / Block Kit / embeds), same as
+outbox event deliveries. Only `anomaly.detected` is pushed — resolutions
+and retractions are NOT webhooked; follow the `deep_link` to Console for
+the event's live status.
+When the target has a secret, the request carries `X-Attune-Signature`
+(HMAC-SHA256 over the raw body, `sha256=<hex>` — verify like any other
+attune webhook):
+
+```json
+{
+  "type": "anomaly.detected",
+  "slice": {"type": "dimension", "key": "dim:severity=1a2b3c4d", "display": "severity=critical"},
+  "direction": "spike",
+  "observed": 31,
+  "expected": {"med": 12, "low": 6.2, "high": 21.4},
+  "z_score": 3.8,
+  "deep_link": "https://<console>/analytics/anomalies?event=<id>"
+}
+```
+
+A per-tick fuse caps delivery at 20 events (top |z|) plus one summary.
+
+## False-positive triage
+
+1. **Low-volume noise** — raise `min_count`; counts of 3→6 are normal
+   Poisson variance and are already suppressed by default.
+2. **Weekly patterns** — already handled (same-weekday baseline). Monthly
+   or holiday patterns are not modeled; expect alerts on unusual days.
+3. **Recluster storms** — cluster drops are off by default; keep them off
+   unless your clustering is stable.
+4. **Growth** — the 2× multiplier guard absorbs compounding growth; if a
+   fast-growing tenant still alerts, lower sensitivity to `low`.
+5. **Data corrections** — GDPR deletions or backfills that erase a spike
+   retract the event automatically on the next recompute.
+6. **Long-lived level shifts** — an anomaly that persists 4+ weeks starts
+   entering its own same-weekday baselines; after ~8 weeks the median
+   adopts the new level and the event auto-resolves as the new normal.
+   This is intentional (a two-month-old "spike" is a level shift, not an
+   incident) and matches how seasonal detectors like Datadog's agile
+   algorithm treat sustained shifts. Acknowledge the quality action if the
+   shift needs human follow-up beyond that horizon.
+
+## Operations
+
+- Metrics: `attune_anomaly_*` (see observability/README.md).
+- Worker cadence: `anomaly.interval` (default 1h); backfill throttle:
+  `anomaly.backfill_tenants_per_tick` (default 10).
+- Rollup retention: 400 days; run-claim retention: 90 days.
+- Multi-instance safe: per-(tenant, day) claims with stale takeover.

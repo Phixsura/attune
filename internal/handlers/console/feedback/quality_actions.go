@@ -25,7 +25,13 @@ const (
 	qualityActionMaxLimit         = 200
 )
 
-var qualityActionKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,119}$`)
+// qualityActionKeyRe accepts the key alphabet every producer emits. '='
+// entered the vocabulary with anomaly dimension keys (#237):
+// "anomaly:dim:severity=1a2b3c4d". The key only ever travels in JSON
+// bodies (POST /quality-actions/update), never in a URL path, so '=' is
+// safe to admit — without it the Console could not acknowledge dimension
+// anomalies the worker had already written.
+var qualityActionKeyRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._:=-]{0,119}$`)
 
 type qualityActionStore interface {
 	ListQualityActions(ctx context.Context, opts repofeedback.QualityActionListOpts) ([]repofeedback.QualityAction, error)
@@ -137,7 +143,7 @@ func (h *QualityActionHandler) UpdateQualityAction(
 func qualityActionUpdateFromRequest(auth *session.AuthCtx, req *attunev1.UpdateQualityActionRequest) (repofeedback.QualityActionUpsert, error) {
 	key := strings.TrimSpace(req.GetActionKey())
 	if !qualityActionKeyRe.MatchString(key) {
-		return repofeedback.QualityActionUpsert{}, errors.New("action_key must be 1-120 chars using lowercase letters, numbers, dot, colon, underscore, or dash")
+		return repofeedback.QualityActionUpsert{}, errors.New("action_key must be 1-120 chars using lowercase letters, numbers, dot, colon, equals, underscore, or dash")
 	}
 	signal := strings.TrimSpace(req.GetSignal())
 	if signal == "" || len(signal) > 80 {

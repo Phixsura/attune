@@ -202,6 +202,12 @@ export default defineConfig({
         'src/features/feedback/api/get-feedback-detail.ts': { lines: 90 },
         'src/features/feedback/api/get-feedback-stats.ts': { lines: 90 },
         'src/features/settings/api/get-enrich-config.ts': { lines: 90 },
+        'src/features/anomalies/api/anomalies.ts': {
+          lines: 95,
+          statements: 95,
+          branches: 90,
+          functions: 95,
+        },
         'src/features/settings/api/update-enrich-config.ts': { lines: 85 },
         'src/features/settings/api/preview-enrich-prompt.ts': { lines: 90 },
         'src/features/api-keys/api/create-api-key.ts': { lines: 90 },

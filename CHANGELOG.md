@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 
 ## [Unreleased]
 
+### Added
+
+- Anomaly & spike detection for product signals (#237): robust same-weekday
+  z-score detector over daily feedback-volume rollups, anomaly event records
+  linked to control-tower quality actions, operator notifications, and a
+  Console analytics page with evidence drilldown.
+
 ### Changed
 
 - Add a privacy-safe, explainable response-quality observation layer for public

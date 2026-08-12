@@ -197,6 +197,18 @@ func aiPipelineDashboard() dashboard {
 		barDesc(23, "Classification drift by dimension", "Latest Jensen-Shannon drift score emitted by the classification quality dashboard for each configured dimension.", []target{
 			targetExprSparse("A", `attune_classification_quality_drift_score{tenant=~"$tenant"}`, "{{dimension}}"),
 		}, "short", gp(12, 65, 12, 8)),
+		rowPanel(24, "Anomaly detection", 73),
+		seriesDesc(25, "Anomaly worker health", "Rollup latency p95, slices judged, worker lag, and pending backfills for the anomaly & spike detection worker (#237). Growing lag means settled buckets are not being judged on time.", []target{
+			targetExpr("A", `histogram_quantile(0.95, sum by (le) (rate(attune_anomaly_rollup_duration_seconds_bucket{tenant=~"$tenant"}[$__rate_interval])))`, "rollup p95"),
+			targetExpr("B", `sum(rate(attune_anomaly_detect_slices_total{tenant=~"$tenant"}[$__rate_interval]))`, "slices judged"),
+			targetExpr("C", `max(attune_anomaly_worker_lag_seconds{tenant=~"$tenant"})`, "worker lag (s)"),
+			targetExpr("D", `attune_anomaly_backfill_pending_tenants`, "pending backfills"),
+		}, "short", gp(0, 74, 12, 8)),
+		seriesDesc(26, "Anomaly outcomes", "New anomaly events by direction, notification failures, and slices dropped by runtime caps. Sustained truncation means a tenant's slice set outgrew the per-tick ceiling.", []target{
+			targetExpr("A", zero(`sum by (direction) (increase(attune_anomaly_events_created_total{tenant=~"$tenant"}[$__range]))`), "events / {{direction}}"),
+			targetExpr("B", zero(`sum(increase(attune_anomaly_notify_failures_total{tenant=~"$tenant"}[$__range]))`), "notify failures"),
+			targetExpr("C", zero(`sum by (reason) (increase(attune_anomaly_slices_truncated_total{tenant=~"$tenant"}[$__range]))`), "truncated / {{reason}}"),
+		}, "short", gp(12, 74, 12, 8)),
 	}
 	d.Panels = layoutSixCardDashboard(d.Panels, 8, 6)
 	return d

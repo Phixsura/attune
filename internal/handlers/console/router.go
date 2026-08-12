@@ -23,6 +23,7 @@ import (
 
 	"github.com/Phixsura/attune/internal/dispatcher"
 	"github.com/Phixsura/attune/internal/domain"
+	consoleanomaly "github.com/Phixsura/attune/internal/handlers/console/anomaly"
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
 	consoleauditevidence "github.com/Phixsura/attune/internal/handlers/console/auditevidence"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
@@ -90,6 +91,7 @@ var (
 	NewBatchHandler               = feedback.NewBatchHandler
 	NewSearchHandler              = feedback.NewSearchHandler
 	NewQualityActionHandler       = feedback.NewQualityActionHandler
+	NewAnomalyHandler             = consoleanomaly.NewHandler
 	NewFeedbackJobHandler         = feedbackjob.NewHandler
 	NewGDPRHandler                = consolegdpr.NewHandler
 	NewUsageHandler               = usage.NewUsageHandler
@@ -143,6 +145,11 @@ var (
 //	 POST /feedback/search/events -> dispatcher.Bind(feedback.SearchHandler.RecordSearchEvent)
 //	 GET /quality-actions -> dispatcher.Bind(feedback.QualityActionHandler.ListQualityActions)
 //	 POST /quality-actions/update -> dispatcher.Bind(feedback.QualityActionHandler.UpdateQualityAction)
+//	 GET /anomalies -> dispatcher.Bind(anomaly.Handler.ListAnomalies)
+//	 GET /anomalies/series -> dispatcher.Bind(anomaly.Handler.GetAnomalySeries)
+//	 GET /anomalies/{event_id}/evidence -> dispatcher.Bind(anomaly.Handler.GetAnomalyEvidence)
+//	 GET /anomaly-config -> dispatcher.Bind(anomaly.Handler.GetAnomalyConfig)
+//	 POST /anomaly-config -> dispatcher.Bind(anomaly.Handler.UpdateAnomalyConfig) [admin]
 //	 GET /feedback/{id}/signal-trace -> dispatcher.Bind(feedback.Handler.GetSignalTrace)
 //	 GET /feedback/{id} -> dispatcher.Bind(feedback.Handler.Get)
 //	 GET /usage -> dispatcher.Bind(usage.Handler.Get)
@@ -184,6 +191,7 @@ type Router struct {
 	feedbackBatch        *feedback.BatchHandler
 	feedbackSearch       *feedback.SearchHandler
 	qualityActions       *feedback.QualityActionHandler
+	anomalies            *consoleanomaly.Handler
 	customerRequests     *consolecustomerrequest.Handler
 	publicVisibility     *consolepublicvisibility.Handler
 	requestNotifications *consolerequestnotification.Handler
@@ -437,6 +445,7 @@ func (r *Router) mountSession(m chi.Router) {
 			}),
 		))
 		r.mountQualityActions(u)
+		r.mountAnomalies(u)
 	})
 	r.mountEnrichConfig(m)
 	r.mountEnrichmentRuntime(m)
@@ -454,6 +463,10 @@ func (r *Router) mountSession(m chi.Router) {
 
 func (r *Router) SetQualityActionHandler(h *feedback.QualityActionHandler) {
 	r.qualityActions = h
+}
+
+func (r *Router) SetAnomalyHandler(h *consoleanomaly.Handler) {
+	r.anomalies = h
 }
 
 func (r *Router) SetCustomerRequestHandler(h *consolecustomerrequest.Handler) {
@@ -1800,6 +1813,76 @@ func (r *Router) mountQualityActions(m chi.Router) {
 			return session.FromContext(r.Context()), nil
 		}),
 	))
+}
+
+func (r *Router) mountAnomalies(m chi.Router) {
+	if r.anomalies == nil {
+		return
+	}
+	m.Get("/anomalies", dispatcher.Bind(
+		"console.AnomalyHandler.ListAnomalies",
+		dispatcher.Query(
+			func() *attunev1.ListAnomaliesRequest {
+				return ptrext.Of(attunev1.ListAnomaliesRequest{})
+			},
+			consoleanomaly.BindListAnomaliesRequest,
+		),
+		r.anomalies.ListAnomalies,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.ListAnomaliesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Get("/anomalies/series", dispatcher.Bind(
+		"console.AnomalyHandler.GetAnomalySeries",
+		dispatcher.Query(
+			func() *attunev1.GetAnomalySeriesRequest {
+				return ptrext.Of(attunev1.GetAnomalySeriesRequest{})
+			},
+			consoleanomaly.BindGetAnomalySeriesRequest,
+		),
+		r.anomalies.GetAnomalySeries,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetAnomalySeriesRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Get("/anomalies/{event_id}/evidence", dispatcher.Bind(
+		"console.AnomalyHandler.GetAnomalyEvidence",
+		dispatcher.Query(
+			func() *attunev1.GetAnomalyEvidenceRequest {
+				return ptrext.Of(attunev1.GetAnomalyEvidenceRequest{})
+			},
+			consoleanomaly.BindGetAnomalyEvidenceRequest,
+		),
+		r.anomalies.GetAnomalyEvidence,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetAnomalyEvidenceRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Get("/anomaly-config", dispatcher.Bind(
+		"console.AnomalyHandler.GetAnomalyConfig",
+		dispatcher.Query(
+			func() *attunev1.GetAnomalyConfigRequest {
+				return ptrext.Of(attunev1.GetAnomalyConfigRequest{})
+			},
+		),
+		r.anomalies.GetAnomalyConfig,
+		dispatcher.WithAuth(func(r *http.Request, _ *attunev1.GetAnomalyConfigRequest) (*session.AuthCtx, error) {
+			return session.FromContext(r.Context()), nil
+		}),
+	))
+	m.Group(func(g chi.Router) {
+		g.Use(r.requireAdmin)
+		g.Post("/anomaly-config", dispatcher.Bind(
+			"console.AnomalyHandler.UpdateAnomalyConfig",
+			dispatcher.JSON(func() *attunev1.UpdateAnomalyConfigRequest {
+				return ptrext.Of(attunev1.UpdateAnomalyConfigRequest{})
+			}),
+			r.anomalies.UpdateAnomalyConfig,
+			dispatcher.WithAuth(func(r *http.Request, _ *attunev1.UpdateAnomalyConfigRequest) (*session.AuthCtx, error) {
+				return session.FromContext(r.Context()), nil
+			}),
+		))
+	})
 }
 
 func (r *Router) mountLLMConfig(m chi.Router) {

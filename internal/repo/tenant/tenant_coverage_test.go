@@ -139,3 +139,10 @@ func expectRepoErr(t *testing.T, name string, call func() error) {
 		t.Fatalf("%s() error = nil, want pool error", name)
 	}
 }
+
+func TestGetTimezoneErrorPath(t *testing.T) {
+	r := newUnreachableTenantRepo(t)
+	if _, err := r.GetTimezone(context.Background(), "t1"); err == nil {
+		t.Fatal("GetTimezone() error = nil, want pool error")
+	}
+}

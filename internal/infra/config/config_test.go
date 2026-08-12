@@ -1580,3 +1580,20 @@ func TestValidateAuditEvidenceConfig_ZeroTTL(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "must be positive")
 }
+
+func TestLoadPathRejectsUnparseableAnomalyInterval(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nanomaly:\n  interval: \"not-a-duration\"\n"
+	_, err := LoadPath(writeConfig(t, raw))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "anomaly.interval")
+}
+
+func TestLoadPathAppliesAnomalyOverrides(t *testing.T) {
+	t.Parallel()
+	raw := validConfigYAML(t, validTinkKeyset(t)) + "\nanomaly:\n  interval: \"30m\"\n  backfill_tenants_per_tick: 7\n"
+	cfg, err := LoadPath(writeConfig(t, raw))
+	require.NoError(t, err)
+	require.Equal(t, 30*time.Minute, cfg.AnomalyInterval)
+	require.Equal(t, 7, cfg.AnomalyBackfillPerTick)
+}

@@ -48,6 +48,135 @@ paths:
                         application/json:
                             schema:
                                 $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/anomalies:
+        get:
+            tags:
+                - AnomalyService
+            operationId: AnomalyService_ListAnomalies
+            parameters:
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+                - name: sliceType
+                  in: query
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ListAnomaliesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/anomalies/series:
+        get:
+            tags:
+                - AnomalyService
+            operationId: AnomalyService_GetAnomalySeries
+            parameters:
+                - name: sliceType
+                  in: query
+                  schema:
+                    type: string
+                - name: sliceKey
+                  in: query
+                  schema:
+                    type: string
+                - name: days
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetAnomalySeriesResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/anomalies/{eventId}/evidence:
+        get:
+            tags:
+                - AnomalyService
+            operationId: AnomalyService_GetAnomalyEvidence
+            parameters:
+                - name: eventId
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetAnomalyEvidenceResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+    /fb/v1/console/anomaly-config:
+        get:
+            tags:
+                - AnomalyService
+            operationId: AnomalyService_GetAnomalyConfig
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GetAnomalyConfigResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
+        post:
+            tags:
+                - AnomalyService
+            operationId: AnomalyService_UpdateAnomalyConfig
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/UpdateAnomalyConfigRequest'
+                required: true
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/UpdateAnomalyConfigResponse'
+                default:
+                    description: Default error response
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ErrorResponse'
     /fb/v1/console/api-keys:
         get:
             tags:
@@ -12656,6 +12785,86 @@ components:
                     description: |-
                         internal (default) -> collaboration note; public -> portal comment
                          routed through the standard moderation pipeline.
+        AnomalyConfig:
+            type: object
+            properties:
+                sensitivity:
+                    type: string
+                minCount:
+                    type: integer
+                    format: int32
+                settleDelayHours:
+                    type: integer
+                    format: int32
+                enabledSliceTypes:
+                    type: array
+                    items:
+                        type: string
+                dropEnabledSliceTypes:
+                    type: array
+                    items:
+                        type: string
+                notifyMode:
+                    type: string
+                detectionEnabled:
+                    type: boolean
+                customSlices:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/AnomalyCustomSlice'
+            description: AnomalyConfig is the per-tenant detection configuration.
+        AnomalyCustomSlice:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                definitionJson:
+                    type: string
+                enabled:
+                    type: boolean
+                lastError:
+                    type: string
+            description: AnomalyCustomSlice is an operator-defined monitored slice.
+        AnomalyEvent:
+            type: object
+            properties:
+                eventId:
+                    type: string
+                sliceType:
+                    type: string
+                sliceKey:
+                    type: string
+                sliceDisplay:
+                    type: string
+                direction:
+                    type: string
+                firstBucketDate:
+                    type: string
+                lastBucketDate:
+                    type: string
+                observed:
+                    type: string
+                expectedMed:
+                    type: number
+                    format: double
+                expectedLow:
+                    type: number
+                    format: double
+                expectedHigh:
+                    type: number
+                    format: double
+                zScore:
+                    type: number
+                    format: double
+                status:
+                    type: string
+                createdAt:
+                    type: string
+                resolvedAt:
+                    type: string
+            description: AnomalyEvent is one detected spike or drop with lifecycle state.
         Any:
             type: object
             properties:
@@ -13934,6 +14143,19 @@ components:
                     type: string
                 token:
                     type: string
+        ContributionEntry:
+            type: object
+            properties:
+                dim:
+                    type: string
+                value:
+                    type: string
+                share:
+                    type: number
+                    format: double
+            description: |-
+                ContributionEntry attributes a share of the deviation to one grouping
+                 value: share = (obs_v - exp_v) / (obs_total - exp_total).
         CreateAIAgentConfigRequest:
             required:
                 - name
@@ -18072,6 +18294,33 @@ components:
                     type: string
                 expiresAt:
                     type: string
+        GetAnomalyConfigResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/AnomalyConfig'
+        GetAnomalyEvidenceResponse:
+            type: object
+            properties:
+                contributions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/ContributionEntry'
+                spread:
+                    type: boolean
+                feedbackIds:
+                    type: array
+                    items:
+                        type: string
+        GetAnomalySeriesResponse:
+            type: object
+            properties:
+                points:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/SeriesPoint'
+                sliceDisplay:
+                    type: string
         GetAuditEvidenceExportResponse:
             type: object
             properties:
@@ -19012,6 +19261,13 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/AIAgentConfig'
+        ListAnomaliesResponse:
+            type: object
+            properties:
+                events:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/AnomalyEvent'
         ListApiKeyLogsResponse:
             type: object
             properties:
@@ -22557,6 +22813,29 @@ components:
                     type: string
                 sentAt:
                     type: string
+        SeriesPoint:
+            type: object
+            properties:
+                date:
+                    type: string
+                count:
+                    type: string
+                expectedMed:
+                    type: number
+                    format: double
+                expectedLow:
+                    type: number
+                    format: double
+                expectedHigh:
+                    type: number
+                    format: double
+                isAnomalous:
+                    type: boolean
+                insufficient:
+                    type: boolean
+            description: |-
+                SeriesPoint is one day of a slice's series with the detector's expected
+                 band replayed by the same pure function the worker uses.
         ServiceAccount:
             type: object
             properties:
@@ -23928,6 +24207,18 @@ components:
                     type: string
                 scope:
                     type: string
+        UpdateAnomalyConfigRequest:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/AnomalyConfig'
+        UpdateAnomalyConfigResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/AnomalyConfig'
+                warning:
+                    type: string
         UpdateApiKeyEnvironmentRequest:
             type: object
             properties:
@@ -24969,6 +25260,10 @@ components:
                     description: Request id for support and log correlation. Mirrors the HTTP request-id/trace identifier when available.
             description: attune-standard error envelope for all non-2xx HTTP responses.
 tags:
+    - name: AnomalyService
+      description: |-
+        AnomalyService exposes detected feedback-volume anomalies, their series
+         context and evidence, and the per-tenant detection configuration (#237).
     - name: ApiKeyService
       description: ApiKeyService manages a tenant's external ingest API keys (console).
     - name: AuditLogService

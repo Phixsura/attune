@@ -142,7 +142,8 @@
     "system_readiness": "系统就绪",
     "reliability": "可靠性总览",
     "security": "安全设置",
-    "cohort_sync": "人群同步"
+    "cohort_sync": "人群同步",
+    "anomalies": "异常检测"
   },
   "surveys": {
     "title": "满意度调查",
@@ -2871,7 +2872,8 @@
       "search_latency": "检查搜索计划、索引覆盖和 fallback 路径，必要时缩小窗口或调整排序参数。",
       "closed_loop_overdue": "打开满意度调查队列，优先处理逾期低分恢复，并补齐客户联系和行动记录。",
       "closed_loop_recovery": "用低分恢复视图分配负责人、升级严重度并补齐根因和下一步动作。",
-      "closed_loop_response_rate": "检查调查投递、抑制原因和触达文案，先恢复样本量再判断满意度趋势。"
+      "closed_loop_response_rate": "检查调查投递、抑制原因和触达文案，先恢复样本量再判断满意度趋势。",
+      "volume_anomalies": "在异常检测页调查尖峰/断流，确认后在此处 acknowledge。"
     },
     "error": {
       "title": "质量信号暂不可用",
@@ -2917,6 +2919,10 @@
       "closed_loop_response_rate": {
         "title": "调查响应率偏低",
         "body": "响应率过低时，满意度趋势缺少足够样本，优先检查投递和抑制路径。"
+      },
+      "volume_anomalies": {
+        "title": "反馈量异常",
+        "body": "一个或多个切片的反馈量显著偏离其历史基线。"
       }
     },
     "proof": {
@@ -7629,6 +7635,51 @@
       "hint_timeout": "→ 提供商 API 响应超时，请稍后重试",
       "hint_rate_limit": "→ 触发了速率限制，请降低同步频率",
       "hint_empty_snapshot": "→ 提供商返回空数据，请检查 cohort 在提供商侧是否正常"
+    }
+  },
+  "anomalies": {
+    "title": "异常检测",
+    "empty": "未检测到异常 — 反馈量与基线一致。",
+    "tabs": {
+      "open": "进行中",
+      "resolved": "已恢复",
+      "all": "全部"
+    },
+    "card": {
+      "observed": "观测 {{observed}}，预期 {{med}}（{{low}}–{{high}}）",
+      "ongoing": "持续 {{days}} 天"
+    },
+    "status": {
+      "retracted": "数据修正后已撤销"
+    },
+    "contribution": {
+      "title": "主要来源",
+      "spread": "分布广泛 — 无集中来源"
+    },
+    "evidence": {
+      "title": "证据",
+      "window": "时间窗 {{from}} – {{to}}",
+      "view": "查看 {{n}} 条样本反馈",
+      "none": "未捕获样本反馈"
+    },
+    "config": {
+      "title": "异常检测",
+      "subtitle": "对每日反馈量做尖峰/断流检测。默认值即安全值；只有希望收到更多告警时才调高灵敏度。",
+      "enabled": "启用检测",
+      "sensitivity": "灵敏度",
+      "sensitivity_high": "高",
+      "sensitivity_medium": "中",
+      "sensitivity_low": "低",
+      "min_count": "触发所需的最小日量",
+      "settle_delay": "沉降延迟（日界后小时数）",
+      "notify_mode": "通知方式",
+      "notify_immediate": "即时",
+      "notify_digest": "并入日报",
+      "notify_off": "关闭",
+      "saved": "配置已保存",
+      "custom_slices": "自定义切片",
+      "custom_slices_hint": "监控特定组合（如 source=zendesk 且 severity=critical），最多 20 条。",
+      "no_custom_slices": "未配置自定义切片"
     }
   }
 }

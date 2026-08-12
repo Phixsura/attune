@@ -163,3 +163,14 @@ func (r *TenantRepo) SetClusteringEnabled(ctx context.Context, id string, enable
 	logext.Infof(ctx, "[%s] OK,tenant_id:%s,enabled:%t", where, id, enabled)
 	return nil
 }
+
+// GetTimezone returns the tenant's IANA timezone string.
+func (r *TenantRepo) GetTimezone(ctx context.Context, tenantID string) (string, error) {
+	var tz string
+	err := r.pool.QueryRow(ctx,
+		`SELECT timezone FROM tenants WHERE id = $1`, tenantID).Scan(&tz)
+	if err != nil {
+		return "", fmt.Errorf("tenant timezone %s: %w", tenantID, err)
+	}
+	return tz, nil
+}

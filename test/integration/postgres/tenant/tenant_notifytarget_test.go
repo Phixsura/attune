@@ -65,6 +65,13 @@ func assertTenantLookups(t *testing.T, ctx context.Context, repo *tenant.TenantR
 	if first == tenantID {
 		t.Fatalf("FirstActiveID should prefer lexicographically first slug, got tenant-crud id")
 	}
+	tz, err := repo.GetTimezone(ctx, tenantID)
+	if err != nil {
+		t.Fatalf("GetTimezone: %v", err)
+	}
+	if tz == "" {
+		t.Fatal("GetTimezone must return the tenant's zone")
+	}
 	got, err := repo.GetByID(ctx, tenantID)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)

@@ -21,6 +21,7 @@ const zh = {
   closedLoopRecovery: '\u95ed\u73af\u6062\u590d',
   closedLoopRecoveryRisk: '\u95ed\u73af\u6062\u590d\u5065\u5eb7\u5ea6\u504f\u4f4e',
   classificationQuality: '分类质量',
+  anomalies: '异常检测',
   classificationReviewLearning: 'AI 审核学习',
   classificationTrainingCandidates: '11 个训练候选',
   controlTower: '\u63a7\u5236\u5854',
@@ -481,6 +482,12 @@ const routes = [
     path: '/analytics/classification-quality',
     title: zh.classificationQuality,
     heading: zh.classificationQuality,
+  },
+  { path: '/analytics/anomalies', title: zh.anomalies, heading: zh.anomalies },
+  {
+    path: '/configuration/anomaly-detection',
+    title: zh.anomalies,
+    heading: zh.anomalies,
   },
   { path: '/feedback', title: zh.feedback, heading: zh.feedback },
   {

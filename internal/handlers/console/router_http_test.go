@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/stretchr/testify/require"
 
+	consoleanomaly "github.com/Phixsura/attune/internal/handlers/console/anomaly"
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
 	"github.com/Phixsura/attune/internal/handlers/console/auth"
@@ -1199,4 +1200,33 @@ func TestRouterHTTPDispatch_NilGuards(t *testing.T) {
 		return nil
 	})
 	require.Equal(t, 0, routeCount, "nil handlers should not register any routes")
+}
+
+// ---------- mountAnomalies routes ----------
+
+func TestRouterHTTPDispatch_Anomalies(t *testing.T) {
+	t.Parallel()
+	r := ptrext.Of(Router{
+		anomalies: ptrext.Of(consoleanomaly.Handler{}),
+		admins:    roleAdminReader{row: admin.Admin{ID: "user-http-test", Role: "admin"}},
+	})
+	mux := newRecovererMux()
+	r.mountAnomalies(mux)
+
+	cases := []struct {
+		name, method, path, body string
+	}{
+		{"GET /anomalies", http.MethodGet, "/anomalies", ""},
+		{"GET /anomalies?status=open&slice_type=total", http.MethodGet, "/anomalies?status=open&slice_type=total", ""},
+		{"GET /anomalies/series", http.MethodGet, "/anomalies/series?slice_type=total&slice_key=total", ""},
+		{"GET /anomalies/{event_id}/evidence", http.MethodGet, "/anomalies/11111111-2222-3333-4444-555555555555/evidence", ""},
+		{"GET /anomaly-config", http.MethodGet, "/anomaly-config", ""},
+		{"POST /anomaly-config", http.MethodPost, "/anomaly-config", `{"config":{}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			serveAndAssertDispatched(t, mux, tc.method, tc.path, tc.body)
+		})
+	}
 }

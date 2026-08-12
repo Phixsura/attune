@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { PageHero, PageHeroMetric } from '@/components/page-hero'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { type AnomalyEvent, anomaliesQuery } from '@/features/anomalies/api/anomalies'
 import {
   type ClassificationQuality,
   classificationQualityQuery,
@@ -63,7 +64,11 @@ type ControlTowerRisk = {
   recommendationKey: string
   metric: string
   severity: SignalSeverity
-  href: '/analytics/classification-quality' | '/analytics/search-quality' | '/integrations/surveys'
+  href:
+    | '/analytics/classification-quality'
+    | '/analytics/search-quality'
+    | '/integrations/surveys'
+    | '/analytics/anomalies'
 }
 
 type ControlTowerLane = {
@@ -293,6 +298,7 @@ export function ControlTowerPage() {
   const qualityActions = useQuery(controlTowerQueries[2])
   const cohortHealth = useQuery(controlTowerQueries[3])
   const feedbackStats = useQuery(controlTowerQueries[4])
+  const openAnomalies = useQuery(anomaliesQuery({ limit: 100, status: 'open' }))
   const me = useQuery(meQuery())
   const role = me.data?.user?.role as Role | undefined
   const canReadSurveyAnalytics = roleCanReadSurveyAnalytics(role)
@@ -317,6 +323,7 @@ export function ControlTowerPage() {
         feedbackStats.data,
         inboundSources.data,
         canReadInboundSources,
+        openAnomalies.data,
       ),
     [
       canReadSurveyAnalytics,
@@ -324,6 +331,7 @@ export function ControlTowerPage() {
       classification.data,
       feedbackStats.data,
       inboundSources.data,
+      openAnomalies.data,
       qualityActions.data,
       search.data,
       surveyAnalytics.data,
@@ -355,6 +363,11 @@ export function ControlTowerPage() {
               label={t('control_tower.hero.active_risks')}
               value={String(model.risks.length)}
               tone={model.risks.length > 0 ? 'urgent' : 'default'}
+            />
+            <PageHeroMetric
+              label={t('control_tower.hero.open_anomalies', '开放异常')}
+              value={String(openAnomalies.data?.length ?? 0)}
+              tone={(openAnomalies.data?.length ?? 0) > 0 ? 'urgent' : 'default'}
             />
             <PageHeroMetric
               label={t('control_tower.hero.classification_events')}
@@ -1286,6 +1299,7 @@ function buildControlTowerModel(
   feedback?: FeedbackStats,
   inboundSources?: InboundSource[],
   canReadInboundSources = true,
+  anomalyEvents: AnomalyEvent[] = [],
 ) {
   const classificationSummary = classification?.summary
   const searchSummary = search?.summary
@@ -1300,6 +1314,16 @@ function buildControlTowerModel(
   const searchClickThrough = clampUnit(toNumber(searchSummary?.clickThroughRate))
   const p95LatencyMs = toNumber(searchSummary?.p95LatencyMs)
   const closedLoop = buildClosedLoopScorecard(survey, canReadSurveyAnalytics)
+  const openAnomalyEvents = anomalyEvents
+  const openAnomalyCount = openAnomalyEvents.length
+  // The worker keys quality actions as "anomaly:<slice_key>"; surface the
+  // highest-|z| event's action so acknowledge/resolve flows through the
+  // same ledger the alert wrote.
+  const topAnomaly = [...openAnomalyEvents].sort(
+    (a: AnomalyEvent, b: AnomalyEvent) => Math.abs(b.zScore) - Math.abs(a.zScore),
+  )[0]
+  const topAnomalyActionKey = topAnomaly ? `anomaly:${topAnomaly.sliceKey}` : 'anomaly:none'
+  const hasAlertAnomaly = openAnomalyEvents.some((e: AnomalyEvent) => Math.abs(e.zScore) >= 5)
   const risks = compactRisks([
     classificationWarnings > 0 && {
       id: 'classification-warnings',
@@ -1405,6 +1429,16 @@ function buildControlTowerModel(
       metric: formatLatency(p95LatencyMs),
       severity: p95LatencyMs >= 5000 ? 'alert' : 'watch',
       href: '/analytics/search-quality',
+    },
+    openAnomalyCount > 0 && {
+      id: 'volume-anomalies',
+      actionKey: topAnomalyActionKey,
+      titleKey: 'control_tower.risk.volume_anomalies.title',
+      bodyKey: 'control_tower.risk.volume_anomalies.body',
+      recommendationKey: 'control_tower.action.volume_anomalies',
+      metric: String(openAnomalyCount),
+      severity: hasAlertAnomaly ? ('alert' as const) : ('watch' as const),
+      href: '/analytics/anomalies',
     },
   ]).slice(0, 7)
   const actionByKey = new Map(qualityActions.map((action) => [action.actionKey, action]))
