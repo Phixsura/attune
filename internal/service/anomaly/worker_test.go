@@ -37,6 +37,7 @@ type fakeRepo struct {
 	disabled       []uuid.UUID
 	failTenantID   string
 	refuseClaims   bool
+	lastDoneRun    time.Time
 }
 
 func (f *fakeRepo) ActiveTenantsWithFeedback(context.Context, int) ([]anomalyrepo.TenantRef, error) {
@@ -67,6 +68,13 @@ func (f *fakeRepo) DisableCustomSlice(_ context.Context, _ string, id uuid.UUID,
 func (f *fakeRepo) RecomputeWindow(_ context.Context, opts anomalyrepo.RecomputeOpts) error {
 	f.recomputeCalls = append(f.recomputeCalls, opts)
 	return nil
+}
+
+func (f *fakeRepo) LatestDoneRun(_ context.Context, _ string) (time.Time, bool, error) {
+	if f.lastDoneRun.IsZero() {
+		return time.Time{}, false, nil
+	}
+	return f.lastDoneRun, true, nil
 }
 
 func (f *fakeRepo) UnclaimedSettledDates(_ context.Context, _ string, candidates []time.Time) ([]time.Time, error) {

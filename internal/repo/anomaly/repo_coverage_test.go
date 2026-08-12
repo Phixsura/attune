@@ -152,6 +152,21 @@ func TestRepoErrorPaths(t *testing.T) {
 		_, err := r.UnclaimedSettledDates(ctx, "t1", []time.Time{day})
 		return err
 	})
+	expectRepoErr(t, "LatestDoneRun", func() error {
+		_, _, err := r.LatestDoneRun(ctx, "t1")
+		return err
+	})
+	expectRepoErr(t, "CountRecentSliceKeys", func() error {
+		_, err := r.CountRecentSliceKeys(ctx, "t1", 30)
+		return err
+	})
+	expectRepoErr(t, "FilterLiveFeedbackIDs", func() error {
+		_, err := r.FilterLiveFeedbackIDs(ctx, "t1", []int64{1})
+		return err
+	})
+	expectRepoErr(t, "SetEvidence", func() error {
+		return r.SetEvidence(ctx, id, "{}")
+	})
 }
 
 func TestSliceKeyHelpers(t *testing.T) {

@@ -6,6 +6,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/Phixsura/attune/internal/pkg/ptrext"
 )
 
 // ClaimRun claims one (tenant, date) detection run for owner. Fresh claims
@@ -89,4 +91,22 @@ func (r *Repo) UnclaimedSettledDates(
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// LatestDoneRun returns the newest bucket_date this tenant has fully
+// judged (ok=false when none exist). The worker uses it to widen its
+// recompute/detection window after downtime instead of silently skipping
+// the gap days.
+func (r *Repo) LatestDoneRun(ctx context.Context, tenantID string) (time.Time, bool, error) {
+	var d *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT MAX(bucket_date) FROM anomaly_detection_runs
+		WHERE tenant_id = $1 AND status = 'done'`, tenantID).Scan(&d)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("anomaly latest done run: %w", err)
+	}
+	if d == nil {
+		return time.Time{}, false, nil
+	}
+	return ptrext.Indirect(d), true, nil
 }

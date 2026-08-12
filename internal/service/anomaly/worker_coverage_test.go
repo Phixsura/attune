@@ -442,3 +442,59 @@ func TestRenderNotifyBodyPerDestination(t *testing.T) {
 		t.Fatalf("drop label wrong: %s", drop)
 	}
 }
+
+// TestWorkerCatchesUpAfterDowntime: a worker down 5 days must widen its
+// window to re-bucket and judge the gap days — the steady-state 3-day
+// window would silently skip them (missed spikes + zero-hole baselines).
+func TestWorkerCatchesUpAfterDowntime(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.counts = map[string]int64{}
+	// Spike happened 5 days ago (Aug 5); baselines steady for all gap days.
+	for d := 1; d <= 6; d++ {
+		dd := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -d)
+		for week := 1; week <= 8; week++ {
+			repo.counts["total|"+dd.AddDate(0, 0, -7*week).Format("2006-01-02")] = 12
+		}
+		repo.counts["total|"+dd.Format("2006-01-02")] = 12
+	}
+	repo.counts["total|2026-08-05"] = 40 // the missed spike
+	repo.slices = []anomalyrepo.SliceRef{{Type: "total", Key: "total", Display: "All feedback"}}
+	repo.lastDoneRun = time.Date(2026, 8, 4, 0, 0, 0, 0, time.UTC) // downtime since Aug 4
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.ProcessOnce(context.Background(), fixedNow) // Aug 10 09:00
+
+	judged := map[string]bool{}
+	for _, d := range repo.claimedDates {
+		judged[d] = true
+	}
+	if !judged["2026-08-05"] {
+		t.Fatalf("gap day with the spike must be judged after downtime; claimed=%v", repo.claimedDates)
+	}
+	if len(repo.newEventIDs) != 1 {
+		t.Fatalf("the missed spike must be detected, events=%d", len(repo.newEventIDs))
+	}
+	// Recompute window must have widened beyond 3 days.
+	opts := repo.recomputeCalls[0]
+	days := int(opts.ToDate.Sub(opts.FromDate).Hours()/24) + 1
+	if days < 6 {
+		t.Fatalf("recompute window must cover the gap, got %d days", days)
+	}
+}
+
+// TestWorkerCatchUpCapped: a gap beyond maxCatchUpDays is bounded, not
+// unbounded recompute.
+func TestWorkerCatchUpCapped(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	seedSpike(repo)
+	repo.lastDoneRun = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) // 70-day gap
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.ProcessOnce(context.Background(), fixedNow)
+
+	opts := repo.recomputeCalls[0]
+	days := int(opts.ToDate.Sub(opts.FromDate).Hours()/24) + 1
+	if days != 14 {
+		t.Fatalf("catch-up must cap at 14 days, got %d", days)
+	}
+}

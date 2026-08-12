@@ -24,8 +24,13 @@ import (
 )
 
 const (
-	// recomputeWindowDays is how many trailing civil days each tick rebuilds.
+	// recomputeWindowDays is how many trailing civil days each tick rebuilds
+	// in steady state.
 	recomputeWindowDays = 3
+	// maxCatchUpDays bounds how far the window stretches after downtime:
+	// gap days beyond it are abandoned (they age out of relevance and a
+	// full 90-day re-judgment belongs to the backfill path).
+	maxCatchUpDays = 14
 	// backfillDays is the initial rollup depth on enablement/config change.
 	backfillDays = 90
 	// baselineWeeks is the same-weekday baseline depth.
@@ -57,6 +62,7 @@ type repoAPI interface {
 	ListCustomSlices(ctx context.Context, tenantID string) ([]anomalyrepo.StoredCustomSlice, error)
 	RecomputeWindow(ctx context.Context, opts anomalyrepo.RecomputeOpts) error
 	UnclaimedSettledDates(ctx context.Context, tenantID string, candidates []time.Time) ([]time.Time, error)
+	LatestDoneRun(ctx context.Context, tenantID string) (time.Time, bool, error)
 	ClaimRun(ctx context.Context, tenantID string, date time.Time, owner string, stale time.Duration) (bool, error)
 	MarkRunDone(ctx context.Context, tenantID string, date time.Time, owner string) error
 	MarkRunFailed(ctx context.Context, tenantID string, date time.Time, owner string, runErr error) error
@@ -249,13 +255,36 @@ func (w *Worker) processTenant(
 		return tenantResult{backfillsSpent: 1}, nil
 	}
 
-	if err := w.recompute(ctx, tenant.ID, loc, cfg, dims, customs, now, recomputeWindowDays); err != nil {
+	windowDays := w.catchUpWindowDays(ctx, tenant.ID, loc, now)
+	if err := w.recompute(ctx, tenant.ID, loc, cfg, dims, customs, now, windowDays); err != nil {
 		return tenantResult{}, err
 	}
-	if err := w.detectSettled(ctx, tenant.ID, loc, cfg, now); err != nil {
+	if err := w.detectSettled(ctx, tenant.ID, loc, cfg, now, windowDays); err != nil {
 		return tenantResult{}, err
 	}
 	return tenantResult{}, w.reconcile(ctx, tenant.ID, loc, cfg, now)
+}
+
+// catchUpWindowDays widens the steady-state 3-day window after downtime so
+// gap days are recomputed and judged instead of silently skipped: a worker
+// down N days would otherwise never bucket days (now−N, now−3], leaving
+// spikes there undetected AND their baselines reading zero forever.
+func (w *Worker) catchUpWindowDays(
+	ctx context.Context, tenantID string, loc *time.Location, now time.Time,
+) int {
+	last, ok, err := w.repo.LatestDoneRun(ctx, tenantID)
+	if err != nil || !ok {
+		return recomputeWindowDays // first run: backfill covers history
+	}
+	gap := int(civilMidnight(now, loc).Sub(civilDateIn(last, loc)).Hours() / 24)
+	if gap <= recomputeWindowDays {
+		return recomputeWindowDays
+	}
+	if gap > maxCatchUpDays {
+		metrics.AnomalySlicesTruncatedTotal.WithLabelValues(tenantID, "catch_up_cap").Inc()
+		return maxCatchUpDays
+	}
+	return gap
 }
 
 // sliceInputs loads the dimension set and enabled custom slices.
@@ -318,8 +347,9 @@ func (w *Worker) recompute(
 // recompute window.
 func (w *Worker) detectSettled(
 	ctx context.Context, tenantID string, loc *time.Location, cfg anomalyrepo.Config, now time.Time,
+	windowDays int,
 ) error {
-	candidates := settledDates(now, loc, cfg.SettleDelayHours)
+	candidates := settledDates(now, loc, cfg.SettleDelayHours, windowDays)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -726,10 +756,10 @@ func civilDateIn(t time.Time, loc *time.Location) time.Time {
 
 // settledDates lists recompute-window dates whose bucket has closed and
 // settled by now: now ≥ (date+1) 00:00 local + settleDelay.
-func settledDates(now time.Time, loc *time.Location, settleDelayHours int) []time.Time {
+func settledDates(now time.Time, loc *time.Location, settleDelayHours, windowDays int) []time.Time {
 	var out []time.Time
 	today := civilMidnight(now, loc)
-	for i := recomputeWindowDays; i >= 1; i-- {
+	for i := windowDays; i >= 1; i-- {
 		d := today.AddDate(0, 0, -i)
 		settleAt := d.AddDate(0, 0, 1).Add(time.Duration(settleDelayHours) * time.Hour)
 		if !now.Before(settleAt) {
@@ -742,7 +772,7 @@ func settledDates(now time.Time, loc *time.Location, settleDelayHours int) []tim
 // settledSet is settledDates keyed by date string for streak checks.
 func settledSet(now time.Time, loc *time.Location, settleDelayHours int) map[string]bool {
 	out := make(map[string]bool)
-	for _, d := range settledDates(now, loc, settleDelayHours) {
+	for _, d := range settledDates(now, loc, settleDelayHours, recomputeWindowDays) {
 		out[d.Format("2006-01-02")] = true
 	}
 	return out
