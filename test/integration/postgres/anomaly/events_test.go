@@ -255,3 +255,34 @@ func TestPG_DigestAnomaliesRespectNotifyMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, out)
 }
+
+// TestPG_DigestAnomaliesTenantLocalWindow: the digest passes tenant-LOCAL
+// midnights as UTC instants (WindowForRunDate). For a positive-offset
+// tenant those instants fall on the PREVIOUS UTC date — the window
+// conversion must go through tenants.timezone or yesterday's events are
+// silently excluded for every UTC+N tenant (the Asia/Shanghai default).
+func TestPG_DigestAnomaliesTenantLocalWindow(t *testing.T) {
+	pool := testdb.NewPool(t)
+	repo := anomalyrepo.New(pool)
+	ctx := context.Background()
+	tenantID := freshTenant(t, pool)
+	_, err := pool.Exec(ctx, `UPDATE tenants SET timezone='Asia/Shanghai' WHERE id=$1`, tenantID)
+	require.NoError(t, err)
+
+	cfg := anomalyrepo.DefaultConfig(tenantID)
+	cfg.NotifyMode = anomalyrepo.NotifyDigest
+	require.NoError(t, repo.UpsertConfig(ctx, cfg, "test"))
+	_, _, err = repo.UpsertHit(ctx, hitInput(tenantID, "2026-08-11", 31))
+	require.NoError(t, err)
+
+	// Digest run for local Aug 12 covering local Aug 11: from/to are the
+	// local midnights expressed in UTC (16:00 the prior UTC day).
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	require.NoError(t, err)
+	from := time.Date(2026, 8, 11, 0, 0, 0, 0, loc).UTC()
+	to := time.Date(2026, 8, 12, 0, 0, 0, 0, loc).UTC()
+
+	out, err := repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from, to)
+	require.NoError(t, err)
+	require.Len(t, out, 1, "yesterday's event must be visible to a UTC+8 tenant")
+}

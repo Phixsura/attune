@@ -242,11 +242,16 @@ type DigestAnomaly struct {
 // local morning would otherwise permanently miss yesterday's events — the
 // window advances before they exist. Open-status filtering keeps the
 // extra day duplicate-free (an event is one row until it resolves).
-// Only tenants whose anomaly
-// notify_mode is 'digest' get the section: 'immediate' tenants were
-// already webhooked (a digest repeat is double delivery) and 'off'
-// tenants explicitly opted out of anomaly notifications. Tenants without
-// a config row default to 'immediate' and are therefore excluded.
+// Only tenants whose anomaly notify_mode is 'digest' get the section:
+// 'immediate' tenants were already webhooked (a digest repeat is double
+// delivery) and 'off' tenants explicitly opted out. Tenants without a
+// config row default to 'immediate' and are therefore excluded.
+//
+// from/to are INSTANTS delimiting a tenant-local calendar day (the digest
+// window). bucket dates are tenant-local civil dates, so the instants are
+// converted through tenants.timezone in SQL — formatting them as UTC
+// dates would shift positive-offset tenants (the Asia/Shanghai default!)
+// back a day and exclude yesterday entirely.
 func (r *Repo) OpenDigestAnomaliesInWindow(
 	ctx context.Context, tenantID string, from, to time.Time,
 ) ([]DigestAnomaly, error) {
@@ -254,11 +259,13 @@ func (r *Repo) OpenDigestAnomaliesInWindow(
 		SELECT e.slice_display, e.direction, e.observed, e.expected_med, e.id::text
 		FROM anomaly_events e
 		JOIN tenant_anomaly_configs c ON c.tenant_id = e.tenant_id
+		JOIN tenants t ON t.id = e.tenant_id
 		WHERE e.tenant_id = $1 AND e.status = 'open'
 		  AND c.notify_mode = 'digest'
-		  AND e.last_bucket_date >= ($2::date - 1) AND e.last_bucket_date < $3::date
+		  AND e.last_bucket_date >= ($2::timestamptz AT TIME ZONE t.timezone)::date - 1
+		  AND e.last_bucket_date <  ($3::timestamptz AT TIME ZONE t.timezone)::date
 		ORDER BY ABS(e.z_score) DESC
-		LIMIT 10`, tenantID, dateStr(from), dateStr(to))
+		LIMIT 10`, tenantID, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("anomaly digest window: %w", err)
 	}
