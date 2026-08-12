@@ -209,8 +209,14 @@ func (h *Handler) replaySeries(
 	// Cold-start clamp mirrors the worker (#18): baseline dates before the
 	// tenant's first bucket are dropped, not zero-filled, so the chart's
 	// insufficient/anomalous verdicts stay identical to the alert path.
+	// Fail closed like the worker — a chart rendered unclamped would show
+	// anomaly dots on days the alert path deems insufficient.
 	var firstDay string
-	if first, ok, err := h.store.FirstBucketDate(ctx, tenantID); err == nil && ok {
+	first, ok, err := h.store.FirstBucketDate(ctx, tenantID)
+	if err != nil {
+		return nil, "", err
+	}
+	if ok {
 		firstDay = first.Format("2006-01-02")
 	}
 

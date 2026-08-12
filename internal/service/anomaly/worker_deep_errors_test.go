@@ -34,6 +34,14 @@ type failingRepo2 struct {
 	failResolve        bool
 	failCountOn        bool
 	failBaseline       bool
+	failFirstBucket    bool
+}
+
+func (f *failingRepo2) FirstBucketDate(ctx context.Context, t string) (time.Time, bool, error) {
+	if f.failFirstBucket {
+		return time.Time{}, false, errBoom
+	}
+	return f.fakeRepo.FirstBucketDate(ctx, t)
 }
 
 func (f *failingRepo2) CleanupRetention(ctx context.Context, b, r, e int) error {
@@ -264,7 +272,7 @@ func TestDetectOneDateSliceCapTruncates(t *testing.T) {
 	repo.slices = slices
 	w := worker2(repo)
 	date := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
-	if err := w.detectOneDate(context.Background(), "t1", time.UTC, baseConfig(), date); err != nil {
+	if err := w.detectOneDate(context.Background(), "t1", time.UTC, baseConfig(), date, time.Time{}); err != nil {
 		t.Fatalf("detectOneDate: %v", err)
 	}
 }
@@ -439,7 +447,7 @@ func TestQuietStreakJudgeErrorStopsStreak(t *testing.T) {
 	ev := openEvent(repo, "2026-06-01")
 	w := worker2(repo)
 	detCfg := DetectorConfig{ZThreshold: 2.5, MinCount: 10, MinBaselinePoints: 4}
-	if got := w.quietStreak(context.Background(), "t1", time.UTC, ev, detCfg, fixedNow, baseConfig()); got != 0 {
+	if got := w.quietStreak(context.Background(), "t1", time.UTC, ev, detCfg, fixedNow, baseConfig(), time.Time{}); got != 0 {
 		t.Fatalf("judge error must stop the streak at 0, got %d", got)
 	}
 }
@@ -534,5 +542,23 @@ func TestCloseQualityActionSurvivesLedgerFailure(t *testing.T) {
 	w.closeQualityAction(context.Background(), "t1", ev) // must not panic
 	if actions.calls != 1 {
 		t.Fatal("ledger close must have been attempted")
+	}
+}
+
+// The cold-start clamp fails CLOSED: an unreadable first-bucket date must
+// stop detection AND reconciliation for the tenant this tick (retry next),
+// never proceed unclamped and risk the day-two false spike.
+func TestFirstBucketReadFailureFailsClosed(t *testing.T) {
+	repo := newRepo2(true)
+	repo.failFirstBucket = true
+	w := worker2(repo)
+	if err := w.detectSettled(context.Background(), "t1", time.UTC, baseConfig(), fixedNow, 3); err == nil {
+		t.Fatal("detectSettled must surface the first-bucket failure")
+	}
+	if len(repo.hits) != 0 {
+		t.Fatal("no detection may run unclamped")
+	}
+	if err := w.reconcile(context.Background(), "t1", time.UTC, baseConfig(), fixedNow); err == nil {
+		t.Fatal("reconcile must surface the first-bucket failure")
 	}
 }

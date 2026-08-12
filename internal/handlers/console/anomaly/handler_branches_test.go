@@ -341,3 +341,19 @@ func TestGetAnomalySeriesColdStartClamp(t *testing.T) {
 		}
 	}
 }
+
+// firstBucketDownStore fails only the cold-start lookup.
+type firstBucketDownStore struct{ fakeStore }
+
+func (s *firstBucketDownStore) FirstBucketDate(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, errStore
+}
+
+func TestGetAnomalySeriesFirstBucketFailureFailsClosed(t *testing.T) {
+	store := ptrext.Of(firstBucketDownStore{fakeStore: fakeStore{cfg: anomalyrepo.DefaultConfig("t1"), counts: map[string]int64{}}})
+	h := NewHandler(store, fakeTenants{})
+	_, err := h.GetAnomalySeries(authedCtx(), ptrext.Of(attunev1.GetAnomalySeriesRequest{
+		SliceType: "total", SliceKey: "total",
+	}))
+	wantInternal(t, err)
+}

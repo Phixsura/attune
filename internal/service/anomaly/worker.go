@@ -373,6 +373,14 @@ func (w *Worker) detectSettled(
 	if len(candidates) == 0 {
 		return nil
 	}
+	// One lookup per tenant pass (the value is tenant-constant): the
+	// cold-start clamp must NOT fail open — proceeding unclamped on a
+	// transient read error would resurrect the day-two false spike this
+	// guard exists to prevent. Failing the pass retries next tick.
+	firstBucket, err := w.firstBucketIn(ctx, tenantID, loc)
+	if err != nil {
+		return err
+	}
 	free, err := w.repo.UnclaimedSettledDates(ctx, tenantID, candidates)
 	if err != nil {
 		return err
@@ -392,7 +400,7 @@ func (w *Worker) detectSettled(
 		if err != nil || !claimed {
 			continue
 		}
-		if err := w.detectOneDate(ctx, tenantID, loc, cfg, date); err != nil {
+		if err := w.detectOneDate(ctx, tenantID, loc, cfg, date, firstBucket); err != nil {
 			_ = w.repo.MarkRunFailed(ctx, tenantID, date, w.owner, err)
 			continue
 		}
@@ -407,6 +415,7 @@ func (w *Worker) detectSettled(
 // the event state machine plus fan-out.
 func (w *Worker) detectOneDate(
 	ctx context.Context, tenantID string, loc *time.Location, cfg anomalyrepo.Config, date time.Time,
+	firstBucket time.Time,
 ) error {
 	baseline := baselineDates(date, loc)
 	// Cold-start clamp (#18): zero-filling makes every baseline exactly 8
@@ -417,9 +426,7 @@ func (w *Worker) detectOneDate(
 	// tenant's first bucket restores the gate: young tenants read as
 	// insufficient_data, while a mature tenant's NEW slice keeps the full
 	// zero-filled baseline (cluster-emergence spikes still fire).
-	if first, ok, err := w.repo.FirstBucketDate(ctx, tenantID); err == nil && ok {
-		baseline = clampToFirst(baseline, civilDateIn(first, loc))
-	}
+	baseline = clampToFirst(baseline, firstBucket)
 	slices, err := w.repo.SlicesForDetection(ctx, tenantID, cfg.EnabledSliceTypes, date, baseline)
 	if err != nil {
 		return err
@@ -754,13 +761,17 @@ func (w *Worker) reconcile(
 		MinBaselinePoints: minBaselinePoints,
 	}
 	inWindow := settledSet(now, loc, cfg.SettleDelayHours)
+	firstBucket, err := w.firstBucketIn(ctx, tenantID, loc)
+	if err != nil {
+		return err
+	}
 	for _, event := range open {
 		// Retraction (data-correction) only applies while the event's bucket
 		// is still inside the recompute window: outside it the buckets are
 		// frozen, so a non-breaching re-judgment reflects config drift (a
 		// sensitivity change), not corrected data — resolve, don't retract.
 		if inWindow[event.LastBucketDate.Format("2006-01-02")] {
-			still, err := w.judgeDate(ctx, tenantID, loc, event, detCfg, event.LastBucketDate)
+			still, err := w.judgeDate(ctx, tenantID, loc, event, detCfg, event.LastBucketDate, firstBucket)
 			if err != nil {
 				return err
 			}
@@ -772,7 +783,7 @@ func (w *Worker) reconcile(
 				continue
 			}
 		}
-		if w.quietStreak(ctx, tenantID, loc, event, detCfg, now, cfg) >= resolveQuietBuckets {
+		if w.quietStreak(ctx, tenantID, loc, event, detCfg, now, cfg, firstBucket) >= resolveQuietBuckets {
 			if err := w.repo.ResolveEvent(ctx, tenantID, event.ID); err != nil {
 				return err
 			}
@@ -786,13 +797,10 @@ func (w *Worker) reconcile(
 // may be a DB-scanned DATE value; it is normalized before baseline math.
 func (w *Worker) judgeDate(
 	ctx context.Context, tenantID string, loc *time.Location,
-	event anomalyrepo.Event, detCfg DetectorConfig, date time.Time,
+	event anomalyrepo.Event, detCfg DetectorConfig, date time.Time, firstBucket time.Time,
 ) (bool, error) {
 	date = civilDateIn(date, loc)
-	baseline := baselineDates(date, loc)
-	if first, ok, err := w.repo.FirstBucketDate(ctx, tenantID); err == nil && ok {
-		baseline = clampToFirst(baseline, civilDateIn(first, loc))
-	}
+	baseline := clampToFirst(baselineDates(date, loc), firstBucket)
 	counts, err := w.repo.BaselineCounts(ctx, tenantID, event.SliceType, event.SliceKey, baseline)
 	if err != nil {
 		return false, err
@@ -814,6 +822,7 @@ func (w *Worker) judgeDate(
 func (w *Worker) quietStreak(
 	ctx context.Context, tenantID string, loc *time.Location,
 	event anomalyrepo.Event, detCfg DetectorConfig, now time.Time, cfg anomalyrepo.Config,
+	firstBucket time.Time,
 ) int {
 	streak := 0
 	day := civilDateIn(event.LastBucketDate, loc) // DB-scanned DATE value
@@ -823,7 +832,7 @@ func (w *Worker) quietStreak(
 		if now.Before(settleAt) {
 			return streak
 		}
-		still, err := w.judgeDate(ctx, tenantID, loc, event, detCfg, d)
+		still, err := w.judgeDate(ctx, tenantID, loc, event, detCfg, d, firstBucket)
 		if err != nil || still {
 			return streak
 		}
@@ -888,9 +897,28 @@ func baselineDates(date time.Time, loc *time.Location) []time.Time {
 	return out
 }
 
+// firstBucketIn resolves the tenant's first bucket date normalized to loc.
+// A tenant with no buckets at all returns the zero time, which clampToFirst
+// treats as "keep everything" (nothing to judge anyway — no buckets means
+// no slices).
+func (w *Worker) firstBucketIn(ctx context.Context, tenantID string, loc *time.Location) (time.Time, error) {
+	first, ok, err := w.repo.FirstBucketDate(ctx, tenantID)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("first bucket date: %w", err)
+	}
+	if !ok {
+		return time.Time{}, nil
+	}
+	return civilDateIn(first, loc), nil
+}
+
 // clampToFirst drops baseline dates before the tenant's first bucket —
 // those days predate the tenant and are phantom zeros, not observations.
+// A zero first keeps the full baseline.
 func clampToFirst(baseline []time.Time, first time.Time) []time.Time {
+	if first.IsZero() {
+		return baseline
+	}
 	out := baseline[:0:0]
 	for _, d := range baseline {
 		if !d.Before(first) {
