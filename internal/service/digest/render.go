@@ -79,19 +79,20 @@ type totalsOut struct {
 }
 
 type payloadOut struct {
-	Version        string     `json:"version"`
-	EventType      string     `json:"event_type"`
-	TenantID       string     `json:"tenant_id"`
-	RunDate        string     `json:"run_date"`
-	Window         windowOut  `json:"window"`
-	Totals         totalsOut  `json:"totals"`
-	Deltas         Deltas     `json:"deltas,omitempty"`
-	Sparkline      []int      `json:"sparkline,omitempty"`
-	Themes         []themeOut `json:"themes"`
-	Items          []itemOut  `json:"items,omitempty"`
-	Markdown       string     `json:"markdown"`
-	IdempotencyKey string     `json:"idempotency_key"`
-	DeepLinkBase   string     `json:"deep_link_base,omitempty"`
+	Version        string           `json:"version"`
+	EventType      string           `json:"event_type"`
+	TenantID       string           `json:"tenant_id"`
+	RunDate        string           `json:"run_date"`
+	Window         windowOut        `json:"window"`
+	Totals         totalsOut        `json:"totals"`
+	Deltas         Deltas           `json:"deltas,omitempty"`
+	Sparkline      []int            `json:"sparkline,omitempty"`
+	Themes         []themeOut       `json:"themes"`
+	Items          []itemOut        `json:"items,omitempty"`
+	Anomalies      []AnomalySummary `json:"anomalies,omitempty"`
+	Markdown       string           `json:"markdown"`
+	IdempotencyKey string           `json:"idempotency_key"`
+	DeepLinkBase   string           `json:"deep_link_base,omitempty"`
 }
 
 // RenderPayload builds the JSON envelope the digest worker POSTs to the tenant's
@@ -122,6 +123,9 @@ func RenderPayload(view DigestView) ([]byte, error) {
 	for _, it := range view.Result.Items {
 		p.Items = append(p.Items, itemOut{ID: it.ID, Title: it.Title})
 	}
+	// AnomalySummary carries wire-ready JSON tags: structured receivers get
+	// the section as data, not just embedded in the markdown block.
+	p.Anomalies = view.Result.Anomalies
 	p.Markdown = renderMarkdown(view)
 	return json.Marshal(p)
 }

@@ -4,6 +4,7 @@ package digest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -100,5 +101,28 @@ func TestAggregateAnomalyOverridesSkip(t *testing.T) {
 		AggInput{TenantID: "t", LLMMin: 6}, time.Now().Add(-24*time.Hour), time.Now())
 	if err != nil || res2.Tier != TierSkip {
 		t.Fatalf("no anomalies must still skip: tier=%v err=%v", res2.Tier, err)
+	}
+}
+
+func TestRenderPayloadCarriesStructuredAnomalies(t *testing.T) {
+	view := DigestView{
+		TenantID: "t1", RunDate: "2026-08-12",
+		Result: Result{Anomalies: []AnomalySummary{{
+			SliceDisplay: "severity=critical", Direction: "spike",
+			Observed: 40, ExpectedMed: 12, EventID: "e1",
+		}}},
+	}
+	raw, err := RenderPayload(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Anomalies []AnomalySummary `json:"anomalies"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Anomalies) != 1 || out.Anomalies[0].EventID != "e1" {
+		t.Fatalf("payload must carry anomalies as structured data: %s", raw)
 	}
 }
