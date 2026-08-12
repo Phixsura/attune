@@ -189,6 +189,11 @@ func (w *Worker) ProcessOnce(ctx context.Context, now time.Time) {
 		logext.Errorf(ctx, "[%s] list tenants failed,err:%+v", where, err.Error())
 		return
 	}
+	// Reset the per-tenant lag gauge before re-populating: a tenant that
+	// drops out of the active set (or gets disabled) mid-lag would
+	// otherwise latch its last non-zero value and hold alerts open forever
+	// (the RefreshQueueDepth lesson).
+	metrics.AnomalyWorkerLagSeconds.Reset()
 	backfillBudget := w.backfillPer
 	pendingBackfills := 0
 	for _, tenant := range tenants {
