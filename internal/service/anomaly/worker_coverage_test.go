@@ -424,10 +424,9 @@ func TestRenderNotifyBodyPerDestination(t *testing.T) {
 		t.Fatalf("slack envelope wrong: %s %v", slack, err)
 	}
 
-	lark, err := renderNotifyBody("lark-bot", p)
-	if err != nil || !strings.Contains(string(lark), `"msg_type":"text"`) {
-		t.Fatalf("lark envelope wrong: %s %v", lark, err)
-	}
+	// lark/slack/discord render through the outbound adapter registry now
+	// ('lark-bot' left the destination vocabulary in migration 015);
+	// renderNotifyBody only hand-renders raw-webhook and legacy slack-bot.
 
 	// Fuse summary keeps its own line.
 	sum, _ := renderNotifyBody("slack-bot", NotifyPayload{SummaryOverflow: 5})
@@ -596,4 +595,101 @@ func TestWorkerDisabledTenantStillReconciles(t *testing.T) {
 	if len(repo.resolved) != 1 {
 		t.Fatalf("open event must still age to resolution, resolved=%d", len(repo.resolved))
 	}
+}
+
+// anomalyStubChannel is a minimal EventChannel that records the envelope
+// it was asked to render (outbox_worker_send_test.go precedent — service
+// tests may not import real adapters, depguard outbound-boundary).
+type anomalyStubChannel struct {
+	id  string
+	got *outbound.Envelope
+}
+
+func (c *anomalyStubChannel) ID() string { return c.id }
+
+func (c *anomalyStubChannel) RenderEvent(env *outbound.Envelope, dst outbound.Target) (outbound.Rendered, error) {
+	c.got = env
+	return outbound.Rendered{
+		Build: func(ctx context.Context) (*http.Request, error) {
+			return http.NewRequestWithContext(ctx, http.MethodPost, dst.URL,
+				strings.NewReader(`{"native":true}`))
+		},
+		Check: outbound.CheckWebhook("stub"),
+	}, nil
+}
+
+// TestSenderRoutesAdapterChannels: registered adapter destinations must be
+// rendered by the outbound registry (native envelopes), and unknown types
+// must error instead of silently posting raw JSON the webhook rejects.
+func TestSenderRoutesAdapterChannels(t *testing.T) {
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	ch := ptrext.Of(anomalyStubChannel{id: "anomaly-stub"})
+	outbound.Register(ch)
+	t.Cleanup(func() { outbound.UnregisterForTest(ch.id) })
+
+	s := newSender(notify.NewTransport(srv.Client(), notify.NoRetry()))
+	target := ptrext.Of(notifytarget.NotifyTarget{
+		TenantID: "t1", URL: srv.URL, DestinationType: "anomaly-stub",
+	})
+	err := s.Send(context.Background(), target, NotifyPayload{
+		Type: "anomaly.detected", Direction: "drop",
+		Slice:    NotifySlice{Display: "severity=critical"},
+		Observed: 0, Expected: NotifyExpectedBand{Med: 12}, ZScore: -3.8,
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if string(gotBody) != `{"native":true}` {
+		t.Fatalf("adapter-rendered body must be delivered verbatim, got: %s", gotBody)
+	}
+	if ch.got == nil || ch.got.EventType != "anomaly.detected" {
+		t.Fatalf("envelope must carry the event type: %+v", ch.got)
+	}
+	title, _ := ch.got.Feedback["title"].(string)
+	if !strings.Contains(title, "severity=critical") {
+		t.Fatalf("envelope title must carry the slice display: %q", title)
+	}
+	if urgent, _ := ch.got.Feedback["is_urgent"].(bool); !urgent {
+		t.Fatal("a drop must render urgent")
+	}
+
+	// Unregistered type: terminal error, not a silent raw POST.
+	bogus := ptrext.Of(notifytarget.NotifyTarget{TenantID: "t1", URL: srv.URL, DestinationType: "carrier-pigeon"})
+	if err := s.Send(context.Background(), bogus, NotifyPayload{}); err == nil {
+		t.Fatal("unknown destination type must error")
+	}
+}
+
+func TestNotifyEnvelopeOverflowAndRenderFailure(t *testing.T) {
+	// Overflow summary gets its own title.
+	env := notifyEnvelope(NotifyPayload{SummaryOverflow: 5, Type: "anomaly.detected"})
+	if title, _ := env.Feedback["title"].(string); title != "More anomalies detected" {
+		t.Fatalf("overflow title wrong: %q", title)
+	}
+
+	// A channel whose render errors must surface, not silently drop.
+	ch := ptrext.Of(failingRenderChannel{id: "anomaly-failing-stub"})
+	outbound.Register(ch)
+	t.Cleanup(func() { outbound.UnregisterForTest(ch.id) })
+	s := newSender(notify.NewTransport(http.DefaultClient, notify.NoRetry()))
+	err := s.Send(context.Background(), ptrext.Of(notifytarget.NotifyTarget{
+		TenantID: "t1", URL: "http://127.0.0.1:1", DestinationType: "anomaly-failing-stub",
+	}), NotifyPayload{})
+	if err == nil || !strings.Contains(err.Error(), "render") {
+		t.Fatalf("render failure must surface: %v", err)
+	}
+}
+
+type failingRenderChannel struct{ id string }
+
+func (c *failingRenderChannel) ID() string { return c.id }
+
+func (c *failingRenderChannel) RenderEvent(*outbound.Envelope, outbound.Target) (outbound.Rendered, error) {
+	return outbound.Rendered{}, errBoom
 }

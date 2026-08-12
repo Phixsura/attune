@@ -90,21 +90,43 @@ func notifySummaryLine(p NotifyPayload) string {
 	return line
 }
 
-// renderNotifyBody produces the wire body for one destination type.
+// renderNotifyBody produces the wire body for the destination types the
+// anomaly sender renders itself. Everything else goes through the
+// outbound adapter registry (see Send) — hand-rolling per-channel shapes
+// here was the pre-#34 hardcoded-switch pattern the registry replaced,
+// and it silently missed the real channel IDs: 'lark-bot' was dropped
+// from the destination vocabulary in migration 015, while the actual
+// 'lark'/'slack'/'discord' adapter channels fell through to raw JSON
+// those webhooks reject.
 func renderNotifyBody(destType string, p NotifyPayload) ([]byte, error) {
-	switch destType {
-	case "slack-bot":
-		// Slack incoming webhooks accept {"text": ...} and reject other shapes.
+	if destType == "slack-bot" {
+		// Legacy Slack incoming-webhook type: {"text": ...} only.
 		return json.Marshal(map[string]string{"text": notifySummaryLine(p)})
-	case "lark-bot":
-		// Lark custom bots require the msg_type envelope.
-		return json.Marshal(map[string]any{
-			"msg_type": "text",
-			"content":  map[string]string{"text": notifySummaryLine(p)},
-		})
-	default:
-		return json.Marshal(p)
 	}
+	// raw-webhook: the documented JSON contract, HMAC-signed by Send.
+	return json.Marshal(p)
+}
+
+// notifyEnvelope maps an anomaly payload onto the outbound event envelope
+// so registered adapters (lark cards, slack Block Kit, discord embeds,
+// github issues, email) render it natively. The feedback-shaped fields
+// carry the human summary; the full contract rides in raw-webhook only.
+func notifyEnvelope(p NotifyPayload) *outbound.Envelope {
+	title := "Feedback volume anomaly: " + p.Slice.Display
+	if p.SummaryOverflow > 0 {
+		title = "More anomalies detected"
+	}
+	return ptrext.Of(outbound.Envelope{
+		Version:   "1",
+		Timestamp: p.BucketDate,
+		EventType: p.Type,
+		TenantID:  p.TenantID,
+		Feedback: map[string]any{
+			"title":     title,
+			"content":   notifySummaryLine(p),
+			"is_urgent": p.Direction == "drop" || abs(p.ZScore) >= 5,
+		},
+	})
 }
 
 func newSender(transport *notify.Transport) *sender {
@@ -121,6 +143,26 @@ func newSender(transport *notify.Transport) *sender {
 func (s *sender) Send(
 	ctx context.Context, target *notifytarget.NotifyTarget, payload NotifyPayload,
 ) error {
+	// Registered adapter channels (lark, slack, discord, github-issue,
+	// email) render their own native shapes — posting the raw contract at
+	// them never delivers. raw-webhook and legacy slack-bot keep the
+	// documented hand-rendered bodies below.
+	if target.DestinationType != "" && target.DestinationType != "raw-webhook" && target.DestinationType != "slack-bot" {
+		if ch := outbound.LookupEvent(target.DestinationType); ch != nil {
+			rendered, err := ch.RenderEvent(notifyEnvelope(payload), outbound.Target{
+				ID: target.ID.String(), TenantID: target.TenantID,
+				URL: target.URL, Secret: target.Secret,
+				SignatureVersion: target.SignatureVersion,
+				DestinationType:  target.DestinationType,
+			})
+			if err != nil {
+				return fmt.Errorf("anomaly notify render %s: %w", target.DestinationType, err)
+			}
+			label := fmt.Sprintf("anomaly-%s-%s", target.DestinationType, target.TenantID)
+			return s.transport.Send(ctx, label, rendered.Build, notify.ResponseChecker(rendered.Check))
+		}
+		return fmt.Errorf("anomaly notify: no outbound channel for destination type %q", target.DestinationType)
+	}
 	body, err := renderNotifyBody(target.DestinationType, payload)
 	if err != nil {
 		return fmt.Errorf("anomaly notify marshal: %w", err)

@@ -65,9 +65,13 @@ Zero configuration is safe: defaults apply to every active tenant.
 
 ## Notifications
 
-Immediate mode posts JSON to the tenant's `radar`-audience notify targets.
-Only `anomaly.detected` is pushed — resolutions and retractions are NOT
-webhooked; follow the `deep_link` to Console for the event's live status.
+Immediate mode delivers to the tenant's `radar`-audience notify targets.
+`raw-webhook` targets receive the JSON contract below; `lark`, `slack`,
+`discord`, `github-issue`, and `email` targets are rendered natively by
+the outbound adapter framework (cards / Block Kit / embeds), same as
+outbox event deliveries. Only `anomaly.detected` is pushed — resolutions
+and retractions are NOT webhooked; follow the `deep_link` to Console for
+the event's live status.
 When the target has a secret, the request carries `X-Attune-Signature`
 (HMAC-SHA256 over the raw body, `sha256=<hex>` — verify like any other
 attune webhook):
