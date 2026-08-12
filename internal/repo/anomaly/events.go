@@ -149,23 +149,31 @@ func (r *Repo) SetQualityAction(ctx context.Context, eventID uuid.UUID, actionID
 
 // ListOpenEvents returns all open events for reconciliation.
 func (r *Repo) ListOpenEvents(ctx context.Context, tenantID string) ([]Event, error) {
-	return r.listEvents(ctx, tenantID, EventStatusOpen, 0)
+	return r.listEvents(ctx, tenantID, EventStatusOpen, "", 0)
 }
 
 // ListEvents returns events filtered by status ("" = all), newest first.
 func (r *Repo) ListEvents(ctx context.Context, tenantID, status string, limit int) ([]Event, error) {
-	return r.listEvents(ctx, tenantID, status, limit)
+	return r.listEvents(ctx, tenantID, status, "", limit)
 }
 
-func (r *Repo) listEvents(ctx context.Context, tenantID, status string, limit int) ([]Event, error) {
+// ListEventsBySliceType additionally filters by slice type in SQL so the
+// limit applies AFTER filtering (an in-memory filter would silently drop
+// matching events past the limit).
+func (r *Repo) ListEventsBySliceType(ctx context.Context, tenantID, status, sliceType string, limit int) ([]Event, error) {
+	return r.listEvents(ctx, tenantID, status, sliceType, limit)
+}
+
+func (r *Repo) listEvents(ctx context.Context, tenantID, status, sliceType string, limit int) ([]Event, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+eventColumns+` FROM anomaly_events
 		WHERE tenant_id = $1 AND ($2 = '' OR status = $2)
+		  AND ($4 = '' OR slice_type = $4)
 		ORDER BY last_bucket_date DESC, created_at DESC
-		LIMIT $3`, tenantID, status, limit)
+		LIMIT $3`, tenantID, status, limit, sliceType)
 	if err != nil {
 		return nil, fmt.Errorf("anomaly list events: %w", err)
 	}
@@ -249,6 +257,31 @@ func (r *Repo) OpenDigestAnomaliesInWindow(
 			return nil, err
 		}
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// FilterLiveFeedbackIDs returns the subset of ids whose feedback rows still
+// exist for the tenant — evidence samples must never leak GDPR-deleted ids.
+func (r *Repo) FilterLiveFeedbackIDs(ctx context.Context, tenantID string, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT id FROM user_feedback
+		WHERE tenant_id = $1 AND id = ANY($2)
+		ORDER BY id DESC`, tenantID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("anomaly live feedback ids: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }

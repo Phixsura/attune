@@ -255,31 +255,50 @@ func (r *Repo) aggregateDimensions(
 		if len(dim.Taxonomy) == 0 {
 			continue // unbounded value domain: not sliced
 		}
+		// The value cap must bound DISTINCT VALUES, not (date, value) rows:
+		// capping rows would silently drop whole days from lower-volume
+		// values and punch zero-holes into their baselines. The CTE picks
+		// the window's top-N values by total count; the outer query then
+		// keeps EVERY day for those values.
 		var query string
 		if dim.Kind == domain.DimMulti {
 			query = `
-				SELECT * FROM (
-				  SELECT (f.created_at AT TIME ZONE $4)::date AS d, v.val, NULL::text,
-				         COUNT(*) AS c, (array_agg(f.id ORDER BY f.id DESC))[1:5]
+				WITH top_vals AS (
+				  SELECT v.val
 				  FROM user_feedback f
 				  CROSS JOIN LATERAL jsonb_array_elements_text(
 				    COALESCE(f.enriched_attrs -> $5, '[]'::jsonb)) AS v(val)
 				  WHERE f.tenant_id=$1 AND f.created_at>=$2 AND f.created_at<$3
 				    AND f.enrichment_status='enriched'
-				  GROUP BY d, v.val
-				) t ORDER BY c DESC LIMIT $6`
+				  GROUP BY v.val ORDER BY COUNT(*) DESC LIMIT $6
+				)
+				SELECT (f.created_at AT TIME ZONE $4)::date AS d, v.val, NULL::text,
+				       COUNT(*), (array_agg(f.id ORDER BY f.id DESC))[1:5]
+				FROM user_feedback f
+				CROSS JOIN LATERAL jsonb_array_elements_text(
+				  COALESCE(f.enriched_attrs -> $5, '[]'::jsonb)) AS v(val)
+				WHERE f.tenant_id=$1 AND f.created_at>=$2 AND f.created_at<$3
+				  AND f.enrichment_status='enriched'
+				  AND v.val IN (SELECT val FROM top_vals)
+				GROUP BY d, v.val`
 		} else {
 			query = `
-				SELECT * FROM (
-				  SELECT (f.created_at AT TIME ZONE $4)::date AS d,
-				         f.enriched_attrs ->> $5 AS val, NULL::text,
-				         COUNT(*) AS c, (array_agg(f.id ORDER BY f.id DESC))[1:5]
+				WITH top_vals AS (
+				  SELECT f.enriched_attrs ->> $5 AS val
 				  FROM user_feedback f
 				  WHERE f.tenant_id=$1 AND f.created_at>=$2 AND f.created_at<$3
 				    AND f.enrichment_status='enriched'
 				    AND f.enriched_attrs ->> $5 IS NOT NULL
-				  GROUP BY d, val
-				) t ORDER BY c DESC LIMIT $6`
+				  GROUP BY val ORDER BY COUNT(*) DESC LIMIT $6
+				)
+				SELECT (f.created_at AT TIME ZONE $4)::date AS d,
+				       f.enriched_attrs ->> $5 AS val, NULL::text,
+				       COUNT(*), (array_agg(f.id ORDER BY f.id DESC))[1:5]
+				FROM user_feedback f
+				WHERE f.tenant_id=$1 AND f.created_at>=$2 AND f.created_at<$3
+				  AND f.enrichment_status='enriched'
+				  AND f.enriched_attrs ->> $5 IN (SELECT val FROM top_vals)
+				GROUP BY d, val`
 		}
 		rows, err := tx.Query(ctx, query,
 			opts.TenantID, fromUTC, toUTC, tz, dim.Name, perDimensionValueCap)
@@ -344,9 +363,14 @@ func compileCustomConditions(conds []CustomCondition, startIdx int) (string, []a
 					" AND f.enrichment_status='enriched' AND f.enriched_attrs -> $%d ?| $%d",
 					n, n+1)
 			} else {
+				// The scalar form ORs an array-containment check so callers
+				// that don't know the dimension kind (the worker's slice →
+				// condition re-expression) still match multi-value dims;
+				// jsonb_typeof guards ?| against misfiring on strings.
 				fmt.Fprintf(&sb,
-					" AND f.enrichment_status='enriched' AND f.enriched_attrs ->> $%d = ANY($%d)",
-					n, n+1)
+					" AND f.enrichment_status='enriched' AND (f.enriched_attrs ->> $%d = ANY($%d)"+
+						" OR (jsonb_typeof(f.enriched_attrs -> $%d) = 'array' AND f.enriched_attrs -> $%d ?| $%d))",
+					n, n+1, n, n, n+1)
 			}
 			args = append(args, c.Name, c.Values)
 			n += 2
@@ -355,6 +379,12 @@ func compileCustomConditions(conds []CustomCondition, startIdx int) (string, []a
 				" AND EXISTS (SELECT 1 FROM cohort_memberships cm WHERE cm.tenant_id = f.tenant_id"+
 					" AND cm.cohort_id = ANY($%d::uuid[]) AND cm.external_user_id = f.subject_key"+
 					" AND cm.left_at IS NULL)", n)
+			args = append(args, c.Values)
+			n++
+		case "cluster":
+			// Internal-only field (contribution scoping); not part of the
+			// operator-facing custom-slice whitelist.
+			fmt.Fprintf(&sb, " AND f.cluster_id = ANY($%d::uuid[])", n)
 			args = append(args, c.Values)
 			n++
 		}

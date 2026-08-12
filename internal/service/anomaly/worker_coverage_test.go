@@ -208,13 +208,47 @@ func TestDeltaPercent(t *testing.T) {
 	}
 }
 
-// TestSliceConditions covers the V1 contract: only total maps to conditions.
+// TestSliceConditions covers the slice → condition re-expression that
+// scopes contribution attribution to the anomalous slice.
 func TestSliceConditions(t *testing.T) {
-	if got := sliceConditions(anomalyrepo.SliceRef{Type: anomalyrepo.SliceTotal}); got != nil {
-		t.Fatalf("total must map to no conditions, got %+v", got)
+	id := uuid.NewString()
+	cases := []struct {
+		name      string
+		slice     anomalyrepo.SliceRef
+		wantOK    bool
+		wantField string
+		wantName  string
+		wantValue string
+	}{
+		{"total is unconditioned", anomalyrepo.SliceRef{Type: anomalyrepo.SliceTotal}, true, "", "", ""},
+		{"dimension parses display", anomalyrepo.SliceRef{
+			Type: anomalyrepo.SliceDimension, Key: "dim:severity=1a2b3c4d", Display: "severity=critical",
+		}, true, "dimension", "severity", "critical"},
+		{"cluster strips key prefix", anomalyrepo.SliceRef{
+			Type: anomalyrepo.SliceCluster, Key: "cluster:" + id,
+		}, true, "cluster", "", id},
+		{"cohort strips key prefix", anomalyrepo.SliceRef{
+			Type: anomalyrepo.SliceCohort, Key: "cohort:" + id,
+		}, true, "cohort", "", id},
+		{"custom is refused", anomalyrepo.SliceRef{Type: anomalyrepo.SliceCustom}, false, "", "", ""},
+		{"unparseable display refused", anomalyrepo.SliceRef{
+			Type: anomalyrepo.SliceDimension, Display: "no-eq-sign",
+		}, false, "", "", ""},
 	}
-	if got := sliceConditions(anomalyrepo.SliceRef{Type: anomalyrepo.SliceCohort}); got != nil {
-		t.Fatalf("cohort maps to nil in V1, got %+v", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conds, ok := sliceConditions(tc.slice)
+			if ok != tc.wantOK {
+				t.Fatalf("ok=%v want %v (%+v)", ok, tc.wantOK, conds)
+			}
+			if !tc.wantOK || tc.wantField == "" {
+				return
+			}
+			if len(conds) != 1 || conds[0].Field != tc.wantField ||
+				conds[0].Name != tc.wantName || conds[0].Values[0] != tc.wantValue {
+				t.Fatalf("re-expression wrong: %+v", conds)
+			}
+		})
 	}
 }
 
@@ -269,5 +303,41 @@ func TestWorkerClaimRefusedSkipsDetection(t *testing.T) {
 
 	if len(repo.hits) != 0 {
 		t.Fatalf("refused claim must skip detection, hits=%d", len(repo.hits))
+	}
+}
+
+// TestWorkerResolvesStaleEventAfterDowntime is the liveness regression: an
+// open event whose last bucket predates the 3-day recompute window (worker
+// downtime) must still auto-resolve once its following days are quiet —
+// otherwise it wedges the open-event unique slot forever.
+func TestWorkerResolvesStaleEventAfterDowntime(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.counts = map[string]int64{}
+	// Event from 10 days ago; every day since is quiet (12/day steady).
+	oldSpike := time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)
+	for d := 0; d <= 12; d++ {
+		dd := oldSpike.AddDate(0, 0, d)
+		for week := 1; week <= 8; week++ {
+			repo.counts["total|"+dd.AddDate(0, 0, -7*week).Format("2006-01-02")] = 12
+		}
+		repo.counts["total|"+dd.Format("2006-01-02")] = 12
+	}
+	repo.openEvents = []anomalyrepo.Event{{
+		ID: uuid.New(), TenantID: "t1", SliceType: "total", SliceKey: "total",
+		Direction: "spike", Status: "open",
+		FirstBucketDate: oldSpike, LastBucketDate: oldSpike,
+	}}
+	// All recompute-window dates are already judged: only reconcile acts.
+	repo.doneDates = []string{"2026-08-07", "2026-08-08", "2026-08-09"}
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.ProcessOnce(context.Background(), fixedNow) // Aug 10, event from Jul 31
+
+	if len(repo.resolved) != 1 {
+		t.Fatalf("stale event outside the recompute window must resolve, resolved=%d retracted=%d",
+			len(repo.resolved), len(repo.retracted))
+	}
+	if len(repo.retracted) != 0 {
+		t.Fatal("out-of-window events must never be retracted (buckets are frozen; that would mislabel config drift as data correction)")
 	}
 }

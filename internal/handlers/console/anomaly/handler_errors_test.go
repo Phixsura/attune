@@ -21,7 +21,11 @@ var errStore = errors.New("store down")
 // downStore fails every read/write to exercise the 500 branches.
 type downStore struct{}
 
-func (downStore) ListEvents(context.Context, string, string, int) ([]anomalyrepo.Event, error) {
+func (downStore) ListEventsBySliceType(context.Context, string, string, string, int) ([]anomalyrepo.Event, error) {
+	return nil, errStore
+}
+
+func (downStore) FilterLiveFeedbackIDs(context.Context, string, []int64) ([]int64, error) {
 	return nil, errStore
 }
 

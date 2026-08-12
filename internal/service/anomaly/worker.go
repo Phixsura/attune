@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -469,8 +470,12 @@ func (w *Worker) contributionGroups(
 	if slice.Type == anomalyrepo.SliceSource {
 		return nil // grouping a single-source slice by source is a tautology
 	}
+	conds, ok := sliceConditions(slice)
+	if !ok {
+		return nil // cannot scope the slice: skip rather than mis-attribute
+	}
 	rows, err := w.repo.GroupCountsByAxis(ctx, tenantID, loc,
-		sliceConditions(slice), anomalyrepo.GroupByAxis{Field: "source"}, date, baseline)
+		conds, anomalyrepo.GroupByAxis{Field: "source"}, date, baseline)
 	if err != nil {
 		logext.Warnf(ctx, "[service.anomaly.Worker] contribution failed,tenant:%s,err:%+v",
 			tenantID, err.Error())
@@ -487,17 +492,48 @@ func (w *Worker) contributionGroups(
 	return map[string][]GroupCount{"source": counts}
 }
 
-// sliceConditions re-expresses a slice as custom conditions for the group
-// counts query. Only slices expressible as conditions get contribution
-// breakdowns (total → no conditions; others → nil in V1 except source).
-func sliceConditions(slice anomalyrepo.SliceRef) []anomalyrepo.CustomCondition {
-	if slice.Type == anomalyrepo.SliceTotal {
-		return nil
+// sliceConditions re-expresses a slice as custom conditions so contribution
+// group counts are computed over THAT slice's feedback, not the whole
+// tenant — otherwise the attribution for "severity=critical spiked" would
+// name whichever source dominates overall volume, not the spike.
+//
+// Returns (conditions, ok): ok=false means the slice cannot be re-expressed
+// (unparseable display) and contribution must be skipped rather than
+// silently mis-scoped.
+func sliceConditions(slice anomalyrepo.SliceRef) ([]anomalyrepo.CustomCondition, bool) {
+	switch slice.Type {
+	case anomalyrepo.SliceTotal:
+		return nil, true // whole tenant IS the slice
+	case anomalyrepo.SliceDimension:
+		// slice_display is "name=value" (value may itself contain '=').
+		name, value, found := strings.Cut(slice.Display, "=")
+		if !found || name == "" {
+			return nil, false
+		}
+		return []anomalyrepo.CustomCondition{
+			{Field: "dimension", Name: name, Values: []string{value}},
+		}, true
+	case anomalyrepo.SliceCluster:
+		id, ok := strings.CutPrefix(slice.Key, "cluster:")
+		if !ok {
+			return nil, false
+		}
+		return []anomalyrepo.CustomCondition{
+			{Field: "cluster", Values: []string{id}},
+		}, true
+	case anomalyrepo.SliceCohort:
+		id, ok := strings.CutPrefix(slice.Key, "cohort:")
+		if !ok {
+			return nil, false
+		}
+		return []anomalyrepo.CustomCondition{
+			{Field: "cohort", Values: []string{id}},
+		}, true
+	default:
+		// Custom slices would need their stored definition re-fetched;
+		// skip in V1 rather than mis-attribute.
+		return nil, false
 	}
-	// Dimension/cluster/cohort/custom slices keep their whole-slice group
-	// counts by source without extra filtering in V1: the source axis over
-	// the total population still names the driving channel.
-	return nil
 }
 
 // upsertQualityAction mirrors the event into the control-tower ledger.
@@ -582,20 +618,25 @@ func (w *Worker) reconcile(
 		MinCount:          int64(cfg.MinCount),
 		MinBaselinePoints: minBaselinePoints,
 	}
-	settled := settledSet(now, loc, cfg.SettleDelayHours)
+	inWindow := settledSet(now, loc, cfg.SettleDelayHours)
 	for _, event := range open {
-		still, err := w.judgeDate(ctx, tenantID, loc, event, detCfg, event.LastBucketDate)
-		if err != nil {
-			return err
-		}
-		if !still {
-			// The original bucket no longer breaches: data was corrected.
-			if err := w.repo.RetractEvent(ctx, tenantID, event.ID); err != nil {
+		// Retraction (data-correction) only applies while the event's bucket
+		// is still inside the recompute window: outside it the buckets are
+		// frozen, so a non-breaching re-judgment reflects config drift (a
+		// sensitivity change), not corrected data — resolve, don't retract.
+		if inWindow[event.LastBucketDate.Format("2006-01-02")] {
+			still, err := w.judgeDate(ctx, tenantID, loc, event, detCfg, event.LastBucketDate)
+			if err != nil {
 				return err
 			}
-			continue
+			if !still {
+				if err := w.repo.RetractEvent(ctx, tenantID, event.ID); err != nil {
+					return err
+				}
+				continue
+			}
 		}
-		if w.quietStreak(ctx, tenantID, loc, event, detCfg, settled) >= resolveQuietBuckets {
+		if w.quietStreak(ctx, tenantID, loc, event, detCfg, now, cfg) >= resolveQuietBuckets {
 			if err := w.repo.ResolveEvent(ctx, tenantID, event.ID); err != nil {
 				return err
 			}
@@ -623,16 +664,21 @@ func (w *Worker) judgeDate(
 }
 
 // quietStreak counts consecutive settled quiet days after the event's last
-// bucket (capped at resolveQuietBuckets — enough to decide).
+// bucket (capped at resolveQuietBuckets — enough to decide). A day is
+// "settled" by TIME (its close + settle delay has passed), not by
+// membership in the recompute window: an event whose last bucket predates
+// the window (worker downtime, detection re-enabled) must still resolve,
+// or it wedges the partial unique index forever.
 func (w *Worker) quietStreak(
 	ctx context.Context, tenantID string, loc *time.Location,
-	event anomalyrepo.Event, detCfg DetectorConfig, settled map[string]bool,
+	event anomalyrepo.Event, detCfg DetectorConfig, now time.Time, cfg anomalyrepo.Config,
 ) int {
 	streak := 0
 	day := civilMidnight(event.LastBucketDate, loc)
 	for i := 1; i <= resolveQuietBuckets; i++ {
 		d := day.AddDate(0, 0, i)
-		if !settled[d.Format("2006-01-02")] {
+		settleAt := d.AddDate(0, 0, 1).Add(time.Duration(cfg.SettleDelayHours) * time.Hour)
+		if now.Before(settleAt) {
 			return streak
 		}
 		still, err := w.judgeDate(ctx, tenantID, loc, event, detCfg, d)

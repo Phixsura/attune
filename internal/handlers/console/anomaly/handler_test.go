@@ -26,14 +26,18 @@ type fakeStore struct {
 	counts  map[string]int64
 }
 
-func (f *fakeStore) ListEvents(_ context.Context, _, status string, _ int) ([]anomalyrepo.Event, error) {
+func (f *fakeStore) ListEventsBySliceType(_ context.Context, _, status, sliceType string, _ int) ([]anomalyrepo.Event, error) {
 	var out []anomalyrepo.Event
 	for _, e := range f.events {
-		if status == "" || e.Status == status {
+		if (status == "" || e.Status == status) && (sliceType == "" || e.SliceType == sliceType) {
 			out = append(out, e)
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeStore) FilterLiveFeedbackIDs(_ context.Context, _ string, ids []int64) ([]int64, error) {
+	return ids, nil // handler tests treat all sample ids as live
 }
 
 func (f *fakeStore) GetEvent(_ context.Context, _ string, id uuid.UUID) (*anomalyrepo.Event, error) {

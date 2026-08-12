@@ -388,3 +388,75 @@ func TestPG_CleanupRetention(t *testing.T) {
 		SELECT COUNT(*) FROM feedback_volume_buckets WHERE tenant_id=$1`, tenantID).Scan(&n))
 	require.Equal(t, 1, n, "only the recent bucket survives")
 }
+
+// TestPG_RecomputeDimensionKeepsAllDaysForTopValues is the regression test
+// for the value-cap semantics: the per-dimension cap must bound DISTINCT
+// VALUES, never (date, value) rows. A row-level LIMIT would keep only the
+// highest-count day rows and punch zero-holes into lower-volume values'
+// baselines across a multi-day window.
+func TestPG_RecomputeDimensionKeepsAllDaysForTopValues(t *testing.T) {
+	pool := testdb.NewPool(t)
+	repo := anomalyrepo.New(pool)
+	loc := shanghai(t)
+	tenantID := freshTenant(t, pool)
+
+	// 60 days × 2 severity values. "critical" dominates (3/day), "low" is
+	// steady (2/day). 120 (date,value) pairs — far beyond a row LIMIT of 50.
+	start := time.Date(2026, 6, 12, 12, 0, 0, 0, loc)
+	for d := 0; d < 60; d++ {
+		day := start.AddDate(0, 0, d)
+		for i := 0; i < 3; i++ {
+			insertFeedback(t, pool, tenantID, day.Add(time.Duration(i)*time.Minute), "api", "", `{"severity":"critical"}`, nil, "")
+		}
+		for i := 0; i < 2; i++ {
+			insertFeedback(t, pool, tenantID, day.Add(time.Duration(i)*time.Minute), "api", "", `{"severity":"low"}`, nil, "")
+		}
+	}
+
+	opts := recomputeOpts(tenantID, loc, start, start.AddDate(0, 0, 59))
+	require.NoError(t, repo.RecomputeWindow(context.Background(), opts))
+
+	// EVERY day must have a bucket for BOTH values.
+	for _, value := range []string{"critical", "low"} {
+		key := anomalyrepo.DimensionSliceKey("severity", value)
+		var got int
+		require.NoError(t, pool.QueryRow(context.Background(), `
+			SELECT COUNT(*) FROM feedback_volume_buckets
+			WHERE tenant_id=$1 AND slice_type='dimension' AND slice_key=$2`,
+			tenantID, key).Scan(&got))
+		require.Equal(t, 60, got,
+			"value %q must keep a bucket for all 60 days (cap is on values, not rows)", value)
+	}
+}
+
+// TestPG_ContributionScopedToDimensionSlice: attribution for a dimension
+// slice must count only that slice's feedback, not the whole tenant.
+func TestPG_ContributionScopedToDimensionSlice(t *testing.T) {
+	pool := testdb.NewPool(t)
+	repo := anomalyrepo.New(pool)
+	loc := shanghai(t)
+	tenantID := freshTenant(t, pool)
+	ctx := context.Background()
+	day := time.Date(2026, 8, 10, 12, 0, 0, 0, loc)
+
+	// critical spike comes 100% from zendesk; a big pile of api "low"
+	// feedback would dominate an unscoped source breakdown.
+	for i := 0; i < 10; i++ {
+		insertFeedback(t, pool, tenantID, day.Add(time.Duration(i)*time.Minute), "zendesk", "", `{"severity":"critical"}`, nil, "")
+	}
+	for i := 0; i < 40; i++ {
+		insertFeedback(t, pool, tenantID, day.Add(time.Duration(i)*time.Minute), "api", "", `{"severity":"low"}`, nil, "")
+	}
+
+	rows, err := repo.GroupCountsByAxis(ctx, tenantID, loc,
+		[]anomalyrepo.CustomCondition{{Field: "dimension", Name: "severity", Values: []string{"critical"}}},
+		anomalyrepo.GroupByAxis{Field: "source"}, day, nil)
+	require.NoError(t, err)
+
+	bySource := map[string]int64{}
+	for _, row := range rows {
+		bySource[row.Value] = row.Observed
+	}
+	require.EqualValues(t, 10, bySource["zendesk"], "scoped count must see only the slice")
+	require.Zero(t, bySource["api"], "api feedback is outside the severity=critical slice")
+}

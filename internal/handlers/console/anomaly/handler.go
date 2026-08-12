@@ -36,7 +36,8 @@ const (
 
 // store is the repo slice these handlers consume.
 type store interface {
-	ListEvents(ctx context.Context, tenantID, status string, limit int) ([]anomalyrepo.Event, error)
+	ListEventsBySliceType(ctx context.Context, tenantID, status, sliceType string, limit int) ([]anomalyrepo.Event, error)
+	FilterLiveFeedbackIDs(ctx context.Context, tenantID string, ids []int64) ([]int64, error)
 	GetEvent(ctx context.Context, tenantID string, id uuid.UUID) (*anomalyrepo.Event, error)
 	BaselineCounts(ctx context.Context, tenantID, sliceType, sliceKey string, dates []time.Time) ([]int64, error)
 	CountOn(ctx context.Context, tenantID, sliceType, sliceKey string, date time.Time) (int64, []int64, error)
@@ -101,7 +102,7 @@ func (h *Handler) ListAnomalies(
 	if limit > maxListLimit {
 		limit = maxListLimit
 	}
-	events, err := h.store.ListEvents(ctx, ctx.Auth.TenantID, req.GetStatus(), limit)
+	events, err := h.store.ListEventsBySliceType(ctx, ctx.Auth.TenantID, req.GetStatus(), req.GetSliceType(), limit)
 	if err != nil {
 		logext.Errorf(ctx, "[%s] query failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
 		return dispatcher.Fail[*attunev1.ListAnomaliesResponse](
@@ -109,11 +110,7 @@ func (h *Handler) ListAnomalies(
 	}
 	out := make([]*attunev1.AnomalyEvent, 0, len(events))
 	for i := range events {
-		e := &events[i]
-		if req.GetSliceType() != "" && e.SliceType != req.GetSliceType() {
-			continue
-		}
-		out = append(out, eventToProto(e))
+		out = append(out, eventToProto(&events[i]))
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.ListAnomaliesResponse{Events: out}))
 }
@@ -258,10 +255,17 @@ func (h *Handler) GetAnomalyEvidence(
 			Dim: c.Dim, Value: c.Value, Share: c.Share,
 		}))
 	}
+	// Evidence samples must reflect live rows only: GDPR-deleted feedback
+	// ids stored at detection time are filtered out at read time.
+	liveIDs, err := h.store.FilterLiveFeedbackIDs(ctx, ctx.Auth.TenantID, doc.SampleIDs)
+	if err != nil {
+		logext.Warnf(ctx, "[%s] live-id filter failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
+		liveIDs = nil // fail closed: no ids rather than possibly-dead ids
+	}
 	return dispatcher.OK(ptrext.Of(attunev1.GetAnomalyEvidenceResponse{
 		Contributions: contributions,
 		Spread:        doc.Spread,
-		FeedbackIds:   doc.SampleIDs,
+		FeedbackIds:   liveIDs,
 	}))
 }
 
