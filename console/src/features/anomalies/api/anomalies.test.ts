@@ -60,3 +60,31 @@ describe('anomalies api', () => {
     expect(cfg).toEqual({ sensitivity: 'medium' })
   })
 })
+
+describe('useUpdateAnomalyConfig', () => {
+  it('POSTs the config and invalidates both query families', async () => {
+    const { QueryClient, QueryClientProvider } = await import('@tanstack/react-query')
+    const { renderHook, waitFor } = await import('@testing-library/react')
+    const React = await import('react')
+    const { useUpdateAnomalyConfig, anomaliesQueryKey, anomalyConfigQueryKey } = await import(
+      './anomalies'
+    )
+
+    apiMock.mockResolvedValue({ config: { sensitivity: 'low' }, warning: '' })
+    const qc = new QueryClient()
+    const invalidate = vi.spyOn(qc, 'invalidateQueries')
+    const wrapper = ({ children }: { children: React.ReactNode }) =>
+      React.createElement(QueryClientProvider, { client: qc }, children)
+
+    const { result } = renderHook(() => useUpdateAnomalyConfig(), { wrapper })
+    result.current.mutate({ config: { sensitivity: 'low' } } as never)
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(apiMock).toHaveBeenCalledWith(
+      '/fb/v1/console/anomaly-config',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: anomalyConfigQueryKey })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: anomaliesQueryKey })
+  })
+})
