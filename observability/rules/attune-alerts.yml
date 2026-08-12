@@ -724,7 +724,7 @@ groups:
           dashboard: "Attune AI Pipeline"
           dashboard_url: "/d/attune-ai-pipeline/attune-ai-pipeline"
           runbook_url: "https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneanomalyworkerlaghigh"
-          action: "Check the anomaly worker is running (worker=anomaly in heartbeat/panic metrics), then look for failed detection runs in anomaly_detection_runs (status='failed') and slow rollups on the AI Pipeline dashboard."
+          action: "Check the anomaly worker is running (attune_worker_panics_total{worker='anomaly'} and process logs), then look for failed detection runs in anomaly_detection_runs (status='failed') and slow rollups on the AI Pipeline dashboard."
 
       - alert: AttuneAnomalyNotifyFailures
         expr: sum(rate(attune_anomaly_notify_failures_total[5m])) > 0

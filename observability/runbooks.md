@@ -850,7 +850,7 @@ Recovery: webhook error rate drops below 0.1/s for 15 minutes.
 The anomaly & spike detection worker (#237) has settled feedback-volume
 buckets older than 2 days that no worker instance has judged.
 
-1. Confirm the worker is alive: `attune_worker_panics_total{worker="anomaly"}`
+1. Confirm the worker is alive: `attune_worker_panics_total{worker="anomaly"}` stays flat
    and the process logs for `service.anomaly.Worker` errors.
 2. Look for stuck runs: `SELECT * FROM anomaly_detection_runs WHERE status
    IN ('failed','running') ORDER BY bucket_date` — failed runs re-claim

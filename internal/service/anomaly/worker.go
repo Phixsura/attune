@@ -373,14 +373,6 @@ func (w *Worker) detectSettled(
 	if len(candidates) == 0 {
 		return nil
 	}
-	// One lookup per tenant pass (the value is tenant-constant): the
-	// cold-start clamp must NOT fail open — proceeding unclamped on a
-	// transient read error would resurrect the day-two false spike this
-	// guard exists to prevent. Failing the pass retries next tick.
-	firstBucket, err := w.firstBucketIn(ctx, tenantID, loc)
-	if err != nil {
-		return err
-	}
 	free, err := w.repo.UnclaimedSettledDates(ctx, tenantID, candidates)
 	if err != nil {
 		return err
@@ -391,6 +383,17 @@ func (w *Worker) detectSettled(
 			Set(now.Sub(oldest.AddDate(0, 0, 1)).Seconds())
 	} else {
 		metrics.AnomalyWorkerLagSeconds.WithLabelValues(tenantID).Set(0)
+	}
+	// One lookup per tenant pass (the value is tenant-constant): the
+	// cold-start clamp must NOT fail open — proceeding unclamped on a
+	// transient read error would resurrect the day-two false spike this
+	// guard exists to prevent. Failing the pass retries next tick. The
+	// lag gauge is set FIRST so a persistently failing tenant shows its
+	// growing lag (and trips AttuneAnomalyWorkerLagHigh) instead of a
+	// misleading zero.
+	firstBucket, err := w.firstBucketIn(ctx, tenantID, loc)
+	if err != nil {
+		return err
 	}
 	for _, raw := range free {
 		// Dates from the runs table are DB scans (UTC midnights): normalize
