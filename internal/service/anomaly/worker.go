@@ -327,9 +327,9 @@ func (w *Worker) detectSettled(
 		return err
 	}
 	if len(free) > 0 {
-		oldest := free[0]
+		oldest := civilDateIn(free[0], loc) // DB-scanned DATE value
 		metrics.AnomalyWorkerLagSeconds.WithLabelValues(tenantID).
-			Set(now.Sub(civilMidnight(oldest, loc).AddDate(0, 0, 1)).Seconds())
+			Set(now.Sub(oldest.AddDate(0, 0, 1)).Seconds())
 	} else {
 		metrics.AnomalyWorkerLagSeconds.WithLabelValues(tenantID).Set(0)
 	}
