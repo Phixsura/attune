@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	anomalyrepo "github.com/Phixsura/attune/internal/repo/anomaly"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -364,5 +366,38 @@ func TestWorkerNegativeOffsetTimezoneBaselines(t *testing.T) {
 	if len(repo.newEventIDs) != 1 {
 		t.Fatalf("negative-offset tz must not shift baseline dates; events=%d hits=%d",
 			len(repo.newEventIDs), len(repo.hits))
+	}
+}
+
+// TestSenderSignsPayloadWithTargetSecret: anomaly webhooks must carry the
+// same X-Attune-Signature (HMAC-SHA256 over the body) every other attune
+// webhook carries, so receivers can verify authenticity.
+func TestSenderSignsPayloadWithTargetSecret(t *testing.T) {
+	var gotSig string
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSig = r.Header.Get("X-Attune-Signature")
+		gotBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	s := newSender(notify.NewTransport(srv.Client(), notify.NoRetry()))
+	target := ptrext.Of(notifytarget.NotifyTarget{TenantID: "t1", URL: srv.URL, Secret: "s3cret"})
+	if err := s.Send(context.Background(), target, NotifyPayload{Type: "anomaly.detected"}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if want := outbound.BytesSign(gotBody, "s3cret"); gotSig != want {
+		t.Fatalf("signature mismatch: got %q want %q", gotSig, want)
+	}
+
+	// No secret → no header (never sign with an empty key).
+	gotSig = "sentinel"
+	unsigned := ptrext.Of(notifytarget.NotifyTarget{TenantID: "t1", URL: srv.URL})
+	if err := s.Send(context.Background(), unsigned, NotifyPayload{}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if gotSig != "" {
+		t.Fatalf("secretless target must not carry a signature, got %q", gotSig)
 	}
 }

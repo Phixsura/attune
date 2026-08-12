@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"github.com/Phixsura/attune/internal/notify"
+	"github.com/Phixsura/attune/internal/outbound"
 	"github.com/Phixsura/attune/internal/pkg/ptrext"
 	anomalyrepo "github.com/Phixsura/attune/internal/repo/anomaly"
 	"github.com/Phixsura/attune/internal/repo/notifytarget"
@@ -80,12 +81,19 @@ func newSender(transport *notify.Transport) *sender {
 // Send delivers one payload to one target through the retrying transport.
 // Anomaly alerts are advisory: failures are logged and metriced by the
 // caller, never retried across ticks (the event stays visible in Console).
+// Payloads are HMAC-signed with the target secret (X-Attune-Signature,
+// bytes mode) so receivers verify authenticity exactly like every other
+// attune webhook.
 func (s *sender) Send(
 	ctx context.Context, target *notifytarget.NotifyTarget, payload NotifyPayload,
 ) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("anomaly notify marshal: %w", err)
+	}
+	signature := ""
+	if target.Secret != "" {
+		signature = outbound.BytesSign(body, target.Secret)
 	}
 	label := fmt.Sprintf("anomaly-%s-%s", target.DestinationType, target.TenantID)
 	build := func(ctx context.Context) (*http.Request, error) {
@@ -94,6 +102,9 @@ func (s *sender) Send(
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		if signature != "" {
+			req.Header.Set("X-Attune-Signature", signature)
+		}
 		return req, nil
 	}
 	check := func(_ context.Context, status int, _ []byte) error {
