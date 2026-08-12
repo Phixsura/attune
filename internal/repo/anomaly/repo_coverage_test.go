@@ -167,6 +167,13 @@ func TestRepoErrorPaths(t *testing.T) {
 	expectRepoErr(t, "SetEvidence", func() error {
 		return r.SetEvidence(ctx, id, "{}")
 	})
+	expectRepoErr(t, "ListUnnotifiedOpenEvents", func() error {
+		_, err := r.ListUnnotifiedOpenEvents(ctx, "t1")
+		return err
+	})
+	expectRepoErr(t, "MarkNotified", func() error {
+		return r.MarkNotified(ctx, "t1", []uuid.UUID{id})
+	})
 }
 
 func TestSliceKeyHelpers(t *testing.T) {

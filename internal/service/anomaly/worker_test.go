@@ -38,6 +38,7 @@ type fakeRepo struct {
 	failTenantID   string
 	refuseClaims   bool
 	lastDoneRun    time.Time
+	notified       map[uuid.UUID]bool
 }
 
 func (f *fakeRepo) ActiveTenantsWithFeedback(context.Context, int) ([]anomalyrepo.TenantRef, error) {
@@ -149,6 +150,26 @@ func (f *fakeRepo) UpsertHit(_ context.Context, in anomalyrepo.HitInput) (anomal
 	return ev, true, nil
 }
 func (f *fakeRepo) SetQualityAction(context.Context, uuid.UUID, string) error { return nil }
+
+func (f *fakeRepo) ListUnnotifiedOpenEvents(_ context.Context, _ string) ([]anomalyrepo.Event, error) {
+	var out []anomalyrepo.Event
+	for _, e := range f.openEvents {
+		if e.Status == "open" && !f.notified[e.ID] {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) MarkNotified(_ context.Context, _ string, ids []uuid.UUID) error {
+	if f.notified == nil {
+		f.notified = map[uuid.UUID]bool{}
+	}
+	for _, id := range ids {
+		f.notified[id] = true
+	}
+	return nil
+}
 
 func (f *fakeRepo) SetEvidence(_ context.Context, id uuid.UUID, evidenceJSON string) error {
 	for i := range f.openEvents {

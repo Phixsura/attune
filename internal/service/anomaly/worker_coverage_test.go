@@ -498,3 +498,69 @@ func TestWorkerCatchUpCapped(t *testing.T) {
 		t.Fatalf("catch-up must cap at 14 days, got %d", days)
 	}
 }
+
+// TestWorkerRetriesNotificationAfterCrash: an event inserted but not yet
+// notified (worker died between insert and delivery) must be delivered on
+// the next tick — the at-least-once contract of the notified_at queue.
+func TestWorkerRetriesNotificationAfterCrash(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.counts = map[string]int64{}
+	// Steady data, all dates already judged: only the notify pass acts.
+	repo.doneDates = []string{"2026-08-07", "2026-08-08", "2026-08-09"}
+	repo.lastDoneRun = time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	// Simulate the crash artifact: an open event with no notified stamp.
+	repo.openEvents = []anomalyrepo.Event{{
+		ID: uuid.New(), TenantID: "t1", SliceType: "total", SliceKey: "total",
+		SliceDisplay: "All feedback", Direction: "spike", Status: "open",
+		FirstBucketDate: time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC),
+		LastBucketDate:  time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC),
+		Observed:        40, ExpectedMed: 12, ZScore: 8,
+	}}
+	// Keep the event breaching so reconcile doesn't retract it mid-test.
+	target := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	for week := 1; week <= 8; week++ {
+		repo.counts["total|"+target.AddDate(0, 0, -7*week).Format("2006-01-02")] = 12
+	}
+	repo.counts["total|2026-08-09"] = 40
+	targets := ptrext.Of(fakeTargets{targets: []notifytarget.NotifyTarget{{TenantID: "t1"}}})
+	snd := ptrext.Of(fakeSender{})
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), targets, snd)
+
+	w.ProcessOnce(context.Background(), fixedNow)
+	if len(snd.sent) != 1 {
+		t.Fatalf("unnotified event must be delivered on the next tick, sent=%d", len(snd.sent))
+	}
+
+	// Second tick: already marked — no duplicate.
+	w.ProcessOnce(context.Background(), fixedNow)
+	if len(snd.sent) != 1 {
+		t.Fatalf("notified event must not re-send, sent=%d", len(snd.sent))
+	}
+}
+
+// TestWorkerDigestModeMarksWithoutSending: digest/off tenants get events
+// stamped so a later switch to immediate doesn't blast history.
+func TestWorkerDigestModeMarksWithoutSending(t *testing.T) {
+	cfg := baseConfig()
+	cfg.NotifyMode = anomalyrepo.NotifyDigest
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: cfg})
+	seedSpike(repo)
+	targets := ptrext.Of(fakeTargets{targets: []notifytarget.NotifyTarget{{TenantID: "t1"}}})
+	snd := ptrext.Of(fakeSender{})
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), targets, snd)
+
+	w.ProcessOnce(context.Background(), fixedNow)
+	if len(snd.sent) != 0 {
+		t.Fatalf("digest mode must not send immediately, sent=%d", len(snd.sent))
+	}
+	if len(repo.notified) != 1 {
+		t.Fatalf("digest-mode events must still be stamped, notified=%d", len(repo.notified))
+	}
+
+	// Later switch to immediate: history stays quiet.
+	repo.config.NotifyMode = anomalyrepo.NotifyImmediate
+	w.ProcessOnce(context.Background(), fixedNow)
+	if len(snd.sent) != 0 {
+		t.Fatalf("mode switch must not blast stamped history, sent=%d", len(snd.sent))
+	}
+}

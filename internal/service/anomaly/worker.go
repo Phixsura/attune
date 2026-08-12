@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -74,6 +73,8 @@ type repoAPI interface {
 	SetEvidence(ctx context.Context, eventID uuid.UUID, evidenceJSON string) error
 	SetQualityAction(ctx context.Context, eventID uuid.UUID, actionID string) error
 	ListOpenEvents(ctx context.Context, tenantID string) ([]anomalyrepo.Event, error)
+	ListUnnotifiedOpenEvents(ctx context.Context, tenantID string) ([]anomalyrepo.Event, error)
+	MarkNotified(ctx context.Context, tenantID string, ids []uuid.UUID) error
 	ResolveEvent(ctx context.Context, tenantID string, id uuid.UUID) error
 	RetractEvent(ctx context.Context, tenantID string, id uuid.UUID) error
 	GroupCountsByAxis(ctx context.Context, tenantID string, loc *time.Location, sliceConds []anomalyrepo.CustomCondition, axis anomalyrepo.GroupByAxis, date time.Time, baselineDates []time.Time) ([]anomalyrepo.GroupCountRow, error)
@@ -267,6 +268,7 @@ func (w *Worker) processTenant(
 	if err := w.detectSettled(ctx, tenant.ID, loc, cfg, now, windowDays); err != nil {
 		return tenantResult{}, err
 	}
+	w.notifyPending(ctx, tenant.ID, cfg)
 	return tenantResult{}, w.reconcile(ctx, tenant.ID, loc, cfg, now)
 }
 
@@ -408,7 +410,6 @@ func (w *Worker) detectOneDate(
 		MinCount:          int64(cfg.MinCount),
 		MinBaselinePoints: minBaselinePoints,
 	}
-	var newEvents []notifyCandidate
 	for _, slice := range slices {
 		metrics.AnomalyDetectSlicesTotal.WithLabelValues(tenantID).Inc()
 		counts, err := w.repo.BaselineCounts(ctx, tenantID, slice.Type, slice.Key, baseline)
@@ -426,34 +427,24 @@ func (w *Worker) detectOneDate(
 		if verdict.Direction == DirectionDrop && !dropEnabled(cfg, slice.Type) {
 			continue
 		}
-		cand, isNew, err := w.applyHit(ctx, tenantID, loc, cfg, slice, date, observed, samples, verdict, baseline)
-		if err != nil {
+		if err := w.applyHit(ctx, tenantID, loc, cfg, slice, date, observed, samples, verdict, baseline); err != nil {
 			return err
 		}
-		if isNew {
-			newEvents = append(newEvents, cand)
-		}
 	}
-	w.notifyNew(ctx, tenantID, cfg, newEvents)
 	return nil
 }
 
-// notifyCandidate pairs a NEW event with its notification payload.
-type notifyCandidate struct {
-	event   anomalyrepo.Event
-	payload NotifyPayload
-}
-
-// applyHit persists one verdict: event upsert, quality action on NEW,
-// notification candidate assembly. Evidence (a multi-query contribution
-// breakdown) is computed only for NEW events — ongoing hits keep their
-// first-occurrence evidence, so computing it up front wasted ~9 queries
-// per slice per day for the lifetime of every long-running anomaly.
+// applyHit persists one verdict: event upsert plus, on NEW, evidence and
+// the quality action. Notification is NOT sent here — a separate pass over
+// unnotified open events delivers after the run commits, so a crash
+// between insert and delivery re-notifies next tick (at-least-once)
+// instead of silently losing the alert. Evidence (a multi-query
+// contribution breakdown) is computed only for NEW events.
 func (w *Worker) applyHit(
 	ctx context.Context, tenantID string, loc *time.Location, cfg anomalyrepo.Config,
 	slice anomalyrepo.SliceRef, date time.Time, observed int64, samples []int64,
 	verdict Verdict, baseline []time.Time,
-) (notifyCandidate, bool, error) {
+) error {
 	event, isNew, err := w.repo.UpsertHit(ctx, anomalyrepo.HitInput{
 		TenantID: tenantID, SliceType: slice.Type, SliceKey: slice.Key,
 		SliceDisplay: slice.Display, Direction: verdict.Direction,
@@ -462,23 +453,22 @@ func (w *Worker) applyHit(
 		ExpectedHigh: verdict.ExpectedHigh, Z: verdict.Z,
 	})
 	if err != nil {
-		return notifyCandidate{}, false, err
+		return err
 	}
 	if !isNew {
-		return notifyCandidate{}, false, nil // ongoing: no action churn, no re-notify
+		return nil // ongoing: no action churn, no re-notify
 	}
 	evidence := w.buildEvidence(ctx, tenantID, loc, slice, date, observed, verdict, baseline, samples)
 	if err := w.repo.SetEvidence(ctx, event.ID, evidence); err != nil {
 		logext.Warnf(ctx, "[service.anomaly.Worker] evidence write failed,tenant:%s,err:%+v",
 			tenantID, err.Error())
 	}
-	event.EvidenceJSON = evidence
 	metrics.AnomalyEventsCreatedTotal.WithLabelValues(tenantID, verdict.Direction).Inc()
 	if err := w.upsertQualityAction(ctx, tenantID, event, verdict, cfg); err != nil {
 		logext.Errorf(ctx, "[service.anomaly.Worker] quality action failed,tenant:%s,err:%+v",
 			tenantID, err.Error())
 	}
-	return notifyCandidate{event: event, payload: w.buildPayload(event)}, true, nil
+	return nil
 }
 
 // buildEvidence computes the contribution breakdown and packages evidence
@@ -609,21 +599,33 @@ func (w *Worker) upsertQualityAction(
 	return w.repo.SetQualityAction(ctx, event.ID, action.ID)
 }
 
-// notifyNew delivers NEW-event notifications per notify_mode with the
-// per-tick fuse.
-func (w *Worker) notifyNew(
-	ctx context.Context, tenantID string, cfg anomalyrepo.Config, events []notifyCandidate,
-) {
-	if cfg.NotifyMode != anomalyrepo.NotifyImmediate || len(events) == 0 {
+// notifyPending drains the unnotified-open-event queue: crash-safe
+// at-least-once delivery with the per-tick fuse applied across ALL dates
+// (the old per-date fan-out let a 14-day catch-up send 14×20 messages).
+// digest/off tenants get their events marked without delivery so a later
+// switch to immediate doesn't blast history.
+func (w *Worker) notifyPending(ctx context.Context, tenantID string, cfg anomalyrepo.Config) {
+	events, err := w.repo.ListUnnotifiedOpenEvents(ctx, tenantID)
+	if err != nil {
+		logext.Warnf(ctx, "[service.anomaly.Worker] unnotified list failed,tenant:%s,err:%+v",
+			tenantID, err.Error())
 		return
 	}
-	sort.Slice(events, func(i, j int) bool {
-		return abs(events[i].event.ZScore) > abs(events[j].event.ZScore)
-	})
+	if len(events) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(events))
+	for _, e := range events {
+		ids = append(ids, e.ID)
+	}
+	if cfg.NotifyMode != anomalyrepo.NotifyImmediate {
+		w.markNotified(ctx, tenantID, ids)
+		return
+	}
 	overflow := 0
 	if len(events) > notifyFuseLimit {
 		overflow = len(events) - notifyFuseLimit
-		events = events[:notifyFuseLimit]
+		events = events[:notifyFuseLimit] // already ordered by |z| desc
 	}
 	targets, err := w.targets.ListActiveByTenantAudience(ctx, tenantID, "radar")
 	if err != nil {
@@ -633,20 +635,29 @@ func (w *Worker) notifyNew(
 	}
 	for i := range targets {
 		target := &targets[i]
-		for _, cand := range events {
-			if err := w.sender.Send(ctx, target, cand.payload); err != nil {
+		for _, event := range events {
+			if err := w.sender.Send(ctx, target, w.buildPayload(event)); err != nil {
 				metrics.AnomalyNotifyFailuresTotal.WithLabelValues(tenantID).Inc()
 				logext.Warnf(ctx, "[service.anomaly.Worker] notify failed,tenant:%s,err:%+v",
 					tenantID, err.Error())
 			}
 		}
 		if overflow > 0 {
-			summary := w.buildPayload(events[0].event)
+			summary := w.buildPayload(events[0])
 			summary.SummaryOverflow = overflow
 			if err := w.sender.Send(ctx, target, summary); err != nil {
 				metrics.AnomalyNotifyFailuresTotal.WithLabelValues(tenantID).Inc()
 			}
 		}
+	}
+	// Mark ALL listed events (including fuse overflow — they were summarized).
+	w.markNotified(ctx, tenantID, ids)
+}
+
+func (w *Worker) markNotified(ctx context.Context, tenantID string, ids []uuid.UUID) {
+	if err := w.repo.MarkNotified(ctx, tenantID, ids); err != nil {
+		logext.Warnf(ctx, "[service.anomaly.Worker] mark notified failed,tenant:%s,err:%+v",
+			tenantID, err.Error())
 	}
 }
 

@@ -304,3 +304,43 @@ func (r *Repo) SetEvidence(ctx context.Context, eventID uuid.UUID, evidenceJSON 
 	}
 	return nil
 }
+
+// ListUnnotifiedOpenEvents returns open events not yet notified — the
+// crash-safe notification queue. A worker dying between event insert and
+// delivery leaves notified_at NULL, so the next tick retries instead of
+// silently losing the alert.
+func (r *Repo) ListUnnotifiedOpenEvents(ctx context.Context, tenantID string) ([]Event, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+eventColumns+` FROM anomaly_events
+		WHERE tenant_id = $1 AND status = 'open' AND notified_at IS NULL
+		ORDER BY ABS(z_score) DESC
+		LIMIT 200`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("anomaly unnotified events: %w", err)
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		e, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// MarkNotified stamps events as delivered (or intentionally skipped for
+// digest/off modes, so a later switch to immediate doesn't blast history).
+func (r *Repo) MarkNotified(ctx context.Context, tenantID string, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE anomaly_events SET notified_at = NOW(), updated_at = NOW()
+		WHERE tenant_id = $1 AND id = ANY($2)`, tenantID, ids)
+	if err != nil {
+		return fmt.Errorf("anomaly mark notified: %w", err)
+	}
+	return nil
+}

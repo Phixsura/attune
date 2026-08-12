@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS anomaly_events (
         CONSTRAINT chk_anomaly_events_status CHECK (status IN ('open','resolved','retracted')),
     quality_action_id UUID REFERENCES feedback_quality_actions(id) ON DELETE SET NULL,
     evidence          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- notified_at makes notification delivery crash-safe: NEW events are
+    -- notified by a separate pass that marks them, so a worker crash
+    -- between event insert and delivery re-notifies on the next tick
+    -- instead of silently losing the alert (at-least-once).
+    notified_at       TIMESTAMPTZ,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     resolved_at       TIMESTAMPTZ,
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
