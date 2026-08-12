@@ -70,6 +70,23 @@ describe('AnomalyConfigPage', () => {
     })
   })
 
+  it('surfaces the server warning as a toast on save', async () => {
+    const { toast } = await import('sonner')
+    const warnSpy = vi.spyOn(toast, 'warning')
+    apiMock.mockResolvedValue({ config: sampleConfig })
+    const { user } = renderWithProviders(<AnomalyConfigPage />)
+    await waitFor(() => expect(screen.getByTestId('anomaly-config-page')).toBeInTheDocument())
+
+    apiMock.mockResolvedValue({
+      config: sampleConfig,
+      warning: 'detection is paused while historical volume is re-computed',
+    })
+    await user.click(screen.getByTestId('save-config'))
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('paused'), expect.anything())
+    })
+  })
+
   it('shows the empty state without custom slices', async () => {
     apiMock.mockResolvedValue({ config: { ...sampleConfig, customSlices: [] } })
     renderWithProviders(<AnomalyConfigPage />)

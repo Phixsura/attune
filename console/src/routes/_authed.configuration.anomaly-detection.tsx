@@ -41,7 +41,14 @@ export function AnomalyConfigPage() {
       { config: draft },
       {
         onError: (err) => toast.error(String(err)),
-        onSuccess: () => toast.success(t('anomalies.config.saved', 'Configuration saved')),
+        onSuccess: (resp) => {
+          toast.success(t('anomalies.config.saved', 'Configuration saved'))
+          // Server-side advisories (digest mode without a subscription,
+          // detection paused for re-backfill) ride the response warning.
+          if (resp.warning) {
+            toast.warning(resp.warning, { duration: 10_000 })
+          }
+        },
       },
     )
   }
