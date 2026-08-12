@@ -65,6 +65,7 @@ type repoAPI interface {
 	CountOn(ctx context.Context, tenantID, sliceType, sliceKey string, date time.Time) (int64, []int64, error)
 	DisableCustomSlice(ctx context.Context, tenantID string, id uuid.UUID, lastError string) error
 	UpsertHit(ctx context.Context, in anomalyrepo.HitInput) (anomalyrepo.Event, bool, error)
+	SetEvidence(ctx context.Context, eventID uuid.UUID, evidenceJSON string) error
 	SetQualityAction(ctx context.Context, eventID uuid.UUID, actionID string) error
 	ListOpenEvents(ctx context.Context, tenantID string) ([]anomalyrepo.Event, error)
 	ResolveEvent(ctx context.Context, tenantID string, id uuid.UUID) error
@@ -409,20 +410,21 @@ type notifyCandidate struct {
 }
 
 // applyHit persists one verdict: event upsert, quality action on NEW,
-// notification candidate assembly.
+// notification candidate assembly. Evidence (a multi-query contribution
+// breakdown) is computed only for NEW events — ongoing hits keep their
+// first-occurrence evidence, so computing it up front wasted ~9 queries
+// per slice per day for the lifetime of every long-running anomaly.
 func (w *Worker) applyHit(
 	ctx context.Context, tenantID string, loc *time.Location, cfg anomalyrepo.Config,
 	slice anomalyrepo.SliceRef, date time.Time, observed int64, samples []int64,
 	verdict Verdict, baseline []time.Time,
 ) (notifyCandidate, bool, error) {
-	evidence := w.buildEvidence(ctx, tenantID, loc, slice, date, observed, verdict, baseline, samples)
 	event, isNew, err := w.repo.UpsertHit(ctx, anomalyrepo.HitInput{
 		TenantID: tenantID, SliceType: slice.Type, SliceKey: slice.Key,
 		SliceDisplay: slice.Display, Direction: verdict.Direction,
 		BucketDate: date, Observed: observed,
 		ExpectedMed: verdict.ExpectedMed, ExpectedLow: verdict.ExpectedLow,
 		ExpectedHigh: verdict.ExpectedHigh, Z: verdict.Z,
-		EvidenceJSON: evidence,
 	})
 	if err != nil {
 		return notifyCandidate{}, false, err
@@ -430,6 +432,12 @@ func (w *Worker) applyHit(
 	if !isNew {
 		return notifyCandidate{}, false, nil // ongoing: no action churn, no re-notify
 	}
+	evidence := w.buildEvidence(ctx, tenantID, loc, slice, date, observed, verdict, baseline, samples)
+	if err := w.repo.SetEvidence(ctx, event.ID, evidence); err != nil {
+		logext.Warnf(ctx, "[service.anomaly.Worker] evidence write failed,tenant:%s,err:%+v",
+			tenantID, err.Error())
+	}
+	event.EvidenceJSON = evidence
 	metrics.AnomalyEventsCreatedTotal.WithLabelValues(tenantID, verdict.Direction).Inc()
 	if err := w.upsertQualityAction(ctx, tenantID, event, verdict, cfg); err != nil {
 		logext.Errorf(ctx, "[service.anomaly.Worker] quality action failed,tenant:%s,err:%+v",

@@ -285,3 +285,16 @@ func (r *Repo) FilterLiveFeedbackIDs(ctx context.Context, tenantID string, ids [
 	}
 	return out, rows.Err()
 }
+
+// SetEvidence writes the evidence document for one event. Split from
+// UpsertHit so the worker can skip the (multi-query) contribution
+// computation entirely for ongoing hits, which never store new evidence.
+func (r *Repo) SetEvidence(ctx context.Context, eventID uuid.UUID, evidenceJSON string) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE anomaly_events SET evidence = $2::jsonb, updated_at = NOW()
+		WHERE id = $1`, eventID, nonEmptyJSON(evidenceJSON))
+	if err != nil {
+		return fmt.Errorf("anomaly set evidence: %w", err)
+	}
+	return nil
+}

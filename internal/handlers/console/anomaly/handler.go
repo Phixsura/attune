@@ -27,11 +27,14 @@ import (
 const (
 	defaultSeriesDays = 90
 	maxSeriesDays     = 180
-	defaultListLimit  = 50
-	maxListLimit      = 200
-	maxCustomSlices   = 20
-	maxConditions     = 3
-	maxConditionVals  = 10
+	// seriesMinBaselinePoints mirrors the worker's gate so chart verdicts
+	// replay identically.
+	seriesMinBaselinePoints = 4
+	defaultListLimit        = 50
+	maxListLimit            = 200
+	maxCustomSlices         = 20
+	maxConditions           = 3
+	maxConditionVals        = 10
 )
 
 // store is the repo slice these handlers consume.
@@ -40,7 +43,6 @@ type store interface {
 	FilterLiveFeedbackIDs(ctx context.Context, tenantID string, ids []int64) ([]int64, error)
 	GetEvent(ctx context.Context, tenantID string, id uuid.UUID) (*anomalyrepo.Event, error)
 	BaselineCounts(ctx context.Context, tenantID, sliceType, sliceKey string, dates []time.Time) ([]int64, error)
-	CountOn(ctx context.Context, tenantID, sliceType, sliceKey string, date time.Time) (int64, []int64, error)
 	GetConfig(ctx context.Context, tenantID string) (anomalyrepo.Config, error)
 	UpsertConfig(ctx context.Context, cfg anomalyrepo.Config, updatedBy string) error
 	ListCustomSlices(ctx context.Context, tenantID string) ([]anomalyrepo.StoredCustomSlice, error)
@@ -171,7 +173,10 @@ func (h *Handler) GetAnomalySeries(
 }
 
 // replaySeries builds per-day points by running the same Detect the worker
-// uses over each day's same-weekday baseline.
+// uses over each day's same-weekday baseline. The full window plus its
+// deepest baseline (days + 56) is fetched in ONE BaselineCounts call and
+// replayed from memory — the previous per-day reads issued 2 queries per
+// point (~180 for the default 90-day window).
 func (h *Handler) replaySeries(
 	ctx context.Context, tenantID, sliceType, sliceKey string,
 	days int, loc *time.Location, cfg anomalyrepo.Config,
@@ -179,26 +184,35 @@ func (h *Handler) replaySeries(
 	detCfg := anomalysvc.DetectorConfig{
 		ZThreshold:        anomalysvc.ZThresholdFor(cfg.Sensitivity),
 		MinCount:          int64(cfg.MinCount),
-		MinBaselinePoints: 4,
+		MinBaselinePoints: seriesMinBaselinePoints,
 	}
 	now := time.Now().In(loc)
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+
+	// One contiguous span: [today − (days−1) − 56, today].
+	spanDays := days + 7*8
+	dates := make([]time.Time, 0, spanDays)
+	for i := spanDays - 1; i >= 0; i-- {
+		dates = append(dates, today.AddDate(0, 0, -i))
+	}
+	counts, err := h.store.BaselineCounts(ctx, tenantID, sliceType, sliceKey, dates)
+	if err != nil {
+		return nil, "", err
+	}
+	countAt := make(map[string]int64, len(dates))
+	for i, d := range dates {
+		countAt[d.Format("2006-01-02")] = counts[i]
+	}
+
 	points := make([]*attunev1.SeriesPoint, 0, days)
 	for i := days - 1; i >= 0; i-- {
 		day := today.AddDate(0, 0, -i)
-		baseline := make([]time.Time, 0, 8)
+		baseline := make([]int64, 0, 8)
 		for week := 8; week >= 1; week-- {
-			baseline = append(baseline, day.AddDate(0, 0, -7*week))
+			baseline = append(baseline, countAt[day.AddDate(0, 0, -7*week).Format("2006-01-02")])
 		}
-		counts, err := h.store.BaselineCounts(ctx, tenantID, sliceType, sliceKey, baseline)
-		if err != nil {
-			return nil, "", err
-		}
-		observed, _, err := h.store.CountOn(ctx, tenantID, sliceType, sliceKey, day)
-		if err != nil {
-			return nil, "", err
-		}
-		verdict := anomalysvc.Detect(counts, observed, detCfg)
+		observed := countAt[day.Format("2006-01-02")]
+		verdict := anomalysvc.Detect(baseline, observed, detCfg)
 		points = append(points, ptrext.Of(attunev1.SeriesPoint{
 			Date:         day.Format("2006-01-02"),
 			Count:        observed,
