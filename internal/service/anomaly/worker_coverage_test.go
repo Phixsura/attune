@@ -564,3 +564,36 @@ func TestWorkerDigestModeMarksWithoutSending(t *testing.T) {
 		t.Fatalf("mode switch must not blast stamped history, sent=%d", len(snd.sent))
 	}
 }
+
+// TestWorkerDisabledTenantStillReconciles: disabling detection must not
+// freeze pre-existing open events — they keep aging toward auto-resolve,
+// or the control-tower risk card shows a stale anomaly forever.
+func TestWorkerDisabledTenantStillReconciles(t *testing.T) {
+	cfg := baseConfig()
+	cfg.DetectionEnabled = false
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: cfg})
+	repo.counts = map[string]int64{}
+	oldSpike := time.Date(2026, 8, 5, 0, 0, 0, 0, time.UTC)
+	for d := 0; d <= 5; d++ {
+		dd := oldSpike.AddDate(0, 0, d)
+		for week := 1; week <= 8; week++ {
+			repo.counts["total|"+dd.AddDate(0, 0, -7*week).Format("2006-01-02")] = 12
+		}
+		repo.counts["total|"+dd.Format("2006-01-02")] = 12 // all quiet now
+	}
+	repo.openEvents = []anomalyrepo.Event{{
+		ID: uuid.New(), TenantID: "t1", SliceType: "total", SliceKey: "total",
+		Direction: "spike", Status: "open",
+		FirstBucketDate: oldSpike, LastBucketDate: oldSpike,
+	}}
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.ProcessOnce(context.Background(), fixedNow)
+
+	if len(repo.recomputeCalls) != 0 || len(repo.hits) != 0 {
+		t.Fatal("disabled tenant must not recompute or detect")
+	}
+	if len(repo.resolved) != 1 {
+		t.Fatalf("open event must still age to resolution, resolved=%d", len(repo.resolved))
+	}
+}

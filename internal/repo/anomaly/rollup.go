@@ -609,3 +609,43 @@ func (r *Repo) groupCountsOneDay(
 	}
 	return out, rows.Err()
 }
+
+// SeriesCount is one slice's count on one date, from a bulk window read.
+type SeriesCount struct {
+	SliceType  string
+	SliceKey   string
+	BucketDate time.Time
+	Count      int64
+	SampleIDs  []int64
+}
+
+// WindowCounts bulk-reads every bucket for the given dates in ONE query —
+// the per-slice BaselineCounts/CountOn loop issued 2 queries per slice
+// (2×500 per date at the slice cap; ×14 dates under catch-up ≈ 14k).
+// Missing (slice, date) pairs are simply absent; callers zero-fill.
+func (r *Repo) WindowCounts(
+	ctx context.Context, tenantID string, enabled []string, dates []time.Time,
+) ([]SeriesCount, error) {
+	strs := make([]string, len(dates))
+	for i, d := range dates {
+		strs[i] = dateStr(d)
+	}
+	rows, err := r.pool.Query(ctx, `
+		SELECT slice_type, slice_key, bucket_date, feedback_count, sample_feedback_ids
+		FROM feedback_volume_buckets
+		WHERE tenant_id = $1 AND slice_type = ANY($2) AND bucket_date = ANY($3::date[])`,
+		tenantID, enabled, strs)
+	if err != nil {
+		return nil, fmt.Errorf("anomaly window counts: %w", err)
+	}
+	defer rows.Close()
+	var out []SeriesCount
+	for rows.Next() {
+		var c SeriesCount
+		if err := rows.Scan(&c.SliceType, &c.SliceKey, &c.BucketDate, &c.Count, &c.SampleIDs); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

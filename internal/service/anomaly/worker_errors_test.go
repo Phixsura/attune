@@ -57,6 +57,13 @@ func (f *failingRepo) BaselineCounts(ctx context.Context, t, st, sk string, date
 	return f.fakeRepo.BaselineCounts(ctx, t, st, sk, dates)
 }
 
+func (f *failingRepo) WindowCounts(ctx context.Context, t string, e []string, dates []time.Time) ([]anomalyrepo.SeriesCount, error) {
+	if f.failBaseline {
+		return nil, errBoom
+	}
+	return f.fakeRepo.WindowCounts(ctx, t, e, dates)
+}
+
 func (f *failingRepo) UpsertHit(ctx context.Context, in anomalyrepo.HitInput) (anomalyrepo.Event, bool, error) {
 	if f.failUpsertHit {
 		return anomalyrepo.Event{}, false, errBoom

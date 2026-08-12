@@ -116,6 +116,21 @@ func (f *fakeRepo) SlicesForDetection(context.Context, string, []string, time.Ti
 	return f.slices, nil
 }
 
+func (f *fakeRepo) WindowCounts(_ context.Context, _ string, _ []string, dates []time.Time) ([]anomalyrepo.SeriesCount, error) {
+	var out []anomalyrepo.SeriesCount
+	for _, slice := range f.slices {
+		for _, d := range dates {
+			if c, ok := f.counts[slice.Key+"|"+d.Format("2006-01-02")]; ok {
+				out = append(out, anomalyrepo.SeriesCount{
+					SliceType: slice.Type, SliceKey: slice.Key,
+					BucketDate: d, Count: c, SampleIDs: []int64{1, 2},
+				})
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeRepo) BaselineCounts(_ context.Context, _, _, sliceKey string, dates []time.Time) ([]int64, error) {
 	out := make([]int64, len(dates))
 	for i, d := range dates {

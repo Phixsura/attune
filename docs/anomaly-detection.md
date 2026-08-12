@@ -96,6 +96,13 @@ A per-tick fuse caps delivery at 20 events (top |z|) plus one summary.
    fast-growing tenant still alerts, lower sensitivity to `low`.
 5. **Data corrections** — GDPR deletions or backfills that erase a spike
    retract the event automatically on the next recompute.
+6. **Long-lived level shifts** — an anomaly that persists 4+ weeks starts
+   entering its own same-weekday baselines; after ~8 weeks the median
+   adopts the new level and the event auto-resolves as the new normal.
+   This is intentional (a two-month-old "spike" is a level shift, not an
+   incident) and matches how seasonal detectors like Datadog's agile
+   algorithm treat sustained shifts. Acknowledge the quality action if the
+   shift needs human follow-up beyond that horizon.
 
 ## Operations
 

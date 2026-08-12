@@ -66,6 +66,7 @@ type repoAPI interface {
 	MarkRunDone(ctx context.Context, tenantID string, date time.Time, owner string) error
 	MarkRunFailed(ctx context.Context, tenantID string, date time.Time, owner string, runErr error) error
 	SlicesForDetection(ctx context.Context, tenantID string, enabled []string, detectDate time.Time, baselineDates []time.Time) ([]anomalyrepo.SliceRef, error)
+	WindowCounts(ctx context.Context, tenantID string, enabled []string, dates []time.Time) ([]anomalyrepo.SeriesCount, error)
 	BaselineCounts(ctx context.Context, tenantID, sliceType, sliceKey string, dates []time.Time) ([]int64, error)
 	CountOn(ctx context.Context, tenantID, sliceType, sliceKey string, date time.Time) (int64, []int64, error)
 	DisableCustomSlice(ctx context.Context, tenantID string, id uuid.UUID, lastError string) error
@@ -233,7 +234,15 @@ func (w *Worker) processTenant(
 		return tenantResult{}, err
 	}
 	if !cfg.DetectionEnabled {
-		return tenantResult{}, nil
+		// No detection, recompute, or notification — but reconciliation
+		// still runs: open events from before the disable must keep aging
+		// toward auto-resolve, or they freeze on the control tower forever
+		// (frozen buckets judge quiet once days pass, so the streak fires).
+		loc, err := time.LoadLocation(tenant.Timezone)
+		if err != nil {
+			loc = time.UTC
+		}
+		return tenantResult{}, w.reconcile(ctx, tenant.ID, loc, cfg, now)
 	}
 	loc, err := time.LoadLocation(tenant.Timezone)
 	if err != nil {
@@ -410,16 +419,35 @@ func (w *Worker) detectOneDate(
 		MinCount:          int64(cfg.MinCount),
 		MinBaselinePoints: minBaselinePoints,
 	}
+	// One bulk read for the date + its 8 baselines replaces 2 queries per
+	// slice (2×500 at the slice cap, ×14 dates under catch-up ≈ 14k).
+	windowDates := append(append([]time.Time{}, baseline...), date)
+	series, err := w.repo.WindowCounts(ctx, tenantID, cfg.EnabledSliceTypes, windowDates)
+	if err != nil {
+		return err
+	}
+	type cell struct {
+		count   int64
+		samples []int64
+	}
+	byKey := make(map[string]map[string]cell, len(slices))
+	for _, sc := range series {
+		k := sc.SliceType + "/" + sc.SliceKey
+		if byKey[k] == nil {
+			byKey[k] = make(map[string]cell, len(windowDates))
+		}
+		byKey[k][sc.BucketDate.Format("2006-01-02")] = cell{count: sc.Count, samples: sc.SampleIDs}
+	}
+	dateKey := date.Format("2006-01-02")
 	for _, slice := range slices {
 		metrics.AnomalyDetectSlicesTotal.WithLabelValues(tenantID).Inc()
-		counts, err := w.repo.BaselineCounts(ctx, tenantID, slice.Type, slice.Key, baseline)
-		if err != nil {
-			return err
+		cells := byKey[slice.Type+"/"+slice.Key]
+		counts := make([]int64, len(baseline))
+		for i, b := range baseline {
+			counts[i] = cells[b.Format("2006-01-02")].count // zero when absent
 		}
-		observed, samples, err := w.repo.CountOn(ctx, tenantID, slice.Type, slice.Key, date)
-		if err != nil {
-			return err
-		}
+		observed := cells[dateKey].count
+		samples := cells[dateKey].samples
 		verdict := Detect(counts, observed, detCfg)
 		if verdict.Direction == "" {
 			continue
