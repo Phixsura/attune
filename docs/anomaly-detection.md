@@ -63,6 +63,13 @@ ledger; it is never auto-resolved.
 
 Zero configuration is safe: defaults apply to every active tenant.
 
+Switching `notify_mode` mid-flight is safe in both directions: events
+delivered (or intentionally skipped) under the old mode are stamped, so
+a switch to `immediate` never replays history. One benign overlap: an
+event webhooked under `immediate` that is still open when you switch to
+`digest` appears once in the next digest — the digest reports open
+state, not deliveries.
+
 ## Notifications
 
 Immediate mode delivers to the tenant's `radar`-audience notify targets.

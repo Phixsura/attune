@@ -243,13 +243,14 @@ func TestRenderMarkdownThemes_WithDeepLink(t *testing.T) {
 
 func TestRenderMarkdownAnomaliesSection(t *testing.T) {
 	view := DigestView{
-		TenantID: "t1",
-		RunDate:  "2026-08-10",
+		TenantID:     "t1",
+		RunDate:      "2026-08-10",
+		DeepLinkBase: "https://app.example.com",
 		Result: Result{
 			Tier:  TierThemeless,
 			Stats: feedback.DigestWindowStats{Total: 3},
 			Anomalies: []AnomalySummary{
-				{SliceDisplay: "severity=critical", Direction: "spike", Observed: 31, ExpectedMed: 12},
+				{SliceDisplay: "severity=critical", Direction: "spike", Observed: 31, ExpectedMed: 12, EventID: "ev-1"},
 				{SliceDisplay: "zendesk", Direction: "drop", Observed: 0, ExpectedMed: 9},
 			},
 		},
@@ -263,6 +264,14 @@ func TestRenderMarkdownAnomaliesSection(t *testing.T) {
 	}
 	if !strings.Contains(md, "[DROP] zendesk: observed 0 vs expected 9") {
 		t.Fatalf("drop line missing:\n%s", md)
+	}
+	// Lines deep-link to the event (theme/item precedent); a summary
+	// without an event id gets no dangling link.
+	if !strings.Contains(md, "[→](https://app.example.com/analytics/anomalies?event=ev-1)") {
+		t.Fatalf("anomaly deep link missing:\n%s", md)
+	}
+	if strings.Contains(md, "?event=)") {
+		t.Fatalf("missing event id must not render an empty link:\n%s", md)
 	}
 
 	// Section omitted entirely when no anomalies.

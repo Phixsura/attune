@@ -205,13 +205,15 @@ func renderMarkdown(view DigestView) string {
 		fmt.Fprintf(&b, "\n+%d unclustered\n", res.Stats.Unclustered)
 	}
 
-	b.WriteString(renderMarkdownAnomalies(res.Anomalies))
+	b.WriteString(renderMarkdownAnomalies(res.Anomalies, view.DeepLinkBase))
 
 	return b.String()
 }
 
 // renderMarkdownAnomalies renders the optional anomaly section (#237).
-func renderMarkdownAnomalies(anomalies []AnomalySummary) string {
+// Each line deep-links to the event like themes/items deep-link to
+// feedback — the digest reader's next step is always "investigate".
+func renderMarkdownAnomalies(anomalies []AnomalySummary, deepLinkBase string) string {
 	if len(anomalies) == 0 {
 		return ""
 	}
@@ -222,8 +224,12 @@ func renderMarkdownAnomalies(anomalies []AnomalySummary) string {
 		if a.Direction == "drop" {
 			marker = "DROP"
 		}
-		fmt.Fprintf(&b, "- [%s] %s: observed %d vs expected %.0f\n",
+		fmt.Fprintf(&b, "- [%s] %s: observed %d vs expected %.0f",
 			marker, a.SliceDisplay, a.Observed, a.ExpectedMed)
+		if deepLinkBase != "" && a.EventID != "" {
+			fmt.Fprintf(&b, " [→](%s/analytics/anomalies?event=%s)", deepLinkBase, a.EventID)
+		}
+		b.WriteByte('\n')
 	}
 	return b.String()
 }
