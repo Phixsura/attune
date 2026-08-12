@@ -235,16 +235,22 @@ type DigestAnomaly struct {
 }
 
 // OpenDigestAnomaliesInWindow lists open events whose last bucket falls in
-// [from, to) — the digest section source.
+// [from, to) — the digest section source. Only tenants whose anomaly
+// notify_mode is 'digest' get the section: 'immediate' tenants were
+// already webhooked (a digest repeat is double delivery) and 'off'
+// tenants explicitly opted out of anomaly notifications. Tenants without
+// a config row default to 'immediate' and are therefore excluded.
 func (r *Repo) OpenDigestAnomaliesInWindow(
 	ctx context.Context, tenantID string, from, to time.Time,
 ) ([]DigestAnomaly, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT slice_display, direction, observed, expected_med, id::text
-		FROM anomaly_events
-		WHERE tenant_id = $1 AND status = 'open'
-		  AND last_bucket_date >= $2::date AND last_bucket_date < $3::date
-		ORDER BY ABS(z_score) DESC
+		SELECT e.slice_display, e.direction, e.observed, e.expected_med, e.id::text
+		FROM anomaly_events e
+		JOIN tenant_anomaly_configs c ON c.tenant_id = e.tenant_id
+		WHERE e.tenant_id = $1 AND e.status = 'open'
+		  AND c.notify_mode = 'digest'
+		  AND e.last_bucket_date >= $2::date AND e.last_bucket_date < $3::date
+		ORDER BY ABS(e.z_score) DESC
 		LIMIT 10`, tenantID, dateStr(from), dateStr(to))
 	if err != nil {
 		return nil, fmt.Errorf("anomaly digest window: %w", err)

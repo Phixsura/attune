@@ -209,3 +209,37 @@ func TestPG_RunClaims(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, free, 1)
 }
+
+func TestPG_DigestAnomaliesRespectNotifyMode(t *testing.T) {
+	pool := testdb.NewPool(t)
+	repo := anomalyrepo.New(pool)
+	ctx := context.Background()
+	tenantID := freshTenant(t, pool)
+
+	_, _, err := repo.UpsertHit(ctx, hitInput(tenantID, "2026-08-10", 31))
+	require.NoError(t, err)
+	from, _ := time.Parse("2006-01-02", "2026-08-10")
+	to := from.AddDate(0, 0, 1)
+
+	// No config row (defaults to immediate): the digest must stay empty —
+	// immediate tenants were already webhooked.
+	out, err := repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from, to)
+	require.NoError(t, err)
+	require.Empty(t, out, "default (immediate) tenants must not get the digest section")
+
+	// Explicit off: still empty (opted out entirely).
+	cfg := anomalyrepo.DefaultConfig(tenantID)
+	cfg.NotifyMode = anomalyrepo.NotifyOff
+	require.NoError(t, repo.UpsertConfig(ctx, cfg, "test"))
+	out, err = repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from, to)
+	require.NoError(t, err)
+	require.Empty(t, out, "off tenants opted out of anomaly notifications")
+
+	// Digest mode: the section appears.
+	cfg.NotifyMode = anomalyrepo.NotifyDigest
+	require.NoError(t, repo.UpsertConfig(ctx, cfg, "test"))
+	out, err = repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from, to)
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Equal(t, "spike", out[0].Direction)
+}
