@@ -25,13 +25,13 @@ export function AnomalySeriesChart({ points, height = 220 }: AnomalySeriesChartP
     PAD.left + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW)
   const y = (v: number) => PAD.top + innerH - (v / maxY) * innerH
 
-  const banded = points.filter((p) => !p.insufficient)
+  const banded = points.map((p, i) => ({ i, p })).filter(({ p }) => !p.insufficient)
   const bandPath =
     banded.length > 1
-      ? `M ${banded.map((p) => `${x(points.indexOf(p))} ${y(p.expectedHigh)}`).join(' L ')} L ${banded
+      ? `M ${banded.map(({ i, p }) => `${x(i)} ${y(p.expectedHigh)}`).join(' L ')} L ${banded
           .slice()
           .reverse()
-          .map((p) => `${x(points.indexOf(p))} ${y(p.expectedLow)}`)
+          .map(({ i, p }) => `${x(i)} ${y(p.expectedLow)}`)
           .join(' L ')} Z`
       : ''
   const linePath = points

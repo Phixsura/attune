@@ -58,7 +58,7 @@ ledger; it is never auto-resolved.
 | min_count | 10 | absolute observed floor for spikes; 0 disables the guard |
 | settle_delay_hours | 3 | wait after day close before judging (late-arriving data) |
 | enabled slice types | all | drop detection excludes `cluster` by default (reclustering reassigns ids) |
-| notify_mode | immediate | `digest` folds new events into the daily digest; `off` keeps Console-only |
+| notify_mode | immediate | `digest` folds new events into the daily digest; `off` keeps Console-only. In digest mode, open anomalies force the digest to send even on a window with zero feedback — a collapsed stream is exactly the drop worth hearing about |
 | custom slices | none | ≤20, each 1–3 AND-ed conditions over source / dimension / cohort |
 
 Zero configuration is safe: defaults apply to every active tenant.

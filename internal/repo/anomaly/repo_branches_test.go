@@ -139,7 +139,7 @@ func TestGetEventHappyPath(t *testing.T) {
 
 func TestSetEvidenceHappyPath(t *testing.T) {
 	pool := ptrext.Of(fakePool{})
-	if err := poolRepo(pool).SetEvidence(context.Background(), uuid.New(), ""); err != nil {
+	if err := poolRepo(pool).SetEvidence(context.Background(), "t1", uuid.New(), ""); err != nil {
 		t.Fatalf("SetEvidence: %v", err)
 	}
 	// Empty evidence must be normalized to a valid JSON object.

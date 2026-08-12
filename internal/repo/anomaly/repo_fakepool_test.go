@@ -272,7 +272,7 @@ func TestEventMutationsExec(t *testing.T) {
 	r := ptrext.Of(Repo{pool: pool})
 	ctx := context.Background()
 	id := uuid.New()
-	if err := r.SetQualityAction(ctx, id, uuid.NewString()); err != nil {
+	if err := r.SetQualityAction(ctx, "t1", id, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.ResolveEvent(ctx, "t1", id); err != nil {

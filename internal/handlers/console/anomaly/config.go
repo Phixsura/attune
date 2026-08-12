@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -75,10 +76,19 @@ func (h *Handler) UpdateAnomalyConfig(
 		return dispatcher.Fail[*attunev1.UpdateAnomalyConfigResponse](
 			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION, err.Error())
 	}
+	// Series-cap guard. Deliberately fail-open on a read error: the cap is
+	// a soft quality guard (the worker's per-tick slice cap is the hard
+	// backstop), and a transient DB error must not brick the config page.
+	// The count measures ALREADY-MATERIALIZED series (the outgoing
+	// config's footprint), so a shrinking change — fewer slice types or
+	// custom slices than currently stored — must pass: it is the only way
+	// an over-cap tenant can dig itself back out.
 	if count, err := h.store.CountRecentSliceKeys(ctx, ctx.Auth.TenantID, 30); err == nil && count > maxConfiguredSeries {
-		return dispatcher.Fail[*attunev1.UpdateAnomalyConfigResponse](
-			http.StatusBadRequest, attunev1.ErrorCode_VALIDATION,
-			fmt.Sprintf("configuration produces %d monitored series over the last 30 days (max %d) — disable slice types or remove custom slices", count, maxConfiguredSeries))
+		if !isShrinkingConfig(ctx, h, cfg, slices) {
+			return dispatcher.Fail[*attunev1.UpdateAnomalyConfigResponse](
+				http.StatusBadRequest, attunev1.ErrorCode_VALIDATION,
+				fmt.Sprintf("configuration produces %d monitored series over the last 30 days (max %d) — disable slice types or remove custom slices", count, maxConfiguredSeries))
+		}
 	}
 	if err := h.store.UpsertConfig(ctx, cfg, ctx.Auth.UserID); err != nil {
 		logext.Errorf(ctx, "[%s] upsert failed,tenant_id:%s,err:%+v", where, ctx.Auth.TenantID, err.Error())
@@ -98,8 +108,11 @@ func (h *Handler) UpdateAnomalyConfig(
 			http.StatusInternalServerError, attunev1.ErrorCode_INTERNAL, "failed to reload anomaly config")
 	}
 	return dispatcher.OK(ptrext.Of(attunev1.UpdateAnomalyConfigResponse{
-		Config:  configToProto(saved, savedSlices),
-		Warning: h.digestModeWarning(ctx, ctx.Auth.TenantID, cfg.NotifyMode),
+		Config: configToProto(saved, savedSlices),
+		Warning: joinWarnings(
+			h.digestModeWarning(ctx, ctx.Auth.TenantID, cfg.NotifyMode),
+			backfillWarning(saved),
+		),
 	}))
 }
 
@@ -143,6 +156,69 @@ func (h *Handler) recordAudit(
 		Summary:    "anomaly detection configuration updated",
 		After:      after,
 	})
+}
+
+// isShrinkingConfig reports whether the submitted config STRICTLY reduces
+// what the stored config monitors: no new slice types, no more enabled
+// custom slices, and at least one of the two actually smaller. Strictly
+// shrinking changes bypass the series cap so an over-cap tenant can dig
+// itself back out through the Console; re-submitting the same over-cap
+// config is still rejected.
+func isShrinkingConfig(
+	ctx context.Context, h *Handler,
+	cfg anomalyrepo.Config, slices []anomalyrepo.StoredCustomSlice,
+) bool {
+	stored, err := h.store.GetConfig(ctx, cfg.TenantID)
+	if err != nil {
+		return false
+	}
+	storedEnabled := map[string]bool{}
+	for _, t := range stored.EnabledSliceTypes {
+		storedEnabled[t] = true
+	}
+	for _, t := range cfg.EnabledSliceTypes {
+		if !storedEnabled[t] {
+			return false // enables a new slice type: growing
+		}
+	}
+	storedSlices, err := h.store.ListCustomSlices(ctx, cfg.TenantID)
+	if err != nil {
+		return false
+	}
+	enabledCount := func(in []anomalyrepo.StoredCustomSlice) int {
+		n := 0
+		for _, s := range in {
+			if s.Enabled {
+				n++
+			}
+		}
+		return n
+	}
+	fewerTypes := len(cfg.EnabledSliceTypes) < len(stored.EnabledSliceTypes)
+	fewerCustom := enabledCount(slices) < enabledCount(storedSlices)
+	noMoreCustom := enabledCount(slices) <= enabledCount(storedSlices)
+	return noMoreCustom && (fewerTypes || fewerCustom)
+}
+
+// backfillWarning tells the operator detection pauses until the worker
+// re-backfills under the new settings (§7: BackfillVersion must catch up
+// to ConfigVersion before any date is judged).
+func backfillWarning(cfg anomalyrepo.Config) string {
+	if cfg.BackfillVersion == cfg.ConfigVersion {
+		return ""
+	}
+	return "detection is paused while historical volume is re-computed under the new settings — it resumes automatically within the next worker cycles"
+}
+
+// joinWarnings concatenates non-empty warnings with a separator.
+func joinWarnings(ws ...string) string {
+	var out []string
+	for _, w := range ws {
+		if w != "" {
+			out = append(out, w)
+		}
+	}
+	return strings.Join(out, " · ")
 }
 
 // digestModeWarning returns the spec §9 advisory: digest notify mode with

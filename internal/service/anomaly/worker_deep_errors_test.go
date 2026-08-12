@@ -57,11 +57,11 @@ func (f *failingRepo2) MarkRunDone(ctx context.Context, t string, d time.Time, o
 	return f.fakeRepo.MarkRunDone(ctx, t, d, o)
 }
 
-func (f *failingRepo2) SetEvidence(ctx context.Context, id uuid.UUID, e string) error {
+func (f *failingRepo2) SetEvidence(ctx context.Context, t string, id uuid.UUID, e string) error {
 	if f.failSetEvidence {
 		return errBoom
 	}
-	return f.fakeRepo.SetEvidence(ctx, id, e)
+	return f.fakeRepo.SetEvidence(ctx, t, id, e)
 }
 
 func (f *failingRepo2) GroupCountsByAxis(ctx context.Context, t string, loc *time.Location, c []anomalyrepo.CustomCondition, a anomalyrepo.GroupByAxis, d time.Time, b []time.Time) ([]anomalyrepo.GroupCountRow, error) {

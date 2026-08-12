@@ -71,8 +71,8 @@ type repoAPI interface {
 	CountOn(ctx context.Context, tenantID, sliceType, sliceKey string, date time.Time) (int64, []int64, error)
 	DisableCustomSlice(ctx context.Context, tenantID string, id uuid.UUID, lastError string) error
 	UpsertHit(ctx context.Context, in anomalyrepo.HitInput) (anomalyrepo.Event, bool, error)
-	SetEvidence(ctx context.Context, eventID uuid.UUID, evidenceJSON string) error
-	SetQualityAction(ctx context.Context, eventID uuid.UUID, actionID string) error
+	SetEvidence(ctx context.Context, tenantID string, eventID uuid.UUID, evidenceJSON string) error
+	SetQualityAction(ctx context.Context, tenantID string, eventID uuid.UUID, actionID string) error
 	ListOpenEvents(ctx context.Context, tenantID string) ([]anomalyrepo.Event, error)
 	ListUnnotifiedOpenEvents(ctx context.Context, tenantID string) ([]anomalyrepo.Event, error)
 	MarkNotified(ctx context.Context, tenantID string, ids []uuid.UUID) error
@@ -487,7 +487,7 @@ func (w *Worker) applyHit(
 		return nil // ongoing: no action churn, no re-notify
 	}
 	evidence := w.buildEvidence(ctx, tenantID, loc, slice, date, observed, verdict, baseline, samples)
-	if err := w.repo.SetEvidence(ctx, event.ID, evidence); err != nil {
+	if err := w.repo.SetEvidence(ctx, tenantID, event.ID, evidence); err != nil {
 		logext.Warnf(ctx, "[service.anomaly.Worker] evidence write failed,tenant:%s,err:%+v",
 			tenantID, err.Error())
 	}
@@ -623,7 +623,7 @@ func (w *Worker) upsertQualityAction(
 	if err != nil {
 		return err
 	}
-	return w.repo.SetQualityAction(ctx, event.ID, action.ID)
+	return w.repo.SetQualityAction(ctx, tenantID, event.ID, action.ID)
 }
 
 // notifyPending drains the unnotified-open-event queue: crash-safe

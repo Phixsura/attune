@@ -137,10 +137,12 @@ func nonEmptyJSON(s string) string {
 }
 
 // SetQualityAction links the event to its control-tower quality action.
-func (r *Repo) SetQualityAction(ctx context.Context, eventID uuid.UUID, actionID string) error {
+// tenantID scopes the write like every other event mutation — defense in
+// depth even though current callers only pass same-process event ids.
+func (r *Repo) SetQualityAction(ctx context.Context, tenantID string, eventID uuid.UUID, actionID string) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE anomaly_events SET quality_action_id = $2::uuid, updated_at = NOW()
-		WHERE id = $1`, eventID, actionID)
+		UPDATE anomaly_events SET quality_action_id = $3::uuid, updated_at = NOW()
+		WHERE tenant_id = $1 AND id = $2`, tenantID, eventID, actionID)
 	if err != nil {
 		return fmt.Errorf("anomaly set quality action: %w", err)
 	}
@@ -295,10 +297,10 @@ func (r *Repo) FilterLiveFeedbackIDs(ctx context.Context, tenantID string, ids [
 // SetEvidence writes the evidence document for one event. Split from
 // UpsertHit so the worker can skip the (multi-query) contribution
 // computation entirely for ongoing hits, which never store new evidence.
-func (r *Repo) SetEvidence(ctx context.Context, eventID uuid.UUID, evidenceJSON string) error {
+func (r *Repo) SetEvidence(ctx context.Context, tenantID string, eventID uuid.UUID, evidenceJSON string) error {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE anomaly_events SET evidence = $2::jsonb, updated_at = NOW()
-		WHERE id = $1`, eventID, nonEmptyJSON(evidenceJSON))
+		UPDATE anomaly_events SET evidence = $3::jsonb, updated_at = NOW()
+		WHERE tenant_id = $1 AND id = $2`, tenantID, eventID, nonEmptyJSON(evidenceJSON))
 	if err != nil {
 		return fmt.Errorf("anomaly set evidence: %w", err)
 	}

@@ -76,3 +76,29 @@ func TestWindowAnomaliesNilReader(t *testing.T) {
 		t.Fatalf("nil reader must yield nil, got %+v", got)
 	}
 }
+
+func TestAggregateAnomalyOverridesSkip(t *testing.T) {
+	// Zero enriched feedback, SendOnEmpty=false — normally TierSkip. An
+	// open drop anomaly must force a send: the dead stream IS the news.
+	agg := NewAggregator(fakeClusters{}, fakeFeedback{}, fakeNamer{})
+	agg.SetAnomalyReader(ptrext.Of(fakeAnomalyReader{rows: []AnomalySummary{{
+		SliceDisplay: "All feedback", Direction: "drop", Observed: 0, ExpectedMed: 40, EventID: "e-drop",
+	}}}))
+	res, err := agg.Aggregate(context.Background(),
+		AggInput{TenantID: "t", LLMMin: 6}, time.Now().Add(-24*time.Hour), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Tier != TierThemeless || len(res.Anomalies) != 1 {
+		t.Fatalf("open anomaly must override skip: tier=%v anomalies=%d", res.Tier, len(res.Anomalies))
+	}
+
+	// No anomalies and no opt-in: skip stands.
+	agg2 := NewAggregator(fakeClusters{}, fakeFeedback{}, fakeNamer{})
+	agg2.SetAnomalyReader(ptrext.Of(fakeAnomalyReader{}))
+	res2, err := agg2.Aggregate(context.Background(),
+		AggInput{TenantID: "t", LLMMin: 6}, time.Now().Add(-24*time.Hour), time.Now())
+	if err != nil || res2.Tier != TierSkip {
+		t.Fatalf("no anomalies must still skip: tier=%v err=%v", res2.Tier, err)
+	}
+}

@@ -164,7 +164,10 @@ func (f *fakeRepo) UpsertHit(_ context.Context, in anomalyrepo.HitInput) (anomal
 	f.openEvents = append(f.openEvents, ev)
 	return ev, true, nil
 }
-func (f *fakeRepo) SetQualityAction(context.Context, uuid.UUID, string) error { return nil }
+
+func (f *fakeRepo) SetQualityAction(context.Context, string, uuid.UUID, string) error {
+	return nil
+}
 
 func (f *fakeRepo) ListUnnotifiedOpenEvents(_ context.Context, _ string) ([]anomalyrepo.Event, error) {
 	var out []anomalyrepo.Event
@@ -186,7 +189,7 @@ func (f *fakeRepo) MarkNotified(_ context.Context, _ string, ids []uuid.UUID) er
 	return nil
 }
 
-func (f *fakeRepo) SetEvidence(_ context.Context, id uuid.UUID, evidenceJSON string) error {
+func (f *fakeRepo) SetEvidence(_ context.Context, _ string, id uuid.UUID, evidenceJSON string) error {
 	for i := range f.openEvents {
 		if f.openEvents[i].ID == id {
 			f.openEvents[i].EvidenceJSON = evidenceJSON

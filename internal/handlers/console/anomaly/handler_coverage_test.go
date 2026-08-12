@@ -173,7 +173,9 @@ func (f fakeDigestChecker) GetByTenant(context.Context, string) (bool, error) {
 }
 
 func TestUpdateAnomalyConfigDigestWarning(t *testing.T) {
-	store := ptrext.Of(fakeStore{cfg: anomalyrepo.DefaultConfig("t1")})
+	cfg0 := anomalyrepo.DefaultConfig("t1")
+	cfg0.BackfillVersion = cfg0.ConfigVersion // backfill settled: isolate the digest warning
+	store := ptrext.Of(fakeStore{cfg: cfg0})
 	h := NewHandler(store, fakeTenants{})
 	h.SetDigestChecker(fakeDigestChecker{has: false})
 

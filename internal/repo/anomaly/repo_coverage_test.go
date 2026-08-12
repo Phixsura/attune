@@ -98,7 +98,7 @@ func TestRepoErrorPaths(t *testing.T) {
 		return err
 	})
 	expectRepoErr(t, "SetQualityAction", func() error {
-		return r.SetQualityAction(ctx, id, uuid.NewString())
+		return r.SetQualityAction(ctx, "t1", id, uuid.NewString())
 	})
 	expectRepoErr(t, "ListOpenEvents", func() error {
 		_, err := r.ListOpenEvents(ctx, "t1")
@@ -165,7 +165,7 @@ func TestRepoErrorPaths(t *testing.T) {
 		return err
 	})
 	expectRepoErr(t, "SetEvidence", func() error {
-		return r.SetEvidence(ctx, id, "{}")
+		return r.SetEvidence(ctx, "t1", id, "{}")
 	})
 	expectRepoErr(t, "ListUnnotifiedOpenEvents", func() error {
 		_, err := r.ListUnnotifiedOpenEvents(ctx, "t1")

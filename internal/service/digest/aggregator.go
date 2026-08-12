@@ -124,13 +124,16 @@ func (a *Aggregator) Aggregate(ctx context.Context, in AggInput, from, to time.T
 		return Result{}, err
 	}
 	if stats.Enriched == 0 {
-		if !in.SendOnEmpty {
+		// The anomaly section is independent of theme volume (#237): a
+		// tenant with zero enriched feedback in-window can still have an
+		// open DROP anomaly — the volume collapsing is exactly why the
+		// window is empty. Anomalies therefore override the skip: without
+		// this, digest-mode tenants would never hear about a dead stream.
+		anomalies := a.windowAnomalies(ctx, in.TenantID, from, to)
+		if !in.SendOnEmpty && len(anomalies) == 0 {
 			return Result{Tier: TierSkip, Stats: stats}, nil
 		}
-		// The anomaly section is independent of theme volume (#237): a
-		// tenant can have zero enriched feedback in-window and still have
-		// an open drop anomaly worth surfacing.
-		return Result{Tier: TierThemeless, Stats: stats, Anomalies: a.windowAnomalies(ctx, in.TenantID, from, to)}, nil
+		return Result{Tier: TierThemeless, Stats: stats, Anomalies: anomalies}, nil
 	}
 	if stats.Enriched < in.LLMMin {
 		items, err := a.feedback.EnrichedInWindow(ctx, in.TenantID, from, to, themelessLimit)

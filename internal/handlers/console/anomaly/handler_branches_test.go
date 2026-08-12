@@ -199,3 +199,118 @@ func TestGetAnomalyEvidenceLiveFilterFailsClosed(t *testing.T) {
 		t.Fatal("failed live filter must return no ids (fail closed)")
 	}
 }
+
+// overCapStore reports an over-cap series count; stored config carries the
+// full slice set + 2 enabled custom slices so shrink comparisons have room.
+type overCapStore struct{ fakeStore }
+
+func (s *overCapStore) CountRecentSliceKeys(context.Context, string, int) (int, error) {
+	return 10_000, nil
+}
+
+func TestSeriesCapAllowsShrinkingConfig(t *testing.T) {
+	stored := anomalyrepo.DefaultConfig("t1")
+	store := ptrext.Of(overCapStore{fakeStore: fakeStore{
+		cfg: stored,
+		slices: []anomalyrepo.StoredCustomSlice{
+			{Name: "a", Enabled: true}, {Name: "b", Enabled: true},
+		},
+	}})
+	h := NewHandler(store, fakeTenants{})
+
+	// Shrinking: drop custom slices entirely and disable a slice type.
+	shrink := validProtoConfig()
+	shrink.EnabledSliceTypes = []string{"total", "source"}
+	shrink.DropEnabledSliceTypes = []string{"total"}
+	shrink.CustomSlices = nil
+	if _, err := h.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{
+		Config: shrink,
+	})); err != nil {
+		t.Fatalf("shrinking config must bypass the series cap: %v", err)
+	}
+
+	// Growing: an over-cap tenant adding custom slices is still rejected.
+	store2 := ptrext.Of(overCapStore{fakeStore: fakeStore{cfg: stored}})
+	h2 := NewHandler(store2, fakeTenants{})
+	grow := validProtoConfig()
+	grow.CustomSlices = []*attunev1.AnomalyCustomSlice{ptrext.Of(attunev1.AnomalyCustomSlice{
+		Name:           "new-slice",
+		Enabled:        true,
+		DefinitionJson: `{"conditions":[{"field":"source","values":["api"]}]}`,
+	})}
+	_, err := h2.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{
+		Config: grow,
+	}))
+	wantValidation(t, err, attunev1.ErrorCode_VALIDATION)
+}
+
+func TestUpdateAnomalyConfigBackfillWarning(t *testing.T) {
+	// fakeStore's GetConfig returns cfg as stored — simulate the post-write
+	// state where config_version has advanced past backfill_version.
+	cfg := anomalyrepo.DefaultConfig("t1")
+	cfg.ConfigVersion = 2
+	cfg.BackfillVersion = 1
+	store := ptrext.Of(fakeStore{cfg: cfg})
+	h := NewHandler(store, fakeTenants{})
+	res, err := h.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{
+		Config: validProtoConfig(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Body.Warning, "paused") {
+		t.Fatalf("pending backfill must warn, got %q", res.Body.Warning)
+	}
+}
+
+// overCapGetConfigDown: over-cap count and the stored-config read fails —
+// the shrink check must fail closed (treat as growing → reject).
+type overCapGetConfigDown struct{ overCapStore }
+
+func (s *overCapGetConfigDown) GetConfig(context.Context, string) (anomalyrepo.Config, error) {
+	return anomalyrepo.Config{}, errStore
+}
+
+// overCapListSlicesDown: stored config reads fine, custom-slice read fails.
+type overCapListSlicesDown struct{ overCapStore }
+
+func (s *overCapListSlicesDown) ListCustomSlices(context.Context, string) ([]anomalyrepo.StoredCustomSlice, error) {
+	return nil, errStore
+}
+
+func TestSeriesCapShrinkCheckFailsClosed(t *testing.T) {
+	shrink := validProtoConfig()
+	shrink.EnabledSliceTypes = []string{"total"}
+	shrink.DropEnabledSliceTypes = []string{"total"}
+	shrink.CustomSlices = nil
+
+	for name, store := range map[string]store{
+		"config read down": ptrext.Of(overCapGetConfigDown{overCapStore{fakeStore{cfg: anomalyrepo.DefaultConfig("t1")}}}),
+		"slices read down": ptrext.Of(overCapListSlicesDown{overCapStore{fakeStore{cfg: anomalyrepo.DefaultConfig("t1")}}}),
+	} {
+		h := NewHandler(store, fakeTenants{})
+		_, err := h.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{
+			Config: shrink,
+		}))
+		if err == nil {
+			t.Fatalf("%s: unverifiable shrink must be rejected", name)
+		}
+	}
+}
+
+func TestSeriesCapRejectsNewSliceType(t *testing.T) {
+	// Stored config has only total enabled; submitting source is growth.
+	stored := anomalyrepo.DefaultConfig("t1")
+	stored.EnabledSliceTypes = []string{"total"}
+	stored.DropEnabledSliceTypes = []string{"total"}
+	store := ptrext.Of(overCapStore{fakeStore{cfg: stored}})
+	h := NewHandler(store, fakeTenants{})
+	grow := validProtoConfig()
+	grow.EnabledSliceTypes = []string{"total", "source"}
+	grow.DropEnabledSliceTypes = []string{"total"}
+	grow.CustomSlices = nil
+	_, err := h.UpdateAnomalyConfig(authedCtx(), ptrext.Of(attunev1.UpdateAnomalyConfigRequest{
+		Config: grow,
+	}))
+	wantValidation(t, err, attunev1.ErrorCode_VALIDATION)
+}
