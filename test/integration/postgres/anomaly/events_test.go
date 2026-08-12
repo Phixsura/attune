@@ -286,3 +286,42 @@ func TestPG_DigestAnomaliesTenantLocalWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 1, "yesterday's event must be visible to a UTC+8 tenant")
 }
+
+// TestPG_UnnotifiedQueueSemantics pins the crash-safe notification queue's
+// SQL against real Postgres: only OPEN events with NULL notified_at are
+// listed, MarkNotified stamps them out of the queue, and closed events
+// never enter it. (A mutation probe showed the fake-pool unit tests route
+// by SQL fragment and cannot catch a corrupted status predicate; this
+// test kills that mutant class.)
+func TestPG_UnnotifiedQueueSemantics(t *testing.T) {
+	pool := testdb.NewPool(t)
+	repo := anomalyrepo.New(pool)
+	ctx := context.Background()
+	tenantID := freshTenant(t, pool)
+
+	ev, _, err := repo.UpsertHit(ctx, hitInput(tenantID, "2026-08-10", 31))
+	require.NoError(t, err)
+	in2 := hitInput(tenantID, "2026-08-10", 44)
+	in2.SliceKey, in2.SliceDisplay = "source:api", "api"
+	in2.SliceType = "source"
+	ev2, _, err := repo.UpsertHit(ctx, in2)
+	require.NoError(t, err)
+
+	// Both fresh events are queued, |z| ordering aside.
+	queued, err := repo.ListUnnotifiedOpenEvents(ctx, tenantID)
+	require.NoError(t, err)
+	require.Len(t, queued, 2)
+
+	// Stamping one removes exactly it.
+	require.NoError(t, repo.MarkNotified(ctx, tenantID, []uuid.UUID{ev.ID}))
+	queued, err = repo.ListUnnotifiedOpenEvents(ctx, tenantID)
+	require.NoError(t, err)
+	require.Len(t, queued, 1)
+	require.Equal(t, ev2.ID, queued[0].ID)
+
+	// A resolved event leaves the queue even when never notified.
+	require.NoError(t, repo.ResolveEvent(ctx, tenantID, ev2.ID))
+	queued, err = repo.ListUnnotifiedOpenEvents(ctx, tenantID)
+	require.NoError(t, err)
+	require.Empty(t, queued)
+}
