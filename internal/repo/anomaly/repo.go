@@ -126,8 +126,8 @@ func (r *Repo) ActiveTenantsWithFeedback(ctx context.Context, sinceDays int) ([]
 		WHERE t.is_active AND EXISTS (
 		  SELECT 1 FROM user_feedback f
 		  WHERE f.tenant_id = t.id
-		    AND f.created_at > NOW() - ($1 || ' days')::interval)
-		ORDER BY t.id`, fmt.Sprintf("%d", sinceDays))
+		    AND f.created_at > NOW() - make_interval(days => $1))
+		ORDER BY t.id`, sinceDays)
 	if err != nil {
 		return nil, fmt.Errorf("anomaly active tenants: %w", err)
 	}
