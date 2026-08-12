@@ -844,3 +844,37 @@ rate(attune_cohort_sync_webhook_requests_total{status="error"}[10m])
 ```
 
 Recovery: webhook error rate drops below 0.1/s for 15 minutes.
+
+## AttuneAnomalyWorkerLagHigh
+
+The anomaly & spike detection worker (#237) has settled feedback-volume
+buckets older than 2 days that no worker instance has judged.
+
+1. Confirm the worker is alive: `attune_worker_panics_total{worker="anomaly"}`
+   and the process logs for `service.anomaly.Worker` errors.
+2. Look for stuck runs: `SELECT * FROM anomaly_detection_runs WHERE status
+   IN ('failed','running') ORDER BY bucket_date` — failed runs re-claim
+   automatically each tick, so persistent failures point at a recurring
+   error (the `error` column has the last message).
+3. Check rollup latency on the AI Pipeline dashboard (panel 25). Slow
+   recomputes starve detection; a tenant with a pathological custom slice
+   condition is the usual cause — disable it in Console > Configuration >
+   Anomaly detection.
+4. After downtime the worker catches up at most 14 days per tick; longer
+   gaps clear over successive hourly ticks. Lag should fall monotonically —
+   alert only if it does not.
+
+## AttuneAnomalyNotifyFailures
+
+Anomaly notifications (immediate mode) are failing to deliver. Detection
+itself is unaffected — events are recorded and visible in Console — but
+operators relying on webhooks/chat are blind.
+
+1. Identify the tenant: `sum by (tenant) (rate(attune_anomaly_notify_failures_total[15m]))`.
+2. Verify the tenant's radar-audience notify target (Console >
+   Integrations > Notify targets): URL reachable, secret current.
+3. lark-bot and slack-bot destinations REJECT non-native payload shapes;
+   if the URL is actually a raw webhook (or vice versa) fix the
+   destination type.
+4. Deliveries are at-least-once: once the target recovers, unnotified
+   open events are re-sent on the next hourly tick automatically.

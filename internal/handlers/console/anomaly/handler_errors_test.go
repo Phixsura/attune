@@ -41,6 +41,10 @@ func (downStore) BaselineCounts(context.Context, string, string, string, []time.
 	return nil, errStore
 }
 
+func (downStore) FirstBucketDate(context.Context, string) (time.Time, bool, error) {
+	return time.Time{}, false, errStore
+}
+
 func (downStore) CountOn(context.Context, string, string, string, time.Time) (int64, []int64, error) {
 	return 0, nil, errStore
 }

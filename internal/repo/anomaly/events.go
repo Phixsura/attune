@@ -237,7 +237,12 @@ type DigestAnomaly struct {
 }
 
 // OpenDigestAnomaliesInWindow lists open events whose last bucket falls in
-// [from, to) — the digest section source. Only tenants whose anomaly
+// the window, extended one day back: detection needs settle_delay (+ the
+// next hourly tick) after a bucket closes, so a digest sent in the early
+// local morning would otherwise permanently miss yesterday's events — the
+// window advances before they exist. Open-status filtering keeps the
+// extra day duplicate-free (an event is one row until it resolves).
+// Only tenants whose anomaly
 // notify_mode is 'digest' get the section: 'immediate' tenants were
 // already webhooked (a digest repeat is double delivery) and 'off'
 // tenants explicitly opted out of anomaly notifications. Tenants without
@@ -251,7 +256,7 @@ func (r *Repo) OpenDigestAnomaliesInWindow(
 		JOIN tenant_anomaly_configs c ON c.tenant_id = e.tenant_id
 		WHERE e.tenant_id = $1 AND e.status = 'open'
 		  AND c.notify_mode = 'digest'
-		  AND e.last_bucket_date >= $2::date AND e.last_bucket_date < $3::date
+		  AND e.last_bucket_date >= ($2::date - 1) AND e.last_bucket_date < $3::date
 		ORDER BY ABS(e.z_score) DESC
 		LIMIT 10`, tenantID, dateStr(from), dateStr(to))
 	if err != nil {

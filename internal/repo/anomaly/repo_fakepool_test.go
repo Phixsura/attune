@@ -284,7 +284,7 @@ func TestEventMutationsExec(t *testing.T) {
 	if err := r.DisableCustomSlice(ctx, "t1", id, "reason"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CleanupRetention(ctx, 400, 90); err != nil {
+	if err := r.CleanupRetention(ctx, 400, 90, 400); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.MarkRunDone(ctx, "t1", day("2026-08-10"), "owner"); err != nil {
@@ -293,8 +293,8 @@ func TestEventMutationsExec(t *testing.T) {
 	if err := r.MarkRunFailed(ctx, "t1", day("2026-08-10"), "owner", nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := len(pool.execTags); got != 8 {
-		t.Fatalf("want 8 execs (cleanup runs two), got %d", got)
+	if got := len(pool.execTags); got != 9 {
+		t.Fatalf("want 9 execs (cleanup runs three), got %d", got)
 	}
 }
 

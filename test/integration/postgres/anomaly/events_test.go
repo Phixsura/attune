@@ -242,4 +242,16 @@ func TestPG_DigestAnomaliesRespectNotifyMode(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	require.Equal(t, "spike", out[0].Direction)
+
+	// One-day-late tolerance: a next-day window still carries the event
+	// (settle delay means yesterday's event may materialize after the
+	// digest for that window already went out).
+	out, err = repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from.AddDate(0, 0, 1), to.AddDate(0, 0, 1))
+	require.NoError(t, err)
+	require.Len(t, out, 1, "window must tolerate one late day")
+
+	// Two days on: out of even the extended window.
+	out, err = repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from.AddDate(0, 0, 2), to.AddDate(0, 0, 2))
+	require.NoError(t, err)
+	require.Empty(t, out)
 }

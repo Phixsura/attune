@@ -44,6 +44,7 @@ type store interface {
 	CountRecentSliceKeys(ctx context.Context, tenantID string, days int) (int, error)
 	GetEvent(ctx context.Context, tenantID string, id uuid.UUID) (*anomalyrepo.Event, error)
 	BaselineCounts(ctx context.Context, tenantID, sliceType, sliceKey string, dates []time.Time) ([]int64, error)
+	FirstBucketDate(ctx context.Context, tenantID string) (time.Time, bool, error)
 	GetConfig(ctx context.Context, tenantID string) (anomalyrepo.Config, error)
 	UpsertConfig(ctx context.Context, cfg anomalyrepo.Config, updatedBy string) error
 	ListCustomSlices(ctx context.Context, tenantID string) ([]anomalyrepo.StoredCustomSlice, error)
@@ -205,13 +206,24 @@ func (h *Handler) replaySeries(
 	for i, d := range dates {
 		countAt[d.Format("2006-01-02")] = counts[i]
 	}
+	// Cold-start clamp mirrors the worker (#18): baseline dates before the
+	// tenant's first bucket are dropped, not zero-filled, so the chart's
+	// insufficient/anomalous verdicts stay identical to the alert path.
+	var firstDay string
+	if first, ok, err := h.store.FirstBucketDate(ctx, tenantID); err == nil && ok {
+		firstDay = first.Format("2006-01-02")
+	}
 
 	points := make([]*attunev1.SeriesPoint, 0, days)
 	for i := days - 1; i >= 0; i-- {
 		day := today.AddDate(0, 0, -i)
 		baseline := make([]int64, 0, 8)
 		for week := 8; week >= 1; week-- {
-			baseline = append(baseline, countAt[day.AddDate(0, 0, -7*week).Format("2006-01-02")])
+			b := day.AddDate(0, 0, -7*week).Format("2006-01-02")
+			if firstDay != "" && b < firstDay {
+				continue // predates the tenant: phantom zero, not data
+			}
+			baseline = append(baseline, countAt[b])
 		}
 		observed := countAt[day.Format("2006-01-02")]
 		verdict := anomalysvc.Detect(baseline, observed, detCfg)

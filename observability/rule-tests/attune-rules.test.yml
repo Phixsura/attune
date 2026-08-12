@@ -475,3 +475,58 @@ tests:
       - eval_time: 200h
         alertname: AttuneRestoreDrillStale
         exp_alerts: []
+
+  # Anomaly worker lag (#237): 3-day-old settled bucket fires after the 1h
+  # pending window; a fresh worker (lag under 2d) stays quiet.
+  - interval: 5m
+    input_series:
+      - series: 'attune_anomaly_worker_lag_seconds{tenant="tenant-a"}'
+        values: '259200x40' # 3 days, held
+    alert_rule_test:
+      - eval_time: 30m # pending (for: 1h) not yet satisfied
+        alertname: AttuneAnomalyWorkerLagHigh
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: AttuneAnomalyWorkerLagHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneAnomalyWorkerLagHigh
+              service: attune
+              severity: warning
+            exp_annotations:
+              summary: Anomaly detection is more than 2 days behind
+              description: The oldest settled, unjudged anomaly bucket is 3d 0h 0m 0s old. Spikes and drops in that window are going unreported.
+              dashboard: Attune AI Pipeline
+              dashboard_url: /d/attune-ai-pipeline/attune-ai-pipeline
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneanomalyworkerlaghigh
+              action: Check the anomaly worker is running (worker=anomaly in heartbeat/panic metrics), then look for failed detection runs in anomaly_detection_runs (status='failed') and slow rollups on the AI Pipeline dashboard.
+
+  - interval: 5m
+    input_series:
+      - series: 'attune_anomaly_worker_lag_seconds{tenant="tenant-a"}'
+        values: '3600x40' # 1h lag: healthy
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: AttuneAnomalyWorkerLagHigh
+        exp_alerts: []
+
+  # Anomaly notify failures (#237): sustained failures fire after 15m.
+  - interval: 1m
+    input_series:
+      - series: 'attune_anomaly_notify_failures_total{tenant="tenant-a"}'
+        values: '0+1x40' # one failure per minute
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AttuneAnomalyNotifyFailures
+        exp_alerts:
+          - exp_labels:
+              alertname: AttuneAnomalyNotifyFailures
+              service: attune
+              severity: warning
+            exp_annotations:
+              summary: Anomaly alert delivery is failing
+              description: Anomaly webhook/chat notifications have been failing for 15+ minutes. Events remain visible in Console, but operators are not being paged.
+              dashboard: Attune AI Pipeline
+              dashboard_url: /d/attune-ai-pipeline/attune-ai-pipeline
+              runbook_url: https://github.com/Phixsura/attune/blob/main/observability/runbooks.md#attuneanomalynotifyfailures
+              action: Group attune_anomaly_notify_failures_total by tenant, then verify that tenant's radar-audience notify target URL and secret. lark/slack targets reject foreign payload shapes — confirm the destination type matches the actual webhook.

@@ -11,8 +11,15 @@ import (
 )
 
 // ClaimRun claims one (tenant, date) detection run for owner. Fresh claims
-// by other owners are refused; stale running claims (heartbeat older than
-// stale) and failed runs are re-claimable; done runs never re-claim.
+// by other owners are refused; stale running claims (claimed_at older
+// than stale) and failed runs are re-claimable; done runs never re-claim.
+//
+// There is deliberately NO heartbeat renewal: a claim is a one-shot
+// timestamp. If a detection pass ever outlives the stale window another
+// replica may take over concurrently — safety then rests on the event
+// layer (UpsertHit's transactional update-then-insert under the partial
+// unique index), which makes duplicate events impossible and turns the
+// race into one harmless failed run that retries next tick.
 func (r *Repo) ClaimRun(
 	ctx context.Context, tenantID string, date time.Time, owner string, stale time.Duration,
 ) (bool, error) {

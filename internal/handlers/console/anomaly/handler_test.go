@@ -25,6 +25,14 @@ type fakeStore struct {
 	upserts       []anomalyrepo.Config
 	counts        map[string]int64
 	sliceKeyCount int
+	firstBucket   time.Time
+}
+
+func (f *fakeStore) FirstBucketDate(context.Context, string) (time.Time, bool, error) {
+	if f.firstBucket.IsZero() {
+		return time.Time{}, false, nil
+	}
+	return f.firstBucket, true, nil
 }
 
 func (f *fakeStore) ListEventsBySliceType(_ context.Context, _, status, sliceType string, _ int) ([]anomalyrepo.Event, error) {

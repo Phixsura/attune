@@ -36,11 +36,11 @@ type failingRepo2 struct {
 	failBaseline       bool
 }
 
-func (f *failingRepo2) CleanupRetention(ctx context.Context, b, r int) error {
+func (f *failingRepo2) CleanupRetention(ctx context.Context, b, r, e int) error {
 	if f.failCleanup {
 		return errBoom
 	}
-	return f.fakeRepo.CleanupRetention(ctx, b, r)
+	return f.fakeRepo.CleanupRetention(ctx, b, r, e)
 }
 
 func (f *failingRepo2) UnclaimedSettledDates(ctx context.Context, t string, c []time.Time) ([]time.Time, error) {
@@ -519,5 +519,20 @@ func TestSenderBuildRequestFailure(t *testing.T) {
 	})
 	if err := s.Send(context.Background(), target, NotifyPayload{}); err == nil {
 		t.Fatal("invalid target URL must fail request construction")
+	}
+}
+
+func TestCloseQualityActionSurvivesLedgerFailure(t *testing.T) {
+	repo := newRepo2(false)
+	ev := anomalyrepo.Event{
+		ID: uuid.New(), TenantID: "t1", SliceKey: "total", Direction: "spike",
+		Status: "open", QualityActionID: ptrext.Of("qa-1"),
+	}
+	repo.openEvents = []anomalyrepo.Event{ev}
+	actions := ptrext.Of(failingActions{})
+	w := newFailingWorker(repo, actions, ptrext.Of(fakeSender{}), ptrext.Of(fakeTargets{}))
+	w.closeQualityAction(context.Background(), "t1", ev) // must not panic
+	if actions.calls != 1 {
+		t.Fatal("ledger close must have been attempted")
 	}
 }

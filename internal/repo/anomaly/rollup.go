@@ -496,9 +496,33 @@ func (r *Repo) CountOn(
 	return count, samples, nil
 }
 
-// CleanupRetention deletes buckets older than bucketDays and detection runs
-// older than runDays. Safe to call every tick.
-func (r *Repo) CleanupRetention(ctx context.Context, bucketDays, runDays int) error {
+// FirstBucketDate returns the tenant's oldest bucket date across all
+// slices — a proxy for "how long has this tenant had data". Baseline
+// dates before it are dropped rather than zero-filled, so a young
+// tenant's short history reads as insufficient_data (silent cold start)
+// instead of an 8-zero baseline that fires a z=15 false spike on day
+// one. Mature tenants keep full zero-fill for NEW slices (cluster
+// emergence), because their first bucket long predates any baseline
+// date. ok=false when the tenant has no buckets at all.
+func (r *Repo) FirstBucketDate(ctx context.Context, tenantID string) (time.Time, bool, error) {
+	var d *time.Time
+	err := r.pool.QueryRow(ctx, `
+		SELECT MIN(bucket_date) FROM feedback_volume_buckets
+		WHERE tenant_id = $1`, tenantID).Scan(&d)
+	if err != nil {
+		return time.Time{}, false, fmt.Errorf("anomaly first bucket date: %w", err)
+	}
+	if d == nil {
+		return time.Time{}, false, nil
+	}
+	return ptrext.Indirect(d), true, nil
+}
+
+// CleanupRetention deletes buckets older than bucketDays, detection runs
+// older than runDays, and CLOSED (resolved/retracted) events older than
+// eventDays. Open events are never deleted — the partial unique index's
+// one-live-event-per-slice semantics depend on them. Safe every tick.
+func (r *Repo) CleanupRetention(ctx context.Context, bucketDays, runDays, eventDays int) error {
 	if _, err := r.pool.Exec(ctx, `
 		DELETE FROM feedback_volume_buckets
 		WHERE bucket_date < CURRENT_DATE - $1::int`, bucketDays); err != nil {
@@ -508,6 +532,12 @@ func (r *Repo) CleanupRetention(ctx context.Context, bucketDays, runDays int) er
 		DELETE FROM anomaly_detection_runs
 		WHERE bucket_date < CURRENT_DATE - $1::int`, runDays); err != nil {
 		return fmt.Errorf("anomaly runs retention: %w", err)
+	}
+	if _, err := r.pool.Exec(ctx, `
+		DELETE FROM anomaly_events
+		WHERE status <> 'open' AND updated_at < NOW() - make_interval(days => $1)`,
+		eventDays); err != nil {
+		return fmt.Errorf("anomaly events retention: %w", err)
 	}
 	return nil
 }

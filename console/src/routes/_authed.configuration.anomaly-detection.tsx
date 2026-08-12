@@ -55,6 +55,7 @@ export function AnomalyConfigPage() {
 
   return (
     <div className="max-w-2xl space-y-4 p-4" data-testid="anomaly-config-page">
+      <h1 className="text-xl font-semibold">{t('anomalies.config.title', 'Anomaly detection')}</h1>
       <Card>
         <CardHeader>
           <CardTitle>{t('anomalies.config.title', 'Anomaly detection')}</CardTitle>

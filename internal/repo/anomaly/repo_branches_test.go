@@ -148,18 +148,22 @@ func TestSetEvidenceHappyPath(t *testing.T) {
 	}
 }
 
-func TestCleanupRetentionRunsBothDeletes(t *testing.T) {
+func TestCleanupRetentionRunsAllDeletes(t *testing.T) {
 	pool := ptrext.Of(fakePool{})
-	if err := poolRepo(pool).CleanupRetention(context.Background(), 400, 90); err != nil {
+	if err := poolRepo(pool).CleanupRetention(context.Background(), 400, 90, 400); err != nil {
 		t.Fatalf("CleanupRetention: %v", err)
 	}
-	if len(pool.execTags) != 2 {
-		t.Fatalf("want bucket + run deletes, got %v", pool.execTags)
+	if len(pool.execTags) != 3 {
+		t.Fatalf("want bucket + run + closed-event deletes, got %v", pool.execTags)
 	}
-	// Second DELETE failing must also surface (first succeeds).
+	// Each later DELETE failing must also surface.
 	pool2 := ptrext.Of(fakePool{execErrOn: "anomaly_detection_runs"})
-	if err := poolRepo(pool2).CleanupRetention(context.Background(), 400, 90); err == nil {
+	if err := poolRepo(pool2).CleanupRetention(context.Background(), 400, 90, 400); err == nil {
 		t.Fatal("run-retention failure must surface")
+	}
+	pool3 := ptrext.Of(fakePool{execErrOn: "DELETE FROM anomaly_events"})
+	if err := poolRepo(pool3).CleanupRetention(context.Background(), 400, 90, 400); err == nil {
+		t.Fatal("event-retention failure must surface")
 	}
 }
 
@@ -304,5 +308,25 @@ func TestWindowCountsQueryFailure(t *testing.T) {
 	if _, err := poolRepo(pool).WindowCounts(context.Background(),
 		"t1", AllSliceTypes(), []time.Time{dayT}); err == nil {
 		t.Fatal("query failure must surface")
+	}
+}
+
+func TestFirstBucketDateBranches(t *testing.T) {
+	dayT := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	// Has buckets.
+	pool := ptrext.Of(fakePool{})
+	pool.rowRoutes = append(pool.rowRoutes,
+		rowRoute("MIN(bucket_date)", scanRow{vals: []any{dayT}}))
+	d, ok, err := poolRepo(pool).FirstBucketDate(context.Background(), "t1")
+	if err != nil || !ok || !d.Equal(dayT) {
+		t.Fatalf("FirstBucketDate: %v %v %v", d, ok, err)
+	}
+	// No buckets: NULL min.
+	pool2 := ptrext.Of(fakePool{})
+	pool2.rowRoutes = append(pool2.rowRoutes,
+		rowRoute("MIN(bucket_date)", scanRow{vals: []any{nil}}))
+	_, ok, err = poolRepo(pool2).FirstBucketDate(context.Background(), "t1")
+	if err != nil || ok {
+		t.Fatalf("empty tenant must report ok=false: %v %v", ok, err)
 	}
 }

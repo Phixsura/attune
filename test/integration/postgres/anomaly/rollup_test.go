@@ -381,12 +381,32 @@ func TestPG_CleanupRetention(t *testing.T) {
 		       ($1, CURRENT_DATE - 10, 'total','total',1)`, tenantID)
 	require.NoError(t, err)
 
-	require.NoError(t, repo.CleanupRetention(ctx, 400, 90))
+	// A stale CLOSED event ages out; a stale OPEN event never does (the
+	// partial unique index depends on open rows).
+	_, err = pool.Exec(ctx, `
+		INSERT INTO anomaly_events
+		  (tenant_id, slice_type, slice_key, direction, first_bucket_date,
+		   last_bucket_date, observed, expected_med, expected_low, expected_high,
+		   z_score, status, updated_at)
+		VALUES
+		  ($1,'total','total','spike', CURRENT_DATE-500, CURRENT_DATE-500, 1,0,0,0,0,'resolved', NOW() - INTERVAL '500 days'),
+		  ($1,'total','total','drop',  CURRENT_DATE-500, CURRENT_DATE-500, 1,0,0,0,0,'open',     NOW() - INTERVAL '500 days')`, tenantID)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.CleanupRetention(ctx, 400, 90, 400))
 
 	var n int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT COUNT(*) FROM feedback_volume_buckets WHERE tenant_id=$1`, tenantID).Scan(&n))
 	require.Equal(t, 1, n, "only the recent bucket survives")
+	var events int
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM anomaly_events WHERE tenant_id=$1`, tenantID).Scan(&events))
+	require.Equal(t, 1, events, "stale closed event ages out; open event survives")
+	var status string
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT status FROM anomaly_events WHERE tenant_id=$1`, tenantID).Scan(&status))
+	require.Equal(t, "open", status)
 }
 
 // TestPG_RecomputeDimensionKeepsAllDaysForTopValues is the regression test

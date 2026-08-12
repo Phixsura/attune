@@ -39,9 +39,12 @@ const (
 	// resolveQuietBuckets is how many consecutive quiet settled buckets
 	// auto-resolve an open event.
 	resolveQuietBuckets = 2
-	// bucketRetentionDays / runRetentionDays bound table growth.
+	// bucketRetentionDays / runRetentionDays / eventRetentionDays bound
+	// table growth. Closed events keep a year of audit trail; open events
+	// are never deleted (the partial unique index depends on them).
 	bucketRetentionDays = 400
 	runRetentionDays    = 90
+	eventRetentionDays  = 400
 	// maxSlicesPerTick hard-caps detection work per tenant-date.
 	maxSlicesPerTick = 1000
 	// notifyFuseLimit caps NEW-event notifications per tenant-tick.
@@ -62,6 +65,7 @@ type repoAPI interface {
 	RecomputeWindow(ctx context.Context, opts anomalyrepo.RecomputeOpts) error
 	UnclaimedSettledDates(ctx context.Context, tenantID string, candidates []time.Time) ([]time.Time, error)
 	LatestDoneRun(ctx context.Context, tenantID string) (time.Time, bool, error)
+	FirstBucketDate(ctx context.Context, tenantID string) (time.Time, bool, error)
 	ClaimRun(ctx context.Context, tenantID string, date time.Time, owner string, stale time.Duration) (bool, error)
 	MarkRunDone(ctx context.Context, tenantID string, date time.Time, owner string) error
 	MarkRunFailed(ctx context.Context, tenantID string, date time.Time, owner string, runErr error) error
@@ -79,7 +83,7 @@ type repoAPI interface {
 	ResolveEvent(ctx context.Context, tenantID string, id uuid.UUID) error
 	RetractEvent(ctx context.Context, tenantID string, id uuid.UUID) error
 	GroupCountsByAxis(ctx context.Context, tenantID string, loc *time.Location, sliceConds []anomalyrepo.CustomCondition, axis anomalyrepo.GroupByAxis, date time.Time, baselineDates []time.Time) ([]anomalyrepo.GroupCountRow, error)
-	CleanupRetention(ctx context.Context, bucketDays, runDays int) error
+	CleanupRetention(ctx context.Context, bucketDays, runDays, eventDays int) error
 }
 
 // qualityActionUpserter is the slice of the feedback repo the worker needs.
@@ -212,7 +216,7 @@ func (w *Worker) ProcessOnce(ctx context.Context, now time.Time) {
 		}
 	}
 	metrics.AnomalyBackfillPendingTenants.Set(float64(pendingBackfills))
-	if err := w.repo.CleanupRetention(ctx, bucketRetentionDays, runRetentionDays); err != nil {
+	if err := w.repo.CleanupRetention(ctx, bucketRetentionDays, runRetentionDays, eventRetentionDays); err != nil {
 		logext.Warnf(ctx, "[%s] retention cleanup failed,err:%+v", where, err.Error())
 	}
 }
@@ -405,6 +409,17 @@ func (w *Worker) detectOneDate(
 	ctx context.Context, tenantID string, loc *time.Location, cfg anomalyrepo.Config, date time.Time,
 ) error {
 	baseline := baselineDates(date, loc)
+	// Cold-start clamp (#18): zero-filling makes every baseline exactly 8
+	// points, so the detector's MinBaselinePoints gate could never fire
+	// and a day-two tenant judged its first real day against 8 phantom
+	// zeros — z=15 false spike, exactly what the spec's "cold start is
+	// silent" promise forbids. Dropping baseline dates before the
+	// tenant's first bucket restores the gate: young tenants read as
+	// insufficient_data, while a mature tenant's NEW slice keeps the full
+	// zero-filled baseline (cluster-emergence spikes still fire).
+	if first, ok, err := w.repo.FirstBucketDate(ctx, tenantID); err == nil && ok {
+		baseline = clampToFirst(baseline, civilDateIn(first, loc))
+	}
 	slices, err := w.repo.SlicesForDetection(ctx, tenantID, cfg.EnabledSliceTypes, date, baseline)
 	if err != nil {
 		return err
@@ -681,6 +696,42 @@ func (w *Worker) notifyPending(ctx context.Context, tenantID string, cfg anomaly
 	w.markNotified(ctx, tenantID, ids)
 }
 
+// closeQualityAction mirrors an event's closure into the control-tower
+// ledger (#237 review finding 10): without it the linked action stays
+// "open" forever after the anomaly resolves. Best-effort — a ledger
+// failure never blocks reconciliation (the event closure is the source of
+// truth; a later spike re-opens the same key via the normal upsert).
+// The shared spike/drop key means a same-slice opposite-direction event
+// still open keeps the action alive: skip the close when any open event
+// remains on the slice.
+func (w *Worker) closeQualityAction(ctx context.Context, tenantID string, event anomalyrepo.Event) {
+	if event.QualityActionID == nil {
+		return
+	}
+	open, err := w.repo.ListOpenEvents(ctx, tenantID)
+	if err == nil {
+		for _, e := range open {
+			if e.SliceKey == event.SliceKey && e.ID != event.ID {
+				return // sibling event still open: the action stays open
+			}
+		}
+	}
+	if _, err := w.actions.UpsertQualityActionStatus(ctx, feedback.QualityActionUpsert{
+		TenantID:    tenantID,
+		ActionKey:   "anomaly:" + event.SliceKey,
+		Signal:      "anomaly_detection",
+		Status:      feedback.QualityActionStatusResolved,
+		Severity:    feedback.QualityActionSeverityNormal,
+		TargetPath:  "/analytics/anomalies?event=" + event.ID.String(),
+		MetricLabel: event.SliceDisplay,
+		MetricValue: "returned to baseline",
+		ActorUserID: "anomaly-worker",
+	}); err != nil {
+		logext.Warnf(ctx, "[service.anomaly.Worker] action close failed,tenant:%s,err:%+v",
+			tenantID, err.Error())
+	}
+}
+
 func (w *Worker) markNotified(ctx context.Context, tenantID string, ids []uuid.UUID) {
 	if err := w.repo.MarkNotified(ctx, tenantID, ids); err != nil {
 		logext.Warnf(ctx, "[service.anomaly.Worker] mark notified failed,tenant:%s,err:%+v",
@@ -717,6 +768,7 @@ func (w *Worker) reconcile(
 				if err := w.repo.RetractEvent(ctx, tenantID, event.ID); err != nil {
 					return err
 				}
+				w.closeQualityAction(ctx, tenantID, event)
 				continue
 			}
 		}
@@ -724,6 +776,7 @@ func (w *Worker) reconcile(
 			if err := w.repo.ResolveEvent(ctx, tenantID, event.ID); err != nil {
 				return err
 			}
+			w.closeQualityAction(ctx, tenantID, event)
 		}
 	}
 	return nil
@@ -737,6 +790,9 @@ func (w *Worker) judgeDate(
 ) (bool, error) {
 	date = civilDateIn(date, loc)
 	baseline := baselineDates(date, loc)
+	if first, ok, err := w.repo.FirstBucketDate(ctx, tenantID); err == nil && ok {
+		baseline = clampToFirst(baseline, civilDateIn(first, loc))
+	}
 	counts, err := w.repo.BaselineCounts(ctx, tenantID, event.SliceType, event.SliceKey, baseline)
 	if err != nil {
 		return false, err
@@ -828,6 +884,18 @@ func baselineDates(date time.Time, loc *time.Location) []time.Time {
 	out := make([]time.Time, 0, baselineWeeks)
 	for week := baselineWeeks; week >= 1; week-- {
 		out = append(out, day.AddDate(0, 0, -7*week))
+	}
+	return out
+}
+
+// clampToFirst drops baseline dates before the tenant's first bucket —
+// those days predate the tenant and are phantom zeros, not observations.
+func clampToFirst(baseline []time.Time, first time.Time) []time.Time {
+	out := baseline[:0:0]
+	for _, d := range baseline {
+		if !d.Before(first) {
+			out = append(out, d)
+		}
 	}
 	return out
 }

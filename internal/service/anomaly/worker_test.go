@@ -38,6 +38,7 @@ type fakeRepo struct {
 	failTenantID   string
 	refuseClaims   bool
 	lastDoneRun    time.Time
+	firstBucket    time.Time
 	notified       map[uuid.UUID]bool
 }
 
@@ -221,7 +222,14 @@ func (f *fakeRepo) RetractEvent(_ context.Context, _ string, id uuid.UUID) error
 func (f *fakeRepo) GroupCountsByAxis(context.Context, string, *time.Location, []anomalyrepo.CustomCondition, anomalyrepo.GroupByAxis, time.Time, []time.Time) ([]anomalyrepo.GroupCountRow, error) {
 	return nil, nil
 }
-func (f *fakeRepo) CleanupRetention(context.Context, int, int) error { return nil }
+func (f *fakeRepo) CleanupRetention(context.Context, int, int, int) error { return nil }
+
+func (f *fakeRepo) FirstBucketDate(context.Context, string) (time.Time, bool, error) {
+	if f.firstBucket.IsZero() {
+		return time.Time{}, false, nil
+	}
+	return f.firstBucket, true, nil
+}
 
 type fakeActions struct {
 	upserts []feedback.QualityActionUpsert
@@ -465,5 +473,108 @@ func TestWorkerNotifyModeOff(t *testing.T) {
 	}
 	if len(repo.newEventIDs) != 1 {
 		t.Fatal("event must still be recorded")
+	}
+}
+
+// TestColdStartTenantIsSilent (#18): a tenant whose first bucket is 2 days
+// old has at most 0-1 real same-weekday baseline points. The clamp must
+// drop the phantom pre-tenant zeros so the detector reads insufficient
+// data — no day-two false spike.
+func TestColdStartTenantIsSilent(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.counts = map[string]int64{"total|2026-08-09": 40} // day-one burst
+	repo.slices = []anomalyrepo.SliceRef{{Type: "total", Key: "total", Display: "All feedback"}}
+	repo.firstBucket = time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC) // tenant is 2 days old
+	snd := ptrext.Of(fakeSender{})
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), snd)
+
+	w.ProcessOnce(context.Background(), fixedNow)
+
+	if len(repo.hits) != 0 || len(snd.sent) != 0 {
+		t.Fatalf("cold start must be silent: hits=%d sent=%d", len(repo.hits), len(snd.sent))
+	}
+}
+
+// TestMatureTenantNewSliceStillFires (#18 counterpart): the clamp must NOT
+// suppress cluster-emergence — a tenant with months of history detecting a
+// brand-new slice keeps its zero-filled baseline and fires.
+func TestMatureTenantNewSliceStillFires(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.counts = map[string]int64{"cluster:abc|2026-08-09": 15} // new cluster, no history
+	repo.slices = []anomalyrepo.SliceRef{{Type: "cluster", Key: "cluster:abc", Display: "New cluster"}}
+	repo.firstBucket = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) // tenant far predates baselines
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.ProcessOnce(context.Background(), fixedNow)
+
+	if len(repo.newEventIDs) != 1 {
+		t.Fatalf("emergence spike must still fire for mature tenants, got %d events", len(repo.newEventIDs))
+	}
+}
+
+// TestReconcileClosesQualityAction (#237 review finding 10): resolving an
+// event must mirror "resolved" into the control-tower ledger.
+func TestReconcileClosesQualityAction(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.counts = map[string]int64{}
+	repo.firstBucket = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	actionID := "qa-1"
+	repo.openEvents = []anomalyrepo.Event{{
+		ID: uuid.New(), TenantID: "t1", SliceType: "total", SliceKey: "total",
+		Direction: "spike", Status: "open", QualityActionID: ptrext.Of(actionID),
+		FirstBucketDate: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		LastBucketDate:  time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+	}}
+	actions := ptrext.Of(fakeActions{})
+	w := newTestWorker(repo, actions, ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.ProcessOnce(context.Background(), fixedNow)
+
+	if len(repo.resolved) != 1 {
+		t.Fatalf("stale quiet event must resolve, got %d", len(repo.resolved))
+	}
+	var closed bool
+	for _, up := range actions.upserts {
+		if up.Status == feedback.QualityActionStatusResolved && up.ActionKey == "anomaly:total" {
+			closed = true
+		}
+	}
+	if !closed {
+		t.Fatalf("resolution must close the ledger action: %+v", actions.upserts)
+	}
+}
+
+// TestCloseQualityActionSkipsWithSiblingOpen: a same-slice event still open
+// (opposite direction) keeps the shared action open.
+func TestCloseQualityActionSkipsWithSiblingOpen(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{config: baseConfig()})
+	actionID := "qa-1"
+	closingEvent := anomalyrepo.Event{
+		ID: uuid.New(), TenantID: "t1", SliceKey: "total", Direction: "drop",
+		Status: "open", QualityActionID: ptrext.Of(actionID),
+	}
+	sibling := anomalyrepo.Event{
+		ID: uuid.New(), TenantID: "t1", SliceKey: "total", Direction: "spike", Status: "open",
+	}
+	repo.openEvents = []anomalyrepo.Event{closingEvent, sibling}
+	actions := ptrext.Of(fakeActions{})
+	w := newTestWorker(repo, actions, ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.closeQualityAction(context.Background(), "t1", closingEvent)
+	if len(actions.upserts) != 0 {
+		t.Fatalf("sibling open event must keep the action open: %+v", actions.upserts)
+	}
+
+	// Without the sibling: close proceeds.
+	repo.openEvents = []anomalyrepo.Event{closingEvent}
+	w.closeQualityAction(context.Background(), "t1", closingEvent)
+	if len(actions.upserts) != 1 {
+		t.Fatalf("lone event closure must close the action, got %d", len(actions.upserts))
+	}
+
+	// Nil action id: no-op.
+	w.closeQualityAction(context.Background(), "t1", anomalyrepo.Event{SliceKey: "x"})
+	if len(actions.upserts) != 1 {
+		t.Fatal("nil action id must be a no-op")
 	}
 }

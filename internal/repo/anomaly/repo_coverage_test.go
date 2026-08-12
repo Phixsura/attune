@@ -72,7 +72,7 @@ func TestRepoErrorPaths(t *testing.T) {
 		return err
 	})
 	expectRepoErr(t, "CleanupRetention", func() error {
-		return r.CleanupRetention(ctx, 400, 90)
+		return r.CleanupRetention(ctx, 400, 90, 400)
 	})
 	expectRepoErr(t, "GroupCountsByAxis", func() error {
 		_, err := r.GroupCountsByAxis(ctx, "t1", time.UTC, nil,
@@ -154,6 +154,10 @@ func TestRepoErrorPaths(t *testing.T) {
 	})
 	expectRepoErr(t, "LatestDoneRun", func() error {
 		_, _, err := r.LatestDoneRun(ctx, "t1")
+		return err
+	})
+	expectRepoErr(t, "FirstBucketDate", func() error {
+		_, _, err := r.FirstBucketDate(ctx, "t1")
 		return err
 	})
 	expectRepoErr(t, "CountRecentSliceKeys", func() error {

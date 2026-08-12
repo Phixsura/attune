@@ -314,3 +314,30 @@ func TestSeriesCapRejectsNewSliceType(t *testing.T) {
 	}))
 	wantValidation(t, err, attunev1.ErrorCode_VALIDATION)
 }
+
+// TestGetAnomalySeriesColdStartClamp (#18): a young tenant's chart must
+// mark early days insufficient instead of judging them against phantom
+// zero baselines — mirroring the worker's clamp.
+func TestGetAnomalySeriesColdStartClamp(t *testing.T) {
+	store := ptrext.Of(fakeStore{
+		cfg:    anomalyrepo.DefaultConfig("t1"),
+		counts: map[string]int64{},
+		// Tenant born 2 days ago: every baseline date predates it.
+		firstBucket: time.Now().UTC().AddDate(0, 0, -2),
+	})
+	h := NewHandler(store, fakeTenants{})
+	res, err := h.GetAnomalySeries(authedCtx(), ptrext.Of(attunev1.GetAnomalySeriesRequest{
+		SliceType: "total", SliceKey: "total", Days: ptrext.Of(int32(3)),
+	}))
+	if err != nil {
+		t.Fatalf("GetAnomalySeries: %v", err)
+	}
+	for _, p := range res.Body.Points {
+		if !p.Insufficient {
+			t.Fatalf("cold-start day %s must be insufficient, got %+v", p.Date, p)
+		}
+		if p.IsAnomalous {
+			t.Fatalf("cold-start day %s must not be anomalous", p.Date)
+		}
+	}
+}

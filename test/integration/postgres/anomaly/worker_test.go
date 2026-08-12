@@ -154,6 +154,42 @@ func TestPG_WorkerAutoResolve(t *testing.T) {
 		}
 	}
 	require.True(t, foundTotal, "spike event must auto-resolve after 2 quiet settled days; resolved=%+v", resolved)
+
+	// The linked control-tower action closes with the event (#237 review
+	// finding 10) — no forever-open ledger rows.
+	fb := feedbackrepo.NewFeedback(pool)
+	actions, err := fb.ListQualityActions(ctx, feedbackrepo.QualityActionListOpts{TenantID: tenantID})
+	require.NoError(t, err)
+	for _, a := range actions {
+		if a.ActionKey == "anomaly:total" {
+			require.Equal(t, "resolved", a.Status, "ledger action must close with the event")
+		}
+	}
+}
+
+// TestPG_WorkerColdStartSilent (#18): a tenant two days old bursting on
+// day one must NOT alert — its baseline is phantom pre-tenant zeros. The
+// spec's cold-start promise: fewer than 4 real baseline points → silent.
+func TestPG_WorkerColdStartSilent(t *testing.T) {
+	pool := testdb.NewPool(t)
+	ctx := context.Background()
+	tenantID := utcTenant(t, pool)
+
+	// Tenant's entire history: one burst yesterday. No weeks of context.
+	burstDate := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 40; i++ {
+		insertFeedback(t, pool, tenantID, burstDate.Add(8*time.Hour).Add(time.Duration(i)*time.Minute), "api", "", "", nil, "")
+	}
+
+	w := newWorkerForTest(pool)
+	now := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	w.ProcessOnce(ctx, now) // backfill
+	w.ProcessOnce(ctx, now) // detect
+
+	repo := anomalyrepo.New(pool)
+	events, err := repo.ListEvents(ctx, tenantID, "", 50)
+	require.NoError(t, err)
+	require.Empty(t, events, "cold-start tenant must stay silent, got %+v", events)
 }
 
 func TestPG_WorkerConcurrentClaimSingleDetection(t *testing.T) {
