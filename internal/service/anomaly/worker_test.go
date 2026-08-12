@@ -240,10 +240,21 @@ func (f *fakeActions) UpsertQualityActionStatus(_ context.Context, in feedback.Q
 	return ptrext.Of(feedback.QualityAction{ID: uuid.NewString(), ActionKey: in.ActionKey}), nil
 }
 
-type fakeTargets struct{ targets []notifytarget.NotifyTarget }
+type fakeTargets struct {
+	targets    []notifytarget.NotifyTarget
+	byAudience map[string][]notifytarget.NotifyTarget
+}
 
-func (f *fakeTargets) ListActiveByTenantAudience(context.Context, string, string) ([]notifytarget.NotifyTarget, error) {
-	return f.targets, nil
+func (f *fakeTargets) ListActiveByTenantAudience(_ context.Context, _, audience string) ([]notifytarget.NotifyTarget, error) {
+	if f.byAudience != nil {
+		return f.byAudience[audience], nil
+	}
+	// Legacy fixtures: return the flat list for radar only so the
+	// radar+all merge doesn't double-deliver in older tests.
+	if audience == notifytarget.AudienceRadar {
+		return f.targets, nil
+	}
+	return nil, nil
 }
 
 type fakeEnrich struct{}
@@ -576,5 +587,27 @@ func TestCloseQualityActionSkipsWithSiblingOpen(t *testing.T) {
 	w.closeQualityAction(context.Background(), "t1", anomalyrepo.Event{SliceKey: "x"})
 	if len(actions.upserts) != 1 {
 		t.Fatal("nil action id must be a no-op")
+	}
+}
+
+// TestNotifyReachesAllAudienceTargets (#237 review finding 41): audience
+// 'all' means pool+radar routing per the vocabulary — a tenant whose only
+// notify target is audience=all must receive anomaly notifications.
+func TestNotifyReachesAllAudienceTargets(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.firstBucket = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedSpike(repo)
+	targets := ptrext.Of(fakeTargets{
+		byAudience: map[string][]notifytarget.NotifyTarget{
+			"all": {{TenantID: "t1", DestinationType: "raw-webhook"}},
+		},
+	})
+	snd := ptrext.Of(fakeSender{})
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), targets, snd)
+
+	w.ProcessOnce(context.Background(), fixedNow)
+
+	if len(snd.sent) != 1 {
+		t.Fatalf("audience=all target must be notified, got %d sends", len(snd.sent))
 	}
 }

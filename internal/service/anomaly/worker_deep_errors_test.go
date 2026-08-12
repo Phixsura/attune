@@ -562,3 +562,24 @@ func TestFirstBucketReadFailureFailsClosed(t *testing.T) {
 		t.Fatal("reconcile must surface the first-bucket failure")
 	}
 }
+
+// failingAllTargets errors only on the audience=all lookup.
+type failingAllTargets struct{}
+
+func (failingAllTargets) ListActiveByTenantAudience(_ context.Context, _, audience string) ([]notifytarget.NotifyTarget, error) {
+	if audience == notifytarget.AudienceAll {
+		return nil, errBoom
+	}
+	return nil, nil
+}
+
+func TestNotifyPendingAllAudienceLookupFailure(t *testing.T) {
+	repo := newRepo2(false)
+	openEvent(repo, "2026-08-09")
+	snd := ptrext.Of(fakeSender{})
+	w := newFailingWorker(repo, ptrext.Of(fakeActions{}), snd, failingAllTargets{})
+	w.notifyPending(context.Background(), "t1", baseConfig())
+	if len(snd.sent) != 0 || len(repo.notified) != 0 {
+		t.Fatal("all-audience lookup failure must neither send nor mark")
+	}
+}

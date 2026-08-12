@@ -679,12 +679,24 @@ func (w *Worker) notifyPending(ctx context.Context, tenantID string, cfg anomaly
 		overflow = len(events) - notifyFuseLimit
 		events = events[:notifyFuseLimit] // already ordered by |z| desc
 	}
-	targets, err := w.targets.ListActiveByTenantAudience(ctx, tenantID, "radar")
+	// Anomalies are radar-class signals. Per the audience vocabulary
+	// (notify_targets.go): 'radar' targets opt into urgent-only, 'all'
+	// targets receive BOTH pool and radar routing — a tenant whose only
+	// target is audience=all must still hear about anomalies (the enrich
+	// outbox applies the same rule to urgent feedback).
+	targets, err := w.targets.ListActiveByTenantAudience(ctx, tenantID, notifytarget.AudienceRadar)
 	if err != nil {
 		logext.Warnf(ctx, "[service.anomaly.Worker] targets failed,tenant:%s,err:%+v",
 			tenantID, err.Error())
 		return
 	}
+	allTargets, err := w.targets.ListActiveByTenantAudience(ctx, tenantID, notifytarget.AudienceAll)
+	if err != nil {
+		logext.Warnf(ctx, "[service.anomaly.Worker] targets failed,tenant:%s,err:%+v",
+			tenantID, err.Error())
+		return
+	}
+	targets = append(targets, allTargets...)
 	for i := range targets {
 		target := &targets[i]
 		for _, event := range events {
