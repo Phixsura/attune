@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -89,6 +90,20 @@ func (r *Repo) RecomputeWindow(ctx context.Context, opts RecomputeOpts) error {
 	if err != nil {
 		return err
 	}
+	// Deterministic upsert order: two worker replicas recompute the same
+	// tenant concurrently (run claims guard detection, not rollup); rows
+	// upserted in differing orders across overlapping key sets would
+	// deadlock. Sorted order makes lock acquisition monotonic.
+	sort.Slice(rows, func(i, j int) bool {
+		a, b := &rows[i], &rows[j]
+		if a.date != b.date {
+			return a.date < b.date
+		}
+		if a.stype != b.stype {
+			return a.stype < b.stype
+		}
+		return a.key < b.key
+	})
 	for i := range rows {
 		b := &rows[i]
 		if _, err := tx.Exec(ctx, upsertBucketSQL,
