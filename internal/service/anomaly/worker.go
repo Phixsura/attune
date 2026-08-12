@@ -517,10 +517,9 @@ func (w *Worker) buildEvidence(
 		top, spread := TopContributions(groups, observed, verdict.ExpectedMed)
 		doc.Contribution, doc.Spread = top, spread
 	}
-	raw, err := json.Marshal(doc)
-	if err != nil {
-		return "{}"
-	}
+	// The doc holds only finite integers, strings, and bools — this marshal
+	// cannot fail.
+	raw, _ := json.Marshal(doc)
 	return string(raw)
 }
 

@@ -61,12 +61,14 @@ func assignVal(dest, val any) {
 
 // listRows implements pgx.Rows over canned scanRow value lists.
 type listRows struct {
-	rows [][]any
-	idx  int
+	rows    [][]any
+	idx     int
+	err     error
+	scanErr error
 }
 
 func (l *listRows) Close()                                       {}
-func (l *listRows) Err() error                                   { return nil }
+func (l *listRows) Err() error                                   { return l.err }
 func (l *listRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (l *listRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (l *listRows) Next() bool {
@@ -75,13 +77,19 @@ func (l *listRows) Next() bool {
 }
 
 func (l *listRows) Scan(dest ...any) error {
+	if l.scanErr != nil {
+		return l.scanErr
+	}
 	return scanRow{vals: l.rows[l.idx-1]}.Scan(dest...)
 }
 func (l *listRows) Values() ([]any, error) { return nil, nil }
 func (l *listRows) RawValues() [][]byte    { return nil }
 func (l *listRows) Conn() *pgx.Conn        { return nil }
 
-// fakePool routes Query/QueryRow/Exec by SQL fragment (ordered).
+// fakePool routes Query/QueryRow/Exec by SQL fragment (ordered). tx, when
+// set, is handed out by Begin so tx-based repo methods run against fakes;
+// queryErrOn / rowsErrOn / scanErrOn / execErrOn inject failures on the
+// first statement containing the fragment.
 type fakePool struct {
 	queryRoutes []struct {
 		fragment string
@@ -91,15 +99,35 @@ type fakePool struct {
 		fragment string
 		row      scanRow
 	}
-	execTags []string
+	execTags   []string
+	tx         *fakeTx
+	queryErrOn string
+	rowsErrOn  string
+	scanErrOn  string
+	execErrOn  string
 }
 
-func (f *fakePool) Begin(context.Context) (pgx.Tx, error) { return nil, errBoomPool }
+func (f *fakePool) Begin(context.Context) (pgx.Tx, error) {
+	if f.tx != nil {
+		return f.tx, nil
+	}
+	return nil, errBoomPool
+}
 
 func (f *fakePool) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	if f.queryErrOn != "" && strings.Contains(sql, f.queryErrOn) {
+		return nil, errBoomPool
+	}
 	for _, r := range f.queryRoutes {
 		if strings.Contains(sql, r.fragment) {
-			return ptrext.Of(listRows{rows: r.rows}), nil
+			rows := ptrext.Of(listRows{rows: r.rows})
+			if f.rowsErrOn != "" && strings.Contains(sql, f.rowsErrOn) {
+				rows.err = errBoomPool
+			}
+			if f.scanErrOn != "" && strings.Contains(sql, f.scanErrOn) {
+				rows.scanErr = errBoomPool
+			}
+			return rows, nil
 		}
 	}
 	return ptrext.Of(listRows{}), nil
@@ -116,6 +144,9 @@ func (f *fakePool) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
 
 func (f *fakePool) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	f.execTags = append(f.execTags, sql)
+	if f.execErrOn != "" && strings.Contains(sql, f.execErrOn) {
+		return pgconn.CommandTag{}, errBoomPool
+	}
 	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 

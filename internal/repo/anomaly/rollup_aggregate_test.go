@@ -19,9 +19,10 @@ import (
 // fakeRows implements pgx.Rows over a fixed (date, v1, v2, count, samples)
 // row set — the shape every aggregate family query returns.
 type fakeRows struct {
-	rows [][]any
-	idx  int
-	err  error
+	rows      [][]any
+	idx       int
+	err       error
+	errOnScan error
 }
 
 func (f *fakeRows) Close()                                       {}
@@ -34,6 +35,9 @@ func (f *fakeRows) Next() bool {
 }
 
 func (f *fakeRows) Scan(dest ...any) error {
+	if f.errOnScan != nil {
+		return f.errOnScan
+	}
 	row := f.rows[f.idx-1]
 	// (date *time.Time, v1 **string, v2 **string, count *int64, samples *[]int64)
 	ptrext.Indirect(dest[0].(*time.Time)) // touch to keep shape honest
@@ -66,27 +70,75 @@ type routeEntry struct {
 	rows     [][]any
 }
 
+// txRowRoute routes a QueryRow call by SQL fragment to a canned scanner.
+type txRowRoute struct {
+	fragment string
+	scan     func(dest ...any) error
+}
+
 // fakeTx implements the pgx.Tx query surface, routing each aggregate query
 // (recognized by an ordered SQL-fragment list) to a fresh row iterator.
+// Failure injection: queryErrOn / execErrOn fail the first statement
+// containing the fragment; commitErr fails Commit.
 type fakeTx struct {
-	routes  []routeEntry
-	queries []string
+	routes     []routeEntry
+	rowRoutes  []txRowRoute
+	queries    []string
+	execs      []string
+	queryErrOn string
+	execErrOn  string
+	rowsErrOn  string
+	scanErrOn  string
+	commitErr  error
+	committed  bool
+	rolledBack bool
 }
 
 func (f *fakeTx) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 	f.queries = append(f.queries, sql)
+	if f.queryErrOn != "" && strings.Contains(sql, f.queryErrOn) {
+		return nil, errFakeTx
+	}
 	for _, entry := range f.routes {
 		if strings.Contains(sql, entry.fragment) {
-			return ptrext.Of(fakeRows{rows: entry.rows}), nil
+			rows := ptrext.Of(fakeRows{rows: entry.rows})
+			if f.rowsErrOn != "" && strings.Contains(sql, f.rowsErrOn) {
+				rows.err = errFakeTx
+			}
+			if f.scanErrOn != "" && strings.Contains(sql, f.scanErrOn) {
+				rows.errOnScan = errFakeTx
+			}
+			return rows, nil
 		}
 	}
 	return ptrext.Of(fakeRows{}), nil
 }
 
-// Unused pgx.Tx surface (aggregateWindow only calls Query).
+var errFakeTx = pgx.ErrTxClosed
+
+// scanFromVals adapts a value list to a Scan call via assignVal.
+func scanFromVals(vals []any) func(dest ...any) error {
+	return func(dest ...any) error {
+		for i, d := range dest {
+			if i < len(vals) {
+				assignVal(d, vals[i])
+			}
+		}
+		return nil
+	}
+}
+
 func (f *fakeTx) Begin(context.Context) (pgx.Tx, error) { return nil, nil }
-func (f *fakeTx) Commit(context.Context) error          { return nil }
-func (f *fakeTx) Rollback(context.Context) error        { return nil }
+func (f *fakeTx) Commit(context.Context) error {
+	f.committed = true
+	return f.commitErr
+}
+
+func (f *fakeTx) Rollback(context.Context) error {
+	f.rolledBack = true
+	return nil
+}
+
 func (f *fakeTx) CopyFrom(context.Context, pgx.Identifier, []string, pgx.CopyFromSource) (int64, error) {
 	return 0, nil
 }
@@ -97,11 +149,29 @@ func (f *fakeTx) Prepare(context.Context, string, string) (*pgconn.StatementDesc
 	return nil, nil
 }
 
-func (f *fakeTx) Exec(context.Context, string, ...any) (pgconn.CommandTag, error) {
-	return pgconn.CommandTag{}, nil
+func (f *fakeTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+	f.execs = append(f.execs, sql)
+	if f.execErrOn != "" && strings.Contains(sql, f.execErrOn) {
+		return pgconn.CommandTag{}, errFakeTx
+	}
+	return pgconn.NewCommandTag("INSERT 1"), nil
 }
-func (f *fakeTx) QueryRow(context.Context, string, ...any) pgx.Row { return nil }
-func (f *fakeTx) Conn() *pgx.Conn                                  { return nil }
+
+func (f *fakeTx) QueryRow(_ context.Context, sql string, _ ...any) pgx.Row {
+	f.queries = append(f.queries, sql)
+	for _, rr := range f.rowRoutes {
+		if strings.Contains(sql, rr.fragment) {
+			return rowFunc(rr.scan)
+		}
+	}
+	return rowFunc(func(...any) error { return pgx.ErrNoRows })
+}
+
+// rowFunc adapts a scan func to pgx.Row.
+type rowFunc func(dest ...any) error
+
+func (r rowFunc) Scan(dest ...any) error { return r(dest...) }
+func (f *fakeTx) Conn() *pgx.Conn        { return nil }
 
 func TestAggregateWindowCollectsAllFamilies(t *testing.T) {
 	day := time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
