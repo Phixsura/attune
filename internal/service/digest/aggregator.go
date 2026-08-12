@@ -127,14 +127,17 @@ func (a *Aggregator) Aggregate(ctx context.Context, in AggInput, from, to time.T
 		if !in.SendOnEmpty {
 			return Result{Tier: TierSkip, Stats: stats}, nil
 		}
-		return Result{Tier: TierThemeless, Stats: stats}, nil
+		// The anomaly section is independent of theme volume (#237): a
+		// tenant can have zero enriched feedback in-window and still have
+		// an open drop anomaly worth surfacing.
+		return Result{Tier: TierThemeless, Stats: stats, Anomalies: a.windowAnomalies(ctx, in.TenantID, from, to)}, nil
 	}
 	if stats.Enriched < in.LLMMin {
 		items, err := a.feedback.EnrichedInWindow(ctx, in.TenantID, from, to, themelessLimit)
 		if err != nil {
 			return Result{}, err
 		}
-		return Result{Tier: TierThemeless, Stats: stats, Items: items}, nil
+		return Result{Tier: TierThemeless, Stats: stats, Items: items, Anomalies: a.windowAnomalies(ctx, in.TenantID, from, to)}, nil
 	}
 	themes, err := a.themes(ctx, in, from, to)
 	if err != nil {

@@ -817,9 +817,15 @@ func newInboundHandler(
 	return h
 }
 
+// digestSubReader is the slice of the digest subscription repo the anomaly
+// advisory check consumes.
+type digestSubReader interface {
+	GetByTenant(ctx context.Context, tenantID string) (*digestsubrepo.Subscription, error)
+}
+
 // anomalyDigestChecker adapts the digest subscription repo to the anomaly
 // config handler's has-subscription advisory check (#237).
-type anomalyDigestChecker struct{ repo *digestsubrepo.Repo }
+type anomalyDigestChecker struct{ repo digestSubReader }
 
 func (c anomalyDigestChecker) GetByTenant(ctx context.Context, tenantID string) (bool, error) {
 	sub, err := c.repo.GetByTenant(ctx, tenantID)

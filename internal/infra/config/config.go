@@ -360,6 +360,7 @@ func buildConfig(yc *yamlConfig) (*Config, error) {
 		Database:       yc.Database,
 		Migrations:     yc.Migrations,
 		Enricher:       yc.Enricher,
+		Anomaly:        yc.Anomaly,
 		Audit:          yc.Audit,
 		AuditEvidence:  yc.AuditEvidence,
 		GDPR:           yc.GDPR,

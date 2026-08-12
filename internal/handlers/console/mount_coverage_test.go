@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 
+	consoleanomaly "github.com/Phixsura/attune/internal/handlers/console/anomaly"
 	"github.com/Phixsura/attune/internal/handlers/console/apikey"
 	consoleauditevidence "github.com/Phixsura/attune/internal/handlers/console/auditevidence"
 	consoleauditlog "github.com/Phixsura/attune/internal/handlers/console/auditlog"
@@ -262,4 +263,33 @@ func TestSetPreflightHandler_SetsField(t *testing.T) {
 	h := http.NotFoundHandler()
 	r.SetPreflightHandler(h)
 	require.NotNil(t, r.preflight)
+}
+
+func TestMountAnomalies_RegistersRoutes(t *testing.T) {
+	t.Parallel()
+	// Nil handler: mount is a no-op.
+	rNil := &Router{}
+	muxNil := chi.NewRouter()
+	rNil.mountAnomalies(muxNil)
+	require.Empty(t, muxNil.Routes())
+
+	r := &Router{anomalies: ptrext.Of(consoleanomaly.Handler{})}
+	mux := chi.NewRouter()
+	r.mountAnomalies(mux)
+	require.NotNil(t, mux)
+	got := map[string]bool{}
+	for _, rt := range mux.Routes() {
+		got[rt.Pattern] = true
+	}
+	for _, want := range []string{"/anomalies", "/anomalies/series", "/anomalies/{event_id}/evidence", "/anomaly-config"} {
+		require.True(t, got[want], "route %s must be mounted", want)
+	}
+}
+
+func TestSetAnomalyHandler(t *testing.T) {
+	t.Parallel()
+	r := &Router{}
+	h := ptrext.Of(consoleanomaly.Handler{})
+	r.SetAnomalyHandler(h)
+	require.Equal(t, h, r.anomalies)
 }

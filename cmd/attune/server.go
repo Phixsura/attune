@@ -745,9 +745,15 @@ func startDigestWorker(ctx context.Context, pool *pgxpool.Pool, llm llmclient.LL
 	safego(ctx, "digest", func() { worker.Run(ctx) })
 }
 
+// digestAnomalyRepo is the slice of the anomaly repo the digest adapter
+// consumes (an interface so the mapping is unit-testable).
+type digestAnomalyRepo interface {
+	OpenDigestAnomaliesInWindow(ctx context.Context, tenantID string, from, to time.Time) ([]anomalyrepo.DigestAnomaly, error)
+}
+
 // digestAnomalyReader adapts the anomaly repo to the digest aggregator's
 // optional anomaly-section interface (#237).
-type digestAnomalyReader struct{ repo *anomalyrepo.Repo }
+type digestAnomalyReader struct{ repo digestAnomalyRepo }
 
 func (r digestAnomalyReader) OpenDigestAnomalies(ctx context.Context, tenantID string, from, to time.Time) ([]digestsvc.AnomalySummary, error) {
 	rows, err := r.repo.OpenDigestAnomaliesInWindow(ctx, tenantID, from, to)
@@ -767,9 +773,15 @@ func (r digestAnomalyReader) OpenDigestAnomalies(ctx context.Context, tenantID s
 	return out, nil
 }
 
+// enrichConfigRepo is the slice of the tenant repo the anomaly adapter
+// consumes.
+type enrichConfigRepo interface {
+	GetEnrichConfig(ctx context.Context, tenantID string) (tenant.EnrichConfig, error)
+}
+
 // anomalyEnrichReader adapts the tenant repo to the anomaly worker's
 // dimension-set view.
-type anomalyEnrichReader struct{ repo *tenant.TenantRepo }
+type anomalyEnrichReader struct{ repo enrichConfigRepo }
 
 func (r anomalyEnrichReader) GetEnrichConfig(ctx context.Context, tenantID string) (anomalysvc.EnrichConfigView, error) {
 	cfg, err := r.repo.GetEnrichConfig(ctx, tenantID)
