@@ -67,11 +67,44 @@ func (w *Worker) buildPayload(event anomalyrepo.Event) NotifyPayload {
 	}
 }
 
-// sender posts anomaly payloads. Raw-webhook targets get the JSON payload
-// verbatim; card-channel targets (lark/slack) get a text card via the same
-// generic JSON for V1 (channel-specific cards are a follow-up).
+// sender posts anomaly payloads, rendering per destination type.
 type sender struct {
 	transport *notify.Transport
+}
+
+// notifySummaryLine renders the one-line human message used by chat
+// channels ("SPIKE severity=critical: observed 31 vs expected 12").
+func notifySummaryLine(p NotifyPayload) string {
+	if p.SummaryOverflow > 0 {
+		return fmt.Sprintf("attune: %d more anomalies detected — see Console", p.SummaryOverflow)
+	}
+	marker := "SPIKE"
+	if p.Direction == "drop" {
+		marker = "DROP"
+	}
+	line := fmt.Sprintf("attune %s %s: observed %d vs expected %.0f (z=%.1f, %s)",
+		marker, p.Slice.Display, p.Observed, p.Expected.Med, p.ZScore, p.BucketDate)
+	if p.DeepLink != "" {
+		line += " " + p.DeepLink
+	}
+	return line
+}
+
+// renderNotifyBody produces the wire body for one destination type.
+func renderNotifyBody(destType string, p NotifyPayload) ([]byte, error) {
+	switch destType {
+	case "slack-bot":
+		// Slack incoming webhooks accept {"text": ...} and reject other shapes.
+		return json.Marshal(map[string]string{"text": notifySummaryLine(p)})
+	case "lark-bot":
+		// Lark custom bots require the msg_type envelope.
+		return json.Marshal(map[string]any{
+			"msg_type": "text",
+			"content":  map[string]string{"text": notifySummaryLine(p)},
+		})
+	default:
+		return json.Marshal(p)
+	}
 }
 
 func newSender(transport *notify.Transport) *sender {
@@ -81,13 +114,14 @@ func newSender(transport *notify.Transport) *sender {
 // Send delivers one payload to one target through the retrying transport.
 // Anomaly alerts are advisory: failures are logged and metriced by the
 // caller, never retried across ticks (the event stays visible in Console).
-// Payloads are HMAC-signed with the target secret (X-Attune-Signature,
-// bytes mode) so receivers verify authenticity exactly like every other
-// attune webhook.
+// Raw-webhook targets get the JSON contract HMAC-signed with the target
+// secret (X-Attune-Signature, bytes mode); lark-bot and slack-bot targets
+// get their native message envelope — those webhooks REJECT foreign JSON
+// shapes outright, so posting the raw contract would never deliver.
 func (s *sender) Send(
 	ctx context.Context, target *notifytarget.NotifyTarget, payload NotifyPayload,
 ) error {
-	body, err := json.Marshal(payload)
+	body, err := renderNotifyBody(target.DestinationType, payload)
 	if err != nil {
 		return fmt.Errorf("anomaly notify marshal: %w", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -399,5 +400,45 @@ func TestSenderSignsPayloadWithTargetSecret(t *testing.T) {
 	}
 	if gotSig != "" {
 		t.Fatalf("secretless target must not carry a signature, got %q", gotSig)
+	}
+}
+
+// TestRenderNotifyBodyPerDestination: chat webhooks reject foreign JSON
+// shapes, so lark/slack targets must get their native envelopes while
+// raw-webhook targets keep the documented contract.
+func TestRenderNotifyBodyPerDestination(t *testing.T) {
+	p := NotifyPayload{
+		Type: "anomaly.detected", Direction: "spike",
+		Slice:    NotifySlice{Display: "severity=critical"},
+		Observed: 31, Expected: NotifyExpectedBand{Med: 12}, ZScore: 3.8,
+		BucketDate: "2026-08-10", DeepLink: "https://c/x",
+	}
+
+	raw, err := renderNotifyBody("raw-webhook", p)
+	if err != nil || !strings.Contains(string(raw), `"type":"anomaly.detected"`) {
+		t.Fatalf("raw contract lost: %s %v", raw, err)
+	}
+
+	slack, err := renderNotifyBody("slack-bot", p)
+	if err != nil || !strings.Contains(string(slack), `"text":"attune SPIKE severity=critical`) {
+		t.Fatalf("slack envelope wrong: %s %v", slack, err)
+	}
+
+	lark, err := renderNotifyBody("lark-bot", p)
+	if err != nil || !strings.Contains(string(lark), `"msg_type":"text"`) {
+		t.Fatalf("lark envelope wrong: %s %v", lark, err)
+	}
+
+	// Fuse summary keeps its own line.
+	sum, _ := renderNotifyBody("slack-bot", NotifyPayload{SummaryOverflow: 5})
+	if !strings.Contains(string(sum), "5 more anomalies") {
+		t.Fatalf("summary line wrong: %s", sum)
+	}
+
+	// Drop direction is labeled DROP.
+	p.Direction = "drop"
+	drop, _ := renderNotifyBody("slack-bot", p)
+	if !strings.Contains(string(drop), "attune DROP") {
+		t.Fatalf("drop label wrong: %s", drop)
 	}
 }
