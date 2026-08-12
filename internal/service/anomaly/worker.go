@@ -49,6 +49,13 @@ const (
 	maxSlicesPerTick = 1000
 	// notifyFuseLimit caps NEW-event notifications per tenant-tick.
 	notifyFuseLimit = 20
+	// evidenceBudgetPerTick caps contribution computations per tenant-tick.
+	// Each NEW event's evidence costs ~9 queries (observed + 8 baseline
+	// group counts); a 14-day catch-up over a spiky 500-slice tenant could
+	// otherwise mint hundreds of NEW events in one pass and monopolize the
+	// pool. Events past the budget keep samples-only evidence — the
+	// contribution breakdown is a nice-to-have, the event is the alert.
+	evidenceBudgetPerTick = 50
 	// staleClaim mirrors the digest worker's stale-claim window.
 	staleClaim = 5 * time.Minute
 	// activeSinceDays scopes worker attention to tenants with recent feedback.
@@ -396,6 +403,7 @@ func (w *Worker) detectSettled(
 	if err != nil {
 		return err
 	}
+	evidenceBudget := ptrext.Of(tickBudget{remaining: evidenceBudgetPerTick})
 	for _, raw := range free {
 		// Dates from the runs table are DB scans (UTC midnights): normalize
 		// to loc-midnight before any baseline math.
@@ -404,7 +412,7 @@ func (w *Worker) detectSettled(
 		if err != nil || !claimed {
 			continue
 		}
-		if err := w.detectOneDate(ctx, tenantID, loc, cfg, date, firstBucket); err != nil {
+		if err := w.detectOneDate(ctx, tenantID, loc, cfg, date, firstBucket, evidenceBudget); err != nil {
 			_ = w.repo.MarkRunFailed(ctx, tenantID, date, w.owner, err)
 			continue
 		}
@@ -419,7 +427,7 @@ func (w *Worker) detectSettled(
 // the event state machine plus fan-out.
 func (w *Worker) detectOneDate(
 	ctx context.Context, tenantID string, loc *time.Location, cfg anomalyrepo.Config, date time.Time,
-	firstBucket time.Time,
+	firstBucket time.Time, evidenceBudget *tickBudget,
 ) error {
 	baseline := baselineDates(date, loc)
 	// Cold-start clamp (#18): zero-filling makes every baseline exactly 8
@@ -481,7 +489,7 @@ func (w *Worker) detectOneDate(
 		if verdict.Direction == DirectionDrop && !dropEnabled(cfg, slice.Type) {
 			continue
 		}
-		if err := w.applyHit(ctx, tenantID, loc, cfg, slice, date, observed, samples, verdict, baseline); err != nil {
+		if err := w.applyHit(ctx, tenantID, loc, cfg, slice, date, observed, samples, verdict, baseline, evidenceBudget); err != nil {
 			return err
 		}
 	}
@@ -497,7 +505,7 @@ func (w *Worker) detectOneDate(
 func (w *Worker) applyHit(
 	ctx context.Context, tenantID string, loc *time.Location, cfg anomalyrepo.Config,
 	slice anomalyrepo.SliceRef, date time.Time, observed int64, samples []int64,
-	verdict Verdict, baseline []time.Time,
+	verdict Verdict, baseline []time.Time, evidenceBudget *tickBudget,
 ) error {
 	event, isNew, err := w.repo.UpsertHit(ctx, anomalyrepo.HitInput{
 		TenantID: tenantID, SliceType: slice.Type, SliceKey: slice.Key,
@@ -512,7 +520,7 @@ func (w *Worker) applyHit(
 	if !isNew {
 		return nil // ongoing: no action churn, no re-notify
 	}
-	evidence := w.buildEvidence(ctx, tenantID, loc, slice, date, observed, verdict, baseline, samples)
+	evidence := w.buildEvidence(ctx, tenantID, loc, slice, date, observed, verdict, baseline, samples, evidenceBudget)
 	if err := w.repo.SetEvidence(ctx, tenantID, event.ID, evidence); err != nil {
 		logext.Warnf(ctx, "[service.anomaly.Worker] evidence write failed,tenant:%s,err:%+v",
 			tenantID, err.Error())
@@ -530,7 +538,7 @@ func (w *Worker) applyHit(
 func (w *Worker) buildEvidence(
 	ctx context.Context, tenantID string, loc *time.Location,
 	slice anomalyrepo.SliceRef, date time.Time, observed int64,
-	verdict Verdict, baseline []time.Time, samples []int64,
+	verdict Verdict, baseline []time.Time, samples []int64, evidenceBudget *tickBudget,
 ) string {
 	type evidenceDoc struct {
 		SampleIDs    []int64        `json:"sample_ids"`
@@ -538,6 +546,11 @@ func (w *Worker) buildEvidence(
 		Spread       bool           `json:"spread,omitempty"`
 	}
 	doc := evidenceDoc{SampleIDs: samples}
+	if !evidenceBudget.spend() {
+		metrics.AnomalySlicesTruncatedTotal.WithLabelValues(tenantID, "evidence_budget").Inc()
+		raw, _ := json.Marshal(doc)
+		return string(raw)
+	}
 	groups := w.contributionGroups(ctx, tenantID, loc, slice, date, baseline)
 	if groups != nil {
 		top, spread := TopContributions(groups, observed, verdict.ExpectedMed)
@@ -938,6 +951,18 @@ func (w *Worker) firstBucketIn(ctx context.Context, tenantID string, loc *time.L
 		return time.Time{}, nil
 	}
 	return civilDateIn(first, loc), nil
+}
+
+// tickBudget meters a bounded per-tenant-tick resource; spend consumes
+// one unit and reports whether any remained.
+type tickBudget struct{ remaining int }
+
+func (b *tickBudget) spend() bool {
+	if b.remaining <= 0 {
+		return false
+	}
+	b.remaining--
+	return true
 }
 
 // clampToFirst drops baseline dates before the tenant's first bucket —

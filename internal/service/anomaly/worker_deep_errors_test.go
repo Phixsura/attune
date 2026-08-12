@@ -272,7 +272,8 @@ func TestDetectOneDateSliceCapTruncates(t *testing.T) {
 	repo.slices = slices
 	w := worker2(repo)
 	date := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
-	if err := w.detectOneDate(context.Background(), "t1", time.UTC, baseConfig(), date, time.Time{}); err != nil {
+	budget := ptrext.Of(tickBudget{remaining: evidenceBudgetPerTick})
+	if err := w.detectOneDate(context.Background(), "t1", time.UTC, baseConfig(), date, time.Time{}, budget); err != nil {
 		t.Fatalf("detectOneDate: %v", err)
 	}
 }

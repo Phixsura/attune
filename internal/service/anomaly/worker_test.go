@@ -4,6 +4,7 @@ package anomaly
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -648,5 +649,32 @@ func TestCloseQualityActionRespectsDismissed(t *testing.T) {
 	w2.closeQualityAction(context.Background(), "t1", ev)
 	if len(actions2.upserts) != 1 {
 		t.Fatalf("unrelated dismissal must not block the close, got %d", len(actions2.upserts))
+	}
+}
+
+// TestEvidenceBudgetDegradesToSamplesOnly (#237 review finding 47): past
+// the per-tick budget, NEW events keep samples-only evidence instead of
+// issuing ~9 contribution queries each — the event is the alert, the
+// breakdown is a nice-to-have.
+func TestEvidenceBudgetDegradesToSamplesOnly(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{tenants: []anomalyrepo.TenantRef{{ID: "t1", Timezone: "UTC"}}, config: baseConfig()})
+	repo.firstBucket = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	seedSpike(repo)
+	w := newTestWorker(repo, ptrext.Of(fakeActions{}), ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	budget := ptrext.Of(tickBudget{}) // exhausted before the first NEW event
+	date := time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC)
+	if err := w.detectOneDate(context.Background(), "t1", time.UTC, baseConfig(), date, time.Time{}, budget); err != nil {
+		t.Fatalf("detectOneDate: %v", err)
+	}
+	if len(repo.newEventIDs) != 1 {
+		t.Fatalf("event must still be created, got %d", len(repo.newEventIDs))
+	}
+	ev := repo.openEvents[0]
+	if !strings.Contains(ev.EvidenceJSON, "sample_ids") {
+		t.Fatalf("samples-only evidence expected: %s", ev.EvidenceJSON)
+	}
+	if strings.Contains(ev.EvidenceJSON, "contribution") {
+		t.Fatalf("no contribution past budget: %s", ev.EvidenceJSON)
 	}
 }

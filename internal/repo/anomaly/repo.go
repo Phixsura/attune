@@ -119,7 +119,13 @@ type TenantRef struct {
 }
 
 // ActiveTenantsWithFeedback lists active tenants that received feedback in
-// the last sinceDays — the worker's attention set.
+// the last sinceDays — the worker's attention set. Random order, for two
+// reasons: (1) fairness — a fixed ORDER BY t.id puts the same tenants at
+// the tail of every tick, so one chronically slow tenant systematically
+// delays the same victims; (2) multi-replica throughput — replicas
+// walking identical orders pile onto the same tenant (run claims prevent
+// duplicate detection but recompute has no claim and gets done twice);
+// random orders let replicas naturally partition the fleet.
 func (r *Repo) ActiveTenantsWithFeedback(ctx context.Context, sinceDays int) ([]TenantRef, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT t.id, t.timezone FROM tenants t
@@ -127,7 +133,7 @@ func (r *Repo) ActiveTenantsWithFeedback(ctx context.Context, sinceDays int) ([]
 		  SELECT 1 FROM user_feedback f
 		  WHERE f.tenant_id = t.id
 		    AND f.created_at > NOW() - make_interval(days => $1))
-		ORDER BY t.id`, sinceDays)
+		ORDER BY random()`, sinceDays)
 	if err != nil {
 		return nil, fmt.Errorf("anomaly active tenants: %w", err)
 	}
