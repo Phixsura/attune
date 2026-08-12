@@ -375,3 +375,116 @@ func TestNonEmptyJSON(t *testing.T) {
 		t.Fatal("nonEmptyJSON wrong")
 	}
 }
+
+func TestWindowCountsMapsRows(t *testing.T) {
+	pool := ptrext.Of(fakePool{})
+	pool.queryRoutes = append(pool.queryRoutes, struct {
+		fragment string
+		rows     [][]any
+	}{"FROM feedback_volume_buckets", [][]any{
+		{"total", "total", day("2026-08-09"), int64(40), []int64{7, 8}},
+		{"source", "source:zendesk", day("2026-08-02"), int64(12), []int64{9}},
+	}})
+	r := ptrext.Of(Repo{pool: pool})
+	out, err := r.WindowCounts(context.Background(), "t1", AllSliceTypes(),
+		[]time.Time{day("2026-08-02"), day("2026-08-09")})
+	if err != nil || len(out) != 2 {
+		t.Fatalf("WindowCounts: %v %+v", err, out)
+	}
+	if out[0].SliceKey != "total" || out[0].Count != 40 || len(out[0].SampleIDs) != 2 {
+		t.Fatalf("row mapping wrong: %+v", out[0])
+	}
+}
+
+func TestListEventsBySliceTypeFilters(t *testing.T) {
+	now := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	pool := ptrext.Of(fakePool{})
+	pool.queryRoutes = append(pool.queryRoutes, struct {
+		fragment string
+		rows     [][]any
+	}{"FROM anomaly_events", [][]any{{
+		uuid.New(), "t1", "source", "source:zendesk", "Zendesk", "spike",
+		day("2026-08-09"), day("2026-08-09"), int64(40),
+		12.0, 6.0, 21.0, 3.8,
+		"open", nil, `{}`,
+		now, now, nil,
+	}}})
+	r := ptrext.Of(Repo{pool: pool})
+	events, err := r.ListEventsBySliceType(context.Background(), "t1", "open", "source", 10)
+	if err != nil || len(events) != 1 || events[0].SliceType != "source" {
+		t.Fatalf("ListEventsBySliceType: %v %+v", err, events)
+	}
+}
+
+func TestUnnotifiedQueueFakePool(t *testing.T) {
+	now := time.Date(2026, 8, 10, 4, 0, 0, 0, time.UTC)
+	pool := ptrext.Of(fakePool{})
+	pool.queryRoutes = append(pool.queryRoutes, struct {
+		fragment string
+		rows     [][]any
+	}{"notified_at IS NULL", [][]any{{
+		uuid.New(), "t1", "total", "total", "All feedback", "spike",
+		day("2026-08-09"), day("2026-08-09"), int64(40),
+		12.0, 6.0, 21.0, 3.8,
+		"open", nil, `{}`,
+		now, now, nil,
+	}}})
+	r := ptrext.Of(Repo{pool: pool})
+	events, err := r.ListUnnotifiedOpenEvents(context.Background(), "t1")
+	if err != nil || len(events) != 1 {
+		t.Fatalf("ListUnnotifiedOpenEvents: %v %+v", err, events)
+	}
+	if err := r.MarkNotified(context.Background(), "t1", []uuid.UUID{events[0].ID}); err != nil {
+		t.Fatalf("MarkNotified: %v", err)
+	}
+	if err := r.MarkNotified(context.Background(), "t1", nil); err != nil {
+		t.Fatalf("MarkNotified empty must no-op: %v", err)
+	}
+	if len(pool.execTags) != 1 {
+		t.Fatalf("empty MarkNotified must skip the exec, got %d", len(pool.execTags))
+	}
+}
+
+func TestFilterLiveFeedbackIDsFakePool(t *testing.T) {
+	pool := ptrext.Of(fakePool{})
+	pool.queryRoutes = append(pool.queryRoutes, struct {
+		fragment string
+		rows     [][]any
+	}{"FROM user_feedback", [][]any{{int64(8)}, {int64(7)}}})
+	r := ptrext.Of(Repo{pool: pool})
+	live, err := r.FilterLiveFeedbackIDs(context.Background(), "t1", []int64{7, 8, 9})
+	if err != nil || len(live) != 2 {
+		t.Fatalf("FilterLiveFeedbackIDs: %v %v", err, live)
+	}
+	// Empty input short-circuits without a query.
+	live, err = r.FilterLiveFeedbackIDs(context.Background(), "t1", nil)
+	if err != nil || live != nil {
+		t.Fatalf("empty input must return nil: %v %v", err, live)
+	}
+}
+
+func TestCountRecentSliceKeysFakePool(t *testing.T) {
+	pool := ptrext.Of(fakePool{})
+	pool.rowRoutes = append(pool.rowRoutes, struct {
+		fragment string
+		row      scanRow
+	}{"COUNT(DISTINCT", scanRow{vals: []any{123}}})
+	r := ptrext.Of(Repo{pool: pool})
+	n, err := r.CountRecentSliceKeys(context.Background(), "t1", 30)
+	if err != nil || n != 123 {
+		t.Fatalf("CountRecentSliceKeys: %v %d", err, n)
+	}
+}
+
+func TestLatestDoneRunFakePool(t *testing.T) {
+	pool := ptrext.Of(fakePool{})
+	pool.rowRoutes = append(pool.rowRoutes, struct {
+		fragment string
+		row      scanRow
+	}{"MAX(bucket_date)", scanRow{vals: []any{day("2026-08-09")}}})
+	r := ptrext.Of(Repo{pool: pool})
+	d, ok, err := r.LatestDoneRun(context.Background(), "t1")
+	if err != nil || !ok || d.Format("2006-01-02") != "2026-08-09" {
+		t.Fatalf("LatestDoneRun: %v %v %v", d, ok, err)
+	}
+}
