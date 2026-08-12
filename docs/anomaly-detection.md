@@ -65,7 +65,10 @@ Zero configuration is safe: defaults apply to every active tenant.
 
 ## Notifications
 
-Immediate mode posts JSON to the tenant's `radar`-audience notify targets:
+Immediate mode posts JSON to the tenant's `radar`-audience notify targets.
+When the target has a secret, the request carries `X-Attune-Signature`
+(HMAC-SHA256 over the raw body, `sha256=<hex>` — verify like any other
+attune webhook):
 
 ```json
 {
