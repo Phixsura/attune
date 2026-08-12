@@ -232,7 +232,19 @@ func (f *fakeRepo) FirstBucketDate(context.Context, string) (time.Time, bool, er
 }
 
 type fakeActions struct {
-	upserts []feedback.QualityActionUpsert
+	upserts   []feedback.QualityActionUpsert
+	dismissed []string // action keys the operator has dismissed
+}
+
+func (f *fakeActions) ListQualityActions(_ context.Context, opts feedback.QualityActionListOpts) ([]feedback.QualityAction, error) {
+	if opts.Status != feedback.QualityActionStatusDismissed {
+		return nil, nil
+	}
+	out := make([]feedback.QualityAction, 0, len(f.dismissed))
+	for _, k := range f.dismissed {
+		out = append(out, feedback.QualityAction{ActionKey: k, Status: feedback.QualityActionStatusDismissed})
+	}
+	return out, nil
 }
 
 func (f *fakeActions) UpsertQualityActionStatus(_ context.Context, in feedback.QualityActionUpsert) (*feedback.QualityAction, error) {
@@ -609,5 +621,32 @@ func TestNotifyReachesAllAudienceTargets(t *testing.T) {
 
 	if len(snd.sent) != 1 {
 		t.Fatalf("audience=all target must be notified, got %d sends", len(snd.sent))
+	}
+}
+
+// TestCloseQualityActionRespectsDismissed (#237 review finding 45): an
+// operator's dismissed verdict outranks the worker's auto-close — the
+// unconditional ledger upsert would otherwise flip dismissed→resolved.
+func TestCloseQualityActionRespectsDismissed(t *testing.T) {
+	repo := ptrext.Of(fakeRepo{config: baseConfig()})
+	ev := anomalyrepo.Event{
+		ID: uuid.New(), TenantID: "t1", SliceKey: "total", Direction: "spike",
+		Status: "open", QualityActionID: ptrext.Of("qa-1"),
+	}
+	repo.openEvents = []anomalyrepo.Event{ev}
+	actions := ptrext.Of(fakeActions{dismissed: []string{"anomaly:total"}})
+	w := newTestWorker(repo, actions, ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+
+	w.closeQualityAction(context.Background(), "t1", ev)
+	if len(actions.upserts) != 0 {
+		t.Fatalf("dismissed action must not be resurrected: %+v", actions.upserts)
+	}
+
+	// A different dismissed key does not block this slice's close.
+	actions2 := ptrext.Of(fakeActions{dismissed: []string{"anomaly:other"}})
+	w2 := newTestWorker(repo, actions2, ptrext.Of(fakeTargets{}), ptrext.Of(fakeSender{}))
+	w2.closeQualityAction(context.Background(), "t1", ev)
+	if len(actions2.upserts) != 1 {
+		t.Fatalf("unrelated dismissal must not block the close, got %d", len(actions2.upserts))
 	}
 }

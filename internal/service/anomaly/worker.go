@@ -89,6 +89,7 @@ type repoAPI interface {
 // qualityActionUpserter is the slice of the feedback repo the worker needs.
 type qualityActionUpserter interface {
 	UpsertQualityActionStatus(ctx context.Context, in feedback.QualityActionUpsert) (*feedback.QualityAction, error)
+	ListQualityActions(ctx context.Context, opts feedback.QualityActionListOpts) ([]feedback.QualityAction, error)
 }
 
 // targetReader resolves the tenant's radar-audience notify targets.
@@ -735,6 +736,18 @@ func (w *Worker) closeQualityAction(ctx context.Context, tenantID string, event 
 		for _, e := range open {
 			if e.SliceKey == event.SliceKey && e.ID != event.ID {
 				return // sibling event still open: the action stays open
+			}
+		}
+	}
+	// The ledger upsert overwrites status unconditionally; an operator's
+	// DISMISSED verdict outranks the worker's auto-close (they judged the
+	// signal noise — flipping it to resolved would misrepresent that).
+	if actions, err := w.actions.ListQualityActions(ctx, feedback.QualityActionListOpts{
+		TenantID: tenantID, Status: feedback.QualityActionStatusDismissed,
+	}); err == nil {
+		for _, a := range actions {
+			if a.ActionKey == "anomaly:"+event.SliceKey {
+				return
 			}
 		}
 	}

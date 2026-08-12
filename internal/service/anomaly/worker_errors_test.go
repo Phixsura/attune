@@ -95,6 +95,10 @@ func (f *failingRepo) ListCustomSlices(ctx context.Context, t string) ([]anomaly
 // failingActions rejects every quality action upsert.
 type failingActions struct{ calls int }
 
+func (f *failingActions) ListQualityActions(context.Context, feedback.QualityActionListOpts) ([]feedback.QualityAction, error) {
+	return nil, errBoom
+}
+
 func (f *failingActions) UpsertQualityActionStatus(context.Context, feedback.QualityActionUpsert) (*feedback.QualityAction, error) {
 	f.calls++
 	return nil, errBoom
